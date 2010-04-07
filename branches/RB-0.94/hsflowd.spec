@@ -31,7 +31,7 @@ make clean
 /usr/local/sbin/hsflowd
 /etc/hsflowd.conf
 /etc/init.d/hsflowd
-%doc README CHANGES LICENSE INSTALL
+%doc README LICENSE INSTALL
 
 %changelog
 * Thu Feb 11 2010 root <root@chow.sf.inmon.com> - 
