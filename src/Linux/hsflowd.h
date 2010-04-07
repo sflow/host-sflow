@@ -28,6 +28,7 @@ extern "C" {
 #include <sys/types.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h> // for PRIu64 etc.
+#include "sys/mman.h" // for mlockall
 
 #include "sflow_api.h"
 
@@ -89,7 +90,7 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(SFLHost_dsk_counters *dsk);
   int readNioCounters(SFLHost_nio_counters *dsk);
-  int readHidCounters(SFLHost_hid_counters *dsk, char *buf, int bufLen);
+  int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
 #if defined(__cplusplus)
 } /* extern "C" */

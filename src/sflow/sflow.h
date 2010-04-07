@@ -538,6 +538,9 @@ typedef struct _SFLAdaptorList {
   SFLAdaptor **adaptors;
 } SFLAdaptorList;
 
+#define SFL_MAX_HOSTNAME_CHARS 64
+#define SFL_MAX_OSRELEASE_CHARS 32
+
 typedef struct _SFLHost_hid_counters {
   SFLString hostname;
   u_char uuid[16];

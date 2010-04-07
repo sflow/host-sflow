@@ -109,9 +109,13 @@ extern "C" {
     SFLCounters_sample_element hidElem;
     memset(&hidElem, 0, sizeof(hidElem));
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-#define SFL_MAX_HOSTNAME_CHARS 256
     char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
-    if(readHidCounters(&hidElem.counterBlock.host_hid, hnamebuf, SFL_MAX_HOSTNAME_CHARS)) {
+    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
+    if(readHidCounters(&hidElem.counterBlock.host_hid,
+		       hnamebuf,
+		       SFL_MAX_HOSTNAME_CHARS,
+		       osrelbuf,
+		       SFL_MAX_OSRELEASE_CHARS)) {
       SFLADD_ELEMENT(cs, &hidElem);
     }
 
@@ -432,6 +436,15 @@ extern "C" {
 	     && HSPReadConfigFile(&sp)
 	     && initAgent(&sp)) {
 	    vsp_state = HSPSTATE_RUN;
+
+	    // Try to lock this process in memory so that we don't get
+	    // swapped out. It's probably less than 100KB,  and this way
+	    // we don't consume extra resources swapping in and out
+	    // every 20 seconds.
+	    if(mlockall(MCL_CURRENT) == -1) {
+	      myLog(LOG_ERR, "mlockall(MCL_CURRENT) failed : %s", strerror(errno));
+	    }
+
 	  }
 	  else{
 	    exitStatus = EXIT_FAILURE;
