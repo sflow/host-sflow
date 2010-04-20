@@ -29,11 +29,48 @@ extern "C" {
       fclose(procFile);
     }
 
-    // UUID $$$
-    // machine_type $$$
+    // UUID (probably only available for VMs)
 
+    // machine_type
+    hid->machine_type = SFLMT_unknown;
+#ifdef __i386__
+    hid->machine_type = SFLMT_x86;
+#endif
+#ifdef __x86_64__
+    hid->machine_type = SFLMT_x86_64;
+#endif
+#ifdef __ia64__
+    hid->machine_type = SFLMT_ia64;
+#endif
+#ifdef __sparc__
+    hid->machine_type = SFLMT_sparc;
+#endif
+#ifdef __alpha__
+    hid->machine_type = SFLMT_alpha;
+#endif
+#ifdef __powerpc__
+    hid->machine_type = SFLMT_powerpc;
+#endif
+#ifdef __m68k__
+    hid->machine_type = SFLMT_68k;
+#endif
+#ifdef __mips__
+    hid->machine_type = SFLMT_mips;
+#endif
+#ifdef __arm__
+    hid->machine_type = SFLMT_arm;
+#endif
+#ifdef __hppa__
+    hid->machine_type = SFLMT_hppa;
+#endif
+#ifdef __s390__
+    hid->machine_type = SFLMT_s390;
+#endif
+
+    // os name
     hid->os_name = SFLOS_linux;
 
+    // os release
     procFile= fopen("/proc/sys/kernel/osrelease", "r");
     if(procFile) {
       if(fgets(rbuf, rbufLen, procFile)) {
