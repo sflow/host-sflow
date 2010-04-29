@@ -32,6 +32,10 @@ extern "C" {
 
 #include "sflow_api.h"
 
+#ifdef XENSTAT
+#include "xenstat.h"
+#endif
+
 #define YES 1
 #define NO 0
 
@@ -39,6 +43,9 @@ extern "C" {
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
+
+/* only one receiver, so the receiverIndex is a constant */
+#define HSP_SFLOW_RECEIVER_INDEX 1
 
   // forward declarations
   struct _HSPSFlow;
@@ -76,6 +83,9 @@ extern "C" {
     // UDP send sockets
     int socket4;
     int socket6;
+#ifdef XENSTAT
+    xenstat_handle *xhandle;
+#endif
   } HSP;
 
   // config parser

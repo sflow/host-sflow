@@ -678,11 +678,13 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_VLAN: elemSiz = sizeof(elem->counterBlock.vlan); break;
     case SFLCOUNTERS_PROCESSOR: elemSiz = 28 /*sizeof(elem->counterBlock.processor)*/;  break;
     case SFLCOUNTERS_HOST_HID: elemSiz = hostIdEncodingLength(&elem->counterBlock.host_hid);  break;
+    case SFLCOUNTERS_HOST_PAR: elemSiz = sizeof(elem->counterBlock.host_par);  break;
     case SFLCOUNTERS_ADAPTORS: elemSiz = adaptorListEncodingLength(elem->counterBlock.adaptors);  break;
     case SFLCOUNTERS_HOST_CPU: elemSiz = sizeof(elem->counterBlock.host_cpu);  break;
     case SFLCOUNTERS_HOST_MEM: elemSiz = sizeof(elem->counterBlock.host_mem);  break;
     case SFLCOUNTERS_HOST_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_dsk)*/;  break;
     case SFLCOUNTERS_HOST_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_nio)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
     default:
       sflError(receiver, "unexpected counters_tag");
       return -1;
@@ -799,6 +801,10 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_hid.os_name);
       putString(receiver, &elem->counterBlock.host_hid.os_release);
       break;
+    case SFLCOUNTERS_HOST_PAR:
+      putNet32(receiver, elem->counterBlock.host_par.dsClass);
+      putNet32(receiver, elem->counterBlock.host_par.dsIndex);
+      break;
     case SFLCOUNTERS_ADAPTORS:
       putAdaptorList(receiver, elem->counterBlock.adaptors);
       break;
@@ -857,6 +863,12 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_nio.pkts_out);
       putNet32(receiver, elem->counterBlock.host_nio.errs_out);
       putNet32(receiver, elem->counterBlock.host_nio.drops_out);
+      break;
+    case SFLCOUNTERS_HOST_VRT_CPU:
+      // mixed sizes
+      putNet32(receiver, elem->counterBlock.host_vrt_cpu.state);
+      putNet64(receiver, elem->counterBlock.host_vrt_cpu.cpuTime);
+      putNet32(receiver, elem->counterBlock.host_vrt_cpu.nrVirtCpu);
       break;
     default:
       sflError(receiver, "unexpected counters_tag");

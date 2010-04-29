@@ -19,8 +19,6 @@ OPT = -O3 -DNDEBUG
 #OPT = -g -ggdb -O2
 OPT= -g -ggdb
 
-CFLAGS= -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall -Wcast-align
-
 #CC= g++
 CC= gcc -std=c99
 
@@ -36,12 +34,31 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
 
+INCLUDES= -I. -I$(SFLOWDIR)
+CFLAGS= -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall -Wcast-align
 LIBS=$(SFLOWDIR)/libsflow.a
+
+EXTRAINCLUDES=
+EXTRACFLAGS=
+EXTRALIBS=
+
+# specify XENTOOLS path to compile with xenstat
+# and include the VM-monitoring structures too
+# XENTOOLS=/root/xen-3.2.0/tools
+
+ifeq ($(XENTOOLS),)
+else
+	XENSTATDIR=$(XENTOOLS)/xenstat/libxenstat/src
+	LIBXENSTAT=$(XENSTATDIR)/libxenstat.a
+	EXTRAINCLUDES= -I$(XENSTATDIR)
+	EXTRACFLAGS= -DXENSTAT
+	EXTRALIBS= $(LIBXENSTAT)
+endif
 
 all: hsflowd
 
 hsflowd: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
+	$(CC) $(CFLAGS) $(EXTRACFLAGS) -o $@ $(OBJS) $(LIBS) $(EXTRALIBS)
 
 install: hsflowd
 	install -m 700 hsflowd $(BINDIR)
@@ -56,7 +73,7 @@ schedule:
 	/sbin/chkconfig --list hsflowd
 
 .c.o: $(HEADERS)
-	$(CC) $(CFLAGS) -I. -I$(SFLOWDIR) -c $*.c
+	$(CC) $(CFLAGS) $(EXTRACFLAGS) $(INCLUDES) $(EXTRAINCLUDES) -c $*.c
 
 clean:
 	rm -f $(OBJS) hsflowd

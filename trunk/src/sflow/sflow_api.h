@@ -124,6 +124,7 @@ typedef struct _SFLSampler {
   uint32_t sFlowFsMaximumHeaderSize;
   /* public fields */
   struct _SFLAgent *agent; /* pointer to my agent */
+  void *userData;          /* can be useful to hang something else here */
   /* private fields */
   SFLReceiver *myReceiver;
   uint32_t skip;
@@ -152,6 +153,7 @@ typedef struct _SFLPoller {
   /* public fields */
   struct _SFLAgent *agent; /* pointer to my agent */
   void *magic;             /* ptr to pass back in getCountersFn() */
+  void *userData;          /* can be useful to hang something else here */
   getCountersFn_t getCountersFn;
   /* private fields */
   SFLReceiver *myReceiver;

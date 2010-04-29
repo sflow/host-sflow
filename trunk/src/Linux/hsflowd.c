@@ -159,8 +159,142 @@ extern "C" {
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
     sfl_poller_writeCountersSample(poller, cs);
-
   }
+
+  void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    assert(poller->magic);
+    HSP *sp = (HSP *)poller->magic;
+
+#ifdef XENSTAT
+    if(sp->xhandle) {
+      xenstat_node *node = xenstat_get_node(sp->xhandle, XENSTAT_ALL);
+      if(node) {
+	xenstat_domain *domain = xenstat_node_domain(node, SFL_DS_INDEX(poller->dsi));
+	if(domain) {
+	  // host ID
+	  SFLCounters_sample_element hidElem;
+	  memset(&hidElem, 0, sizeof(hidElem));
+	  hidElem.tag = SFLCOUNTERS_HOST_HID;
+	  char *hname = xenstat_domain_name(domain);
+	  hidElem.counterBlock.host_hid.hostname.str = hname;
+	  hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
+	  //hidElem.counterBlock.host_hid.uuid;
+	  //hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;
+	  //hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;
+	  //hidElem.counterBlock.host_hid.os_release.str = NULL;
+	  //hidElem.counterBlock.host_hid.os_release.len = 0;
+	  SFLADD_ELEMENT(cs, &hidElem);
+
+	  // host parent
+	  SFLCounters_sample_element parElem;
+	  memset(&parElem, 0, sizeof(parElem));
+	  parElem.tag = SFLCOUNTERS_HOST_PAR;
+	  parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
+	  parElem.counterBlock.host_par.dsIndex = 1;
+	  SFLADD_ELEMENT(cs, &parElem);
+
+	  // VM Net I/O
+
+	  // VM cpu counters
+	  SFLCounters_sample_element cpuElem;
+	  memset(&cpuElem, 0, sizeof(cpuElem));
+	  cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
+	  u_int64_t vcpu_ns = 0;
+	  uint32_t vcpu_count = xenstat_domain_num_vcpus(domain);
+	  for(uint32_t c = 0; c < vcpu_count; c++) {
+	    xenstat_vcpu *vcpu = xenstat_domain_vcpu(domain, c);
+	    if(xenstat_vcpu_online(vcpu)) {
+	      vcpu_ns += xenstat_vcpu_ns(vcpu);
+	    }
+	  }
+	  cpuElem.counterBlock.host_vrt_cpu.state = 0; // domain->state libvert enum $$$
+	  cpuElem.counterBlock.host_vrt_cpu.cpuTime = vcpu_ns;
+	  cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = vcpu_count;
+	  SFLADD_ELEMENT(cs, &cpuElem);
+
+	  // VM memory counters
+
+	  // VM disk I/O counters
+
+	  // include the adaptor list
+	  //SFLCounters_sample_element adaptorsElem;
+	  //memset(&adaptorsElem, 0, sizeof(adaptorsElem));
+	  //adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
+	  //adaptorsElem.counterBlock.adaptors = sp->adaptorList;
+	  //SFLADD_ELEMENT(cs, &adaptorsElem);
+
+	  sfl_poller_writeCountersSample(poller, cs);
+	}
+	xenstat_free_node(node);
+      }
+    }
+#endif /* XENSTAT */
+  }
+
+  /*_________________---------------------------__________________
+    _________________    configVMs              __________________
+    -----------------___________________________------------------
+  */
+  
+  static void configVMs(HSP *sp) {
+    if(debug) myLog(LOG_INFO, "configVMs");
+    HSPSFlow *sf = sp->sFlow;
+    if(sf && sf->agent) {
+      // mark and sweep
+      static const char *markedVM = "markedVM";
+      // 1. mark all the current virtual pollers
+      for(SFLPoller *pl = sf->agent->pollers; pl; pl = pl->nxt) {
+	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) pl->userData = (void *)markedVM;
+      }
+
+      // 2. create new VM pollers, or clear the mark on existing ones
+#ifdef XENSTAT
+      if(sp->xhandle) {
+	xenstat_node *node = xenstat_get_node(sp->xhandle, XENSTAT_ALL);
+	if(node) {
+	  uint32_t num_domains = xenstat_node_num_domains(node);
+	  for(uint32_t i = 0; i < num_domains; i++) {
+	    xenstat_domain *domain = xenstat_node_domain_by_index(node, i);
+	    if(domain) {
+	      uint32_t domId = xenstat_domain_id(domain);
+	      // dom0 is the hypervisor. We want the others.
+	      if(domId != 0) {
+		SFLDataSource_instance dsi;
+		// ds_class = <virtualEntity>, ds_index = <domId>, ds_instance = 0
+		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, domId, 0);
+		SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
+		if(vpoller->userData == markedVM) {
+		  // it was already there, just clear the mark.
+		  vpoller->userData = NULL;
+		}
+		else {
+		  // new one - tell it what to do.
+		  myLog(LOG_INFO, "configVMs: new domain=%u", domId);
+		  uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+		  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
+		  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
+		}
+	      }
+	    }
+	  }
+	  xenstat_free_node(node);
+	}
+      }
+#endif
+
+      // 3. remove any that don't exist any more
+      for(SFLPoller *pl = sf->agent->pollers; pl; ) {
+	SFLPoller *nextPl = pl->nxt;
+	if(pl->userData == markedVM) {
+	  myLog(LOG_INFO, "configVMs: removing domain=%u", SFL_DS_INDEX(pl->dsi));
+	  sfl_agent_removePoller(sf->agent, &pl->dsi);
+	}
+	pl = nextPl;
+      }
+    }
+  }
+
 
   /*_________________---------------------------__________________
     _________________       tick                __________________
@@ -168,6 +302,10 @@ extern "C" {
   */
   
   static void tick(HSP *sp, time_t clk) {
+    if(clk % 60 == 0) {
+      // make sure the VM list has not changed
+      configVMs(sp);
+    }
   }
 
   /*_________________---------------------------__________________
@@ -178,6 +316,12 @@ extern "C" {
   static int initAgent(HSP *sp)
   {
     if(debug) myLog(LOG_INFO,"creating sfl agent");
+
+#ifdef XENSTAT
+    if(sp->xhandle == NULL) {
+      sp->xhandle = xenstat_init();
+    }
+#endif
 
     HSPSFlow *sf = sp->sFlow;
     
@@ -213,7 +357,6 @@ extern "C" {
     // just one receiver - we are serious about making this lightweight for now
     HSPCollector *collector = sf->collectors;
     SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
-    uint32_t receiverIndex = 1;
     
     // claim the receiver slot
     sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
@@ -229,15 +372,17 @@ extern "C" {
     
     uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
     
-    // add a single poller to represent the whole physical host
+    // add a <physicalEntity> poller to represent the whole physical host
     SFLDataSource_instance dsi;
-    SFL_DS_SET(dsi, 2, 1, 0);  // ds_class = <physicalEntity>, ds_index = 1, ds_instance = 0
+  // ds_class = <physicalEntity>, ds_index = 1, ds_instance = 0
+    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, 1, 0);
     sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
     sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
-    sfl_poller_set_sFlowCpReceiver(sf->poller, receiverIndex);
+    sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
     
-    // add poller instances for each virtual machine $$$
-    
+    // add <virtualEntity> pollers for each virtual machine
+    configVMs(sp);
+
     return YES;
   }
 
@@ -498,6 +643,13 @@ extern "C" {
     closelog();
     myLog(LOG_INFO,"stopped");
     if(debug == 0) remove(sp.pidFile);
+
+#ifdef XENSTAT
+    if(sp.xhandle) {
+      xenstat_uninit(sp.xhandle);
+    }
+#endif
+
     exit(exitStatus);
   } /* main() */
 
