@@ -35,6 +35,13 @@ typedef struct _SFLAddress {
     SFLAddress_value address;
 } SFLAddress;
 
+enum SFL_DSCLASS {
+  SFL_DSCLASS_IFINDEX=0,
+  SFL_DSCLASS_VLAN=1,
+  SFL_DSCLASS_PHYSICAL_ENTITY=2,
+  SFL_DSCLASS_LOGICAL_ENTITY=3
+};
+
 /* Packet header data */
 
 #define SFL_DEFAULT_HEADER_SIZE 128
@@ -538,6 +545,11 @@ typedef struct _SFLAdaptorList {
   SFLAdaptor **adaptors;
 } SFLAdaptorList;
 
+typedef struct _SFLHost_par_counters {
+  uint32_t dsClass;       /* sFlowDataSource class */
+  uint32_t dsIndex;       /* sFlowDataSource index */
+} SFLHost_par_counters;
+
 #define SFL_MAX_HOSTNAME_CHARS 64
 #define SFL_MAX_OSRELEASE_CHARS 32
 
@@ -606,6 +618,15 @@ typedef struct _SFLHost_dsk_counters {
   uint32_t write_time;      /* write time (ms) */
 } SFLHost_dsk_counters;
 
+/* Virtual Domain Statistics */
+/* opaque = counter_data; enterprise = 0; format = 2101 */
+
+typedef struct _SFLHost_vrt_cpu_counters {
+   uint32_t state;       /* virtDomainState */
+   uint64_t cpuTime;     /* the CPU time used in nanoseconds */
+   uint32_t nrVirtCpu;   /* number of virtual CPUs for the domain */
+} SFLHost_vrt_cpu_counters;
+
 /* Counters data */
 
 enum SFLCounters_type_tag {
@@ -620,10 +641,12 @@ enum SFLCounters_type_tag {
   SFLCOUNTERS_RADIO        = 1002,
   SFLCOUNTERS_HOST_HID     = 2000, /* host id */
   SFLCOUNTERS_ADAPTORS     = 2001, /* host adaptors */
+  SFLCOUNTERS_HOST_PAR     = 2002, /* host parent */
   SFLCOUNTERS_HOST_CPU     = 2003, /* host cpu  */
   SFLCOUNTERS_HOST_MEM     = 2004, /* host memory  */
   SFLCOUNTERS_HOST_DSK     = 2005, /* host storage I/O  */
   SFLCOUNTERS_HOST_NIO     = 2006, /* host network I/O */
+  SFLCOUNTERS_HOST_VRT_CPU = 2101, /* host virt cpu */
 };
 
 typedef union _SFLCounters_type {
@@ -633,12 +656,14 @@ typedef union _SFLCounters_type {
   SFLVg_counters vg;
   SFLVlan_counters vlan;
   SFLProcessor_counters processor;
+  SFLHost_par_counters host_par;
   SFLHost_hid_counters host_hid;
   SFLAdaptorList *adaptors;
   SFLHost_cpu_counters host_cpu;
   SFLHost_mem_counters host_mem;
   SFLHost_dsk_counters host_dsk;
   SFLHost_nio_counters host_nio;
+  SFLHost_vrt_cpu_counters host_vrt_cpu;
 } SFLCounters_type;
 
 typedef struct _SFLCounters_sample_element {
