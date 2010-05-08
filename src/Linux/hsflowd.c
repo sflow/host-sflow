@@ -195,6 +195,23 @@ extern "C" {
 	  SFLADD_ELEMENT(cs, &parElem);
 
 	  // VM Net I/O
+	  SFLCounters_sample_element nioElem;
+	  memset(&nioElem, 0, sizeof(nioElem));
+	  nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
+	  uint32_t network_count = xenstat_domain_num_networks(domain);
+	  for(uint32_t n = 0; n < network_count; n++) {
+	    xenstat_network *vnet = xenstat_domain_network(domain, n);
+	    uint32_t vnet_id = xenstat_network_id(vnet); // is this the ifIndex? Can we use it to full in the adaptor list? $$$
+	    nioElem.counterBlock.host_vrt_nio.bytes_in += xenstat_network_rbytes(vnet);
+	    nioElem.counterBlock.host_vrt_nio.pkts_in += xenstat_network_rpackets(vnet);
+	    nioElem.counterBlock.host_vrt_nio.errs_in += xenstat_network_rerrs(vnet);
+	    nioElem.counterBlock.host_vrt_nio.drops_in += xenstat_network_rdrop(vnet);
+	    nioElem.counterBlock.host_vrt_nio.bytes_out += xenstat_network_tbytes(vnet);
+	    nioElem.counterBlock.host_vrt_nio.pkts_out += xenstat_network_tpackets(vnet);
+	    nioElem.counterBlock.host_vrt_nio.errs_out += xenstat_network_terrs(vnet);
+	    nioElem.counterBlock.host_vrt_nio.drops_out += xenstat_network_tdrop(vnet);
+	  }
+	  SFLADD_ELEMENT(cs, &nioElem);
 
 	  // VM cpu counters
 	  SFLCounters_sample_element cpuElem;
@@ -214,8 +231,30 @@ extern "C" {
 	  SFLADD_ELEMENT(cs, &cpuElem);
 
 	  // VM memory counters
+	  SFLCounters_sample_element memElem;
+	  memset(&memElem, 0, sizeof(memElem));
+	  memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
+	  memElem.counterBlock.host_vrt_mem.memory = xenstat_domain_cur_mem(domain);
+	  memElem.counterBlock.host_vrt_mem.maxMemory = xenstat_domain_max_mem(domain);
+	  SFLADD_ELEMENT(cs, &memElem);
 
 	  // VM disk I/O counters
+	  SFLCounters_sample_element dskElem;
+	  memset(&dskElem, 0, sizeof(dskElem));
+	  dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
+	  uint32_t vbd_count = xenstat_domain_num_vbds(domain);
+	  for(uint32_t d = 0; d < vbd_count; d++) {
+	    xenstat_vbd *vbd = xenstat_domain_vbd(domain, d);
+	    uint32_t dev = xenstat_vbd_dev(vbd); // can we get the  missing parameters from /proc using this? $$$
+	    //dskElem.counterBlock.host_vrt_dsk.capacity 
+	    //dskElem.counterBlock.host_vrt_dsk.allocation 
+	    //dskElem.counterBlock.host_vrt_dsk.available
+	    dskElem.counterBlock.host_vrt_dsk.rd_req += xenstat_vbd_rd_reqs(vbd);
+	    //dskElem.counterBlock.host_vrt_dsk.rd_bytes
+	    dskElem.counterBlock.host_vrt_dsk.wr_req += xenstat_vbd_wr_reqs(vbd);
+	    //dskElem.counterBlock.host_vrt_dsk.wr_bytes
+	  }
+	  SFLADD_ELEMENT(cs, &dskElem);
 
 	  // include the adaptor list
 	  //SFLCounters_sample_element adaptorsElem;

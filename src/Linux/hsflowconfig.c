@@ -284,7 +284,7 @@ extern int debug;
   static HSPSFlow *newSFlow(HSP *sp) {
     HSPSFlow *sf = (HSPSFlow *)calloc(1, sizeof(HSPSFlow));
     sf->sFlowSettings = newSFlowSettings(sf);
-    sf->subAgentId = 0;
+    sf->subAgentId = HSP_DEFAULT_SUBAGENTID;
     sp->sFlow = sf; // just one of these, not a list
     sf->myHSP = sp;
     return sf;
@@ -436,7 +436,8 @@ extern int debug;
 	  if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
 	  break;
 	case HSPTOKEN_SUBAGENTID:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, 1000000)) == NULL) return NO;
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
+	  break;
 	default:
 	  parseError(sp, tok, "unexpected sFlow setting", "");
 	  return NO;
