@@ -43,6 +43,8 @@ extern "C" {
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
+#define HSP_DEFAULT_SUBAGENTID 100
+#define HSP_MAX_SUBAGENTID 1000000
 
 /* only one receiver, so the receiverIndex is a constant */
 #define HSP_SFLOW_RECEIVER_INDEX 1

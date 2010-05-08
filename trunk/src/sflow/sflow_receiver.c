@@ -670,24 +670,33 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     cs->num_elements++;
     siz += 8; /* tag, length */
     elemSiz = 0;
+    /* here we are assuming that the structure fields are not expanded to be 64-bit aligned,
+       because then the sizeof(struct) would be larger than the wire-encoding. */
     switch(elem->tag) {
     case SFLCOUNTERS_GENERIC:  elemSiz = sizeof(elem->counterBlock.generic); break;
     case SFLCOUNTERS_ETHERNET: elemSiz = sizeof(elem->counterBlock.ethernet); break;
     case SFLCOUNTERS_TOKENRING: elemSiz = sizeof(elem->counterBlock.tokenring); break;
     case SFLCOUNTERS_VG: elemSiz = sizeof(elem->counterBlock.vg); break;
     case SFLCOUNTERS_VLAN: elemSiz = sizeof(elem->counterBlock.vlan); break;
-    case SFLCOUNTERS_PROCESSOR: elemSiz = 28 /*sizeof(elem->counterBlock.processor)*/;  break;
+    case SFLCOUNTERS_PROCESSOR: elemSiz = sizeof(elem->counterBlock.processor);  break;
     case SFLCOUNTERS_HOST_HID: elemSiz = hostIdEncodingLength(&elem->counterBlock.host_hid);  break;
     case SFLCOUNTERS_HOST_PAR: elemSiz = sizeof(elem->counterBlock.host_par);  break;
     case SFLCOUNTERS_ADAPTORS: elemSiz = adaptorListEncodingLength(elem->counterBlock.adaptors);  break;
     case SFLCOUNTERS_HOST_CPU: elemSiz = sizeof(elem->counterBlock.host_cpu);  break;
     case SFLCOUNTERS_HOST_MEM: elemSiz = sizeof(elem->counterBlock.host_mem);  break;
-    case SFLCOUNTERS_HOST_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_dsk)*/;  break;
-    case SFLCOUNTERS_HOST_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_nio)*/;  break;
-    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
+    case SFLCOUNTERS_HOST_DSK: elemSiz = sizeof(elem->counterBlock.host_dsk);  break;
+    case SFLCOUNTERS_HOST_NIO: elemSiz = sizeof(elem->counterBlock.host_nio);  break;
+    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = sizeof(elem->counterBlock.host_vrt_cpu);  break;
+    case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = sizeof(elem->counterBlock.host_vrt_mem);  break;
+    case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = sizeof(elem->counterBlock.host_vrt_dsk);  break;
+    case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = sizeof(elem->counterBlock.host_vrt_nio);  break;
     default:
-      sflError(receiver, "unexpected counters_tag");
-      return -1;
+      {
+	char errm[128];
+	sprintf(errm, "computeCounterSampleSize(): unexpected counters tag (%u)", elem->tag);
+	sflError(receiver, errm);
+	return -1;
+      }
       break;
     }
     // cache the element size, and accumulate it into the overall FlowSample size
@@ -761,7 +770,6 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32_run(receiver, &elem->counterBlock.tokenring, sizeof(elem->counterBlock.tokenring) / 4);
       break;
     case SFLCOUNTERS_VG:
-      // mixed sizes
       putNet32(receiver, elem->counterBlock.vg.dot12InHighPriorityFrames);
       putNet64(receiver, elem->counterBlock.vg.dot12InHighPriorityOctets);
       putNet32(receiver, elem->counterBlock.vg.dot12InNormPriorityFrames);
@@ -778,7 +786,6 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet64(receiver, elem->counterBlock.vg.dot12HCOutHighPriorityOctets);
       break;
     case SFLCOUNTERS_VLAN:
-      // mixed sizes
       putNet32(receiver, elem->counterBlock.vlan.vlan_id);
       putNet64(receiver, elem->counterBlock.vlan.octets);
       putNet32(receiver, elem->counterBlock.vlan.ucastPkts);
@@ -787,7 +794,6 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.vlan.discards);
       break;
     case SFLCOUNTERS_PROCESSOR:
-      // mixed sizes
       putNet32(receiver, elem->counterBlock.processor.five_sec_cpu);
       putNet32(receiver, elem->counterBlock.processor.one_min_cpu);
       putNet32(receiver, elem->counterBlock.processor.five_min_cpu);
@@ -809,7 +815,6 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putAdaptorList(receiver, elem->counterBlock.adaptors);
       break;
     case SFLCOUNTERS_HOST_CPU:
-      // mixed sizes
       putNetFloat(receiver, elem->counterBlock.host_cpu.load_one);
       putNetFloat(receiver, elem->counterBlock.host_cpu.load_five);
       putNetFloat(receiver, elem->counterBlock.host_cpu.load_fifteen);
@@ -829,18 +834,8 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_cpu.contexts);
       break;
     case SFLCOUNTERS_HOST_MEM:
-      // mixed sizes
-      putNet32(receiver, elem->counterBlock.host_mem.mem_total);
-      putNet32(receiver, elem->counterBlock.host_mem.mem_free);
-      putNet32(receiver, elem->counterBlock.host_mem.mem_shared);
-      putNet32(receiver, elem->counterBlock.host_mem.mem_buffers);
-      putNet32(receiver, elem->counterBlock.host_mem.mem_cached);
-      putNet32(receiver, elem->counterBlock.host_mem.swap_total);
-      putNet32(receiver, elem->counterBlock.host_mem.swap_free);
-      putNet32(receiver, elem->counterBlock.host_mem.page_in);
-      putNet32(receiver, elem->counterBlock.host_mem.page_out);
-      putNet32(receiver, elem->counterBlock.host_mem.swap_in);
-      putNet32(receiver, elem->counterBlock.host_mem.swap_out);
+      // all these counters are 32-bit
+      putNet32_run(receiver, &elem->counterBlock.host_mem, sizeof(elem->counterBlock.host_mem) / 4);
       break;
     case SFLCOUNTERS_HOST_DSK:
       putNet64(receiver, elem->counterBlock.host_dsk.disk_total);
@@ -854,7 +849,6 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_dsk.write_time);
       break;
     case SFLCOUNTERS_HOST_NIO:
-      // mixed sizes
       putNet64(receiver, elem->counterBlock.host_nio.bytes_in);
       putNet32(receiver, elem->counterBlock.host_nio.pkts_in);
       putNet32(receiver, elem->counterBlock.host_nio.errs_in);
@@ -865,14 +859,40 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_nio.drops_out);
       break;
     case SFLCOUNTERS_HOST_VRT_CPU:
-      // mixed sizes
       putNet32(receiver, elem->counterBlock.host_vrt_cpu.state);
       putNet64(receiver, elem->counterBlock.host_vrt_cpu.cpuTime);
       putNet32(receiver, elem->counterBlock.host_vrt_cpu.nrVirtCpu);
       break;
+    case SFLCOUNTERS_HOST_VRT_MEM:
+      putNet32(receiver, elem->counterBlock.host_vrt_mem.memory);
+      putNet32(receiver, elem->counterBlock.host_vrt_mem.maxMemory);
+      break;
+    case SFLCOUNTERS_HOST_VRT_DSK:
+      putNet64(receiver, elem->counterBlock.host_vrt_dsk.capacity);
+      putNet64(receiver, elem->counterBlock.host_vrt_dsk.allocation);
+      putNet64(receiver, elem->counterBlock.host_vrt_dsk.available);
+      putNet32(receiver, elem->counterBlock.host_vrt_dsk.rd_req);
+      putNet64(receiver, elem->counterBlock.host_vrt_dsk.rd_bytes);
+      putNet32(receiver, elem->counterBlock.host_vrt_dsk.wr_req);
+      putNet64(receiver, elem->counterBlock.host_vrt_dsk.wr_bytes);
+      break;
+    case SFLCOUNTERS_HOST_VRT_NIO:
+      putNet64(receiver, elem->counterBlock.host_vrt_nio.bytes_in);
+      putNet32(receiver, elem->counterBlock.host_vrt_nio.pkts_in);
+      putNet32(receiver, elem->counterBlock.host_vrt_nio.errs_in);
+      putNet32(receiver, elem->counterBlock.host_vrt_nio.drops_in);
+      putNet64(receiver, elem->counterBlock.host_vrt_nio.bytes_out);
+      putNet32(receiver, elem->counterBlock.host_vrt_nio.pkts_out);
+      putNet32(receiver, elem->counterBlock.host_vrt_nio.errs_out);
+      putNet32(receiver, elem->counterBlock.host_vrt_nio.drops_out);
+      break;
     default:
-      sflError(receiver, "unexpected counters_tag");
-      return -1;
+      {
+	char errm[128];
+	sprintf(errm, "unexpected counters tag (%u)", elem->tag);
+	sflError(receiver, errm);
+	return -1;
+      }
       break;
     }
   }
