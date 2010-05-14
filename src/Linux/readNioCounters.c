@@ -14,8 +14,8 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  int readNioCounters(SFLHost_nio_counters *nio) {
-    int gotData = NO;
+  int readNioCounters(SFLHost_nio_counters *nio, char *devFilter) {
+    int interface_count = 0;
     FILE *procFile;
     procFile= fopen("/proc/net/dev", "r");
     if(procFile) {
@@ -36,34 +36,36 @@ extern "C" {
 #define MAX_PROC_LINE_CHARS 240
       char line[MAX_PROC_LINE_CHARS];
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	// assume the format is:
-	// Inter-|   Receive                                                |  Transmit
-	//  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
-	if(sscanf(line, "%*s %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
-		  &bytes_in,
-		  &pkts_in,
-		  &errs_in,
-		  &drops_in,
-		  &bytes_out,
-		  &pkts_out,
-		  &errs_out,
-		  &drops_out) == 8) {
-	  gotData = YES;
-	  // report the sum over all devices
-	  nio->bytes_in += bytes_in;
-	  nio->pkts_in += (uint32_t)pkts_in;
-	  nio->errs_in += (uint32_t)errs_in;
-	  nio->drops_in += (uint32_t)drops_in;
-	  nio->bytes_out += bytes_out;
-	  nio->pkts_out += (uint32_t)pkts_out;
-	  nio->errs_out += (uint32_t)errs_out;
-	  nio->drops_out += (uint32_t)drops_out;
+	if(devFilter == NULL || strncmp(line, devFilter, strlen(devFilter)) == 0) {
+	  // assume the format is:
+	  // Inter-|   Receive                                                |  Transmit
+	  //  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+	  if(sscanf(line, "%*s %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+		    &bytes_in,
+		    &pkts_in,
+		    &errs_in,
+		    &drops_in,
+		    &bytes_out,
+		    &pkts_out,
+		    &errs_out,
+		    &drops_out) == 8) {
+	    interface_count++;
+	    // report the sum over all devices
+	    nio->bytes_in += bytes_in;
+	    nio->pkts_in += (uint32_t)pkts_in;
+	    nio->errs_in += (uint32_t)errs_in;
+	    nio->drops_in += (uint32_t)drops_in;
+	    nio->bytes_out += bytes_out;
+	    nio->pkts_out += (uint32_t)pkts_out;
+	    nio->errs_out += (uint32_t)errs_out;
+	    nio->drops_out += (uint32_t)drops_out;
+	  }
 	}
       }
       fclose(procFile);
     }
 
-    return gotData;
+    return interface_count;
   }
 
 

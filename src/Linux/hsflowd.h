@@ -33,7 +33,9 @@ extern "C" {
 #include "sflow_api.h"
 
 #ifdef XENSTAT
-#include "xenstat.h"
+#include "xs.h"
+#include "xenctrl.h"
+#include "dirent.h"
 #endif
 
 #define YES 1
@@ -46,8 +48,14 @@ extern "C" {
 #define HSP_DEFAULT_SUBAGENTID 100
 #define HSP_MAX_SUBAGENTID 1000000
 
-/* only one receiver, so the receiverIndex is a constant */
+  // only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
+
+// just assume the sector size is 512 bytes
+#define HSP_SECTOR_BYTES 512
+
+// upper limit on number of VIFs per VM
+#define HSP_MAX_VIFS 64
 
   // forward declarations
   struct _HSPSFlow;
@@ -82,16 +90,28 @@ extern "C" {
     char *pidFile;
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
+    int refreshAdaptorList;
+    int refreshVMList;
     // UDP send sockets
     int socket4;
     int socket6;
 #ifdef XENSTAT
-    xenstat_handle *xhandle;
+    int xc_handle; // libxc
+    struct xs_handle *xs_handle; // xenstore
+    uint32_t page_size;
 #endif
   } HSP;
 
+// userData structure to store state for VM data-sources
+typedef struct _HSPVMState {
+  uint32_t network_count;
+  int32_t marked;
+  uint32_t vm_index;
+} HSPVMState;
+
   // config parser
   int HSPReadConfigFile(HSP *sp);
+  int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
 
   // logger
   void myLog(int syslogType, char *fmt, ...);
@@ -101,7 +121,7 @@ extern "C" {
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(SFLHost_dsk_counters *dsk);
-  int readNioCounters(SFLHost_nio_counters *dsk);
+  int readNioCounters(SFLHost_nio_counters *dsk, char *devFilter);
   int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
 #if defined(__cplusplus)

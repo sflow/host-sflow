@@ -47,7 +47,7 @@ void newAdaptorList(HSP *sp)
 
   
 /*________________---------------------------__________________
-  ________________    newAdaptorList         __________________
+  ________________    trimWhitespace         __________________
   ----------------___________________________------------------
 */
 
@@ -105,7 +105,7 @@ int readInterfaces(HSP *sp)
       if(devName) {
 	devName = trimWhitespace(devName);
 	if(devName && strlen(devName) < IFNAMSIZ) {
-	  // we set the ifr_name field to make out queries
+	  // we set the ifr_name field to make our queries
 	  strcpy(ifr.ifr_name, devName);
 
 	  // Get the flags for this interface
