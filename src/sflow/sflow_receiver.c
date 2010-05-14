@@ -680,16 +680,16 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_VLAN: elemSiz = sizeof(elem->counterBlock.vlan); break;
     case SFLCOUNTERS_PROCESSOR: elemSiz = sizeof(elem->counterBlock.processor);  break;
     case SFLCOUNTERS_HOST_HID: elemSiz = hostIdEncodingLength(&elem->counterBlock.host_hid);  break;
-    case SFLCOUNTERS_HOST_PAR: elemSiz = sizeof(elem->counterBlock.host_par);  break;
+    case SFLCOUNTERS_HOST_PAR: elemSiz = 8 /*sizeof(elem->counterBlock.host_par)*/;  break;
     case SFLCOUNTERS_ADAPTORS: elemSiz = adaptorListEncodingLength(elem->counterBlock.adaptors);  break;
-    case SFLCOUNTERS_HOST_CPU: elemSiz = sizeof(elem->counterBlock.host_cpu);  break;
-    case SFLCOUNTERS_HOST_MEM: elemSiz = sizeof(elem->counterBlock.host_mem);  break;
-    case SFLCOUNTERS_HOST_DSK: elemSiz = sizeof(elem->counterBlock.host_dsk);  break;
-    case SFLCOUNTERS_HOST_NIO: elemSiz = sizeof(elem->counterBlock.host_nio);  break;
-    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = sizeof(elem->counterBlock.host_vrt_cpu);  break;
-    case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = sizeof(elem->counterBlock.host_vrt_mem);  break;
-    case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = sizeof(elem->counterBlock.host_vrt_dsk);  break;
-    case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = sizeof(elem->counterBlock.host_vrt_nio);  break;
+    case SFLCOUNTERS_HOST_CPU: elemSiz = 68 /*sizeof(elem->counterBlock.host_cpu)*/;  break;
+    case SFLCOUNTERS_HOST_MEM: elemSiz = 72 /*sizeof(elem->counterBlock.host_mem)*/ ;  break;
+    case SFLCOUNTERS_HOST_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_dsk)*/;  break;
+    case SFLCOUNTERS_HOST_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_nio)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_mem)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 48 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_vrt_nio)*/;  break;
     default:
       {
 	char errm[128];
@@ -834,8 +834,17 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_cpu.contexts);
       break;
     case SFLCOUNTERS_HOST_MEM:
-      // all these counters are 32-bit
-      putNet32_run(receiver, &elem->counterBlock.host_mem, sizeof(elem->counterBlock.host_mem) / 4);
+      putNet64(receiver, elem->counterBlock.host_mem.mem_total);
+      putNet64(receiver, elem->counterBlock.host_mem.mem_free);
+      putNet64(receiver, elem->counterBlock.host_mem.mem_shared);
+      putNet64(receiver, elem->counterBlock.host_mem.mem_buffers);
+      putNet64(receiver, elem->counterBlock.host_mem.mem_cached);
+      putNet64(receiver, elem->counterBlock.host_mem.swap_total);
+      putNet64(receiver, elem->counterBlock.host_mem.swap_free);
+      putNet32(receiver, elem->counterBlock.host_mem.page_in);
+      putNet32(receiver, elem->counterBlock.host_mem.page_out);
+      putNet32(receiver, elem->counterBlock.host_mem.swap_in);
+      putNet32(receiver, elem->counterBlock.host_mem.swap_out);
       break;
     case SFLCOUNTERS_HOST_DSK:
       putNet64(receiver, elem->counterBlock.host_dsk.disk_total);
@@ -864,8 +873,8 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_vrt_cpu.nrVirtCpu);
       break;
     case SFLCOUNTERS_HOST_VRT_MEM:
-      putNet32(receiver, elem->counterBlock.host_vrt_mem.memory);
-      putNet32(receiver, elem->counterBlock.host_vrt_mem.maxMemory);
+      putNet64(receiver, elem->counterBlock.host_vrt_mem.memory);
+      putNet64(receiver, elem->counterBlock.host_vrt_mem.maxMemory);
       break;
     case SFLCOUNTERS_HOST_VRT_DSK:
       putNet64(receiver, elem->counterBlock.host_vrt_dsk.capacity);

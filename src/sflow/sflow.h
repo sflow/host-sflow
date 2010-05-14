@@ -593,13 +593,13 @@ typedef struct _SFLHost_cpu_counters {
 } SFLHost_cpu_counters;
 
 typedef struct _SFLHost_mem_counters {
-  uint32_t mem_total;    /* total kB */
-  uint32_t mem_free;     /* free KB */
-  uint32_t mem_shared;   /* shared KB */
-  uint32_t mem_buffers;  /* buffers KB */
-  uint32_t mem_cached;   /* cached kB */
-  uint32_t swap_total;   /* swap total kB */
-  uint32_t swap_free;    /* swap free kB */
+  uint64_t mem_total;    /* total bytes */
+  uint64_t mem_free;     /* free bytes */
+  uint64_t mem_shared;   /* shared bytes */
+  uint64_t mem_buffers;  /* buffers bytes */
+  uint64_t mem_cached;   /* cached bytes */
+  uint64_t swap_total;   /* swap total bytes */
+  uint64_t swap_free;    /* swap free bytes */
   uint32_t page_in;      /* page in count */
   uint32_t page_out;     /* page out count */
   uint32_t swap_in;      /* swap in count */
@@ -631,8 +631,8 @@ typedef struct _SFLHost_vrt_cpu_counters {
 /* opaque = counter_data; enterprise = 0; format = 2102 */
 
 typedef struct _SFLHost_vrt_mem_counters {
-  uint32_t memory;      /* memory in KBytes used by domain */
-  uint32_t maxMemory;   /* memory in KBytes allowed */
+  uint64_t memory;      /* memory in bytes used by domain */
+  uint64_t maxMemory;   /* memory in bytes allowed */
 } SFLHost_vrt_mem_counters;
 
 /* Virtual Domain Disk statistics */
