@@ -29,12 +29,12 @@ extern "C" {
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
 	if(sscanf(line, "%s %"SCNu64"", var, &val64) == 2) {
 	  gotData = YES;
-	  if(strcmp(var, "MemTotal:") == 0) mem->mem_total = val64;
-	  else if(strcmp(var, "MemFree:") == 0) mem->mem_free = val64;
-	  else if(strcmp(var, "Buffers:") == 0) mem->mem_buffers = val64;
-	  else if(strcmp(var, "Cached:") == 0) mem->mem_cached = val64;
-	  else if(strcmp(var, "SwapTotal:") == 0) mem->swap_total = val64;
-	  else if(strcmp(var, "SwapFree:") == 0) mem->swap_free = val64;
+	  if(strcmp(var, "MemTotal:") == 0) mem->mem_total = val64 * 1024;
+	  else if(strcmp(var, "MemFree:") == 0) mem->mem_free = val64 * 1024;
+	  else if(strcmp(var, "Buffers:") == 0) mem->mem_buffers = val64 * 1024;
+	  else if(strcmp(var, "Cached:") == 0) mem->mem_cached = val64 * 1024;
+	  else if(strcmp(var, "SwapTotal:") == 0) mem->swap_total = val64 * 1024;
+	  else if(strcmp(var, "SwapFree:") == 0) mem->swap_free = val64 * 1024;
 	}
       }
       fclose(procFile);
