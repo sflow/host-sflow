@@ -1,10 +1,10 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 0.94
+Version: 0.95
 Release: 1
 License: http://host-sflow.sourceforge.net/license.html
 Group: Applications/Internet
-URL: http://www.inmon.com
+URL: http://host-sflow.sourceforge.net
 Source0: %{name}-%{version}.tar.gz
 
 %description
