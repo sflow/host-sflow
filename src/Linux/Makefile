@@ -1,6 +1,17 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
+# specify XEN_ROOT path to compile with xenstat
+# and include the VM-monitoring structures too
+# e.g. XEN_ROOT=/root/xen-3.2.0
+
+ifeq ($(XEN_ROOT),)
+else
+	include $(XEN_ROOT)/tools/Rules.mk
+	CFLAGS+= -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
+	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
+endif
+
 ifeq ($(BINDIR),)
 	BINDIR=/usr/local/sbin
 endif
@@ -34,31 +45,13 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
 
-INCLUDES= -I. -I$(SFLOWDIR)
-CFLAGS= -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wcast-align
-LIBS=$(SFLOWDIR)/libsflow.a
-
-EXTRAINCLUDES=
-EXTRACFLAGS=
-EXTRALIBS=
-
-# specify XENTOOLS path to compile with xenstat
-# and include the VM-monitoring structures too
-# e.g. XENTOOLS=/root/xen-3.2.0/tools
-
-ifeq ($(XENTOOLS),)
-else
-	XENSTOREDIR=$(XENTOOLS)/xenstore
-	LIBXCDIR=$(XENTOOLS)/libxc
-	EXTRAINCLUDES= -I$(XENSTOREDIR) -I$(LIBXCDIR)
-	EXTRACFLAGS= -DXENSTAT
-	EXTRALIBS= -L$(XENSTOREDIR) -L$(LIBXCDIR) -lxenstore -lxenctrl
-endif
+CFLAGS+= -I. -I$(SFLOWDIR) -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall
+LIBS+= $(SFLOWDIR)/libsflow.a
 
 all: hsflowd
 
 hsflowd: $(OBJS)
-	$(CC) $(CFLAGS) $(EXTRACFLAGS) -o $@ $(OBJS) $(LIBS) $(EXTRALIBS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
 
 install: hsflowd
 	install -m 700 hsflowd $(BINDIR)
@@ -73,7 +66,7 @@ schedule:
 	/sbin/chkconfig --list hsflowd
 
 .c.o: $(HEADERS)
-	$(CC) $(CFLAGS) $(EXTRACFLAGS) $(INCLUDES) $(EXTRAINCLUDES) -c $*.c
+	$(CC) $(CFLAGS) -c $*.c
 
 clean:
 	rm -f $(OBJS) hsflowd

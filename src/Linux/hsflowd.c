@@ -100,14 +100,48 @@ extern "C" {
     }
   }
 
+#ifdef __XEN_TOOLS__
+  // if sp->xs_handle is not NULL then we know that sp->xc_handle is good too
+  // because of the way we opened the handles in the first place.
+  static int xenHandlesOK(HSP *sp) { return (sp->xs_handle != NULL); }
+
+  static int readVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode)
+  {
+    if(xenHandlesOK(sp)) {
+      // there seems to be some confusion about sizeof(xc_physinfo_t). The
+      // compiler thinks it is 96 bytes, but the called to xc_physinfo() seems
+      // to be writing past that point (and overwriting other vars that are on
+      // the stack). Short term workaround is to give it more than enough
+      // space to work with, but we'll need to get to the bottom of this at
+      // some point.
+      uint64_t buf[200]; // 1600 bytes - lots of headroom.
+      memset(buf, 0, sizeof(buf));
+      xc_physinfo_t *physinfo = (xc_physinfo_t *)buf;
+      if(debug) myLog(LOG_INFO, "compiler thinks sizeof(xc_physinfo_t) is %u", sizeof(physinfo));
+      if(xc_physinfo(sp->xc_handle, physinfo) < 0) {
+	myLog(LOG_ERR, "xc_physinfo() failed : %s", strerror(errno));
+      }
+      else {
+	vnode->mhz = (physinfo->cpu_khz / 1000);
+	vnode->cpus = physinfo->nr_cpus;
+	vnode->memory = ((uint64_t)physinfo->total_pages * sp->page_size);
+	vnode->memory_free = ((uint64_t)physinfo->free_pages * sp->page_size);
+	vnode->num_domains = sp->num_domains;
+	return YES;
+      }
+    }
+    return NO;
+  }
+
+#endif
+
   void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
 
     // host ID
-    SFLCounters_sample_element hidElem;
-    memset(&hidElem, 0, sizeof(hidElem));
+    SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
     char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
     char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
@@ -120,48 +154,52 @@ extern "C" {
     }
 
     // host Net I/O
-    SFLCounters_sample_element nioElem;
-    memset(&nioElem, 0, sizeof(nioElem));
+    SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_NIO;
     if(readNioCounters(&nioElem.counterBlock.host_nio, NULL)) {
       SFLADD_ELEMENT(cs, &nioElem);
     }
 
     // host cpu counters
-    SFLCounters_sample_element cpuElem;
-    memset(&cpuElem, 0, sizeof(cpuElem));
+    SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_CPU;
     if(readCpuCounters(&cpuElem.counterBlock.host_cpu)) {
       SFLADD_ELEMENT(cs, &cpuElem);
     }
 
     // host memory counters
-    SFLCounters_sample_element memElem;
-    memset(&memElem, 0, sizeof(memElem));
+    SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_MEM;
     if(readMemoryCounters(&memElem.counterBlock.host_mem)) {
       SFLADD_ELEMENT(cs, &memElem);
     }
 
     // host I/O counters
-    SFLCounters_sample_element dskElem;
-    memset(&dskElem, 0, sizeof(dskElem));
+    SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_DSK;
     if(readDiskCounters(&dskElem.counterBlock.host_dsk)) {
       SFLADD_ELEMENT(cs, &dskElem);
     }
 
     // include the adaptor list
-    SFLCounters_sample_element adaptorsElem;
-    memset(&adaptorsElem, 0, sizeof(adaptorsElem));
+    SFLCounters_sample_element adaptorsElem = { 0 };
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
     adaptorsElem.counterBlock.adaptors = sp->adaptorList;
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
+#ifdef __XEN_TOOLS__
+    // hypervisor node stats
+    SFLCounters_sample_element vnodeElem = { 0 };
+    vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
+    if(readVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
+      SFLADD_ELEMENT(cs, &vnodeElem);
+    }
+#endif
+
     sfl_poller_writeCountersSample(poller, cs);
   }
 
-#ifdef XENSTAT
+#ifdef __XEN_TOOLS__
 
 #define HSP_MAX_PATHLEN 256
 #define XEN_SYSFS_VBD_PATH "/sys/devices/xen-backend"
@@ -199,9 +237,9 @@ extern "C" {
       char vbd_type[256];
       if(sscanf(dp->d_name, "%3s-%u-%u", vbd_type, &vbd_dom_id, &vbd_dev) == 3) {
 	if(vbd_dom_id == dom_id) {
-	  //dsk->apacity 
-	  //dsk->allocation 
-	  //dsk->available
+	  //dsk->capacity $$$
+	  //dsk->allocation $$$
+	  //dsk->available $$$
 	  if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", dp->d_name, dom_id); 
 	  dsk->rd_req += xen_vbd_counter(dom_id, vbd_dev, "rd_req");
 	  dsk->rd_bytes += (xen_vbd_counter(dom_id, vbd_dev, "rd_sect") * HSP_SECTOR_BYTES);
@@ -247,12 +285,12 @@ extern "C" {
 
   void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-#ifdef XENSTAT
+#ifdef __XEN_TOOLS__
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
     HSPVMState *state = (HSPVMState *)poller->userData;
 
-    if(state && sp->xs_handle) {
+    if(state && xenHandlesOK(sp)) {
       
       uint32_t dom_id = SFL_DS_INDEX(poller->dsi);
       xc_domaininfo_t domaininfo;
@@ -271,7 +309,7 @@ extern "C" {
       }
       
       // host ID
-      SFLCounters_sample_element hidElem;
+      SFLCounters_sample_element hidElem = { 0 };
       memset(&hidElem, 0, sizeof(hidElem));
       hidElem.tag = SFLCOUNTERS_HOST_HID;
       char query[255];
@@ -293,16 +331,14 @@ extern "C" {
       }
       
       // host parent
-      SFLCounters_sample_element parElem;
-      memset(&parElem, 0, sizeof(parElem));
+      SFLCounters_sample_element parElem = { 0 };
       parElem.tag = SFLCOUNTERS_HOST_PAR;
       parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
       parElem.counterBlock.host_par.dsIndex = 1;
       SFLADD_ELEMENT(cs, &parElem);
 
       // VM Net I/O
-      SFLCounters_sample_element nioElem;
-      memset(&nioElem, 0, sizeof(nioElem));
+      SFLCounters_sample_element nioElem = { 0 };
       nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
       char devFilter[20];
       snprintf(devFilter, 20, "vif%u.", dom_id);
@@ -322,8 +358,7 @@ extern "C" {
       SFLADD_ELEMENT(cs, &nioElem);
 
       // VM cpu counters [ref xenstat.c]
-      SFLCounters_sample_element cpuElem;
-      memset(&cpuElem, 0, sizeof(cpuElem));
+      SFLCounters_sample_element cpuElem = { 0 };
       cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
       u_int64_t vcpu_ns = 0;
       for(uint32_t c = 0; c <= domaininfo.max_vcpu_id; c++) {
@@ -339,14 +374,32 @@ extern "C" {
 	  }
 	}
       }
-      cpuElem.counterBlock.host_vrt_cpu.state = 0; // domain->state libvirt enum $$$
+      uint32_t st = domaininfo.flags;
+      // first 8 bits (b7-b0) are a mask of flags (see tools/libxc/xen/domctl.h)
+      // next 8 bits (b15-b8) indentify the CPU to which the domain is bound
+      // next 8 bits (b23-b16) indentify the the user-supplied shutdown code
+      cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_NOSTATE;
+      if(st & XEN_DOMINF_shutdown) {
+	cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_SHUTDOWN;
+	if(((st >> XEN_DOMINF_shutdownshift) & XEN_DOMINF_shutdownmask) == SHUTDOWN_crash) {
+	  cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_CRASHED;
+	}
+      }
+      else if(st & XEN_DOMINF_paused) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_PAUSED;
+      else if(st & XEN_DOMINF_blocked) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_BLOCKED;
+      else if(st & XEN_DOMINF_running) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_RUNNING;
+      // SFL_VIR_DOMAIN_SHUTOFF ?
+      // other domaininfo flags include:
+      // XEN_DOMINF_dying      : not sure when this is set -- perhaps always :)
+      // XEN_DOMINF_hvm_guest  : as opposed to a PV guest
+      // XEN_DOMINF_debugged   :
+
       cpuElem.counterBlock.host_vrt_cpu.cpuTime = vcpu_ns;
       cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domaininfo.max_vcpu_id + 1;
       SFLADD_ELEMENT(cs, &cpuElem);
 
       // VM memory counters [ref xenstat.c]
-      SFLCounters_sample_element memElem;
-      memset(&memElem, 0, sizeof(memElem));
+      SFLCounters_sample_element memElem = { 0 };
       memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
       uint64_t memBytes = domaininfo.tot_pages * sp->page_size;
       memElem.counterBlock.host_vrt_mem.memory = (memBytes / 1024);
@@ -360,8 +413,7 @@ extern "C" {
       SFLADD_ELEMENT(cs, &memElem);
 
       // VM disk I/O counters
-      SFLCounters_sample_element dskElem;
-      memset(&dskElem, 0, sizeof(dskElem));
+      SFLCounters_sample_element dskElem = { 0 };
       dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
       if(xenstat_dsk(sp, dom_id, &dskElem.counterBlock.host_vrt_dsk)) {
 	SFLADD_ELEMENT(cs, &dskElem);
@@ -369,8 +421,7 @@ extern "C" {
 
       // include my slice of the adaptor list - and update
       // the MAC with the correct one at the same time
-      SFLCounters_sample_element adaptorsElem;
-      memset(&adaptorsElem, 0, sizeof(adaptorsElem));
+      SFLCounters_sample_element adaptorsElem = { 0 };
       adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
       SFLAdaptorList myAdaptors;
       SFLAdaptor *adaptors[HSP_MAX_VIFS];
@@ -384,7 +435,7 @@ extern "C" {
       sfl_poller_writeCountersSample(poller, cs);
     }
 
-#endif /* XENSTAT */
+#endif /* __XEN_TOOLS__ */
   }
 
   /*_________________---------------------------__________________
@@ -406,9 +457,9 @@ extern "C" {
       }
 
       // 2. create new VM pollers, or clear the mark on existing ones
-#ifdef XENSTAT
+#ifdef __XEN_TOOLS__
 
-      if(sp->xs_handle) {
+      if(xenHandlesOK(sp)) {
 #define DOMAIN_CHUNK_SIZE 256
 	xc_domaininfo_t domaininfo[DOMAIN_CHUNK_SIZE];
 	int32_t num_domains=0, new_domains=0;
@@ -455,6 +506,8 @@ extern "C" {
 	  }
 	  num_domains += new_domains;
 	} while(new_domains > 0);
+	// remember the number of domains we found
+	sp->num_domains = num_domains;
       }
 #endif
       
@@ -506,7 +559,7 @@ extern "C" {
   {
     if(debug) myLog(LOG_INFO,"creating sfl agent");
 
-#ifdef XENSTAT
+#ifdef __XEN_TOOLS__
     if(sp->xc_handle == 0) {
       sp->xc_handle = xc_interface_open();
       if(sp->xc_handle <= 0) {
@@ -701,8 +754,7 @@ extern "C" {
 
   int main(int argc, char *argv[])
   {
-    HSP sp;
-    memset(&sp, 0, sizeof(sp));
+    HSP sp = { 0 };
 
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
@@ -854,7 +906,7 @@ extern "C" {
     myLog(LOG_INFO,"stopped");
     if(debug == 0) remove(sp.pidFile);
 
-#ifdef XENSTAT
+#ifdef __XEN_TOOLS__
     if(sp.xc_handle && sp.xc_handle != -1) {
       xc_interface_close(sp.xc_handle);
       sp.xc_handle = 0;

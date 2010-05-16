@@ -672,6 +672,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     elemSiz = 0;
     /* here we are assuming that the structure fields are not expanded to be 64-bit aligned,
        because then the sizeof(struct) would be larger than the wire-encoding. */
+
     switch(elem->tag) {
     case SFLCOUNTERS_GENERIC:  elemSiz = sizeof(elem->counterBlock.generic); break;
     case SFLCOUNTERS_ETHERNET: elemSiz = sizeof(elem->counterBlock.ethernet); break;
@@ -686,6 +687,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_HOST_MEM: elemSiz = 72 /*sizeof(elem->counterBlock.host_mem)*/ ;  break;
     case SFLCOUNTERS_HOST_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_dsk)*/;  break;
     case SFLCOUNTERS_HOST_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_nio)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_NODE: elemSiz = 28 /*sizeof(elem->counterBlock.host_vrt_node)*/;  break;
     case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
     case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_mem)*/;  break;
     case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 48 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
@@ -866,6 +868,13 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_nio.pkts_out);
       putNet32(receiver, elem->counterBlock.host_nio.errs_out);
       putNet32(receiver, elem->counterBlock.host_nio.drops_out);
+      break;
+    case SFLCOUNTERS_HOST_VRT_NODE:
+      putNet32(receiver, elem->counterBlock.host_vrt_node.mhz);
+      putNet32(receiver, elem->counterBlock.host_vrt_node.cpus);
+      putNet64(receiver, elem->counterBlock.host_vrt_node.memory);
+      putNet64(receiver, elem->counterBlock.host_vrt_node.memory_free);
+      putNet32(receiver, elem->counterBlock.host_vrt_node.num_domains);
       break;
     case SFLCOUNTERS_HOST_VRT_CPU:
       putNet32(receiver, elem->counterBlock.host_vrt_cpu.state);

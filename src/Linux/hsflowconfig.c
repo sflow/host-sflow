@@ -69,8 +69,7 @@ extern int debug;
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
   {
     struct addrinfo *info = NULL;
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
+    struct addrinfo hints = { 0 };
     hints.ai_socktype = SOCK_DGRAM; // constrain this so we don't get lots of answers
     hints.ai_family = family; // PF_INET, PF_INET6 or 0
     int err = getaddrinfo(name, NULL, &hints, &info);

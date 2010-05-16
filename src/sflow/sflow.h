@@ -618,11 +618,34 @@ typedef struct _SFLHost_dsk_counters {
   uint32_t write_time;      /* write time (ms) */
 } SFLHost_dsk_counters;
 
-/* Virtual Domain Statistics */
+
+/* Virtual Node Statistics */
+/* opaque = counter_data; enterprise = 0; format = 2100 */
+
+typedef struct _SFLHost_vrt_node_counters {
+   uint32_t mhz;           /* expected CPU frequency */
+   uint32_t cpus;          /* the number of active CPUs */
+   uint64_t memory;        /* memory size in bytes */
+   uint64_t memory_free;   /* unassigned memory in bytes */
+   uint32_t num_domains;   /* number of active domains */
+} SFLHost_vrt_node_counters;
+
+/* Virtual Domain CPU Statistics */
 /* opaque = counter_data; enterprise = 0; format = 2101 */
 
+/* virDomainState imported from libvirt.h */
+enum SFLVirDomainState {
+     SFL_VIR_DOMAIN_NOSTATE = 0, /* no state */
+     SFL_VIR_DOMAIN_RUNNING = 1, /* the domain is running */
+     SFL_VIR_DOMAIN_BLOCKED = 2, /* the domain is blocked on resource */
+     SFL_VIR_DOMAIN_PAUSED  = 3, /* the domain is paused by user */
+     SFL_VIR_DOMAIN_SHUTDOWN= 4, /* the domain is being shut down */
+     SFL_VIR_DOMAIN_SHUTOFF = 5, /* the domain is shut off */
+     SFL_VIR_DOMAIN_CRASHED = 6  /* the domain is crashed */
+} ;
+
 typedef struct _SFLHost_vrt_cpu_counters {
-   uint32_t state;       /* virtDomainState */
+   uint32_t state;       /* SFLVirDomainState */
    uint64_t cpuTime;     /* the CPU time used in nanoseconds */
    uint32_t nrVirtCpu;   /* number of virtual CPUs for the domain */
 } SFLHost_vrt_cpu_counters;
@@ -666,25 +689,26 @@ typedef struct _SFLHost_vrt_nio_counters {
 
 enum SFLCounters_type_tag {
   /* enterprise = 0, format = ... */
-  SFLCOUNTERS_GENERIC      = 1,
-  SFLCOUNTERS_ETHERNET     = 2,
-  SFLCOUNTERS_TOKENRING    = 3,
-  SFLCOUNTERS_VG           = 4,
-  SFLCOUNTERS_VLAN         = 5,
-  SFLCOUNTERS_80211        = 6,
-  SFLCOUNTERS_PROCESSOR    = 1001,
-  SFLCOUNTERS_RADIO        = 1002,
-  SFLCOUNTERS_HOST_HID     = 2000, /* host id */
-  SFLCOUNTERS_ADAPTORS     = 2001, /* host adaptors */
-  SFLCOUNTERS_HOST_PAR     = 2002, /* host parent */
-  SFLCOUNTERS_HOST_CPU     = 2003, /* host cpu  */
-  SFLCOUNTERS_HOST_MEM     = 2004, /* host memory  */
-  SFLCOUNTERS_HOST_DSK     = 2005, /* host storage I/O  */
-  SFLCOUNTERS_HOST_NIO     = 2006, /* host network I/O */
-  SFLCOUNTERS_HOST_VRT_CPU = 2101, /* host virt cpu */
-  SFLCOUNTERS_HOST_VRT_MEM = 2102, /* host virt mem */
-  SFLCOUNTERS_HOST_VRT_DSK = 2103, /* host virt storage */
-  SFLCOUNTERS_HOST_VRT_NIO = 2104, /* host virt network I/O */
+  SFLCOUNTERS_GENERIC       = 1,
+  SFLCOUNTERS_ETHERNET      = 2,
+  SFLCOUNTERS_TOKENRING     = 3,
+  SFLCOUNTERS_VG            = 4,
+  SFLCOUNTERS_VLAN          = 5,
+  SFLCOUNTERS_80211         = 6,
+  SFLCOUNTERS_PROCESSOR     = 1001,
+  SFLCOUNTERS_RADIO         = 1002,
+  SFLCOUNTERS_HOST_HID      = 2000, /* host id */
+  SFLCOUNTERS_ADAPTORS      = 2001, /* host adaptors */
+  SFLCOUNTERS_HOST_PAR      = 2002, /* host parent */
+  SFLCOUNTERS_HOST_CPU      = 2003, /* host cpu  */
+  SFLCOUNTERS_HOST_MEM      = 2004, /* host memory  */
+  SFLCOUNTERS_HOST_DSK      = 2005, /* host storage I/O  */
+  SFLCOUNTERS_HOST_NIO      = 2006, /* host network I/O */
+  SFLCOUNTERS_HOST_VRT_NODE = 2100, /* host virt node */
+  SFLCOUNTERS_HOST_VRT_CPU  = 2101, /* host virt cpu */
+  SFLCOUNTERS_HOST_VRT_MEM  = 2102, /* host virt mem */
+  SFLCOUNTERS_HOST_VRT_DSK  = 2103, /* host virt storage */
+  SFLCOUNTERS_HOST_VRT_NIO  = 2104, /* host virt network I/O */
 };
 
 typedef union _SFLCounters_type {
@@ -701,6 +725,7 @@ typedef union _SFLCounters_type {
   SFLHost_mem_counters host_mem;
   SFLHost_dsk_counters host_dsk;
   SFLHost_nio_counters host_nio;
+  SFLHost_vrt_node_counters host_vrt_node;
   SFLHost_vrt_cpu_counters host_vrt_cpu;
   SFLHost_vrt_mem_counters host_vrt_mem;
   SFLHost_vrt_dsk_counters host_vrt_dsk;
