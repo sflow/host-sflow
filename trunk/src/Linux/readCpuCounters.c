@@ -79,11 +79,12 @@ extern "C" {
 	  }
 	}
 	else {
-	  if(strncmp(line, "cpu", 3) == 0) {
-	    gotData = YES;
-	    cpu->cpu_num++;
-	  }
-	  else if(strncmp(line, "intr", 4) == 0) {
+	  //if(strncmp(line, "cpu", 3) == 0) {
+	  //  gotData = YES;
+	  //  cpu->cpu_num++;
+	  //}
+	  //else
+	  if(strncmp(line, "intr", 4) == 0) {
 	    // total interrupts is the second token on this line
 	    if(sscanf(line, "intr %"SCNu64"", &cpu_interrupts) == 1) {
 	      gotData = YES;
@@ -111,7 +112,30 @@ extern "C" {
       fclose(procFile);
     }
 
-    //cpu_speed? $$$
+    //cpu_num and cpu_speed
+    procFile = fopen("/proc/cpuinfo", "r");
+    if(procFile) {
+      double total_mhz = 0.0;
+      uint32_t n = 0;
+#undef MAX_PROC_LINE_CHARS
+#define MAX_PROC_LINE_CHARS 80
+      char line[MAX_PROC_LINE_CHARS];
+      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+	if(strncmp(line, "cpu MHz", 7) == 0) {
+	  double cpu_mhz = 0.0;
+	  if(sscanf(line, "cpu MHz : %lf", &cpu_mhz) == 1) {
+	    n++;
+	    total_mhz += cpu_mhz;
+	  }
+	}
+      }
+      if(n > 0) {
+	gotData = YES;
+	cpu->cpu_num = n;
+	cpu->cpu_speed = (uint32_t)(total_mhz / n);
+      }
+      fclose(procFile);
+    }
 
     return gotData;
   }
