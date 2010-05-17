@@ -32,7 +32,7 @@ extern "C" {
 
 #include "sflow_api.h"
 
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
 #include "xs.h"
 #include "xenctrl.h"
 #include "dirent.h"
@@ -95,7 +95,7 @@ extern "C" {
     // UDP send sockets
     int socket4;
     int socket6;
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
     int xc_handle; // libxc
     struct xs_handle *xs_handle; // xenstore
     uint32_t page_size;
