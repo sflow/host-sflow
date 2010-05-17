@@ -25,3 +25,30 @@ recompile, and then run with the "-d" command line option:
 gdb> set args -d
 gdb> r
 
+Citrix XenServer
+================
+
+To compile for XenServer, install these sources into the
+equivalent XenServer DDK VM, and compile with XEN_DDK=yes:
+
+DDK> export XEN_DDK=yes
+DDK> make rpm
+
+The rpm will be written to /usr/src/redhat/RPMS/i386.
+Copy that rpm to the XenServer dom0 host, and install it:
+
+[root@xenserver ~]# rpm -Uvh hsflowd-<VERSION>-1.i386.rpm
+
+Then schedule it to run automatically:
+
+[root@xenserver ~]# /sbin/chkconfig --level 345 hsflowd on
+
+Then start it:
+
+[root@xenserver ~]# /sbin/service hsflowd start
+
+Output will go to /var/log/messages.
+
+
+
+

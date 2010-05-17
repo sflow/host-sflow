@@ -1,15 +1,20 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
-# specify XEN_ROOT path to compile with xenstat
-# and include the VM-monitoring structures too
+# specify XEN_ROOT path to compile with xen-sources
 # e.g. XEN_ROOT=/root/xen-3.2.0
-
 ifeq ($(XEN_ROOT),)
 else
 	include $(XEN_ROOT)/tools/Rules.mk
-	CFLAGS+= -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
+	CFLAGS+= -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
 	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
+endif
+
+# alternatively, if compiling on the Citrix
+# XenServer DDK VM just set XEN_DDK=yes
+ifeq ($(XEN_DDK),yes)
+	CFLAGS+= -DHSF_XEN
+	LIBS+= -lxenstore -lxenctrl
 endif
 
 ifeq ($(BINDIR),)
@@ -31,7 +36,7 @@ OPT = -O3 -DNDEBUG
 OPT= -g -ggdb
 
 #CC= g++
-CC= gcc -std=c99
+CC= gcc -std=gnu99
 
 READ_OBJS=readInterfaces.o \
           readCpuCounters.o \
@@ -45,7 +50,7 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
 
-CFLAGS+= -I. -I$(SFLOWDIR) -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall
 LIBS+= $(SFLOWDIR)/libsflow.a
 
 all: hsflowd

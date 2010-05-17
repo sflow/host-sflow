@@ -100,7 +100,7 @@ extern "C" {
     }
   }
 
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
   // if sp->xs_handle is not NULL then we know that sp->xc_handle is good too
   // because of the way we opened the handles in the first place.
   static int xenHandlesOK(HSP *sp) { return (sp->xs_handle != NULL); }
@@ -108,24 +108,15 @@ extern "C" {
   static int readVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode)
   {
     if(xenHandlesOK(sp)) {
-      // there seems to be some confusion about sizeof(xc_physinfo_t). The
-      // compiler thinks it is 96 bytes, but the called to xc_physinfo() seems
-      // to be writing past that point (and overwriting other vars that are on
-      // the stack). Short term workaround is to give it more than enough
-      // space to work with, but we'll need to get to the bottom of this at
-      // some point.
-      uint64_t buf[200]; // 1600 bytes - lots of headroom.
-      memset(buf, 0, sizeof(buf));
-      xc_physinfo_t *physinfo = (xc_physinfo_t *)buf;
-      if(debug) myLog(LOG_INFO, "compiler thinks sizeof(xc_physinfo_t) is %u", sizeof(physinfo));
-      if(xc_physinfo(sp->xc_handle, physinfo) < 0) {
+      xc_physinfo_t physinfo = { 0 };
+      if(xc_physinfo(sp->xc_handle, &physinfo) < 0) {
 	myLog(LOG_ERR, "xc_physinfo() failed : %s", strerror(errno));
       }
       else {
-	vnode->mhz = (physinfo->cpu_khz / 1000);
-	vnode->cpus = physinfo->nr_cpus;
-	vnode->memory = ((uint64_t)physinfo->total_pages * sp->page_size);
-	vnode->memory_free = ((uint64_t)physinfo->free_pages * sp->page_size);
+      	vnode->mhz = (physinfo.cpu_khz / 1000);
+	vnode->cpus = physinfo.nr_cpus;
+	vnode->memory = ((uint64_t)physinfo.total_pages * sp->page_size);
+	vnode->memory_free = ((uint64_t)physinfo.free_pages * sp->page_size);
 	vnode->num_domains = sp->num_domains;
 	return YES;
       }
@@ -187,7 +178,7 @@ extern "C" {
     adaptorsElem.counterBlock.adaptors = sp->adaptorList;
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
     // hypervisor node stats
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
@@ -199,7 +190,7 @@ extern "C" {
     sfl_poller_writeCountersSample(poller, cs);
   }
 
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
 
 #define HSP_MAX_PATHLEN 256
 #define XEN_SYSFS_VBD_PATH "/sys/devices/xen-backend"
@@ -285,7 +276,7 @@ extern "C" {
 
   void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
     HSPVMState *state = (HSPVMState *)poller->userData;
@@ -317,14 +308,14 @@ extern "C" {
       snprintf(query, sizeof(query), "/local/domain/%u/name", dom_id);
       char *xshname = (char *)xs_read(sp->xs_handle, XBT_NULL, query, NULL);
       if(xshname) {
-	// copy it here so we can free it straight away
+	// copy the name out here so we can free it straight away
 	strncpy(hname, xshname, 255);
 	free(xshname);
 	hidElem.counterBlock.host_hid.hostname.str = hname;
 	hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
-	//hidElem.counterBlock.host_hid.uuid;
-	//hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;
-	//hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;
+	memcpy(hidElem.counterBlock.host_hid.uuid, &domaininfo.handle, 16);
+	hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;
+	hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;
 	//hidElem.counterBlock.host_hid.os_release.str = NULL;
 	//hidElem.counterBlock.host_hid.os_release.len = 0;
 	SFLADD_ELEMENT(cs, &hidElem);
@@ -435,7 +426,7 @@ extern "C" {
       sfl_poller_writeCountersSample(poller, cs);
     }
 
-#endif /* __XEN_TOOLS__ */
+#endif /* HSF_XEN */
   }
 
   /*_________________---------------------------__________________
@@ -457,7 +448,7 @@ extern "C" {
       }
 
       // 2. create new VM pollers, or clear the mark on existing ones
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
 
       if(xenHandlesOK(sp)) {
 #define DOMAIN_CHUNK_SIZE 256
@@ -559,7 +550,7 @@ extern "C" {
   {
     if(debug) myLog(LOG_INFO,"creating sfl agent");
 
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
     if(sp->xc_handle == 0) {
       sp->xc_handle = xc_interface_open();
       if(sp->xc_handle <= 0) {
@@ -695,7 +686,6 @@ extern "C" {
   fprintf(stderr, "=============== More Information ============================================\n");
   fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
   fprintf(stderr, "| sFlowTrend (FREE)     - http://www.inmon.com/products/sFlowTrend.php      |\n");
-  fprintf(stderr, "| Traffic Sentinel      - http://www.inmon.com/products/trafficsentinel.php |\n");
   fprintf(stderr, "=============================================================================\n");
 
     exit(EXIT_FAILURE);
@@ -906,7 +896,7 @@ extern "C" {
     myLog(LOG_INFO,"stopped");
     if(debug == 0) remove(sp.pidFile);
 
-#ifdef __XEN_TOOLS__
+#ifdef HSF_XEN
     if(sp.xc_handle && sp.xc_handle != -1) {
       xc_interface_close(sp.xc_handle);
       sp.xc_handle = 0;
