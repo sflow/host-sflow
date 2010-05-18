@@ -8,6 +8,8 @@
 extern "C" {
 #endif
 
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <stdio.h>
 #include <tchar.h>
 #include <ws2tcpip.h>
@@ -25,7 +27,6 @@ extern "C" {
 #include <pdh.h>
 #include <pdhmsg.h>
 
-#include "inttypes.h"
 #include "sflow_api.h"
 
 #define YES 1
@@ -90,7 +91,7 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(SFLHost_dsk_counters *dsk);
   int readNioCounters(SFLHost_nio_counters *dsk);
-  int readHidCounters(SFLHost_hid_counters *dsk, char *buf, int bufLen);
+  int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
 #if defined(__cplusplus)
 } /* extern "C" */
