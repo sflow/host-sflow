@@ -67,7 +67,7 @@ void sfl_poller_set_sFlowCpReceiver(SFLPoller *poller, uint32_t sFlowCpReceiver)
 }
 
 uint32_t sfl_poller_get_sFlowCpInterval(SFLPoller *poller) {
-  return poller->sFlowCpInterval;
+  return (uint32_t)poller->sFlowCpInterval;
 }
 
 void sfl_poller_set_sFlowCpInterval(SFLPoller *poller, uint32_t sFlowCpInterval) {
