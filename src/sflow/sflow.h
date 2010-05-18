@@ -12,6 +12,10 @@
 extern "C" {
 #endif
 
+#ifdef _WIN32
+#include "inttypes.h"
+#endif //_WIN32
+
 typedef struct {
     uint32_t addr;
 } SFLIPv4;

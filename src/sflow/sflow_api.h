@@ -19,11 +19,14 @@ extern "C" {
 
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
 #include <unistd.h>
+#include <arpa/inet.h>
+#endif //_WIN32
 #include <errno.h>
 #include <string.h>
 #include <sys/types.h>
-#include <arpa/inet.h>
+
 
 #ifdef SFLOW_DO_SOCKET
 #include <sys/socket.h>
