@@ -239,10 +239,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\..\..\sflow\inttypes.h"
-				>
-			</File>
-			<File
 				RelativePath=".\readWindowsCounters.h"
 				>
 			</File>

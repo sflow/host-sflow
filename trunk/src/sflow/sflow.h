@@ -13,7 +13,13 @@ extern "C" {
 #endif
 
 #ifdef _WIN32
-#include "inttypes.h"
+#include <windows.h>
+#define uint32_t UINT32
+#define u_char CHAR
+#define u_int8_t UINT
+#define uint8_t UINT
+#define uint64_t UINT64
+#define int64_t INT64
 #endif //_WIN32
 
 typedef struct {

@@ -107,14 +107,23 @@ int WriteToLog(char* str)
 	SFLCounters_sample_element memElem;
 	SFLCounters_sample_element dskElem;
 	SFLCounters_sample_element adaptorsElem;
-	char hnamebuf[256];
+	char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
+    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     HSP *sp = (HSP *)poller->magic;
 	
 
     // host ID
-    memset(&hidElem, 0, sizeof(hidElem));
+    //memset(&hidElem, 0, sizeof(hidElem));
+    //hidElem.tag = SFLCOUNTERS_HOST_HID;
+    //if(readHidCounters(&hidElem.counterBlock.host_hid, hnamebuf, 256)) {
+    //  SFLADD_ELEMENT(cs, &hidElem);
+    //}
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    if(readHidCounters(&hidElem.counterBlock.host_hid, hnamebuf, 256)) {
+    if(readHidCounters(&hidElem.counterBlock.host_hid,
+		       hnamebuf,
+		       SFL_MAX_HOSTNAME_CHARS,
+		       osrelbuf,
+		       SFL_MAX_OSRELEASE_CHARS)) {
       SFLADD_ELEMENT(cs, &hidElem);
     }
 
