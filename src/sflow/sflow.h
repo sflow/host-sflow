@@ -15,9 +15,11 @@ extern "C" {
 #ifdef _WIN32
 #include <windows.h>
 #define uint32_t UINT32
-#define u_char CHAR
-#define u_int8_t UINT
-#define uint8_t UINT
+#define u_char UCHAR
+#define uchar UCHAR
+#define u_int8_t UCHAR
+#define uint8_t UCHAR
+#define uint16_t WORD
 #define uint64_t UINT64
 #define int64_t INT64
 #endif //_WIN32

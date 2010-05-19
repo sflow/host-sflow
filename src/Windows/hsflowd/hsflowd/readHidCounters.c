@@ -16,32 +16,32 @@ extern int debug;
   
 int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen){
     int gotData = NO;
-	DWORD dwRes,len;
+	DWORD dwRes;
 	OSVERSIONINFO osvi;
 	SYSTEM_INFO si;
 
-	if(debug){
-		printf("entering readHidCounters\n");
+	ZeroMemory(hbuf,hbufLen);
+	dwRes = GetComputerNameEx(ComputerNameDnsHostname,hbuf,&hbufLen);
+	if(dwRes){ 
+		hid->hostname.str = hbuf;
+		hid->hostname.len = hbufLen;
 	}
-	dwRes = GetComputerNameEx(ComputerNameDnsHostname,hbuf,&len);
-	if(!dwRes) return NO;
-	gotData = YES;
-	hid->hostname.str = hbuf;
-	hid->hostname.len = len;
 	
 	hid->os_name = SFLOS_windows;
 
 	ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
 	dwRes = GetVersionEx(&osvi);
-	if(!dwRes) return gotData;
-	sprintf(rbuf,"%d.%d.%d %s",osvi.dwMajorVersion,osvi.dwMinorVersion,osvi.dwBuildNumber,osvi.szCSDVersion);
-	hid->os_release.str = rbuf;
-	hid->os_release.len = strlen(rbuf);
+	if(dwRes){
+		ZeroMemory(rbuf,rbufLen);
+		sprintf(rbuf,"%d.%d.%d %s",osvi.dwMajorVersion,osvi.dwMinorVersion,osvi.dwBuildNumber,osvi.szCSDVersion);
+		hid->os_release.str = rbuf;
+		hid->os_release.len = strlen(rbuf);
+	}
 
-	GetSystemInfo(&si);
+	GetNativeSystemInfo(&si);
 	hid->machine_type = SFLMT_unknown;
-	switch(si.dwProcessorType){
+	switch(si.wProcessorArchitecture){
 		case PROCESSOR_ARCHITECTURE_AMD64:
 			hid->machine_type = SFLMT_x86_64;
 			break;
@@ -53,12 +53,11 @@ int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rb
 			break;
 	}
 
-	strcpy(hid->uuid,"");
+	dwRes = readSystemUUID(hid->uuid);
 	
-	if(debug){
-		printf("readHidCounters:\n\thostname:\t%s\n\trelease:\t%s",hid->hostname.str,hid->os_release.str);
-	}
-    return gotData;
+	MyLog(LOG_INFO,"readHidCounters:\n\thostname:\t%s\n\trelease:\t%s\n\tmachine_type:\t%d\n",hid->hostname.str,hid->os_release.str,hid->machine_type);
+
+    return YES;
   }
 
 #if defined(__cplusplus)

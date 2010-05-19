@@ -22,34 +22,30 @@ extern int debug;
 
 	memStat.dwLength = sizeof(memStat);
 	if(GlobalMemoryStatusEx(&memStat) == 0){
-		if(debug){
-			printf("GlobalMemoryStatusEx failed: %d\n",GetLastError());
-		}
+
+		MyLog(LOG_ERR,"GlobalMemoryStatusEx failed: %d\n",GetLastError());
 		return NO;
 	}
 
-	mem->mem_total = memStat.ullTotalPhys/1024;
-	mem->mem_free = memStat.ullAvailPhys/1024;
-	mem->swap_total = memStat.ullTotalPageFile/1024;
-	mem->swap_free = memStat.ullAvailPageFile/1024;
-	mem->mem_cached = readSingleCounter("\\Memory\\Cache Bytes")/1024;
-	mem->swap_in = readSingleCounter("\\Memory\\Pages Input/sec");
-	mem->swap_out = readSingleCounter("\\Memory\\Pages Output/sec");
+	mem->mem_total = memStat.ullTotalPhys;
+	mem->mem_free = memStat.ullAvailPhys;
+	mem->swap_total = memStat.ullTotalPageFile;
+	mem->swap_free = memStat.ullAvailPageFile;
+	mem->mem_cached = readSingleCounter("\\Memory\\Cache Bytes");
+	mem->swap_in = (uint32_t)readSingleCounter("\\Memory\\Pages Input/sec");
+	mem->swap_out = (uint32_t)readSingleCounter("\\Memory\\Pages Output/sec");
 
 	//There are no obvious Windows equivalents
-	mem->mem_buffers = UNKNOWN_COUNTER;
-    //mem->swap_cached = UNKNOWN_COUNTER;
-	//mem->mem_active = UNKNOWN_COUNTER;
-	//mem->mem_inactive = UNKNOWN_COUNTER;
+	mem->mem_buffers = UNKNOWN_COUNTER_64;
+    mem->mem_shared = UNKNOWN_COUNTER_64;
 	mem->page_in = UNKNOWN_COUNTER;
 	mem->page_out = UNKNOWN_COUNTER;
 
 	gotData = YES;
 
-	//if(debug){
-	//	printf("readMemoryCounters:\n\ttotal: %lu\n\tfree: %lu\n\tcached: %lu\n\tpage_in: %lu\n\tpage_out: %lu\n",
-	//		mem->total,mem->free,mem->cached,mem->page_in,mem->page_out);
-	//}
+	MyLog(LOG_INFO,"readMemoryCounters:\n\ttotal: %I64d\n\tfree: %I64d\n\tcached: %I64d\n\tswap_in: %d\n\tswap_out: %d\n",
+			mem->mem_total,mem->mem_free,mem->mem_cached,mem->swap_in,mem->swap_out);
+
     return gotData;
   }
 

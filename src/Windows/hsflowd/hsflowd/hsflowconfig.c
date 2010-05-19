@@ -82,7 +82,9 @@ extern int debug;
 	sendSocketAddr->sin_family = AF_INET;
 	sendSocketAddr->sin_addr.s_addr = col->ipAddr.address.ip_v4.addr;
 	
-    return 0;
+	MyLog(LOG_INFO,"collector: %s",collector_ip);
+
+    return gotData;
   }
 
 #if defined(__cplusplus)

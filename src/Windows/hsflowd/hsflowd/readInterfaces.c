@@ -41,9 +41,8 @@ void newAdaptorList(HSP *sp)
   sp->adaptorList->num_adaptors = 0;
 }
 
-  
 /*________________---------------------------__________________
-  ________________    newAdaptorList         __________________
+  ________________    trimWhitespace         __________________
   ----------------___________________________------------------
 */
 
@@ -81,14 +80,14 @@ int readInterfaces(HSP *sp)
 
   pAdapterInfo = (IP_ADAPTER_INFO *) malloc(sizeof (IP_ADAPTER_INFO));
   if (pAdapterInfo == NULL) {
-      printf("Error allocating memory needed to call GetAdaptersinfo\n");
+      MyLog(LOG_ERR,"Error allocating memory needed to call GetAdaptersinfo\n");
       return 1;
   }
   if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
         free(pAdapterInfo);
         pAdapterInfo = (IP_ADAPTER_INFO *) malloc(ulOutBufLen);
         if (pAdapterInfo == NULL) {
-            printf("Error allocating memory needed to call GetAdaptersinfo\n");
+            MyLog(LOG_ERR,"Error allocating memory needed to call GetAdaptersinfo\n");
             return 1;
         }
    }
@@ -98,7 +97,7 @@ int readInterfaces(HSP *sp)
 			adaptor = (SFLAdaptor *)calloc(1, sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
 			memcpy(adaptor->macs[0].mac,pAdapter->Address,6);
 			adaptor->num_macs = 1;
-			adaptor->deviceName = strdup(pAdapter->AdapterName);
+			adaptor->deviceName = _strdup(pAdapter->AdapterName);
 			adaptor->ifIndex = pAdapter->Index;
 			adaptor->ipAddr.addr = inet_addr(pAdapter->IpAddressList.IpAddress.String);
 			sp->adaptorList->adaptors[sp->adaptorList->num_adaptors] = adaptor;
@@ -108,6 +107,7 @@ int readInterfaces(HSP *sp)
 		  		sp->adaptorList->adaptors = (SFLAdaptor **)realloc(sp->adaptorList->adaptors,
 								     sp->adaptorList->capacity * sizeof(SFLAdaptor *));
 			}
+			MyLog(LOG_INFO,"AdapterInfo:\n\tAdapterName:\t%s\n\tDescription:\t%s\n",pAdapter->AdapterName,pAdapter->Description);
 			pAdapter = pAdapter->Next;
 		}
   }

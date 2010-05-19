@@ -19,12 +19,10 @@ extern int debug;
     int gotData = NO;
 	PPDH_RAW_COUNTER_ITEM value;
 	uint32_t i, icount;
-	if(debug){
-		printf("entering readNioCounters\n");
-	}
+	
 	icount = readMultiCounter("\\Network Interface(*)\\Bytes Received/sec",&value);
 	for(i = 0; i < icount; i++){
-		nio->bytes_in += (uint32_t)value[i].RawValue.FirstValue;
+		nio->bytes_in += value[i].RawValue.FirstValue;
 	}
 	if(value){
 		free(value);
@@ -53,7 +51,7 @@ extern int debug;
 
 	icount = readMultiCounter("\\Network Interface(*)\\Bytes Sent/sec",&value);
 	for(i = 0; i < icount; i++){
-		nio->bytes_out += (uint32_t)value[i].RawValue.FirstValue;
+		nio->bytes_out += value[i].RawValue.FirstValue;
 	}
 	if(value){
 		free(value);
@@ -83,10 +81,9 @@ extern int debug;
 		free(value);
 	}
 
-	//if(debug){
-	//	printf("readNioCounters:\n\trbytes:\t%lu\n\trdrops:\t%lu\n\trerrs:\t%lu\n\trpkts:\t%lu\n\ttbytes:\t%lu\n\ttdrops:\t%lu\n\tterrs:\t%lu\n\ttpkts:\t%lu\n",
-	//		nio->rbytes,nio->rdrops,nio->rerrs,nio->rpkts,nio->tbytes,nio->tdrops,nio->terrs,nio->tpkts);
-	//}
+	MyLog(LOG_INFO,"readNioCounters:\n\trbytes:\t%lu\n\trdrops:\t%lu\n\trerrs:\t%lu\n\trpkts:\t%lu\n\ttbytes:\t%lu\n\ttdrops:\t%lu\n\tterrs:\t%lu\n\ttpkts:\t%lu\n",
+			nio->bytes_in,nio->drops_in,nio->errs_in,nio->pkts_in,nio->bytes_out,nio->drops_out,nio->errs_out,nio->pkts_out);
+
 	gotData = YES;
     return gotData;
   }

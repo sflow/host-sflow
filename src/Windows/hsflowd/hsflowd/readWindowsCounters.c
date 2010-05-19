@@ -8,7 +8,7 @@ extern "C" {
 
 extern int debug;
 
-uint32_t readSingleCounter(char* path)
+uint64_t readSingleCounter(char* path)
 {
     PDH_STATUS Status;
     PDH_HQUERY Query = NULL;
@@ -50,10 +50,7 @@ Cleanup:
         PdhCloseQuery(Query);
     }
 
-	if(debug && ret >= COUNTER_MAX){
-		printf("COUNTER OVERFLOW!!!!\n");
-	}
-	return (uint32_t)ret;
+	return (uint64_t)ret;
 }
 
 uint32_t readMultiCounter(char* path, PPDH_RAW_COUNTER_ITEM *ppBuffer)
@@ -108,14 +105,6 @@ Cleanup:
     {
         PdhCloseQuery(Query);
     }
-
-	if(debug){
-		for(i = 0; i < ret; i++){
-			if(ppBuffer[0][i].RawValue.FirstValue >= COUNTER_MAX){
-				printf("COUNTER OVERFLOW!!!!\n");
-			}
-		}
-	}
 
 	return (uint32_t)ret;
 }

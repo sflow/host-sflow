@@ -21,13 +21,13 @@ extern int debug;
 	uint32_t i = 0;
 	PPDH_RAW_COUNTER_ITEM thread, processor;
 
-	cpu->cpu_user = readSingleCounter("\\Processor(_Total)\\% User Time");
-	cpu->cpu_system = readSingleCounter("\\Processor(_Total)\\% Privileged Time");
-	cpu->cpu_idle = readSingleCounter("\\Processor(_Total)\\% Idle Time");
-	cpu->cpu_intr = readSingleCounter("\\Processor(_Total)\\% Interrupt Time");
-	cpu->interrupts = readSingleCounter("\\Processor(_Total)\\Interrupts/sec");
-	cpu->contexts = readSingleCounter("\\System\\Context Switches/sec");
-	cpu->uptime = readSingleCounter("\\System\\System Up Time");  //TODO: convert to UNIX time
+	cpu->cpu_user = (uint32_t)readSingleCounter("\\Processor(_Total)\\% User Time");
+	cpu->cpu_system = (uint32_t)readSingleCounter("\\Processor(_Total)\\% Privileged Time");
+	cpu->cpu_idle = (uint32_t)readSingleCounter("\\Processor(_Total)\\% Idle Time");
+	cpu->cpu_intr = (uint32_t)readSingleCounter("\\Processor(_Total)\\% Interrupt Time");
+	cpu->interrupts = (uint32_t)readSingleCounter("\\Processor(_Total)\\Interrupts/sec");
+	cpu->contexts = (uint32_t)readSingleCounter("\\System\\Context Switches/sec");
+	cpu->uptime = (uint32_t)readSingleCounter("\\System\\System Up Time");  //TODO: convert to UNIX time
 	cpu->cpu_num = readMultiCounter("\\Processor(*)\\% Processor Time",&processor);
 
 	cpu->proc_total = readMultiCounter("\\Thread(*)\\Thread State",&thread);
@@ -42,14 +42,12 @@ extern int debug;
 	cpu->cpu_sintr = UNKNOWN_COUNTER;
 	cpu->cpu_nice = UNKNOWN_COUNTER;
 	cpu->cpu_wio = UNKNOWN_COUNTER;
-	cpu->load_one = 0;
-	cpu->load_five = 0;
-	cpu->load_fifteen = 0;
+	cpu->load_one = UNKNOWN_FLOAT;
+	cpu->load_five = UNKNOWN_FLOAT;
+	cpu->load_fifteen = UNKNOWN_FLOAT;
 	
-	//if(debug){
-	//	printf("readCpuCounters:\n\tuser: %lu\n\tsystem: %lu\n\tidle: %lu\n\tirq: %lu\n\tthreads_total: %lu\n\tthreads_running: %lu\n",
-	//		cpu->user,cpu->system,cpu->idle,cpu->irq,cpu->threads_total,cpu->threads_running);
-	//}
+	MyLog(LOG_INFO,"readCpuCounters:\n\tcpu_num:\t%d\n\tuser: %lu\n\tsystem: %lu\n\tidle: %lu\n\tirq: %lu\n\tthreads_total: %lu\n\tthreads_running: %lu\n",
+			cpu->cpu_num,cpu->cpu_user,cpu->cpu_system,cpu->cpu_idle,cpu->cpu_intr,cpu->proc_total,cpu->proc_run);
 
 	if(thread){ 
 		free(thread);

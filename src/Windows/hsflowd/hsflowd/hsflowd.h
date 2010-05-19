@@ -37,9 +37,20 @@ extern "C" {
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
 
-#define UNKNOWN_COUNTER 4294967295 
+#define UNKNOWN_COUNTER    0xFFFFFFFF 
+#define UNKNOWN_COUNTER_64 0xFFFFFFFFFFFFFFFF
 #define UNKNOWN_PERCENT -1
 #define UNKNOWN_INT 0
+#define UNKNOWN_FLOAT -1
+
+#define LOG_EMERG 0
+#define LOG_ALERT 1
+#define LOG_CRIT 2
+#define LOG_ERR 3
+#define LOG_WARNING 4
+#define LOG_NOTICE 5
+#define LOG_INFO 6
+#define LOG_DEBUG 7
 
   // forward declarations
   struct _HSPSFlow;
@@ -83,7 +94,7 @@ extern "C" {
   int HSPReadConfig(HSP *sp);
 
   // logger
-  void myLog(int syslogType, char *fmt, ...);
+  void MyLog(int syslogType, char *fmt, ...);
 
   // read functions
   int readInterfaces(HSP *sp);
@@ -92,6 +103,7 @@ extern "C" {
   int readDiskCounters(SFLHost_dsk_counters *dsk);
   int readNioCounters(SFLHost_nio_counters *dsk);
   int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
+  int readSystemUUID(u_char *uuidbuf);
 
 #if defined(__cplusplus)
 } /* extern "C" */
