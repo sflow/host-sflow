@@ -272,6 +272,10 @@
 				RelativePath=".\hsflowd.rc"
 				>
 			</File>
+			<File
+				RelativePath=".\INSTALL.WINDOWS"
+				>
+			</File>
 		</Filter>
 	</Files>
 	<Globals>
