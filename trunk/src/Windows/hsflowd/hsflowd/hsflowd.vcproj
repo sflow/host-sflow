@@ -209,6 +209,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\readSystemUUID.c"
+				>
+			</File>
+			<File
 				RelativePath=".\readWindowsCounters.c"
 				>
 			</File>
@@ -236,6 +240,10 @@
 			>
 			<File
 				RelativePath=".\hsflowd.h"
+				>
+			</File>
+			<File
+				RelativePath=".\readSystemUUID.h"
 				>
 			</File>
 			<File

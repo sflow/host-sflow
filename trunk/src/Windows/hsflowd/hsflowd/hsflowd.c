@@ -1,7 +1,6 @@
 #include "hsflowd.h"
 
 #define SLEEP_TIME 1000
-#define LOGFILE "hsflowd.log"
 
 int debug = 0;
 SERVICE_STATUS ServiceStatus; 
@@ -12,20 +11,20 @@ void  ControlHandler(DWORD request);
 int InitService();
 
 /*_________________---------------------------__________________
-  _________________        logging            __________________
-  -----------------___________________________------------------
-*/
-int WriteToLog(char* str)
-{
-	FILE* log;
-	errno_t err;
-	err = fopen_s(&log,LOGFILE, "a+");
-	if (err!= 0)
-		return -1;
-	fprintf(log, "%s\n", str);
-	fclose(log);
-	return 0;
-}
+    _________________        logging            __________________
+    -----------------___________________________------------------
+  */
+
+  void MyLog(int syslogType, char *fmt, ...)
+  {
+    va_list args;
+    va_start(args, fmt);
+    if(debug) {
+      vfprintf(stderr, fmt, args);
+      fprintf(stderr, "\n");
+    }
+    //else vsyslog(syslogType, fmt, args);
+  }
 /*_________________---------------------------__________________
   _________________     agent callbacks       __________________
   -----------------___________________________------------------
@@ -44,8 +43,7 @@ int WriteToLog(char* str)
 
   static void agentCB_error(void *magic, SFLAgent *agent, char *msg)
   {
-	  WriteToLog("error");
-    //myLog(LOG_ERR, "sflow agent error: %s", msg);
+	  MyLog(LOG_ERR,"agentCB_error: %s",msg);	  
   }
 
   
@@ -89,11 +87,11 @@ int WriteToLog(char* str)
 	if(result == -1 && errno != EINTR) {
 	  if(debug){
 		  int sockerr = WSAGetLastError();
-		  printf("sendto error code: %d",sockerr);
+		  MyLog(LOG_ERR,"sendto error code: %d",sockerr);
 	  }
 	}
 	if(result == 0) {
-	  //myLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
+	  MyLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
 	}
       }
     }
@@ -111,13 +109,6 @@ int WriteToLog(char* str)
     char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     HSP *sp = (HSP *)poller->magic;
 	
-
-    // host ID
-    //memset(&hidElem, 0, sizeof(hidElem));
-    //hidElem.tag = SFLCOUNTERS_HOST_HID;
-    //if(readHidCounters(&hidElem.counterBlock.host_hid, hnamebuf, 256)) {
-    //  SFLADD_ELEMENT(cs, &hidElem);
-    //}
     hidElem.tag = SFLCOUNTERS_HOST_HID;
     if(readHidCounters(&hidElem.counterBlock.host_hid,
 		       hnamebuf,
@@ -189,10 +180,10 @@ int WriteToLog(char* str)
 	WSADATA WSAData;
 	int WSARes = 0;
 
-    if(debug) printf("creating sfl agent\n");
+    MyLog(LOG_ERR,"creating sfl agent\n");
 
     if(sf->collectors == NULL) {
-	  if(debug) printf("No collectors defined\n");
+	  MyLog(LOG_ERR,"No collectors defined\n");
       return NO;
     }
 
@@ -200,19 +191,17 @@ int WriteToLog(char* str)
 
 	WSARes = WSAStartup(MAKEWORD(2, 2),&WSAData);
     if(WSARes != 0){
-		if(debug) printf("WSAStartup failed: %d\n",WSARes);
+		MyLog(LOG_ERR,"WSAStartup failed: %d\n",WSARes);
 		exit(WSARes);
 	}
     // open the sockets if not open already - one for v4 and another for v6
     if(sp->socket4 <= 0) {
       if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-		  WriteToLog("socket error");
-	//myLog(LOG_ERR, "IPv4 send socket open failed : %s", strerror(errno));
+		  MyLog(LOG_ERR,"socket error");
     }
     if(sp->socket6 <= 0) {
       if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-		  WriteToLog("socket error");
-	//myLog(LOG_ERR, "IPv6 send socket open failed : %s", strerror(errno));
+		  MyLog(LOG_ERR,"socket error");
     }
 
 	
@@ -292,6 +281,7 @@ void main()
     ServiceTable[1].lpServiceProc = NULL;
     if(0 == StartServiceCtrlDispatcher(ServiceTable)){
 		if(ERROR_FAILED_SERVICE_CONTROLLER_CONNECT == GetLastError()){
+			//invoked from the commandline.  turn on debug output.
 			debug = 1;
 			ServiceMain(0,NULL);
 		}
@@ -325,7 +315,7 @@ void ServiceMain(int argc, char** argv)
         	return; 
     	}  
 	}
-    // We report the running status to SCM. 
+    // report the running status to SCM. 
     ServiceStatus.dwCurrentState = SERVICE_RUNNING; 
     SetServiceStatus (hStatus, &ServiceStatus);
 
@@ -333,10 +323,9 @@ void ServiceMain(int argc, char** argv)
 	HSPReadConfig(&sp);
 	initAgent(&sp);
  
-    // The worker loop of a service
+    // main loop
     while (ServiceStatus.dwCurrentState == SERVICE_RUNNING)
 	{
-		WriteToLog("tick");
 		sfl_agent_tick(sp.sFlow->agent, time(NULL));
 		Sleep(SLEEP_TIME);
 	}
@@ -349,7 +338,6 @@ void ControlHandler(DWORD request)
     switch(request) 
     { 
         case SERVICE_CONTROL_STOP: 
-             WriteToLog("Monitoring stopped.");
 
             ServiceStatus.dwWin32ExitCode = 0; 
             ServiceStatus.dwCurrentState  = SERVICE_STOPPED; 
@@ -357,7 +345,6 @@ void ControlHandler(DWORD request)
             return; 
  
         case SERVICE_CONTROL_SHUTDOWN: 
-            WriteToLog("Monitoring stopped.");
 
             ServiceStatus.dwWin32ExitCode = 0; 
             ServiceStatus.dwCurrentState  = SERVICE_STOPPED; 
