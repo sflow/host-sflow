@@ -136,7 +136,8 @@ extern "C" {
     hidElem.tag = SFLCOUNTERS_HOST_HID;
     char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
     char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
-    if(readHidCounters(&hidElem.counterBlock.host_hid,
+    if(readHidCounters(sp,
+		       &hidElem.counterBlock.host_hid,
 		       hnamebuf,
 		       SFL_MAX_HOSTNAME_CHARS,
 		       osrelbuf,
@@ -254,7 +255,7 @@ extern "C" {
 	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
 	  char macQuery[256];
 	  snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	  char *macStr = xs_read(sp->xs_handle, XBT_NULL, "/local/domain/1/device/vif/0/mac", NULL);
+	  char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
 	  if(macStr == NULL) {
 	    myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
 	  }
@@ -705,6 +706,12 @@ extern "C" {
       case 'v': printf("%s version %s\n", argv[0], HSP_VERSION); exit(EXIT_SUCCESS); break;
       case 'p': sp->pidFile = optarg; break;
       case 'f': sp->configFile = optarg; break;
+      case 'u':
+	if(parseUUID(optarg, sp->uuid) == NO) {
+	  fprintf(stderr, "bad UUID format: %s\n", optarg);
+	  instructions(*argv);
+	}
+	break;
       case '?':
       case 'h':
       default: instructions(*argv);
@@ -914,3 +921,4 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
+

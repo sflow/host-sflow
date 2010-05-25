@@ -34,10 +34,11 @@ equivalent XenServer DDK VM, and compile with XEN_DDK=yes:
 DDK> export XEN_DDK=yes
 DDK> make rpm
 
-The rpm will be written to /usr/src/redhat/RPMS/i386.
+The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
+(where <ARCH> is i386 or x86_64 or ...)
 Copy that rpm to the XenServer dom0 host, and install it:
 
-[root@xenserver ~]# rpm -Uvh hsflowd-<VERSION>-1.i386.rpm
+[root@xenserver ~]# rpm -Uvh hsflowd-<VERSION>-1.<ARCH>.rpm
 
 Then schedule it to run automatically:
 

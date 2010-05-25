@@ -13,7 +13,7 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) {
+  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) {
     int gotData = NO;
     FILE *procFile;
     procFile= fopen("/proc/sys/kernel/hostname", "r");
@@ -29,7 +29,8 @@ extern "C" {
       fclose(procFile);
     }
 
-    // UUID (probably only available for VMs)
+    // UUID
+    memcpy(hid->uuid, sp->uuid, 16);
 
     // machine_type
     hid->machine_type = SFLMT_unknown;

@@ -50,7 +50,7 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
 
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE
 LIBS+= $(SFLOWDIR)/libsflow.a
 
 all: hsflowd
