@@ -108,8 +108,16 @@ int readInterfaces(HSP *sp)
 	  // we set the ifr_name field to make our queries
 	  strcpy(ifr.ifr_name, devName);
 
+	  if(debug > 1) {
+	    myLog(LOG_INFO, "reading interface %s", devName);
+	  }
+
 	  // Get the flags for this interface
-	  if(ioctl(fd,SIOCGIFFLAGS, &ifr) != 0) perror("Get SIOCGIFFLAGS failed\n");
+	  if(ioctl(fd,SIOCGIFFLAGS, &ifr) != 0) {
+	    myLog(LOG_ERR, "device %s Get SIOCGIFFLAGS failed : %s",
+		  devName,
+		  strerror(errno));
+	  }
 	  else {
 	    int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
 	    int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
@@ -118,7 +126,11 @@ int readInterfaces(HSP *sp)
 	    if(up && !loopback) {
 	      
 	       // Get the MAC Address for this interface
-	       if(ioctl(fd,SIOCGIFHWADDR, &ifr) != 0) perror("Get SIOCGIFHWADDR failed");
+	      if(ioctl(fd,SIOCGIFHWADDR, &ifr) != 0) {
+		myLog(LOG_ERR, "device %s Get SIOCGIFHWADDR failed : %s",
+		      devName,
+		      strerror(errno));
+	      }
 	      else {
 		// for now just assume that each interface has only one MAC.  It's not clear how we can
 		// learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
@@ -130,26 +142,38 @@ int readInterfaces(HSP *sp)
 
 		// Try and get the ifIndex for this interface
 		if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
-		  perror("Get SIOCGIFINDEX failed");
+		  // only complain about this if we are debugging
+		  if(debug) {
+		    myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
+			  devName,
+			  strerror(errno));
+		  }
 		}
 		else {
 		  adaptor->ifIndex = ifr.ifr_ifindex;
 		}
 	       
-		// Get the IP address for this interface
-		if(ioctl(fd,SIOCGIFADDR, &ifr) != 0) perror("Get SIOCGIFADDR failed");
+		// Try to get the IP address for this interface
+		if(ioctl(fd,SIOCGIFADDR, &ifr) != 0) {
+		  // only complain about this if we are debugging
+		  if(debug) {
+		    myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s",
+			  devName,
+			  strerror(errno));
+		  }
+		}
 		else {
-		   if (ifr.ifr_addr.sa_family == AF_INET) {
-		      struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
-		      // IP addr is now s->sin_addr
-		      adaptor->ipAddr.addr = s->sin_addr.s_addr;
-		   }
-		   //else if (ifr.ifr_addr.sa_family == AF_INET6) {
-		      // not sure this ever happens - on a linux system IPv6 addresses
-		      // are picked up from /proc/net/if_inet6
-		      // struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
-		      // IP6 addr is now s->sin6_addr;
-		   //}
+		  if (ifr.ifr_addr.sa_family == AF_INET) {
+		    struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
+		    // IP addr is now s->sin_addr
+		    adaptor->ipAddr.addr = s->sin_addr.s_addr;
+		  }
+		  //else if (ifr.ifr_addr.sa_family == AF_INET6) {
+		  // not sure this ever happens - on a linux system IPv6 addresses
+		  // are picked up from /proc/net/if_inet6
+		  // struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
+		  // IP6 addr is now s->sin6_addr;
+		  //}
 		}
 		
 		// add it to the list
@@ -170,10 +194,10 @@ int readInterfaces(HSP *sp)
   }
   
   close (fd);
-
+  
   return sp->adaptorList->num_adaptors;
 }
-
+  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

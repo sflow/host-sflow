@@ -166,6 +166,12 @@ extern int debug;
     return YES;
   }
 
+  int parseUUID(char *str, char *uuid)
+  {
+    if(hexToBinary((u_char *)str, (u_char *)uuid, 16) != 16) return NO;
+    return YES;
+  }
+
   /*_________________---------------------------__________________
     _________________      parseError           __________________
     -----------------___________________________------------------
@@ -268,6 +274,19 @@ extern int debug;
       parseError(sp, tok, "expected device name", "");
       return NULL;
    }
+
+  // expectUUID
+
+  static HSPToken *expectUUID(HSP *sp, HSPToken *tok, char *uuid)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || parseUUID(t->str, uuid) == NO) {
+      parseError(sp, tok, "expected UUID", "");
+      return NULL;
+    }
+    return t;
+  }
 
   /*_________________---------------------------__________________
     _________________     new object fns        __________________
@@ -437,6 +456,9 @@ extern int debug;
 	case HSPTOKEN_SUBAGENTID:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
 	  break;
+	case HSPTOKEN_UUID:
+	  if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
+	  break;
 	default:
 	  parseError(sp, tok, "unexpected sFlow setting", "");
 	  return NO;
@@ -521,3 +543,4 @@ extern int debug;
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
+

@@ -6,12 +6,28 @@
 extern "C" {
 #endif
 
-#include "hsflowd.h"
+#include <search.h> // for tfind,tsearch,tsdestroy
+#include <sys/statvfs.h> // for statvfs
 
+#include "hsflowd.h"
 /* It looks like we could read this from "fdisk -l",  so the source
    code to fdisk should probably be consulted to find where it can
    be read off */
 #define ASSUMED_DISK_SECTOR_BYTES 512
+
+  /*_________________---------------------------__________________
+    _________________     remote_mount          __________________
+    -----------------___________________________------------------
+    from Ganglia/linux/metrics.c
+  */
+
+int remote_mount(const char *device, const char *type)
+{
+  return ((strchr(device,':') != 0)
+	  || (!strcmp(type, "smbfs") && device[0]=='/' && device[1]=='/')
+	  || (!strncmp(type, "nfs", 3)) || (!strcmp(type, "autofs"))
+	  || (!strcmp(type,"gfs")) || (!strcmp(type,"none")) );
+}
 
   /*_________________---------------------------__________________
     _________________     readDiskCounters      __________________
@@ -69,6 +85,55 @@ extern "C" {
       fclose(procFile);
     }
 
+    // borrowed heavily from ganglia/linux/metrics.c for this part where
+    // we read the mount points and then interrogate them to add up the
+    // disk space on local disks.
+    procFile = fopen("/proc/mounts", "r");
+    if(procFile) {
+#undef MAX_PROC_LINE_CHARS
+#define MAX_PROC_LINE_CHARS 240
+      char line[MAX_PROC_LINE_CHARS];
+      char device[MAX_PROC_LINE_CHARS];
+      char mount[MAX_PROC_LINE_CHARS];
+      char type[MAX_PROC_LINE_CHARS];
+      char mode[MAX_PROC_LINE_CHARS];
+      void *treeRoot = NULL;
+      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+	if(sscanf(line, "%s %s %s %s", device, mount, type, mode) == 4) {
+	  // must start with /dev/ or /dev2/
+	  if(strncmp(device, "/dev/", 5) == 0 ||
+	     strncmp(device, "/dev2/", 6) == 0) {
+	    // must be read-write
+	    if(strncmp(mode, "ro", 2) != 0) {
+	      // must be local
+	      if(!remote_mount(device, type)) {
+		// don't count it again if it was seen before
+		if(tfind(device, &treeRoot, (comparison_fn_t)strcmp) == NULL) {
+		  // not found, so remember it
+		  tsearch(strdup(device), &treeRoot, (comparison_fn_t)strcmp);
+		  // and get the numbers
+		  struct statvfs svfs;
+		  if(statvfs(mount, &svfs) == 0) {
+		    if(svfs.f_blocks) {
+		      uint64_t dtot64 = (uint64_t)svfs.f_blocks * (uint64_t)svfs.f_bsize;
+		      uint64_t dfree64 = (uint64_t)svfs.f_bavail * (uint64_t)svfs.f_bsize;
+		      dsk->disk_total += dtot64;
+		      dsk->disk_free += dfree64;
+		      // percent used (as % * 100)
+		      uint32_t pc = (uint32_t)(((dtot64 - dfree64) * 10000) / dtot64);
+		      if(pc > dsk->part_max_used) dsk->part_max_used = pc;
+		    }
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+      }
+      tdestroy(treeRoot, free);
+      fclose(procFile);
+    }
+    
     return gotData;
   }
 

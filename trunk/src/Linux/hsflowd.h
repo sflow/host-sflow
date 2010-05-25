@@ -88,6 +88,8 @@ extern "C" {
     HSPSFlow *sFlow;
     char *configFile;
     char *pidFile;
+    // Identity
+    char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
     int refreshAdaptorList;
@@ -113,6 +115,7 @@ typedef struct _HSPVMState {
   // config parser
   int HSPReadConfigFile(HSP *sp);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
+  int parseUUID(char *str, char *uuid);
 
   // logger
   void myLog(int syslogType, char *fmt, ...);
@@ -123,10 +126,11 @@ typedef struct _HSPVMState {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(SFLHost_dsk_counters *dsk);
   int readNioCounters(SFLHost_nio_counters *dsk, char *devFilter);
-  int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
+  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
 
 #endif /* HSFLOWD_H */
+

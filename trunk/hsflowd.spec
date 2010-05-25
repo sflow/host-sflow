@@ -1,6 +1,6 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 0.95
+Version: 0.96
 Release: 1
 License: http://host-sflow.sourceforge.net/license.html
 Group: Applications/Internet
@@ -31,7 +31,7 @@ make clean
 /usr/local/sbin/hsflowd
 /etc/hsflowd.conf
 /etc/init.d/hsflowd
-%doc README LICENSE INSTALL
+%doc README LICENSE INSTALL.Linux
 
 %changelog
 * Thu Feb 11 2010 root <root@chow.sf.inmon.com> - 

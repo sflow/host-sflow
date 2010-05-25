@@ -36,6 +36,46 @@ inm_pid() {
     fi
 }
 
+# A function to try and find a UUID for this host
+inm_uuid() {
+    local MYUUID;
+    local UUID_REGEX;
+
+    UUID_REGEX='^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+
+    if [ -x /usr/sbin/dmidecode ]; then
+	# from the BIOS
+	MYUUID=`/usr/sbin/dmidecode | awk -- '/UUID/{print $2}'`
+        if [[ $MYUUID =~ $UUID_REGEX ]]; then
+            echo $MYUUID
+	    return 0;
+	fi;
+    fi
+
+    if [ -d /dev/disk/by-uuid ]; then
+	# first local disk
+	MYUUID=`ls /dev/disk/by-uuid | head -n 1`;
+        if [[ $MYUUID =~ $UUID_REGEX ]]; then
+	    echo $MYUUID
+	    return 0;
+	fi;
+    fi
+
+    if [ -x /sbin/blkid ]; then
+	# first local disk (via 'blkid')
+        MYUUID=`blkid | awk -vRS=" " -vFS="=" -- '/UUID/{print $2}' | tr -d '"' | head -1`;
+        if [[ $MYUUID =~ $UUID_REGEX ]]; then
+            echo $MYUUID
+	    return 0;
+	fi;
+    fi
+
+    # vol_id, tune2fs are additional options. Or a UUID can be set in the configuration file
+
+    echo "not found";
+    return 1
+}
+
 # A function to start a program.
 inm_daemon() {
     if [ $# = 0 ] ; then
@@ -49,9 +89,13 @@ inm_daemon() {
 	echo -n " already running (pid = $pid) "
 	return 1;
     fi
-    
-    # run the program (making sure we do not inherit any env)
-    su - root -c "$EXECPREFIX/$1"
+    if UUID=`inm_uuid`; then
+	# invoke with UUID arg
+	su - root -c "$EXECPREFIX/$1 -u $UUID";
+    else
+	# invoke without UUID arg
+	su - root -c "$EXECPREFIX/$1";
+    fi
 }
 
 # A function to stop a program.
