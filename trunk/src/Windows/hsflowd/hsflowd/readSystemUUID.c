@@ -4,6 +4,9 @@ extern "C" {
 
 #include "hsflowd.h"
 #include "readSystemUUID.h"
+#include <Objbase.h>
+#include <Wbemidl.h>
+
 
 PVOID getUUIDPtr(uint32_t length,smbiosHeader *smbios){
 	//We're not going to parse the whole SMBIOS table here.  Just a quick and dirty to get the UUID
@@ -30,29 +33,93 @@ PVOID getUUIDPtr(uint32_t length,smbiosHeader *smbios){
 }
 
 int readSystemUUID(u_char *uuidbuf){
-	RawSMBIOSData *smbuf;
-	DWORD smbufSize;
-	u_char* uuidPtr;
-	int gotData = NO;
+	int	                    gotData = NO;
+	BSTR                    path = SysAllocString(L"root\\wmi");
+	BSTR                    className = SysAllocString(L"MSSmBios_RawSMBiosTables");
+	BSTR                    propName = SysAllocString(L"SMBiosData");
+	ULONG                   uReturned = 1;
+	HRESULT                 hr = S_FALSE;
+	IWbemLocator            *pLocator = NULL;
+	IWbemServices           *pNamespace = NULL;
+	IEnumWbemClassObject    *pEnumSMBIOS = NULL;
+	IWbemClassObject        *pSmbios = NULL;
+	CIMTYPE                 type;
+	VARIANT                 pVal;
+	SAFEARRAY               *pArray = NULL;
+	smbiosHeader            *smbiosData;
+	u_char                  *uuidPtr;
+	DWORD                   smbufSize;
 
-	smbufSize = GetSystemFirmwareTable('RSMB',0,NULL,0);
-	if(smbufSize == 0){
-		MyLog(LOG_ERR,"GetSystemFirmwareTable failed 1st call: %d",GetLastError());
-		return gotData;
+	hr =  CoInitializeEx(0, COINIT_MULTITHREADED);
+	if (! SUCCEEDED( hr ) ){
+		MyLog(LOG_ERR,"readSystemUUID: failed to initialize COM");
+		gotData = NO;
+		goto Cleanup;
 	}
-	smbuf = malloc(smbufSize);
-	if( GetSystemFirmwareTable('RSMB',0,(PVOID)smbuf,smbufSize) < smbufSize){
-		MyLog(LOG_ERR,"GetSystemFirmwareTable failed 2nd call: %d",GetLastError());
-		return gotData;
+	
+	hr =  CoInitializeSecurity(NULL,-1,NULL,NULL,RPC_C_AUTHN_LEVEL_DEFAULT,RPC_C_IMP_LEVEL_IMPERSONATE,NULL,EOAC_NONE,NULL);
+	hr = CoCreateInstance( &CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (LPVOID *) &pLocator );
+	if(! SUCCEEDED( hr ) ){
+		MyLog(LOG_ERR,"readSystemUUID: failed to create WMI instance");
+		gotData = NO;
+		goto Cleanup;
 	}
-	uuidPtr = NULL;
-	uuidPtr = getUUIDPtr(smbuf->Length,(smbiosHeader*)smbuf->SMBIOSTableData);
+
+	hr = pLocator->lpVtbl->ConnectServer(pLocator,path, NULL, NULL, NULL, 0, NULL, NULL, &pNamespace );
+	pLocator->lpVtbl->Release(pLocator);
+	if( WBEM_S_NO_ERROR != hr ){
+		MyLog(LOG_ERR,"getSystemUUID: ConnectServer() failed for namespace");
+		gotData = NO;
+		goto Cleanup;
+	}
+
+	hr = pNamespace->lpVtbl->CreateInstanceEnum( pNamespace,className, 0, NULL, &pEnumSMBIOS );
+	pNamespace->lpVtbl->Release(pNamespace);
+	if (! SUCCEEDED( hr ) ){
+		MyLog(LOG_ERR,"getSystemUUID: CreateInstanceEnum() failed for MSSmBios_RawSMBiosTables");
+		gotData = NO;
+		goto Cleanup;
+	}
+
+	hr = pEnumSMBIOS->lpVtbl->Next(pEnumSMBIOS, 4000, 1, &pSmbios, &uReturned );
+	pEnumSMBIOS->lpVtbl->Release(pEnumSMBIOS);
+	if ( 1 != uReturned ){
+		MyLog(LOG_ERR,"getSystemUUID: Next() failed for pEnumSMBIOS");
+		gotData = NO;
+		goto Cleanup;
+	}
+	
+	pSmbios->lpVtbl->Get(pSmbios,propName,0L,&pVal,&type,NULL);
+	if ( ( VT_UI1 | VT_ARRAY) != pVal.vt){
+		MyLog(LOG_ERR,"getSystemUUID: Get() failed for pSmbios");
+	    gotData = NO;
+		goto Cleanup;
+	}
+
+	pArray = V_ARRAY(&pVal);
+	smbufSize = pArray->rgsabound[0].cElements;
+	smbiosData = (smbiosHeader*)malloc(smbufSize);
+	if(!smbiosData){
+		MyLog(LOG_ERR,"getSystemUUID: failed to allocate buffer for smbiosData");
+		gotData = NO;
+		goto Cleanup;
+	}
+	memcpy((void*)smbiosData,pArray->pvData,smbufSize);
+	uuidPtr = (u_char*)getUUIDPtr(smbufSize,smbiosData);
 	if(!uuidPtr){
-		MyLog(LOG_ERR,"readSystemUUID: failed");
-		return gotData;
+		MyLog(LOG_ERR,"getSystemUUID: failed to find UUID in SMBIOS");
+		gotData = NO;
+		goto Cleanup;
 	}
 	memcpy((void*)uuidbuf,uuidPtr,16);
 	gotData = YES;
+
+Cleanup:
+	SysFreeString(propName);
+	SysFreeString(className);
+	SysFreeString(path);
+	if(smbiosData) free(smbiosData);
+
 	return gotData;
 }
 

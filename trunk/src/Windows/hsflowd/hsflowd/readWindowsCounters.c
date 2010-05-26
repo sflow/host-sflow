@@ -80,8 +80,8 @@ uint32_t readMultiCounter(char* path, PPDH_RAW_COUNTER_ITEM *ppBuffer)
         goto Cleanup;
     }
 
-	*ppBuffer = (PPDH_RAW_COUNTER_ITEM)malloc(bufSize);
-	Status = PdhGetRawCounterArray(Counter, &bufSize, &itemCount, *ppBuffer);  //bufSize contains required buffer length
+	//*ppBuffer = (PPDH_RAW_COUNTER_ITEM)malloc(bufSize);
+	Status = PdhGetRawCounterArray(Counter, &bufSize, &itemCount, NULL);  //bufSize contains required buffer length
 	if (Status != ERROR_SUCCESS) 
     {
 		if(Status == PDH_MORE_DATA){

@@ -5,6 +5,7 @@ extern "C" {
 //http://cs.mipt.ru/docs/comp/eng/hardware/spec/sys_man_spec/main.pdf 
 
 #define SMBIOS_TABLE_SYSTEM_INFORMATION 1
+#define COBJMACROS
 
 //3.1.2
 typedef struct smbiosHeader
