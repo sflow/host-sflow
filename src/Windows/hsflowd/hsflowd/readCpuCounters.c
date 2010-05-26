@@ -19,7 +19,7 @@ extern int debug;
   int readCpuCounters(SFLHost_cpu_counters *cpu) {
     int gotData = NO;
 	uint32_t i = 0;
-	PPDH_RAW_COUNTER_ITEM thread, processor;
+	PPDH_RAW_COUNTER_ITEM thread = NULL, processor = NULL;
 
 	cpu->cpu_user = (uint32_t)readSingleCounter("\\Processor(_Total)\\% User Time");
 	cpu->cpu_system = (uint32_t)readSingleCounter("\\Processor(_Total)\\% Privileged Time");
@@ -32,9 +32,11 @@ extern int debug;
 
 	cpu->proc_total = readMultiCounter("\\Thread(*)\\Thread State",&thread);
 	cpu->proc_run = 0;
-	for(i = 0; i < cpu->proc_total; i++){
-		if(thread[i].RawValue.FirstValue == 2 && strncmp("Idle",thread[i].szName,4) != 0){
-			cpu->proc_run++;
+	if(thread){
+		for(i = 0; i < cpu->proc_total; i++){
+			if(thread[i].RawValue.FirstValue == 2 && strncmp("Idle",thread[i].szName,4) != 0){
+				cpu->proc_run++;
+			}
 		}
 	}
 
