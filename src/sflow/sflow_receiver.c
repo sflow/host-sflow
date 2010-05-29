@@ -946,7 +946,7 @@ static void sendSample(SFLReceiver *receiver)
   /* version, agent_address and sub_agent_id were pre-set. */
   uint32_t hdrIdx = (receiver->agent->myIP.type == SFLADDRESSTYPE_IP_V6) ? 7 : 4;
   receiver->sampleCollector.data[hdrIdx++] = htonl(++receiver->sampleCollector.packetSeqNo); /* seq no */
-  receiver->sampleCollector.data[hdrIdx++] = (u_long)htonl((receiver->agent->now - receiver->agent->bootTime) * 1000); /* uptime */
+  receiver->sampleCollector.data[hdrIdx++] = htonl((uint32_t)(receiver->agent->now - receiver->agent->bootTime) * 1000); /* uptime */
   receiver->sampleCollector.data[hdrIdx++] = htonl(receiver->sampleCollector.numSamples); /* num samples */
   /* send */
   if(receiver->agent->sendFn) (*receiver->agent->sendFn)(receiver->agent->magic,
