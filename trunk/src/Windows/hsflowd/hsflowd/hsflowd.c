@@ -109,6 +109,7 @@ int InitService();
     char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     HSP *sp = (HSP *)poller->magic;
 	
+    memset(&hidElem, 0, sizeof(hidElem));
     hidElem.tag = SFLCOUNTERS_HOST_HID;
     if(readHidCounters(&hidElem.counterBlock.host_hid,
 		       hnamebuf,
