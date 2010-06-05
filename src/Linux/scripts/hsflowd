@@ -47,7 +47,7 @@ inm_uuid() {
 	# from the BIOS
 	MYUUID=`/usr/sbin/dmidecode | awk -- '/UUID/{print $2}'`
         if [[ $MYUUID =~ $UUID_REGEX ]]; then
-            echo $MYUUID
+            echo "$MYUUID"
 	    return 0;
 	fi;
     fi
@@ -56,7 +56,7 @@ inm_uuid() {
 	# first local disk
 	MYUUID=`ls /dev/disk/by-uuid | head -n 1`;
         if [[ $MYUUID =~ $UUID_REGEX ]]; then
-	    echo $MYUUID
+	    echo "$MYUUID"
 	    return 0;
 	fi;
     fi
@@ -65,7 +65,7 @@ inm_uuid() {
 	# first local disk (via 'blkid')
         MYUUID=`blkid | awk -vRS=" " -vFS="=" -- '/UUID/{print $2}' | tr -d '"' | head -1`;
         if [[ $MYUUID =~ $UUID_REGEX ]]; then
-            echo $MYUUID
+            echo "$MYUUID"
 	    return 0;
 	fi;
     fi
@@ -91,7 +91,7 @@ inm_daemon() {
     fi
     if UUID=`inm_uuid`; then
 	# invoke with UUID arg
-	su - root -c "$EXECPREFIX/$1 -u $UUID";
+	su - root -c "$EXECPREFIX/$1 -u '${UUID}'";
     else
 	# invoke without UUID arg
 	su - root -c "$EXECPREFIX/$1";
