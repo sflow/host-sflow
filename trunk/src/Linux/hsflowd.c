@@ -196,11 +196,15 @@ extern "C" {
 #define HSP_MAX_PATHLEN 256
 #define XEN_SYSFS_VBD_PATH "/sys/devices/xen-backend"
 
-  static int64_t xen_vbd_counter(uint32_t dom_id, uint32_t vbd_dev, char *counter)
+  static int64_t xen_vbd_counter(char *vbd_type, uint32_t dom_id, uint32_t vbd_dev, char *counter)
   {
     int64_t ctr64 = 0;
     char path[HSP_MAX_PATHLEN];
-    snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/vbd-%u-%u/statistics/%s", dom_id, vbd_dev, counter);
+    snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/%s-%u-%u/statistics/%s",
+	     vbd_type,
+	     dom_id,
+	     vbd_dev,
+	     counter);
     FILE *file = fopen(path, "r");
     if(file) {
       fscanf(file, "%"SCNi64, &ctr64);
@@ -233,10 +237,10 @@ extern "C" {
 	  //dsk->allocation $$$
 	  //dsk->available $$$
 	  if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", dp->d_name, dom_id); 
-	  dsk->rd_req += xen_vbd_counter(dom_id, vbd_dev, "rd_req");
-	  dsk->rd_bytes += (xen_vbd_counter(dom_id, vbd_dev, "rd_sect") * HSP_SECTOR_BYTES);
-	  dsk->wr_req += xen_vbd_counter(dom_id, vbd_dev, "wr_req");
-	  dsk->wr_bytes += (xen_vbd_counter(dom_id, vbd_dev, "wr_sect") * HSP_SECTOR_BYTES);
+	  dsk->rd_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_req");
+	  dsk->rd_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_sect") * HSP_SECTOR_BYTES);
+	  dsk->wr_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_req");
+	  dsk->wr_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_sect") * HSP_SECTOR_BYTES);
 	}
       }
     }
@@ -393,15 +397,8 @@ extern "C" {
       // VM memory counters [ref xenstat.c]
       SFLCounters_sample_element memElem = { 0 };
       memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-      uint64_t memBytes = domaininfo.tot_pages * sp->page_size;
-      memElem.counterBlock.host_vrt_mem.memory = (memBytes / 1024);
-      if(domaininfo.max_pages == UINT_MAX) {
-	memElem.counterBlock.host_vrt_mem.maxMemory = -1;
-      }
-      else {
-	uint64_t maxBytes = domaininfo.max_pages * sp->page_size;
-	memElem.counterBlock.host_vrt_mem.maxMemory = (maxBytes / 1024);
-      }
+      memElem.counterBlock.host_vrt_mem.memory = domaininfo.tot_pages * sp->page_size;
+      memElem.counterBlock.host_vrt_mem.maxMemory = (domaininfo.max_pages == UINT_MAX) ? -1 : (domaininfo.max_pages * sp->page_size);
       SFLADD_ELEMENT(cs, &memElem);
 
       // VM disk I/O counters
@@ -678,11 +675,12 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-d] [-v] [-p PIDFile] [-f CONFIGFile] \n", command);
+    fprintf(stderr,"Usage: %s [-d] [-v] [-p PIDFile] [-f CONFIGFile] [-u UUID] \n", command);
     fprintf(stderr,"\n\
              -d:  debug mode - do not fork as a daemon, and log to stderr (repeat for more details)\n\
              -v:  print version number and exit\n\
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
+        -u UUID:  specify UUID as unique ID for this host\n\
   -f CONFIGFile:  specify config file (default is "HSP_DEFAULT_CONFIGFILE")\n\n");
   fprintf(stderr, "=============== More Information ============================================\n");
   fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
