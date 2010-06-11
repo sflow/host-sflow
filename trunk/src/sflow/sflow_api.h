@@ -86,8 +86,10 @@ typedef struct _SFLDataSource_instance {
  (dsi).ds_instance = (inst); \
  } while(0)
 
+#define SFL_SAMPLECOLLECTOR_DATA_QUADS (SFL_MAX_DATAGRAM_SIZE + SFL_DATA_PAD) / sizeof(u_int32_t)
+
 typedef struct _SFLSampleCollector {
-  uint32_t data[(SFL_MAX_DATAGRAM_SIZE + SFL_DATA_PAD) / sizeof(uint32_t)];
+  uint32_t data[SFL_SAMPLECOLLECTOR_DATA_QUADS];
   uint32_t *datap; /* packet fill pointer */
   uint32_t pktlen; /* accumulated size */
   uint32_t packetSeqNo;
