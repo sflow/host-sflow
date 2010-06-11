@@ -180,6 +180,14 @@ extern "C" {
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
 #ifdef HSF_XEN
+    // replace the adaptorList with a filtered version of the same
+      SFLAdaptorList myAdaptors;
+      SFLAdaptor *adaptors[HSP_MAX_VIFS];
+      myAdaptors.adaptors = adaptors;
+      myAdaptors.capacity = HSP_MAX_VIFS;
+      myAdaptors.num_adaptors = 0;
+      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, 0, &myAdaptors);
+
     // hypervisor node stats
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
@@ -254,22 +262,30 @@ extern "C" {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       uint32_t vif_domid;
       uint32_t vif_netid;
-      if(sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2) {
-	if(vif_domid == dom_id && myAdaptors->num_adaptors < HSP_MAX_VIFS) {
+      int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
+      if((isVirtual && dom_id == vif_domid) ||
+	 (!isVirtual && dom_id == 0)) {
+	// include this one (if we have room)
+	if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
 	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
-	  char macQuery[256];
-	  snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	  char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
-	  if(macStr == NULL) {
-	    myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
-	  }
-	  else{
-	    if(adaptor->num_macs > 0) {
-	      if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
-		myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
-	      }
+	  if(isVirtual) {
+	    // for virtual interfaces we need to query for the MAC address
+	    char macQuery[256];
+	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
+	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
+	    if(macStr == NULL) {
+	      myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
 	    }
-	    free(macStr);
+	    else{
+	      // got it - but make sure there is a place to write it
+	      if(adaptor->num_macs > 0) {
+		// OK, just overwrite the 'dummy' one that was there
+		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
+		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
+		}
+	      }
+	      free(macStr);
+	    }
 	  }
 	}
       }
