@@ -40,12 +40,6 @@ void sfl_receiver_init(SFLReceiver *receiver, SFLAgent *agent)
   initSocket(receiver);
 #endif
 
-  /* preset some of the header fields */
-  receiver->sampleCollector.datap = receiver->sampleCollector.data;
-  putNet32(receiver, SFLDATAGRAM_VERSION5);
-  putAddress(receiver, &agent->myIP);
-  putNet32(receiver, agent->subId);
-
   /* prepare to receive the first sample */
   resetSampleCollector(receiver);
 }
@@ -942,42 +936,47 @@ uint32_t sfl_receiver_samplePacketsSent(SFLReceiver *receiver)
 static void sendSample(SFLReceiver *receiver)
 {  
   /* construct and send out the sample, then reset for the next one... */
-  /* first fill in the header with the latest values */
-  /* version, agent_address and sub_agent_id were pre-set. */
-  uint32_t hdrIdx = (receiver->agent->myIP.type == SFLADDRESSTYPE_IP_V6) ? 7 : 4;
-  receiver->sampleCollector.data[hdrIdx++] = htonl(++receiver->sampleCollector.packetSeqNo); /* seq no */
-  receiver->sampleCollector.data[hdrIdx++] = htonl((uint32_t)(receiver->agent->now - receiver->agent->bootTime) * 1000); /* uptime */
-  receiver->sampleCollector.data[hdrIdx++] = htonl(receiver->sampleCollector.numSamples); /* num samples */
+  SFLAgent *agent = receiver->agent;
+  
+  /* go back and fill in the header */
+  receiver->sampleCollector.datap = receiver->sampleCollector.data;
+  putNet32(receiver, SFLDATAGRAM_VERSION5);
+  putAddress(receiver, &agent->myIP);
+  putNet32(receiver, agent->subId);
+  putNet32(receiver, ++receiver->sampleCollector.packetSeqNo);
+  putNet32(receiver,  ((agent->now - agent->bootTime) * 1000));
+  putNet32(receiver, receiver->sampleCollector.numSamples);
+  
   /* send */
-  if(receiver->agent->sendFn) (*receiver->agent->sendFn)(receiver->agent->magic,
-						     receiver->agent,
-						     receiver,
-						     (u_char *)receiver->sampleCollector.data, 
-						     receiver->sampleCollector.pktlen);
+  if(agent->sendFn) (*agent->sendFn)(agent->magic,
+				     agent,
+				     receiver,
+				     (u_char *)receiver->sampleCollector.data, 
+				     receiver->sampleCollector.pktlen);
   else {
 #ifdef SFLOW_DO_SOCKET
     /* send it myself */
     if (receiver->sFlowRcvrAddress.type == SFLADDRESSTYPE_IP_V6) {
       uint32_t soclen = sizeof(struct sockaddr_in6);
-      int result = sendto(receiver->agent->receiverSocket6,
+      int result = sendto(agent->receiverSocket6,
 			  receiver->sampleCollector.data,
 			  receiver->sampleCollector.pktlen,
 			  0,
 			  (struct sockaddr *)&receiver->receiver6,
 			  soclen);
-      if(result == -1 && errno != EINTR) sfl_agent_sysError(receiver->agent, "receiver", "IPv6 socket sendto error");
-      if(result == 0) sfl_agent_error(receiver->agent, "receiver", "IPv6 socket sendto returned 0");
+      if(result == -1 && errno != EINTR) sfl_agent_sysError(agent, "receiver", "IPv6 socket sendto error");
+      if(result == 0) sfl_agent_error(agent, "receiver", "IPv6 socket sendto returned 0");
     }
     else {
       uint32_t soclen = sizeof(struct sockaddr_in);
-      int result = sendto(receiver->agent->receiverSocket4,
+      int result = sendto(agent->receiverSocket4,
 			  receiver->sampleCollector.data,
 			  receiver->sampleCollector.pktlen,
 			  0,
 			  (struct sockaddr *)&receiver->receiver4,
 			  soclen);
-      if(result == -1 && errno != EINTR) sfl_agent_sysError(receiver->agent, "receiver", "socket sendto error");
-      if(result == 0) sfl_agent_error(receiver->agent, "receiver", "socket sendto returned 0");
+      if(result == -1 && errno != EINTR) sfl_agent_sysError(agent, "receiver", "socket sendto error");
+      if(result == 0) sfl_agent_error(agent, "receiver", "socket sendto returned 0");
     }
 #endif
   }
@@ -995,10 +994,16 @@ static void resetSampleCollector(SFLReceiver *receiver)
 {
   receiver->sampleCollector.pktlen = 0;
   receiver->sampleCollector.numSamples = 0;
+
+  /* clear the buffer completely (ensures that pad bytes will always be zeros - thank you CW) */
+  memset((u_char *)receiver->sampleCollector.data, 0, (SFL_SAMPLECOLLECTOR_DATA_QUADS * 4));
+
   /* point the datap to just after the header */
   receiver->sampleCollector.datap = (receiver->agent->myIP.type == SFLADDRESSTYPE_IP_V6) ?
-    (receiver->sampleCollector.data + 10) :  (receiver->sampleCollector.data + 7);
+    (receiver->sampleCollector.data + 10) :
+    (receiver->sampleCollector.data + 7);
 
+  /* start pktlen with the right value */
   receiver->sampleCollector.pktlen = (u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data;
 }
 
