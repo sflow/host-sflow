@@ -124,6 +124,43 @@ extern "C" {
     return NO;
   }
 
+  static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
+  {
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      uint32_t vif_domid;
+      uint32_t vif_netid;
+      int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
+      if((isVirtual && dom_id == vif_domid) ||
+	 (!isVirtual && dom_id == 0)) {
+	// include this one (if we have room)
+	if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
+	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
+	  if(isVirtual) {
+	    // for virtual interfaces we need to query for the MAC address
+	    char macQuery[256];
+	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
+	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
+	    if(macStr == NULL) {
+	      myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
+	    }
+	    else{
+	      // got it - but make sure there is a place to write it
+	      if(adaptor->num_macs > 0) {
+		// OK, just overwrite the 'dummy' one that was there
+		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
+		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
+		}
+	      }
+	      free(macStr);
+	    }
+	  }
+	}
+      }
+    }
+    return myAdaptors;
+  }
+
 #endif
 
   void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
@@ -254,43 +291,6 @@ extern "C" {
     }
     closedir(sysfsvbd);
     return YES;
-  }
-
-  static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
-  {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      uint32_t vif_domid;
-      uint32_t vif_netid;
-      int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
-      if((isVirtual && dom_id == vif_domid) ||
-	 (!isVirtual && dom_id == 0)) {
-	// include this one (if we have room)
-	if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
-	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
-	  if(isVirtual) {
-	    // for virtual interfaces we need to query for the MAC address
-	    char macQuery[256];
-	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
-	    if(macStr == NULL) {
-	      myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
-	    }
-	    else{
-	      // got it - but make sure there is a place to write it
-	      if(adaptor->num_macs > 0) {
-		// OK, just overwrite the 'dummy' one that was there
-		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
-		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
-		}
-	      }
-	      free(macStr);
-	    }
-	  }
-	}
-      }
-    }
-    return myAdaptors;
   }
   
 #endif
