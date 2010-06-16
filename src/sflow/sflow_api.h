@@ -254,6 +254,7 @@ SFLSampler *sfl_agent_getSamplerByIfIndex(SFLAgent *agent, uint32_t ifIndex);
 
 /* random number generator - used by sampler and poller */
 uint32_t sfl_random(uint32_t mean);
+void sfl_random_init(uint32_t seed);
 
 /* call these functions to GET and SET MIB values */
 

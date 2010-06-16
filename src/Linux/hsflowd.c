@@ -9,7 +9,7 @@ extern "C" {
 
 #include "hsflowd.h"
 
-  typedef enum { HSPSTATE_END, HSPSTATE_RUN, HSPSTATE_READCONFIG } EnumHSPState;
+  typedef enum { HSPSTATE_END, HSPSTATE_RUN, HSPSTATE_READCONFIG, HSPSTATE_WAITCONFIG } EnumHSPState;
 
   // global - easier for signal handler
   EnumHSPState vsp_state = HSPSTATE_READCONFIG;
@@ -60,9 +60,12 @@ extern "C" {
     size_t socklen = 0;
     int fd = 0;
 
-    for(HSPCollector *coll = sp->sFlow->collectors; coll; coll=coll->nxt) {
+    for(HSPCollector *coll = sp->sFlow->sFlowSettings->collectors; coll; coll=coll->nxt) {
 
       switch(coll->ipAddr.type) {
+      case SFLADDRESSTYPE_UNDEFINED:
+	// skip over it if the forward lookup failed
+	break;
       case SFLADDRESSTYPE_IP_V4:
 	{
 	  struct sockaddr_in *sa = (struct sockaddr_in *)&(coll->sendSocketAddr);
@@ -497,7 +500,7 @@ extern "C" {
 		  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
 		  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
 		  // hang my HSPVMState object on the datasource userData hook
-		  HSPVMState *state = (HSPVMState *)malloc(sizeof(HSPVMState));
+		  HSPVMState *state = (HSPVMState *)calloc(1, sizeof(HSPVMState));
 		  state->network_count = 0;
 		  state->marked = NO;
 		  vpoller->userData = state;
@@ -593,7 +596,12 @@ extern "C" {
 
     HSPSFlow *sf = sp->sFlow;
     
-    if(sf->collectors == NULL) {
+    if(sf->sFlowSettings == NULL) {
+      myLog(LOG_ERR, "No sFlow config defined");
+      return NO;
+    }
+    
+    if(sf->sFlowSettings->collectors == NULL) {
       myLog(LOG_ERR, "No collectors defined");
       return NO;
     }
@@ -623,7 +631,7 @@ extern "C" {
 		   agentCB_error,
 		   agentCB_sendPkt);
     // just one receiver - we are serious about making this lightweight for now
-    HSPCollector *collector = sf->collectors;
+    HSPCollector *collector = sf->sFlowSettings->collectors;
     SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
     
     // claim the receiver slot
@@ -654,25 +662,6 @@ extern "C" {
     return YES;
   }
 
-
-  /*_________________---------------------------__________________
-    _________________       freeSFlow           __________________
-    -----------------___________________________------------------
-  */
-
-  static void freeSFlow(HSPSFlow *sf)
-  {
-    if(sf == NULL) return;
-    if(sf->sFlowSettings) free(sf->sFlowSettings);
-    if(sf->agent) sfl_agent_release(sf->agent);
-    for(HSPCollector *coll = sf->collectors; coll; ) {
-      HSPCollector *nextColl = coll->nxt;
-      free(coll);
-      coll = nextColl;
-    }
-    free(sf);
-  }
-
   /*_________________---------------------------__________________
     _________________     setDefaults           __________________
     -----------------___________________________------------------
@@ -682,6 +671,8 @@ extern "C" {
   {
     sp->configFile = HSP_DEFAULT_CONFIGFILE;
     sp->pidFile = HSP_DEFAULT_PIDFILE;
+    sp->DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
+    sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
   }
 
   /*_________________---------------------------__________________
@@ -748,15 +739,140 @@ extern "C" {
       myLog(LOG_INFO,"Received SIGINT");
       vsp_state = HSPSTATE_END;
       break;
-    case SIGHUP:
-      myLog(LOG_INFO,"Received SIGHUP - re-reading config");
-      vsp_state = HSPSTATE_READCONFIG;
-      break;
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
       break;
     }
   }
+  
+  void my_usleep(uint32_t microseconds) {
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = microseconds;
+    int max_fd = 0;
+    int nfds = select(max_fd + 1,
+		      (fd_set *)NULL,
+		      (fd_set *)NULL,
+		      (fd_set *)NULL,
+		      &timeout);
+    // may return prematurely if a signal was caught, in which case nfds will be
+    // -1 and errno will be set to EINTR.  If we get any other error, abort.
+    if(nfds < 0 && errno != EINTR) {
+      myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________        runDNSSD           __________________
+    -----------------___________________________------------------
+  */
+
+  static void myDnsCB(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen)
+  {
+    HSPSFlowSettings *st = sp->sFlow->sFlowSettings_dnsSD;
+
+    // remember the ttl
+    sp->DNSSD_ttl = ttl;
+
+    char keyBuf[1024];
+    char valBuf[1024];
+    if(keyLen > 1023 || valLen > 1023) {
+      myLog(LOG_ERR, "myDNSCB: string too long");
+      return;
+    }
+    // null terminate
+    memcpy(keyBuf, (char *)key, keyLen);
+    keyBuf[keyLen] = '\0';
+    memcpy(valBuf, (char *)val, valLen);
+    valBuf[valLen] = '\0';
+
+    if(debug) {
+      myLog(LOG_INFO, "dnsSD: (rtype=%u,ttl=%u) <%s>=<%s>", rtype, ttl, keyBuf, valBuf);
+    }
+
+    if(key == NULL && val && valLen > 3) {
+      uint32_t delim = strcspn(valBuf, "/");
+      if(delim > 0 && delim < valLen) {
+	valBuf[delim] = '\0';
+	HSPCollector *coll = newCollector(st);
+	if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
+	  myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but forward lookup failed");
+	  // turn off the collector by clearing the address type
+	  coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	}
+	coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
+	if(coll->udpPort < 1 || coll->udpPort > 65535) {
+	  myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but bad port: %d", coll->udpPort);
+	  // turn off the collector by clearing the address type
+	  coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	}
+      }
+    }
+    else if(strcmp(keyBuf, "sampling") == 0) {
+    }
+    else if(strcmp(keyBuf, "txtvers") == 0) {
+    }
+    else if(strcmp(keyBuf, "polling") == 0) {
+      st->pollingInterval = strtol(valBuf, NULL, 0);
+      if(st->pollingInterval < 1 || st->pollingInterval > 300) {
+	// $$$ what if this fails?
+      }
+    }
+    else {
+      myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
+    }
+  }
+
+  static void *runDNSSD(void *magic) {
+    HSP *sp = (HSP *)magic;
+    sp->DNSSD_countdown = sfl_random(sp->DNSSD_startDelay);
+    time_t clk = time(NULL);
+    while(1) {
+      my_usleep(1000000);
+      time_t test_clk = time(NULL);
+      if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
+	// avoid a flurry of ticks if the clock jumps
+	myLog(LOG_INFO, "time jump detected (DNSSD) %ld->%ld", clk, test_clk);
+	clk = test_clk - 1;
+      }
+      time_t ticks = test_clk - clk;
+      clk = test_clk;
+      if(sp->DNSSD_countdown > ticks) {
+	sp->DNSSD_countdown -= ticks;
+      }
+      else {
+	// initiate server-discovery
+	HSPSFlow *sf = sp->sFlow;
+	sf->sFlowSettings_dnsSD = newSFlowSettings();
+	// pick up default polling interval from config file
+	sf->sFlowSettings_dnsSD->pollingInterval = sf->sFlowSettings_file->pollingInterval;
+	// now make the requests
+	int ans = dnsSD(sp, myDnsCB);
+	SEMLOCK_DO(sp->config_mut) {
+	  if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) {
+	    // must have been using a dnsSD one that worked before
+	    freeSFlowSettings(sf->sFlowSettings);
+	  }
+	  if(ans == -1) {
+	    // failed - clean up
+	    freeSFlowSettings(sf->sFlowSettings_dnsSD);
+	    sf->sFlowSettings_dnsSD = NULL;
+	    // go into hibernation mode waiting for dnsSD to work
+	    sf->sFlowSettings = NULL;
+	    sp->DNSSD_countdown = sp->DNSSD_retryDelay;
+	  }
+	  else {
+	    // success - make this the running config
+	    sf->sFlowSettings = sf->sFlowSettings_dnsSD;
+	    sp->DNSSD_countdown = sp->DNSSD_ttl;
+	  }
+	}
+      }    
+    }  
+    return NULL;
+  }
+
 
   /*_________________---------------------------__________________
     _________________         main              __________________
@@ -774,7 +890,6 @@ extern "C" {
     // register signal handler
     signal(SIGTERM,signal_handler);
     signal(SIGINT,signal_handler); 
-    signal(SIGHUP,signal_handler); 
 
     // init
     setDefaults(&sp);
@@ -838,78 +953,120 @@ extern "C" {
     // initialize the clock so we can detect second boundaries
     time_t clk = time(NULL);
 
+    // semaphore to protect config shared with DNSSD thread
+    sp.config_mut = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp.config_mut, NULL);
+
     while(vsp_state != HSPSTATE_END) {
      
       switch(vsp_state) {
       case HSPSTATE_READCONFIG:
 	{
-	  if(sp.sFlow) {
-	    // we have been asked to re-read
-	    // the config e.g. on a SIGHUP
-	    freeSFlow(sp.sFlow);
-	    sp.sFlow = NULL;
-	  }
-
+	  
 	  if(readInterfaces(&sp)
-	     && HSPReadConfigFile(&sp)
-	     && initAgent(&sp)) {
-	    vsp_state = HSPSTATE_RUN;
-
-	    // Try to lock this process in memory so that we don't get
-	    // swapped out. It's probably less than 100KB,  and this way
-	    // we don't consume extra resources swapping in and out
-	    // every 20 seconds.
-	    if(mlockall(MCL_CURRENT) == -1) {
-	      myLog(LOG_ERR, "mlockall(MCL_CURRENT) failed : %s", strerror(errno));
+	     && HSPReadConfigFile(&sp)) {
+	    
+	    { // we must have an agentIP, so we can use
+	      // it to seed the random number generator
+	      SFLAddress *agentIP = &sp.sFlow->agentIP;
+	      uint32_t seed;
+	      if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
+	      else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
+	      sfl_random_init(seed);
 	    }
-
+	    
+	    if(sp.DNSSD) {
+	      // launch dnsSD thread.  It will now be responsible for
+	      // the sFlowSettings,  and the current thread will loop
+	      // in the HSPSTATE_WAITCONFIG state until that pointer
+	      // has been set (sp.sFlow.sFlowSettings)
+	      sp.DNSSD_thread = calloc(1, sizeof(pthread_t));
+	      if(pthread_create(sp.DNSSD_thread, NULL, runDNSSD, &sp) != 0) {
+		myLog(LOG_ERR, "pthread_create() failed\n");
+		exit(EXIT_FAILURE);
+	      }
+	    }
+	    else {
+	      // just use the config from the file
+	      sp.sFlow->sFlowSettings = sp.sFlow->sFlowSettings_file;
+	    }
+	    vsp_state = HSPSTATE_WAITCONFIG;
 	  }
 	  else{
 	    exitStatus = EXIT_FAILURE;
 	    vsp_state = HSPSTATE_END;
+	  }
+	  
+	}
+	break;
+	
+      case HSPSTATE_WAITCONFIG:
+	SEMLOCK_DO(sp.config_mut) {
+	  if(sp.sFlow->sFlowSettings) {
+	    // we have a config - proceed
+	    if(initAgent(&sp)) {
+	      // Try to lock this process in memory so that we don't get
+	      // swapped out. It's probably less than 100KB,  and this way
+	      // we don't consume extra resources swapping in and out
+	      // every 20 seconds.
+	      if(mlockall(MCL_CURRENT) == -1) {
+		myLog(LOG_ERR, "mlockall(MCL_CURRENT) failed : %s", strerror(errno));
+	      }
+	      vsp_state = HSPSTATE_RUN;
+	    }
+	    else {
+	      exitStatus = EXIT_FAILURE;
+	      vsp_state = HSPSTATE_END;
+	    }
 	  }
 	}
 	break;
 	
       case HSPSTATE_RUN:
 	{
-	  // read some packets (or time out)
-	  fd_set readfds;
-	  FD_ZERO(&readfds);
-	  // set the timeout so that if all is quiet we will
-	  // still loop around and check for ticks/signals about
-	  // 10 times per second
-	  struct timeval timeout;
-	  timeout.tv_sec = 0;
-	  timeout.tv_usec = 100000;
-	  int max_fd = 0;
-	  int nfds = select(max_fd + 1,
-			    &readfds,
-			    (fd_set *)NULL,
-			    (fd_set *)NULL,
-			    &timeout);
-	  // may return prematurely if a signal was caught, in which case nfds will be
-	  // -1 and errno will be set to EINTR.  If we get any other error, abort.
-	  if(nfds < 0 && errno != EINTR) {
-	    myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
-	    exit(EXIT_FAILURE);
-	  }
-	  if(nfds > 0) {
-	    // got something?
-	  }
-	
 	  // check for second boundaries and generate ticks for the sFlow library
 	  time_t test_clk = time(NULL);
+	  if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
+	    // avoid a busy-loop of ticks
+	    myLog(LOG_INFO, "time jump detected");
+	    clk = test_clk - 1;
+	  }
 	  while(clk < test_clk) {
-	    sfl_agent_tick(sp.sFlow->agent, clk);
-	    // and a tick for myself too
-	    tick(&sp, clk);
+	    SEMLOCK_DO(sp.config_mut) {
+	      // was the config turned off?
+	      if(sp.sFlow->sFlowSettings) {
+		// did the polling interval change?  We have the semaphore
+		// here so we can just run along and tell everyone.
+		uint32_t piv = sp.sFlow->sFlowSettings->pollingInterval;
+		if(piv != sp.previousPollingInterval) {
+
+		  if(debug) myLog(LOG_INFO, "polling interval changed from %u to %u",
+				  sp.previousPollingInterval, piv);
+
+		  for(SFLPoller *pl = sp.sFlow->agent->pollers; pl; pl = pl->nxt) {
+		    sfl_poller_set_sFlowCpInterval(pl, piv);
+		  }
+		  sp.previousPollingInterval = piv;
+		}
+
+		// send a tick to the sFlow agent
+		sfl_agent_tick(sp.sFlow->agent, clk);
+		// and a tick for myself too
+		tick(&sp, clk);
+	      }
+	    } // semaphore
+
 	    clk++;
 	  }
 	}
       case HSPSTATE_END:
 	break;
       }
+
+      // set the timeout so that if all is quiet we will
+      // still loop around and check for ticks/signals
+      // several times per second
+      my_usleep(200000);
     }
 
     // get here if terminated by a signal

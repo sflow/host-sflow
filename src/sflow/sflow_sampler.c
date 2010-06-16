@@ -160,11 +160,15 @@ void sfl_sampler_writeFlowSample(SFLSampler *sampler, SFL_FLOW_SAMPLE_TYPE *fs)
   Gerhard's generator
 */
 
-uint32_t sfl_random(uint32_t lim)
-{
-  static uint32_t a = 1;
-  a = ((a * 32719) + 3) % 32749;
-  return ((a % lim) + 1);
+static uint32_t SFLRandom = 1;
+
+uint32_t sfl_random(uint32_t lim) {
+  SFLRandom = ((SFLRandom * 32719) + 3) % 32749;
+  return ((SFLRandom % lim) + 1);
+} 
+
+void sfl_random_init(uint32_t seed) {
+  SFLRandom = seed;
 } 
 
 /*_________________---------------------------__________________

@@ -224,7 +224,7 @@ extern int debug;
     return mult;
   }
 
-  static HSPToken *expectInteger32(HSP *sp, HSPToken *tok, uint32_t *arg, uint32_t minVal, uint32_t maxVal)
+  HSPToken *expectInteger32(HSP *sp, HSPToken *tok, uint32_t *arg, uint32_t minVal, uint32_t maxVal)
   {
     HSPToken *t = tok;
     t = t->nxt;
@@ -245,7 +245,7 @@ extern int debug;
 
   // expectIP
 
-  static HSPToken *expectIP(HSP *sp, HSPToken *tok, SFLAddress *addr, struct sockaddr *sa)
+  HSPToken *expectIP(HSP *sp, HSPToken *tok, SFLAddress *addr, struct sockaddr *sa)
   {
     HSPToken *t = tok;
     t = t->nxt;
@@ -253,6 +253,21 @@ extern int debug;
       parseError(sp, tok, "expected hostname or IP", "");
       return NULL;
     }
+    return t;
+  }
+
+  // expectDNSSD
+
+  static HSPToken *expectDNSSD(HSP *sp, HSPToken *tok)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || (strcasecmp(t->str, "on") != 0 && strcasecmp(t->str, "off") != 0)) {
+      parseError(sp, tok, "expected 'on' or 'off'", "");
+      return NULL;
+    }
+    // enable or disable DNS server discovery
+    sp->DNSSD = (strcasecmp(t->str, "on") == 0);
     return t;
   }
 
@@ -293,27 +308,36 @@ extern int debug;
     -----------------___________________________------------------
   */
 
-  static HSPSFlowSettings *newSFlowSettings(HSPSFlow *sf) {
+  HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings) {
+    HSPCollector *col = (HSPCollector *)calloc(1, sizeof(HSPCollector));
+    ADD_TO_LIST(sFlowSettings->collectors, col);
+    sFlowSettings->numCollectors++;
+    col->udpPort = SFL_DEFAULT_COLLECTOR_PORT;
+    return col;
+  }
+
+  HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)calloc(1, sizeof(HSPSFlowSettings));
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     return st;
   }
 
+  void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
+    for(HSPCollector *coll = sFlowSettings->collectors; coll; ) {
+      HSPCollector *nextColl = coll->nxt;
+      free(coll);
+      coll = nextColl;
+    }
+    free(sFlowSettings);
+  }
+
   static HSPSFlow *newSFlow(HSP *sp) {
     HSPSFlow *sf = (HSPSFlow *)calloc(1, sizeof(HSPSFlow));
-    sf->sFlowSettings = newSFlowSettings(sf);
+    sf->sFlowSettings_file = newSFlowSettings();
     sf->subAgentId = HSP_DEFAULT_SUBAGENTID;
     sp->sFlow = sf; // just one of these, not a list
     sf->myHSP = sp;
     return sf;
-  }
-
-  static HSPCollector *newCollector(HSPSFlow *sf) {
-    HSPCollector *col = (HSPCollector *)calloc(1, sizeof(HSPCollector));
-    ADD_TO_LIST(sf->collectors, col);
-    sf->numCollectors++;
-    col->udpPort = SFL_DEFAULT_COLLECTOR_PORT;
-    return col;
   }
 
   static HSPToken *newToken(char *str, int len) {
@@ -439,13 +463,16 @@ extern int debug;
       case HSPOBJ_SFLOW:
 
 	switch(tok->stok) {
+	case HSPTOKEN_DNSSD:
+	  if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
+	  break;
 	case HSPTOKEN_COLLECTOR:
 	  if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	  newCollector(sp->sFlow);
+	  newCollector(sp->sFlow->sFlowSettings_file);
 	  level[++depth] = HSPOBJ_COLLECTOR;
 	  break;
 	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings->pollingInterval, 1, 300)) == NULL) return NO;
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 1, 300)) == NULL) return NO;
 	  break;
 	case HSPTOKEN_AGENTIP:
 	  if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
@@ -468,7 +495,7 @@ extern int debug;
 	
       case HSPOBJ_COLLECTOR:
 	{
-	  HSPCollector *col = sp->sFlow->collectors;
+	  HSPCollector *col = sp->sFlow->sFlowSettings_file->collectors;
 	  switch(tok->stok) {
 	  case HSPTOKEN_IP:
 	    if((tok = expectIP(sp, tok, &col->ipAddr, (struct sockaddr *)&col->sendSocketAddr)) == NULL) return NO;
@@ -524,11 +551,11 @@ extern int debug;
 	myLog(LOG_ERR, "parse error in %s : agentIP not defined", sp->configFile);
 	parseOK = NO;
       }
-      if(sp->sFlow->numCollectors == 0) {
-	myLog(LOG_ERR, "parse error in %s : no collectors defined", sp->configFile);
+      if(sp->sFlow->sFlowSettings_file->numCollectors == 0 && sp->DNSSD == NO) {
+	myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
 	parseOK = NO;
       }
-      for(HSPCollector *coll = sp->sFlow->collectors; coll; coll = coll->nxt) {
+      for(HSPCollector *coll = sp->sFlow->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
 	//////////////////////// collector /////////////////////////
 	if(coll->ipAddr.type == 0) {
 	  myLog(LOG_ERR, "parse error in %s : collector  has no IP", sp->configFile);
