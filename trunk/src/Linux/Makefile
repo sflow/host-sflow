@@ -46,12 +46,13 @@ READ_OBJS=readInterfaces.o \
           readNioCounters.o
 
 HSFLOW_OBJS= hsflowconfig.o \
+             dnsSD.o \
              hsflowd.o
 
 OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
 
 CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE
-LIBS+= $(SFLOWDIR)/libsflow.a
+LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
 all: hsflowd
 
@@ -78,6 +79,7 @@ clean:
 
 # dependencies
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
+dnsSD.o: dnsSD.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
 readInterfaces.o: readInterfaces.c $(HEADERS)
 readCpuCounters.o: readCpuCounters.c $(HEADERS)

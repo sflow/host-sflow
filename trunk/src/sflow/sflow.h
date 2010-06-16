@@ -38,6 +38,7 @@ typedef union _SFLAddress_value {
 } SFLAddress_value;
 
 enum SFLAddress_type {
+  SFLADDRESSTYPE_UNDEFINED = 0,
   SFLADDRESSTYPE_IP_V4 = 1,
   SFLADDRESSTYPE_IP_V6 = 2
 };

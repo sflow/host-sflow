@@ -24,6 +24,7 @@ extern "C" {
 #include <fcntl.h>
 #include <assert.h>
 #include <ctype.h>
+#include <pthread.h>
 
 #include <sys/types.h>
 #define __STDC_FORMAT_MACROS
@@ -46,6 +47,9 @@ extern "C" {
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
 #define HSP_DEFAULT_SUBAGENTID 100
+#define HSP_MAX_TICKS 60
+#define HSP_DEFAULT_DNSSD_STARTDELAY 30
+#define HSP_DEFAULT_DNSSD_RETRYDELAY 300
 #define HSP_MAX_SUBAGENTID 1000000
 
   // only one receiver, so the receiverIndex is a constant
@@ -61,10 +65,6 @@ extern "C" {
   struct _HSPSFlow;
   struct _HSP;
 
-  typedef struct _HSPSFlowSettings {
-    uint32_t pollingInterval;
-  } HSPSFlowSettings;
-
   typedef struct _HSPCollector {
     struct _HSPCollector *nxt;
     SFLAddress ipAddr;
@@ -72,13 +72,21 @@ extern "C" {
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
 
+  typedef struct _HSPSFlowSettings {
+    HSPCollector *collectors;
+    uint32_t numCollectors;
+    uint32_t pollingInterval;
+  } HSPSFlowSettings;
+
   typedef struct _HSPSFlow {
     struct _HSP *myHSP;
     SFLAgent *agent;
     SFLPoller *poller;
-    HSPCollector *collectors;
-    uint32_t numCollectors;
+
+    HSPSFlowSettings *sFlowSettings_file;
+    HSPSFlowSettings *sFlowSettings_dnsSD;
     HSPSFlowSettings *sFlowSettings;
+
     uint32_t subAgentId;
     SFLAdaptor *agentDevice;
     SFLAddress agentIP;
@@ -103,6 +111,18 @@ extern "C" {
     uint32_t page_size;
     uint32_t num_domains;
 #endif
+
+    // inter-thread communication
+    pthread_mutex_t *config_mut;
+    int DNSSD;
+    uint32_t previousPollingInterval;
+
+    // the thead and his private state
+    pthread_t *DNSSD_thread;
+    int DNSSD_countdown;
+    uint32_t DNSSD_startDelay;
+    uint32_t DNSSD_retryDelay;
+    uint32_t DNSSD_ttl;
   } HSP;
 
 // userData structure to store state for VM data-sources
@@ -112,14 +132,23 @@ typedef struct _HSPVMState {
   uint32_t vm_index;
 } HSPVMState;
 
-  // config parser
+  // expose some config parser fns
   int HSPReadConfigFile(HSP *sp);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
   int parseUUID(char *str, char *uuid);
-
+  HSPSFlowSettings *newSFlowSettings(void);
+  HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
+  void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
+  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
+  
+  // using DNS SRV+TXT records
+#define SFLOW_DNS_SD "_sflow._udp"
+  typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen);
+  int dnsSD(HSP *sp, HSPDnsCB callback);
+  
   // logger
   void myLog(int syslogType, char *fmt, ...);
-
+  
   // read functions
   int readInterfaces(HSP *sp);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
@@ -127,6 +156,25 @@ typedef struct _HSPVMState {
   int readDiskCounters(SFLHost_dsk_counters *dsk);
   int readNioCounters(SFLHost_nio_counters *dsk, char *devFilter);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
+
+  static inline int lockOrDie(pthread_mutex_t *sem) {
+    if(sem && pthread_mutex_lock(sem) != 0) {
+      myLog(LOG_ERR, "failed to lock semaphore!");
+      exit(EXIT_FAILURE);
+    }
+    return YES;
+  }
+
+  static inline int releaseOrDie(pthread_mutex_t *sem) {
+    if(sem && pthread_mutex_unlock(sem) != 0) {
+      myLog(LOG_ERR, "failed to unlock semaphore!");
+      exit(EXIT_FAILURE);
+    }
+    return YES;
+  }
+
+#define DYNAMIC_LOCAL(VAR) VAR
+#define SEMLOCK_DO(_sem) for(int DYNAMIC_LOCAL(_ctrl)=1; DYNAMIC_LOCAL(_ctrl) && lockOrDie(_sem); DYNAMIC_LOCAL(_ctrl)=0, releaseOrDie(_sem))
 
 #if defined(__cplusplus)
 } /* extern "C" */
