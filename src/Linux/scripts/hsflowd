@@ -2,7 +2,7 @@
 #
 # init(1) startup script for hsflowd daemon
 #
-# chkconfig: 5 85 15
+# chkconfig: 345 85 15
 # description: Host sFlow Daemon
 # processname: hsflowd
 # pidfile: /var/run/hsflowd.pid

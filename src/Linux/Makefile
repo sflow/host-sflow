@@ -68,7 +68,7 @@ install: hsflowd
 # necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
 # at the required runlevels
 schedule:
-	/sbin/chkconfig --level 345 hsflowd on
+	/sbin/chkconfig --add hsflowd
 	/sbin/chkconfig --list hsflowd
 
 .c.o: $(HEADERS)
