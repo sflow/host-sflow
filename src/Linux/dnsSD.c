@@ -24,10 +24,20 @@ extern int debug;
  int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback)
   {
     u_char buf[PACKETSZ];
+    if(debug) myLog(LOG_INFO,"=== res_search(%s, C_IN, %u) ===", dname, rtype);
     int anslen = res_search(dname, C_IN, rtype, buf, PACKETSZ);
     if(anslen == -1) {
-      myLog(LOG_ERR,"res_search(%s, C_IN, rtype) failed : %s", dname, strerror(errno));
-      return -1;
+      if(errno == 0 && (h_errno == HOST_NOT_FOUND || h_errno == NO_DATA)) {
+	// although res_search returned -1, the request did actually get an answer,
+	// it's just that there was no SRV record configured,  or the response was
+	// not authoritative. Interpret this the same way as answer_count==0.
+	if(debug) myLog(LOG_INFO,"res_search(%s, C_IN, %u) came up blank (h_errno=%d)", dname, rtype, h_errno);
+	return 0;
+      }
+      else {
+	myLog(LOG_ERR,"res_search(%s, C_IN, %u) failed : %s (h_errno=%d)", dname, rtype, strerror(errno), h_errno);
+	return -1;
+      }
     }
     if(anslen < sizeof(HEADER)) {
       myLog(LOG_ERR,"res_search(%s) returned %d (too short)", dname, anslen);
@@ -44,7 +54,7 @@ extern int debug;
       myLog(LOG_INFO,"res_search(%s) returned no answer", dname);
       return 0;
     }
-    if(debug) myLog(LOG_INFO, "dnsconfig: answer_count = %d", answer_count);
+    if(debug) myLog(LOG_INFO, "dnsSD: answer_count = %d", answer_count);
 
     u_char *p = buf + sizeof(HEADER);
     u_char *endp = buf + anslen;
@@ -55,14 +65,14 @@ extern int debug;
       myLog(LOG_ERR,"dn_skipname() <query> failed");
       return -1;
     }
-    if(debug) myLog(LOG_INFO, "dnsconfig: (compressed) query_name_len = %d", query_name_len);
+    if(debug) myLog(LOG_INFO, "dnsSD: (compressed) query_name_len = %d", query_name_len);
     p += (query_name_len);
     p += QFIXEDSZ;
 
     // collect array of results
     for(int entry = 0; entry < answer_count; entry++) {
 
-      if(debug) myLog(LOG_INFO, "dnsconfig: entry %d, bytes_left=%d", entry, (endp - p));
+      if(debug) myLog(LOG_INFO, "dnsSD: entry %d, bytes_left=%d", entry, (endp - p));
 
       // consume name (again)
       query_name_len = dn_skipname(p, endp);
@@ -100,7 +110,7 @@ extern int debug;
       case T_SRV:
 	{
 	  // now x should see
-	  // [priority:16][weight:16][port:16][FQDN]
+	  // [priority:2][weight:2][port:2][FQDN:res_len-6]
 	  uint16_t res_pri = (x[0] << 8)  | x[1];
 	  uint16_t res_wgt = (x[2] << 8)  | x[3];
 	  uint32_t res_prt = (x[4] << 8)  | x[5];
@@ -151,6 +161,9 @@ extern int debug;
 	break;
       case T_TXT:
 	{
+	  // now x should see
+	  // [TXT:res_len]
+
 	  // still got room for a text record?
 	  if((endp - x) < HSF_MIN_TXT) {
 	    myLog(LOG_ERR,"no room for text record -- only %d bytes left", (endp - x));
@@ -167,7 +180,7 @@ extern int debug;
 	    printf("\n");
 	  }
 
-	  // format is [len][<key>=<val>][len][<key>=<val>]
+	  // format is [len][<key>=<val>][len][<key>=<val>]...
 	  // so we can pull out the settings and give them directly
 	  // to the callback fn without copying
 	  u_char *txtend = x + res_len;
@@ -202,10 +215,10 @@ extern int debug;
 
   int dnsSD(HSP *sp, HSPDnsCB callback)
   {
-    int srv = dnsSD_Request(sp, SFLOW_DNS_SD, T_SRV, callback);
+    int num_servers = dnsSD_Request(sp, SFLOW_DNS_SD, T_SRV, callback);
     dnsSD_Request(sp, SFLOW_DNS_SD, T_TXT, callback);
     // it's ok even if just the SRV request succeeded
-    return (srv == -1) ? -1 : 0;
+    return num_servers; //  -1 on error
   }
 
 #if defined(__cplusplus)

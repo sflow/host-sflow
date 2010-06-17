@@ -33,7 +33,7 @@ SFLOWDIR=../sflow
 
 OPT = -O3 -DNDEBUG
 #OPT = -g -ggdb -O2
-OPT= -g -ggdb
+#OPT= -g -ggdb
 
 #CC= g++
 CC= gcc -std=gnu99
