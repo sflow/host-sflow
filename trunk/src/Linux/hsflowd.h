@@ -50,6 +50,7 @@ extern "C" {
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
+#define HSP_DEFAULT_DNSSD_MINDELAY 10
 #define HSP_MAX_SUBAGENTID 1000000
 
   // only one receiver, so the receiverIndex is a constant
@@ -92,7 +93,10 @@ extern "C" {
     SFLAddress agentIP;
   } HSPSFlow; 
 
+  typedef enum { HSPSTATE_READCONFIG=0, HSPSTATE_WAITCONFIG, HSPSTATE_RUN, HSPSTATE_END } EnumHSPState;
+
   typedef struct _HSP {
+    EnumHSPState state;
     HSPSFlow *sFlow;
     char *configFile;
     char *pidFile;
@@ -117,7 +121,7 @@ extern "C" {
     int DNSSD;
     uint32_t previousPollingInterval;
 
-    // the thead and his private state
+    // the DNSSD thread and his private state
     pthread_t *DNSSD_thread;
     int DNSSD_countdown;
     uint32_t DNSSD_startDelay;

@@ -3,9 +3,9 @@
 
 HEADERS= sflow_api.h sflow.h Makefile
 
-#OPT = -O3 -DNDEBUG
+OPT = -O3 -DNDEBUG
 #OPT = -g -ggdb -O2
-OPT= -g -ggdb
+#OPT= -g -ggdb
 
 CFLAGS= -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall -Wcast-align
 LDFLAGS=

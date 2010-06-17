@@ -9,10 +9,8 @@ extern "C" {
 
 #include "hsflowd.h"
 
-  typedef enum { HSPSTATE_END, HSPSTATE_RUN, HSPSTATE_READCONFIG, HSPSTATE_WAITCONFIG } EnumHSPState;
-
   // global - easier for signal handler
-  EnumHSPState vsp_state = HSPSTATE_READCONFIG;
+  HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
   int debug = 0;
 
@@ -730,14 +728,15 @@ extern "C" {
   */
 
   static void signal_handler(int sig) {
+    HSP *sp = &HSPSamplingProbe;
     switch(sig) {
     case SIGTERM:
       myLog(LOG_INFO,"Received SIGTERM");
-      vsp_state = HSPSTATE_END;
+      sp->state = HSPSTATE_END;
       break;
     case SIGINT:
       myLog(LOG_INFO,"Received SIGINT");
-      vsp_state = HSPSTATE_END;
+      sp->state = HSPSTATE_END;
       break;
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
@@ -772,8 +771,10 @@ extern "C" {
   {
     HSPSFlowSettings *st = sp->sFlow->sFlowSettings_dnsSD;
 
-    // remember the ttl
-    sp->DNSSD_ttl = ttl;
+    // latch the min ttl
+    if(sp->DNSSD_ttl == 0 || ttl < sp->DNSSD_ttl) {
+      sp->DNSSD_ttl = ttl;
+    }
 
     char keyBuf[1024];
     char valBuf[1024];
@@ -847,26 +848,38 @@ extern "C" {
 	sf->sFlowSettings_dnsSD = newSFlowSettings();
 	// pick up default polling interval from config file
 	sf->sFlowSettings_dnsSD->pollingInterval = sf->sFlowSettings_file->pollingInterval;
+	// we want the min ttl, so clear it here
+	sp->DNSSD_ttl = 0;
 	// now make the requests
-	int ans = dnsSD(sp, myDnsCB);
+	int num_servers = dnsSD(sp, myDnsCB);
 	SEMLOCK_DO(sp->config_mut) {
-	  if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) {
-	    // must have been using a dnsSD one that worked before
-	    freeSFlowSettings(sf->sFlowSettings);
+	  // three cases here:
+	  // A) if(num_servers == -1) (i.e. query failed) then keep the current config
+	  // B) if(num_servers == 0) then stop monitoring
+	  // C) if(num_servers > 0) then install the new config
+	  if(debug) myLog(LOG_INFO, "num_servers == %d", num_servers);
+	  if(num_servers >= 0) {
+	    // remove the current config
+	    if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) freeSFlowSettings(sf->sFlowSettings);
+	    sf->sFlowSettings = NULL;
 	  }
-	  if(ans == -1) {
-	    // failed - clean up
+	  if(num_servers <= 0) {
+	    // clean up, and go into 'retry' mode
 	    freeSFlowSettings(sf->sFlowSettings_dnsSD);
 	    sf->sFlowSettings_dnsSD = NULL;
-	    // go into hibernation mode waiting for dnsSD to work
-	    sf->sFlowSettings = NULL;
-	    sp->DNSSD_countdown = sp->DNSSD_retryDelay;
+	    // we might still learn a TTL (e.g. from the TXT record query)
+	    sp->DNSSD_countdown = sp->DNSSD_ttl == 0 ? sp->DNSSD_retryDelay : sp->DNSSD_ttl;
 	  }
 	  else {
-	    // success - make this the running config
+	    // make this the running config
 	    sf->sFlowSettings = sf->sFlowSettings_dnsSD;
 	    sp->DNSSD_countdown = sp->DNSSD_ttl;
 	  }
+	  if(sp->DNSSD_countdown < HSP_DEFAULT_DNSSD_MINDELAY) {
+	    if(debug) myLog(LOG_INFO, "forcing minimum DNS polling delay");
+	    sp->DNSSD_countdown = HSP_DEFAULT_DNSSD_MINDELAY;
+	  }
+	  if(debug) myLog(LOG_INFO, "DNSSD polling delay set to %u seconds", sp->DNSSD_countdown);
 	}
       }    
     }  
@@ -881,8 +894,8 @@ extern "C" {
 
   int main(int argc, char *argv[])
   {
-    HSP sp = { 0 };
-
+    HSP *sp = &HSPSamplingProbe;
+    
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
     setlogmask(LOG_UPTO(LOG_DEBUG));
@@ -892,15 +905,15 @@ extern "C" {
     signal(SIGINT,signal_handler); 
 
     // init
-    setDefaults(&sp);
+    setDefaults(sp);
 
     // read the command line
-    processCommandLine(&sp, argc, argv);
+    processCommandLine(sp, argc, argv);
       
     // don't run if we think another one is already running
     struct stat statBuf;
-    if(stat(sp.pidFile, &statBuf) == 0) {
-      myLog(LOG_ERR,"Another %s is already running. If this is an error, remove %s", argv[0], sp.pidFile);
+    if(stat(sp->pidFile, &statBuf) == 0) {
+      myLog(LOG_ERR,"Another %s is already running. If this is an error, remove %s", argv[0], sp->pidFile);
       exit(EXIT_FAILURE);
     }
 
@@ -915,13 +928,13 @@ extern "C" {
       if(pid > 0) {
 	// in parent - write pid file and exit
 	FILE *f;
-	if(!(f = fopen(sp.pidFile,"w"))) {
-	  myLog(LOG_ERR,"Could not open the pid file %s for writing : %s", sp.pidFile, strerror(errno));
+	if(!(f = fopen(sp->pidFile,"w"))) {
+	  myLog(LOG_ERR,"Could not open the pid file %s for writing : %s", sp->pidFile, strerror(errno));
 	  exit(EXIT_FAILURE);
 	}
 	fprintf(f,"%"PRIu64"\n",(uint64_t)pid);
 	if(fclose(f) == -1) {
-	  myLog(LOG_ERR,"Could not close pid file %s : %s", sp.pidFile, strerror(errno));
+	  myLog(LOG_ERR,"Could not close pid file %s : %s", sp->pidFile, strerror(errno));
 	  exit(EXIT_FAILURE);
 	}
 	
@@ -954,57 +967,60 @@ extern "C" {
     time_t clk = time(NULL);
 
     // semaphore to protect config shared with DNSSD thread
-    sp.config_mut = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
-    pthread_mutex_init(sp.config_mut, NULL);
+    sp->config_mut = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp->config_mut, NULL);
+    
+    sp->state = HSPSTATE_READCONFIG;
 
-    while(vsp_state != HSPSTATE_END) {
-     
-      switch(vsp_state) {
+    while(sp->state != HSPSTATE_END) {
+      
+      switch(sp->state) {
+	
       case HSPSTATE_READCONFIG:
 	{
 	  
-	  if(readInterfaces(&sp)
-	     && HSPReadConfigFile(&sp)) {
+	  if(readInterfaces(sp)
+	     && HSPReadConfigFile(sp)) {
 	    
 	    { // we must have an agentIP, so we can use
 	      // it to seed the random number generator
-	      SFLAddress *agentIP = &sp.sFlow->agentIP;
+	      SFLAddress *agentIP = &sp->sFlow->agentIP;
 	      uint32_t seed;
 	      if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
 	      else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
 	      sfl_random_init(seed);
 	    }
 	    
-	    if(sp.DNSSD) {
+	    if(sp->DNSSD) {
 	      // launch dnsSD thread.  It will now be responsible for
 	      // the sFlowSettings,  and the current thread will loop
 	      // in the HSPSTATE_WAITCONFIG state until that pointer
-	      // has been set (sp.sFlow.sFlowSettings)
-	      sp.DNSSD_thread = calloc(1, sizeof(pthread_t));
-	      if(pthread_create(sp.DNSSD_thread, NULL, runDNSSD, &sp) != 0) {
+	      // has been set (sp->sFlow.sFlowSettings)
+	      sp->DNSSD_thread = calloc(1, sizeof(pthread_t));
+	      if(pthread_create(sp->DNSSD_thread, NULL, runDNSSD, sp) != 0) {
 		myLog(LOG_ERR, "pthread_create() failed\n");
 		exit(EXIT_FAILURE);
 	      }
 	    }
 	    else {
 	      // just use the config from the file
-	      sp.sFlow->sFlowSettings = sp.sFlow->sFlowSettings_file;
+	      sp->sFlow->sFlowSettings = sp->sFlow->sFlowSettings_file;
 	    }
-	    vsp_state = HSPSTATE_WAITCONFIG;
+	    sp->state = HSPSTATE_WAITCONFIG;
 	  }
 	  else{
 	    exitStatus = EXIT_FAILURE;
-	    vsp_state = HSPSTATE_END;
+	    sp->state = HSPSTATE_END;
 	  }
 	  
 	}
 	break;
 	
       case HSPSTATE_WAITCONFIG:
-	SEMLOCK_DO(sp.config_mut) {
-	  if(sp.sFlow->sFlowSettings) {
+	SEMLOCK_DO(sp->config_mut) {
+	  if(sp->sFlow->sFlowSettings) {
 	    // we have a config - proceed
-	    if(initAgent(&sp)) {
+	    if(initAgent(sp)) {
 	      // Try to lock this process in memory so that we don't get
 	      // swapped out. It's probably less than 100KB,  and this way
 	      // we don't consume extra resources swapping in and out
@@ -1012,11 +1028,11 @@ extern "C" {
 	      if(mlockall(MCL_CURRENT) == -1) {
 		myLog(LOG_ERR, "mlockall(MCL_CURRENT) failed : %s", strerror(errno));
 	      }
-	      vsp_state = HSPSTATE_RUN;
+	      sp->state = HSPSTATE_RUN;
 	    }
 	    else {
 	      exitStatus = EXIT_FAILURE;
-	      vsp_state = HSPSTATE_END;
+	      sp->state = HSPSTATE_END;
 	    }
 	  }
 	}
@@ -1032,59 +1048,63 @@ extern "C" {
 	    clk = test_clk - 1;
 	  }
 	  while(clk < test_clk) {
-	    SEMLOCK_DO(sp.config_mut) {
+	    SEMLOCK_DO(sp->config_mut) {
 	      // was the config turned off?
-	      if(sp.sFlow->sFlowSettings) {
+	      if(sp->sFlow->sFlowSettings) {
 		// did the polling interval change?  We have the semaphore
 		// here so we can just run along and tell everyone.
-		uint32_t piv = sp.sFlow->sFlowSettings->pollingInterval;
-		if(piv != sp.previousPollingInterval) {
-
+		uint32_t piv = sp->sFlow->sFlowSettings->pollingInterval;
+		if(piv != sp->previousPollingInterval) {
+		  
 		  if(debug) myLog(LOG_INFO, "polling interval changed from %u to %u",
-				  sp.previousPollingInterval, piv);
-
-		  for(SFLPoller *pl = sp.sFlow->agent->pollers; pl; pl = pl->nxt) {
+				  sp->previousPollingInterval, piv);
+		  
+		  for(SFLPoller *pl = sp->sFlow->agent->pollers; pl; pl = pl->nxt) {
 		    sfl_poller_set_sFlowCpInterval(pl, piv);
 		  }
-		  sp.previousPollingInterval = piv;
+		  sp->previousPollingInterval = piv;
 		}
-
+		
 		// send a tick to the sFlow agent
-		sfl_agent_tick(sp.sFlow->agent, clk);
+		sfl_agent_tick(sp->sFlow->agent, clk);
 		// and a tick for myself too
-		tick(&sp, clk);
+		tick(sp, clk);
 	      }
 	    } // semaphore
-
+	    
 	    clk++;
 	  }
 	}
       case HSPSTATE_END:
 	break;
       }
-
+      
       // set the timeout so that if all is quiet we will
       // still loop around and check for ticks/signals
       // several times per second
       my_usleep(200000);
     }
 
-    // get here if terminated by a signal
+    // get here if a signal kicks the state to HSPSTATE_END
+    // and we break out of the loop above.
+    // If that doesn't happen the most likely explanation
+    // is a bug that caused the semaphore to be acquired
+    // and not released,  but that would only happen if the
+    // DNSSD thread died or hung up inside the critical block.
     closelog();
     myLog(LOG_INFO,"stopped");
-    if(debug == 0) remove(sp.pidFile);
-
+    if(debug == 0) remove(sp->pidFile);
+    
 #ifdef HSF_XEN
-    if(sp.xc_handle && sp.xc_handle != -1) {
-      xc_interface_close(sp.xc_handle);
-      sp.xc_handle = 0;
+    if(sp->xc_handle && sp->xc_handle != -1) {
+      xc_interface_close(sp->xc_handle);
+      sp->xc_handle = 0;
     }
-    if(sp.xs_handle) {
-      xs_daemon_close(sp.xs_handle);
-      sp.xs_handle = NULL;
+    if(sp->xs_handle) {
+      xs_daemon_close(sp->xs_handle);
+      sp->xs_handle = NULL;
     }
 #endif
-
     exit(exitStatus);
   } /* main() */
 
