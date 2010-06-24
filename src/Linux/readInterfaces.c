@@ -39,9 +39,9 @@ void freeAdaptors(HSP *sp)
 void newAdaptorList(HSP *sp)
 {
   freeAdaptors(sp);
-  sp->adaptorList = (SFLAdaptorList *)malloc(sizeof(SFLAdaptorList));
+  sp->adaptorList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
   sp->adaptorList->capacity = 4; // will grow if necessary
-  sp->adaptorList->adaptors = (SFLAdaptor **)malloc(sp->adaptorList->capacity * sizeof(SFLAdaptor *));
+  sp->adaptorList->adaptors = (SFLAdaptor **)my_calloc(sp->adaptorList->capacity * sizeof(SFLAdaptor *));
   sp->adaptorList->num_adaptors = 0;
 }
 
@@ -135,7 +135,7 @@ int readInterfaces(HSP *sp)
 		// for now just assume that each interface has only one MAC.  It's not clear how we can
 		// learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
 		// create a new "adaptor" entry
-		SFLAdaptor *adaptor = (SFLAdaptor *)calloc(1, sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
+		SFLAdaptor *adaptor = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
 		memcpy(adaptor->macs[0].mac, &ifr.ifr_hwaddr.sa_data, 6);
 		adaptor->num_macs = 1;
 		adaptor->deviceName = strdup(devName);
@@ -181,8 +181,8 @@ int readInterfaces(HSP *sp)
 		if(++sp->adaptorList->num_adaptors == sp->adaptorList->capacity)  {
 		  // grow
 		  sp->adaptorList->capacity *= 2;
-		  sp->adaptorList->adaptors = (SFLAdaptor **)realloc(sp->adaptorList->adaptors,
-								     sp->adaptorList->capacity * sizeof(SFLAdaptor *));
+		  sp->adaptorList->adaptors = (SFLAdaptor **)my_realloc(sp->adaptorList->adaptors,
+									sp->adaptorList->capacity * sizeof(SFLAdaptor *));
 		}
 	      }
 	    }

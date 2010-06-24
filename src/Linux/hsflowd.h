@@ -29,10 +29,11 @@ extern "C" {
 #include <sys/types.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h> // for PRIu64 etc.
-#include "sys/mman.h" // for mlockall
-#include "pwd.h" // for drop_privileges
-#include "grp.h" // for drop_privileges
-
+#include "sys/mman.h" // for mlockall()
+#include "pwd.h" // for getpwnam()
+#include "grp.h"
+#include "sys/resource.h" // for setrlimit()
+#include "malloc.h" // for malloc_stats()
 #include "sflow_api.h"
 
 #ifdef HSF_XEN
@@ -54,6 +55,11 @@ extern "C" {
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
 #define HSP_DEFAULT_DNSSD_MINDELAY 10
 #define HSP_MAX_SUBAGENTID 1000000
+
+// the limit we will request before calling mlockall()
+// calling res_search() seems to allocate about 11MB
+// (not sure why), so set the limit accordingly.
+#define HSP_RLIMIT_MEMLOCK (1024 * 1024 * 15)
 
   // only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
@@ -95,7 +101,20 @@ extern "C" {
     SFLAddress agentIP;
   } HSPSFlow; 
 
-  typedef enum { HSPSTATE_READCONFIG=0, HSPSTATE_WAITCONFIG, HSPSTATE_RUN, HSPSTATE_END } EnumHSPState;
+  typedef enum { HSPSTATE_READCONFIG=0,
+		 HSPSTATE_WAITCONFIG,
+		 HSPSTATE_RUN,
+		 HSPSTATE_END
+  } EnumHSPState;
+
+#ifdef HSFLOWD_MAIN
+  static const char *HSPStateNames[] = {
+    "READCONFIG",
+    "WAITCONFIG",
+    "RUN",
+    "END"
+  };
+#endif
 
   typedef struct _HSP {
     EnumHSPState state;
@@ -154,7 +173,11 @@ typedef struct _HSPVMState {
   
   // logger
   void myLog(int syslogType, char *fmt, ...);
-  
+
+  // allocation
+  void *my_calloc(size_t bytes);
+  void *my_realloc(void *ptr, size_t bytes);
+
   // read functions
   int readInterfaces(HSP *sp);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
