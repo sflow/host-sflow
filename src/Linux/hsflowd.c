@@ -885,8 +885,37 @@ extern "C" {
     }  
     return NULL;
   }
+      
+  /*_________________---------------------------__________________
+    _________________         drop_privileges   __________________
+    -----------------___________________________------------------
+  */
 
-
+  static void drop_privileges() {
+    if(getuid() == 0) {
+      // set the real and effective group-id to 'nobody'
+      struct passwd *nobody = getpwnam("nobody");
+      if(nobody == NULL) {
+	myLog(LOG_ERR, "drop_privileges: user 'nobody' not found");
+	exit(EXIT_FAILURE);
+      }
+      if(setgid(nobody->pw_gid) != 0) {
+	myLog(LOG_ERR, "drop_privileges: setgid(%d) failed : %s", nobody->pw_gid, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      /*       if(initgroups("nobody", nobody->pw_gid) != 0) { */
+      /* 	myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno)); */
+      /* 	exit(EXIT_FAILURE); */
+      /*       } */
+      /*       endpwent(); */
+      /*       endgrent(); */
+      if(setuid(nobody->pw_uid) != 0) {
+	myLog(LOG_ERR, "drop_privileges: setuid(%d) failed : %s", nobody->pw_uid, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+    }
+  }
+      
   /*_________________---------------------------__________________
     _________________         main              __________________
     -----------------___________________________------------------
@@ -895,7 +924,7 @@ extern "C" {
   int main(int argc, char *argv[])
   {
     HSP *sp = &HSPSamplingProbe;
-    
+
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
     setlogmask(LOG_UPTO(LOG_DEBUG));
@@ -944,6 +973,11 @@ extern "C" {
 	
 	// in child
 	umask(0);
+    
+	// don't need to be root any more - we held on to root privileges
+	// to make sure we could write the pid file,  but from now on we
+	// don't want the responsibility...
+	drop_privileges();
 	
 	pid_t sid = setsid();
 	if(sid < 0) {
@@ -1017,6 +1051,7 @@ extern "C" {
 	break;
 	
       case HSPSTATE_WAITCONFIG:
+
 	SEMLOCK_DO(sp->config_mut) {
 	  if(sp->sFlow->sFlowSettings) {
 	    // we have a config - proceed
@@ -1093,7 +1128,6 @@ extern "C" {
     // DNSSD thread died or hung up inside the critical block.
     closelog();
     myLog(LOG_INFO,"stopped");
-    if(debug == 0) remove(sp->pidFile);
     
 #ifdef HSF_XEN
     if(sp->xc_handle && sp->xc_handle != -1) {
@@ -1105,6 +1139,13 @@ extern "C" {
       sp->xs_handle = NULL;
     }
 #endif
+
+    if(debug == 0) {
+      // shouldn't need to be root again to remove the pidFile
+      // (i.e. we should still have execute permission on /var/run)
+      remove(sp->pidFile);
+    }
+
     exit(exitStatus);
   } /* main() */
 

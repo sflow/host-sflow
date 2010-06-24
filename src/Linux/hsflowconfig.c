@@ -394,7 +394,7 @@ extern int debug;
   {
     FILE *cfg = NULL;
     if((cfg = fopen(sp->configFile, "r")) == NULL) {
-      myLog(LOG_ERR,"cannot open config file %s : %s", sp->pidFile, strerror(errno));
+      myLog(LOG_ERR,"cannot open config file %s : %s", sp->configFile, strerror(errno));
       return NO;
     }
 

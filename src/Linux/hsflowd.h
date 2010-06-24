@@ -30,6 +30,8 @@ extern "C" {
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h> // for PRIu64 etc.
 #include "sys/mman.h" // for mlockall
+#include "pwd.h" // for drop_privileges
+#include "grp.h" // for drop_privileges
 
 #include "sflow_api.h"
 
