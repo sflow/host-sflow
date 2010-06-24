@@ -7,9 +7,11 @@
 extern "C" {
 #endif
 
+#define HSFLOWD_MAIN
+
 #include "hsflowd.h"
 
-  // global - easier for signal handler
+  // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
   int debug = 0;
@@ -31,13 +33,40 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________       my_calloc             __________________
+    -----------------___________________________------------------
+  */
+  
+  void *my_calloc(size_t bytes)
+  {
+    void *mem = calloc(1, bytes);
+    if(mem == NULL) {
+      myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
+      if(debug) malloc_stats();
+      exit(EXIT_FAILURE);
+    }
+    return mem;
+  }
+  
+  void *my_realloc(void *ptr, size_t bytes)
+  {
+    void *mem = realloc(ptr, bytes);
+    if(mem == NULL) {
+      myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
+      if(debug) malloc_stats();
+      exit(EXIT_FAILURE);
+    }
+    return mem;
+  }
+
+  /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
     -----------------___________________________------------------
   */
-
+  
   static void *agentCB_alloc(void *magic, SFLAgent *agent, size_t bytes)
   {
-    return calloc(1, bytes);
+    return my_calloc(bytes);
   }
 
   static int agentCB_free(void *magic, SFLAgent *agent, void *obj)
@@ -498,7 +527,7 @@ extern "C" {
 		  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
 		  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
 		  // hang my HSPVMState object on the datasource userData hook
-		  HSPVMState *state = (HSPVMState *)calloc(1, sizeof(HSPVMState));
+		  HSPVMState *state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
 		  state->network_count = 0;
 		  state->marked = NO;
 		  vpoller->userData = state;
@@ -617,7 +646,7 @@ extern "C" {
     }
 
     time_t now = time(NULL);
-    sf->agent = (SFLAgent *)calloc(1, sizeof(SFLAgent));
+    sf->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
     sfl_agent_init(sf->agent,
 		   &sf->agentIP,
 		   sf->subAgentId,
@@ -723,6 +752,16 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     setState              __________________
+    -----------------___________________________------------------
+  */
+
+  static void setState(HSP *sp, EnumHSPState state) {
+    if(debug) myLog(LOG_INFO, "state -> %s", HSPStateNames[state]);
+    sp->state = state;
+  }
+
+  /*_________________---------------------------__________________
     _________________     signal_handler        __________________
     -----------------___________________________------------------
   */
@@ -732,17 +771,22 @@ extern "C" {
     switch(sig) {
     case SIGTERM:
       myLog(LOG_INFO,"Received SIGTERM");
-      sp->state = HSPSTATE_END;
+      setState(sp, HSPSTATE_END);
       break;
     case SIGINT:
       myLog(LOG_INFO,"Received SIGINT");
-      sp->state = HSPSTATE_END;
+      setState(sp, HSPSTATE_END);
       break;
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
       break;
     }
   }
+
+  /*_________________---------------------------__________________
+    _________________     my_usleep             __________________
+    -----------------___________________________------------------
+  */
   
   void my_usleep(uint32_t microseconds) {
     struct timeval timeout;
@@ -891,8 +935,49 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void drop_privileges() {
+  static void drop_privileges(int requestMemLockBytes) {
     if(getuid() == 0) {
+
+      if(requestMemLockBytes) {
+	// Request to lock this process in memory so that we don't get
+	// swapped out. It's probably less than 100KB,  and this way
+	// we don't consume extra resources swapping in and out
+	// every 20 seconds.  The default limit is just 32K on most
+	// systems,  so for this to be useful we have to increase it
+	// somewhat first.
+	struct rlimit rlim = {0};
+#ifdef RLIMIT_MEMLOCK
+	rlim.rlim_cur = rlim.rlim_max = requestMemLockBytes;
+	if(setrlimit(RLIMIT_MEMLOCK, &rlim) != 0) {
+	  myLog(LOG_ERR, "setrlimit(RLIMIT_MEMLOCK, %d) failed : %s", requestMemLockBytes, strerror(errno));
+	}
+#endif
+	// Because we are dropping privileges we can get away with
+	// using the MLC_FUTURE option to mlockall without fear.  We
+	// won't be allowed to lock more than the limit we just set
+	// above.
+	if(mlockall(MCL_FUTURE) == -1) {
+	  myLog(LOG_ERR, "mlockall(MCL_FUTURE) failed : %s", strerror(errno));
+	}
+
+	// We can also use this as an upper limit on the data segment so that we fail
+	// if there is a memory leak,  rather than grow forever and cause problems.
+#ifdef RLIMIT_DATA
+	rlim.rlim_cur = rlim.rlim_max = requestMemLockBytes;
+	if(setrlimit(RLIMIT_DATA, &rlim) != 0) {
+	  myLog(LOG_ERR, "setrlimit(RLIMIT_DATA, %d) failed : %s", requestMemLockBytes, strerror(errno));
+	}
+#endif
+
+	// consider overriding other limits to make sure we fail quickly if anything is wrong
+	// RLIMIT_STACK
+	// RLIMIT_CORE
+	// RLIMIT_RSS
+	// RLIMIT_NOFILE
+	// RLIMIT_AS
+	// RLIMIT_LOCKS
+      }
+      
       // set the real and effective group-id to 'nobody'
       struct passwd *nobody = getpwnam("nobody");
       if(nobody == NULL) {
@@ -970,15 +1055,10 @@ extern "C" {
 	exit(EXIT_SUCCESS);
       }
       else {
-	
 	// in child
 	umask(0);
-    
-	// don't need to be root any more - we held on to root privileges
-	// to make sure we could write the pid file,  but from now on we
-	// don't want the responsibility...
-	drop_privileges();
-	
+
+	// new session - with me as process group leader
 	pid_t sid = setsid();
 	if(sid < 0) {
 	  myLog(LOG_ERR,"setsid failed");
@@ -994,6 +1074,11 @@ extern "C" {
 	dup(i);                       // stderr
       }
     }
+    
+    // don't need to be root any more - we held on to root privileges
+    // to make sure we could write the pid file,  but from now on we
+    // don't want the responsibility...
+    drop_privileges(HSP_RLIMIT_MEMLOCK);
 
     myLog(LOG_INFO, "started");
     
@@ -1001,10 +1086,10 @@ extern "C" {
     time_t clk = time(NULL);
 
     // semaphore to protect config shared with DNSSD thread
-    sp->config_mut = (pthread_mutex_t *)calloc(1, sizeof(pthread_mutex_t));
+    sp->config_mut = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(sp->config_mut, NULL);
     
-    sp->state = HSPSTATE_READCONFIG;
+    setState(sp, HSPSTATE_READCONFIG);
 
     while(sp->state != HSPSTATE_END) {
       
@@ -1012,7 +1097,6 @@ extern "C" {
 	
       case HSPSTATE_READCONFIG:
 	{
-	  
 	  if(readInterfaces(sp)
 	     && HSPReadConfigFile(sp)) {
 	    
@@ -1030,7 +1114,7 @@ extern "C" {
 	      // the sFlowSettings,  and the current thread will loop
 	      // in the HSPSTATE_WAITCONFIG state until that pointer
 	      // has been set (sp->sFlow.sFlowSettings)
-	      sp->DNSSD_thread = calloc(1, sizeof(pthread_t));
+	      sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
 	      if(pthread_create(sp->DNSSD_thread, NULL, runDNSSD, sp) != 0) {
 		myLog(LOG_ERR, "pthread_create() failed\n");
 		exit(EXIT_FAILURE);
@@ -1040,34 +1124,31 @@ extern "C" {
 	      // just use the config from the file
 	      sp->sFlow->sFlowSettings = sp->sFlow->sFlowSettings_file;
 	    }
-	    sp->state = HSPSTATE_WAITCONFIG;
+	    setState(sp, HSPSTATE_WAITCONFIG);
 	  }
 	  else{
 	    exitStatus = EXIT_FAILURE;
-	    sp->state = HSPSTATE_END;
+	    setState(sp, HSPSTATE_END);
 	  }
 	  
 	}
 	break;
 	
       case HSPSTATE_WAITCONFIG:
-
 	SEMLOCK_DO(sp->config_mut) {
 	  if(sp->sFlow->sFlowSettings) {
 	    // we have a config - proceed
 	    if(initAgent(sp)) {
-	      // Try to lock this process in memory so that we don't get
-	      // swapped out. It's probably less than 100KB,  and this way
-	      // we don't consume extra resources swapping in and out
-	      // every 20 seconds.
-	      if(mlockall(MCL_CURRENT) == -1) {
-		myLog(LOG_ERR, "mlockall(MCL_CURRENT) failed : %s", strerror(errno));
+	      if(debug) {
+		if(debug) myLog(LOG_INFO, "initAgent suceeded");
+		// print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
+		malloc_stats();
 	      }
-	      sp->state = HSPSTATE_RUN;
+	      setState(sp, HSPSTATE_RUN);
 	    }
 	    else {
 	      exitStatus = EXIT_FAILURE;
-	      sp->state = HSPSTATE_END;
+	      setState(sp, HSPSTATE_END);
 	    }
 	  }
 	}
@@ -1083,6 +1164,10 @@ extern "C" {
 	    clk = test_clk - 1;
 	  }
 	  while(clk < test_clk) {
+
+	    // this would be a good place to test the memory footprint and
+	    // bail out if it looks like we are leaking memory(?)
+
 	    SEMLOCK_DO(sp->config_mut) {
 	      // was the config turned off?
 	      if(sp->sFlow->sFlowSettings) {
