@@ -62,7 +62,7 @@ hsflowd: $(OBJS)
 install: hsflowd
 	install -m 700 hsflowd $(BINDIR)
 	if [ ! -e $(INITSDIR)/hsflowd ]; then install -m 700 scripts/hsflowd $(INITDIR); fi
-	if [ ! -e $(CONFDIR)/hsflowd.conf ]; then install -m 700 scripts/hsflowd.conf $(CONFDIR); fi
+	if [ ! -e $(CONFDIR)/hsflowd.conf ]; then install -m 644 scripts/hsflowd.conf $(CONFDIR); fi
 
 # the chkconfig command may not be available in your VM, but all it does it to put the
 # necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
