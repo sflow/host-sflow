@@ -40,7 +40,7 @@ extern "C" {
 	  // assume the format is:
 	  // Inter-|   Receive                                                |  Transmit
 	  //  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
-	  if(sscanf(line, "%*s %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+	  if(sscanf(line, "%*[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
 		    &bytes_in,
 		    &pkts_in,
 		    &errs_in,
