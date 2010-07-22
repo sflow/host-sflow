@@ -141,15 +141,15 @@ extern int debug;
 	  }
 	  else {
 	    // fqdn[ans_len] = '\0';
-	    myLog(LOG_INFO, "answer %d is <%s>:<%u> (wgt=%d; pri=%d; ttl=%d; ans_len=%d; res_len=%d)",
-		  entry,
-		  fqdn,
-		  res_prt,
-		  res_wgt,
-		  res_pri,
-		  res_ttl,
-		  ans_len,
-		  res_len);
+	    if(debug) myLog(LOG_INFO, "answer %d is <%s>:<%u> (wgt=%d; pri=%d; ttl=%d; ans_len=%d; res_len=%d)",
+			    entry,
+			    fqdn,
+			    res_prt,
+			    res_wgt,
+			    res_pri,
+			    res_ttl,
+			    ans_len,
+			    res_len);
 	    if(callback) {
 	      char fqdn_port[PACKETSZ];
 	      sprintf(fqdn_port, "%s/%u", fqdn, res_prt);
