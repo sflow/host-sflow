@@ -27,6 +27,19 @@ ifeq ($(CONFDIR),)
 	CONFDIR=/etc
 endif
 
+INSTALL=install
+
+# INSTROOT may be passed in, e.g. RPM_BUILD_ROOT
+ifeq ($(INSTROOT),)
+	BIN_D=$(BINDIR)
+	INIT_D=$(INITDIR)
+	CONF_D=$(CONFDIR)
+else
+	BIN_D=$(INSTROOT)/$(BINDIR)
+	INIT_D=$(INSTROOT)/$(INITDIR)
+	CONF_D=$(INSTROOT)/$(CONFDIR)
+endif
+
 HEADERS= hsflowd.h hsflowtokens.h Makefile
 
 SFLOWDIR=../sflow
@@ -60,9 +73,10 @@ hsflowd: $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
 
 install: hsflowd
-	install -m 700 hsflowd $(BINDIR)
-	if [ ! -e $(INITSDIR)/hsflowd ]; then install -m 700 scripts/hsflowd $(INITDIR); fi
-	if [ ! -e $(CONFDIR)/hsflowd.conf ]; then install -m 644 scripts/hsflowd.conf $(CONFDIR); fi
+	$(INSTALL) -d $(BIN_D)
+	$(INSTALL) -m 700 hsflowd $(BIN_D)
+	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 700 scripts/hsflowd $(INIT_D); fi
+	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
 
 # the chkconfig command may not be available in your VM, but all it does it to put the
 # necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon

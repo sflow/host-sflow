@@ -1,11 +1,12 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 0.98
+Version: 0.99
 Release: 1
 License: http://host-sflow.sourceforge.net/license.html
 Group: Applications/Internet
 URL: http://host-sflow.sourceforge.net
 Source0: %{name}-%{version}.tar.gz
+BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 Requires(post): chkconfig
 
 %description
@@ -21,9 +22,11 @@ the network.
 make
 
 %install
-make install
+rm -rf %{buildroot}
+make INSTROOT=%{buildroot} install
 
 %clean
+rm -rf %{buildroot}
 make clean
 
 
@@ -44,8 +47,10 @@ if [ $1 = 0 ]; then
 fi
 
 %changelog
+* Thu Jul 22 2010 root <root@chow.sf.inmon.com>
+- use BuildRoot
 * Fri Jul 09 2010 root <root@chow.sf.inmon.com>
 - added post and preun,  and require chkconfig
-* Thu Feb 11 2010 root <root@chow.sf.inmon.com> - 
+* Thu Feb 11 2010 root <root@chow.sf.inmon.com> 
 - Initial build.
 
