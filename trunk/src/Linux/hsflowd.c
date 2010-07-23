@@ -131,9 +131,50 @@ extern "C" {
   }
 
 #ifdef HSF_XEN
+  static void openXenHandles(HSP *sp)
+  {
+    // need to do this while we still have root privileges
+    if(sp->xc_handle == 0) {
+      sp->xc_handle = xc_interface_open();
+      if(sp->xc_handle <= 0) {
+        myLog(LOG_ERR, "xc_interface_open() failed : %s", strerror(errno));
+      }
+      else {
+        sp->xs_handle = xs_daemon_open_readonly();
+        if(sp->xs_handle == NULL) {
+          myLog(LOG_ERR, "xs_daemon_open_readonly() failed : %s", strerror(errno));
+        }
+        // get the page size [ref xenstat.c]
+#if defined(PAGESIZE)
+        sp->page_size = PAGESIZE;
+#elif defined(PAGE_SIZE)
+        sp->page_size = PAGE_SIZE;
+#else
+        sp->page_size = sysconf(_SC_PAGE_SIZE);
+        if(pgsiz < 0) {
+          myLog(LOG_ERR, "Failed to retrieve page size : %s", strerror(errno));
+          abort();
+        }
+#endif
+      }
+    }
+  }
+
   // if sp->xs_handle is not NULL then we know that sp->xc_handle is good too
   // because of the way we opened the handles in the first place.
   static int xenHandlesOK(HSP *sp) { return (sp->xs_handle != NULL); }
+
+  static void closeXenHandles(HSP *sp)
+  {
+    if(sp->xc_handle && sp->xc_handle != -1) {
+      xc_interface_close(sp->xc_handle);
+      sp->xc_handle = 0;
+    }
+    if(sp->xs_handle) {
+      xs_daemon_close(sp->xs_handle);
+      sp->xs_handle = NULL;
+    }
+  }
 
   static int readVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode)
   {
@@ -594,33 +635,6 @@ extern "C" {
   {
     if(debug) myLog(LOG_INFO,"creating sfl agent");
 
-#ifdef HSF_XEN
-    if(sp->xc_handle == 0) {
-      sp->xc_handle = xc_interface_open();
-      if(sp->xc_handle <= 0) {
-	myLog(LOG_ERR, "xc_interface_open() failed : %s", strerror(errno));
-      }
-      else {
-	sp->xs_handle = xs_daemon_open_readonly();
-	if(sp->xs_handle == NULL) {
-	  myLog(LOG_ERR, "xs_daemon_open_readonly() failed : %s", strerror(errno));
-	}
-	// get the page size [ref xenstat.c]
-#if defined(PAGESIZE)
-	sp->page_size = PAGESIZE;
-#elif defined(PAGE_SIZE)
-	sp->page_size = PAGE_SIZE;
-#else
-	sp->page_size = sysconf(_SC_PAGE_SIZE);
-	if(pgsiz < 0) {
-	  myLog(LOG_ERR, "Failed to retrieve page size : %s", strerror(errno));
-	  abort();
-	}
-#endif
-      }
-    }
-#endif
-
     HSPSFlow *sf = sp->sFlow;
     
     if(sf->sFlowSettings == NULL) {
@@ -1075,9 +1089,14 @@ extern "C" {
       }
     }
     
+#ifdef HSF_XEN
+    // open Xen handles while we still have root privileges
+    openXenHandles(sp);
+#endif
+
     // don't need to be root any more - we held on to root privileges
-    // to make sure we could write the pid file,  but from now on we
-    // don't want the responsibility...
+    // to make sure we could write the pid file (and possibly open the
+    // Xen handles,  but from now on we don't want the responsibility...
     drop_privileges(HSP_RLIMIT_MEMLOCK);
 
     myLog(LOG_INFO, "started");
@@ -1215,14 +1234,7 @@ extern "C" {
     myLog(LOG_INFO,"stopped");
     
 #ifdef HSF_XEN
-    if(sp->xc_handle && sp->xc_handle != -1) {
-      xc_interface_close(sp->xc_handle);
-      sp->xc_handle = 0;
-    }
-    if(sp->xs_handle) {
-      xs_daemon_close(sp->xs_handle);
-      sp->xs_handle = NULL;
-    }
+    closeXenHandles(sp);
 #endif
 
     if(debug == 0) {
