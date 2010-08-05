@@ -682,9 +682,9 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_HOST_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_dsk)*/;  break;
     case SFLCOUNTERS_HOST_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_nio)*/;  break;
     case SFLCOUNTERS_HOST_VRT_NODE: elemSiz = 28 /*sizeof(elem->counterBlock.host_vrt_node)*/;  break;
-    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 12 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
     case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_mem)*/;  break;
-    case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 48 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
+    case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
     case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_vrt_nio)*/;  break;
     default:
       {
@@ -872,7 +872,7 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       break;
     case SFLCOUNTERS_HOST_VRT_CPU:
       putNet32(receiver, elem->counterBlock.host_vrt_cpu.state);
-      putNet64(receiver, elem->counterBlock.host_vrt_cpu.cpuTime);
+      putNet32(receiver, elem->counterBlock.host_vrt_cpu.cpuTime);
       putNet32(receiver, elem->counterBlock.host_vrt_cpu.nrVirtCpu);
       break;
     case SFLCOUNTERS_HOST_VRT_MEM:
@@ -887,6 +887,7 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet64(receiver, elem->counterBlock.host_vrt_dsk.rd_bytes);
       putNet32(receiver, elem->counterBlock.host_vrt_dsk.wr_req);
       putNet64(receiver, elem->counterBlock.host_vrt_dsk.wr_bytes);
+      putNet32(receiver, elem->counterBlock.host_vrt_dsk.errs);
       break;
     case SFLCOUNTERS_HOST_VRT_NIO:
       putNet64(receiver, elem->counterBlock.host_vrt_nio.bytes_in);
