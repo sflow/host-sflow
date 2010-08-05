@@ -659,7 +659,7 @@ enum SFLVirDomainState {
 
 typedef struct _SFLHost_vrt_cpu_counters {
    uint32_t state;       /* SFLVirDomainState */
-   uint64_t cpuTime;     /* the CPU time used in nanoseconds */
+   uint32_t cpuTime;     /* the CPU time used in mS */
    uint32_t nrVirtCpu;   /* number of virtual CPUs for the domain */
 } SFLHost_vrt_cpu_counters;
 
@@ -682,6 +682,7 @@ typedef struct _SFLHost_vrt_dsk_counters {
    uint64_t rd_bytes;   /* number of read bytes */
    uint32_t wr_req;     /* number of write requests */
    uint64_t wr_bytes;   /* number of  written bytes */
+   uint32_t errs;       /* read/write errors */
 } SFLHost_vrt_dsk_counters;
 
 /* Virtual Domain Network statistics */

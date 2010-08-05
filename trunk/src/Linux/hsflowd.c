@@ -357,6 +357,7 @@ extern "C" {
 	  dsk->rd_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_sect") * HSP_SECTOR_BYTES);
 	  dsk->wr_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_req");
 	  dsk->wr_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_sect") * HSP_SECTOR_BYTES);
+	  dsk->errs += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "oo_req");
 	}
       }
     }
@@ -477,7 +478,7 @@ extern "C" {
       // XEN_DOMINF_hvm_guest  : as opposed to a PV guest
       // XEN_DOMINF_debugged   :
 
-      cpuElem.counterBlock.host_vrt_cpu.cpuTime = vcpu_ns;
+      cpuElem.counterBlock.host_vrt_cpu.cpuTime = (vcpu_ns / 1000000);
       cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domaininfo.max_vcpu_id + 1;
       SFLADD_ELEMENT(cs, &cpuElem);
 
