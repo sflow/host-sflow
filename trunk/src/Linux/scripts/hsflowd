@@ -36,18 +36,23 @@ inm_pid() {
     fi
 }
 
+# A function to test the form of a UUID string
+is_uuid() {
+    local UUID_REGEX;
+    UUID_REGEX='^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+    # newer bash supports the =~ operator but for backwards compatibility we use grep
+    echo $1 | egrep $UUID_REGEX >/dev/null;
+}
+
 # A function to try and find a UUID for this host
 inm_uuid() {
     local MYUUID;
-    local UUID_REGEX;
-
-    UUID_REGEX='^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
 
     if [ -x /usr/sbin/dmidecode ]; then
 	# from the BIOS
 	MYUUID=`/usr/sbin/dmidecode | awk -- '/UUID/{print $2}'`
-        if [[ $MYUUID =~ $UUID_REGEX ]]; then
-            echo "$MYUUID"
+        if is_uuid $MYUUID; then
+            echo $MYUUID
 	    return 0;
 	fi;
     fi
@@ -55,8 +60,8 @@ inm_uuid() {
     if [ -d /dev/disk/by-uuid ]; then
 	# first local disk
 	MYUUID=`ls /dev/disk/by-uuid | head -n 1`;
-        if [[ $MYUUID =~ $UUID_REGEX ]]; then
-	    echo "$MYUUID"
+        if is_uuid $MYUUID; then
+	    echo $MYUUID
 	    return 0;
 	fi;
     fi
@@ -64,8 +69,8 @@ inm_uuid() {
     if [ -x /sbin/blkid ]; then
 	# first local disk (via 'blkid')
         MYUUID=`blkid | awk -vRS=" " -vFS="=" -- '/UUID/{print $2}' | tr -d '"' | head -1`;
-        if [[ $MYUUID =~ $UUID_REGEX ]]; then
-            echo "$MYUUID"
+        if is_uuid $MYUUID; then
+            echo $MYUUID
 	    return 0;
 	fi;
     fi
