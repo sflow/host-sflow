@@ -945,7 +945,7 @@ static void sendSample(SFLReceiver *receiver)
   putAddress(receiver, &agent->myIP);
   putNet32(receiver, agent->subId);
   putNet32(receiver, ++receiver->sampleCollector.packetSeqNo);
-  putNet32(receiver,  ((agent->now - agent->bootTime) * 1000));
+  putNet32(receiver,  (uint32_t)((agent->now - agent->bootTime) * 1000));
   putNet32(receiver, receiver->sampleCollector.numSamples);
   
   /* send */
