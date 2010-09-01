@@ -4,11 +4,11 @@
 PROG=hsflowd
 VERSION=1.01
 RPM_SOURCES_DIR=/usr/src/redhat/SOURCES
-MY_SOURCES_DIR=$(RPM_SOURCES_DIR)/hsflowd-$(VERSION)
+MY_SOURCES_DIR=$(RPM_SOURCES_DIR)/$(PROG)-$(VERSION)
 
 PLATFORM=$(shell uname)
 
-all: hsflowd
+all: $(PROG)
 
 hsflowd:
 	cd src/sflow; $(MAKE)
@@ -27,5 +27,5 @@ schedule:
 rpm:
 	rm -rf $(MY_SOURCES_DIR)
 	cp -r . $(MY_SOURCES_DIR)
-	tar cz -C $(RPM_SOURCES_DIR) -f $(MY_SOURCES_DIR).tar.gz hsflowd-$(VERSION)
-	rpmbuild -ba hsflowd.spec
+	tar cz -C $(RPM_SOURCES_DIR) -f $(MY_SOURCES_DIR).tar.gz $(PROG)-$(VERSION)
+	rpmbuild -ba $(PROG).spec

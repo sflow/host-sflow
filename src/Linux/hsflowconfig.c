@@ -318,6 +318,7 @@ extern int debug;
 
   HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)calloc(1, sizeof(HSPSFlowSettings));
+    st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     return st;
   }
@@ -395,7 +396,7 @@ extern int debug;
     FILE *cfg = NULL;
     if((cfg = fopen(sp->configFile, "r")) == NULL) {
       myLog(LOG_ERR,"cannot open config file %s : %s", sp->configFile, strerror(errno));
-      return NO;
+      return NULL;
     }
 
     // collect the tokens in a (reversed) list
@@ -471,8 +472,11 @@ extern int debug;
 	  newCollector(sp->sFlow->sFlowSettings_file);
 	  level[++depth] = HSPOBJ_COLLECTOR;
 	  break;
+	case HSPTOKEN_PACKETSAMPLINGRATE:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
+	  break;
 	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 1, 300)) == NULL) return NO;
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
 	  break;
 	case HSPTOKEN_AGENTIP:
 	  if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;

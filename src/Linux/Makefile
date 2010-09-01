@@ -1,17 +1,23 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
-# specify XEN_ROOT path to compile with xen-sources
+# if XEN_DDK is not set, then assume it should be "yes"
+# if we are on a Xenserver DDK (or equivalent) system.
+# Just test if the xenstore and xenctrl libs are present.
+ifeq ($(XEN_DDK),)
+	XEN_DDK=$(shell if ls /usr/lib/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib/libxenstore.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+endif
+
+# specify XEN_ROOT path to compile with xen-sources instead
 # e.g. XEN_ROOT=/root/xen-3.2.0
 ifeq ($(XEN_ROOT),)
 else
+	XEN_DDK=no
 	include $(XEN_ROOT)/tools/Rules.mk
 	CFLAGS+= -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
 	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
 endif
 
-# alternatively, if compiling on the Citrix
-# XenServer DDK VM just set XEN_DDK=yes
 ifeq ($(XEN_DDK),yes)
 	CFLAGS+= -DHSF_XEN
 	LIBS+= -lxenstore -lxenctrl
@@ -40,7 +46,7 @@ else
 	CONF_D=$(INSTROOT)/$(CONFDIR)
 endif
 
-HEADERS= hsflowd.h hsflowtokens.h Makefile
+HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 
 SFLOWDIR=../sflow
 
@@ -62,36 +68,67 @@ HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
              hsflowd.o
 
-OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
+SFLOWOVS_OBJS=sflowovsd.o
 
 CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE
 LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
-all: hsflowd
+#### BUILD ####
 
-hsflowd: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
+all: hsflowd sflowovsd
 
-install: hsflowd
+hsflowd: $(HSFLOW_OBJS) $(READ_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(HSFLOW_OBJS) $(READ_OBJS) $(LIBS)
+
+sflowovsd: $(SFLOWOVS_OBJS)
+	$(CC) $(CFLAGS) -o $@ $(SFLOWOVS_OBJS) $(LIBS)
+
+#### INSTALL ####
+
+install: install-hsflowd install-sflowovsd
+
+install-hsflowd: hsflowd
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 700 scripts/hsflowd $(INIT_D); fi
 	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
 
+install-sflowovsd: sflowovsd
+	$(INSTALL) -d $(BIN_D)
+	$(INSTALL) -m 700 sflowovsd $(BIN_D)
+	if [ ! -e $(INIT_D)/sflowovsd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 700 scripts/sflowovsd $(INIT_D); fi
+
+#### SCHEDULE ####
+
 # the chkconfig command may not be available in your VM, but all it does it to put the
 # necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
 # at the required runlevels
-schedule:
+
+schedule: schedule-hsflowd schedule-sflowovsd
+
+schedule-hsflowd:
 	/sbin/chkconfig --add hsflowd
 	/sbin/chkconfig --list hsflowd
+
+schedule-sflowovsd:
+	/sbin/chkconfig --add sflowovsd
+	/sbin/chkconfig --list sflowovsd
+
+#### CLEAN ####
+
+clean: clean-hsflowd clean-sflowovsd
+
+clean-hsflowd:
+	rm -f $(HSFLOW_OBJS) $(READ_OBJS) hsflowd
+
+clean-sflowovsd:
+	rm -f $(SFLOWOVS_OBJS) sflowovsd
+
+#### dependencies ####
 
 .c.o: $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c
 
-clean:
-	rm -f $(OBJS) hsflowd
-
-# dependencies
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
 dnsSD.o: dnsSD.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
@@ -101,4 +138,5 @@ readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
+sflowovsd.o: sflowovsd.c $(HEADERS)
 

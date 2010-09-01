@@ -9,11 +9,14 @@ Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 Requires(post): chkconfig
 
+%define OpenVSwitchControl /usr/bin/ovs-vsctl
+
 %description
-This program implements the host-sFlow standard - sending
+This program implements the host sFlow(R) standard - sending
 key performance metrics to an sFlow collector to enable
 highly-scalable monitoring of all critical resources in
-the network.
+the network. If Open VSwitch is present, will also control
+the Open VSwitch sFlow configuration.
 
 %prep
 %setup
@@ -33,24 +36,33 @@ make clean
 %files
 %defattr(-,root,root,-)
 /usr/local/sbin/hsflowd
+/usr/local/sbin/sflowovsd
 /etc/hsflowd.conf
 /etc/init.d/hsflowd
+/etc/init.d/sflowovsd
 %doc README LICENSE INSTALL.Linux
 
 %post
 /sbin/chkconfig --add hsflowd
+if [ -x %{OpenVSwitchControl} ]; then
+  /sbin/chkconfig --add sflowovsd;
+fi
 
 %preun
 if [ $1 = 0 ]; then
   /sbin/service hsflowd stop > /dev/null 2>&1
+  /sbin/service sflowovsd stop > /dev/null 2>&1
   /sbin/chkconfig --del hsflowd
+  /sbin/chkconfig --del sflowovsd
 fi
 
 %changelog
-* Thu Jul 22 2010 root <root@chow.sf.inmon.com>
+* Mon Aug 30 2010 nhm <nhm@noodle.sf.inmon.com>
+- add sflowovsd
+* Thu Jul 22 2010 nhm <nhm@chow.sf.inmon.com>
 - use BuildRoot
-* Fri Jul 09 2010 root <root@chow.sf.inmon.com>
+* Fri Jul 09 2010 nhm <nhm@chow.sf.inmon.com>
 - added post and preun,  and require chkconfig
-* Thu Feb 11 2010 root <root@chow.sf.inmon.com> 
+* Thu Feb 11 2010 nhm <nhm@chow.sf.inmon.com> 
 - Initial build.
 
