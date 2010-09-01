@@ -337,7 +337,8 @@ extern "C" {
     cfg->sampling_n = 0;
     cfg->polling_secs = 0;
     cfg->header_bytes = SFL_DEFAULT_HEADER_SIZE;
-    setStr(&cfg->agentIP, NULL);
+    setStr(&cfg->agent_ip, NULL);
+    setStr(&cfg->agent_dev, NULL);
     cfg->num_collectors = 0;
     strArrayReset(cfg->targets);
     setStr(&cfg->targetStr, NULL);
@@ -370,21 +371,21 @@ extern "C" {
 
   static int readConfig(SFVS *sv)
   {
-    resetConfig(&sv->config);
     
-    FILE *cfg = NULL;
-    if((cfg = fopen(sv->configFile, "r")) == NULL) {
-      myLog(LOG_ERR,"cannot open config file %s : %s", sv->configFile, strerror(errno));
-      return NO;
-    }
     // loop until we get the same revision number at the beginning and the end
+    int readAgain = NO;
     uint32_t rev_start = 0;
     uint32_t rev_end = 0;
     do {
+      readAgain = NO;
+      resetConfig(&sv->config);
+      FILE *cfg = NULL;
+      if((cfg = fopen(sv->configFile, "r")) == NULL) {
+	myLog(LOG_ERR,"cannot open config file %s : %s", sv->configFile, strerror(errno));
+	return NO;
+      }
       char line[SFVS_MAX_LINELEN];
       uint32_t lineNo = 0;
-      rev_start = 0;
-      rev_end = 0;
       while(fgets(line, SFVS_MAX_LINELEN, cfg)) {
 	lineNo++;
 	char *p = line;
@@ -436,7 +437,14 @@ extern "C" {
 	    // format with quotes
 	    char ipbuf[SFVS_MAX_LINELEN];
 	    sprintf(ipbuf, "\"%s\"", tok1);
-	    setStr(&sv->config.agentIP, ipbuf);
+	    setStr(&sv->config.agent_ip, ipbuf);
+	  }
+	  else if(strcasecmp(var, "agent") == 0
+		  && syntaxOK(sv, lineNo, tokc, 1, 1, "agent=<deviceName>")) {
+	    // format with quotes?
+	    char ipbuf[SFVS_MAX_LINELEN];
+	    sprintf(ipbuf, "\"%s\"", tok1);
+	    setStr(&sv->config.agent_dev, ipbuf);
 	  }
 	  else if(strcasecmp(var, "collector") == 0
 		  && syntaxOK(sv, lineNo, tokc, 1, 3, "collector=<IP address>[ <port>[ <priority>]]")) {
@@ -455,8 +463,18 @@ extern "C" {
 	  }
 	}
       }
-    } while(rev_start != rev_end);
-    fclose(cfg);
+      fclose(cfg);
+
+      if(rev_start && rev_end && rev_start != rev_end) {
+	if(debug) fprintf(stderr, "re-read config (rev_start != rev_end)\n");
+	readAgain = YES;
+	rev_start = 0;
+	rev_end = 0;
+	// take a nap so we can't busy-loop here
+	my_usleep(50000);
+      }
+
+    } while(readAgain);
     
     // turn the collectors list into the targets string
     formatTargets(sv);
@@ -467,8 +485,10 @@ extern "C" {
       syntaxError(sv, 0, "missing non-zero revision numbers rev_start, rev_end");
     }
 
-    if(!sv->config.agentIP) {
-      syntaxError(sv, 0, "missing agentIP=<IP address>|<IPv6 address>");
+    // for open vswitch we have to have the device name
+    if(!sv->config.agent_dev /* && !sv->config.agent_ip*/) {
+      //syntaxError(sv, 0, "missing agent=<deviceName> OR agentIP=<IP address>|<IPv6 address>");
+      syntaxError(sv, 0, "missing agent=<deviceName>");
     }
 
     return (!sv->config.error);
@@ -613,7 +633,7 @@ extern "C" {
 #endif
     addOvsArg(sv, "create");
     addOvsArg(sv, "sflow");
-    addOvsVarEqVal(sv, "agent", sv->config.agentIP);
+    addOvsVarEqVal(sv, "agent", sv->config.agent_dev);
     addOvsVarEqVal_int(sv, "header", sv->config.header_bytes);
     addOvsVarEqVal_int(sv, "polling", sv->config.polling_secs);
     addOvsVarEqVal_int(sv, "sampling", sv->config.sampling_n);
@@ -679,8 +699,8 @@ extern "C" {
       if(strcmp(var, "agent") == 0) {
 	char quoted[SFVS_MAX_LINELEN];
 	snprintf(quoted, SFVS_MAX_LINELEN, "\"%s\"", val);
-	if(strcmp(quoted, sv->config.agentIP) != 0) {
-	  addSFlowSetting(sv, "agent", sv->config.agentIP);
+	if(strcmp(quoted, sv->config.agent_dev) != 0) {
+	  addSFlowSetting(sv, "agent", sv->config.agent_dev);
 	}
       }
       else if(strcmp(var, "header") == 0) {

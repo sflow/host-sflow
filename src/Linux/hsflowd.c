@@ -638,6 +638,9 @@ extern "C" {
       fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
       char ipbuf[51];
       fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
+      if(sp->sFlow->agentDevice) {
+	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice->deviceName);
+      }
       for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
 	// <ip> <port> [<priority>]
 	fprintf(sp->f_out, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
