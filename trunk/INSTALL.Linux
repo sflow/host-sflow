@@ -3,27 +3,34 @@ http://host-sflow.sourceforge.net/license.html
 
 To compile and install, try this:
 
-% make
-% make install
+root> make
+root> make install
 
 Edit /etc/hsflowd.conf to set the collector IP.
 
 To start the daemon, run:
 
-% /etc/init.d/hsflowd start
+root> /etc/init.d/hsflowd start
 
 and check the syslog (e.g. /var/log/messages) for errors.
 
-To schedule the daemon to start automatically on a reboot, try:
+If Open VSwitch is running, starting sflowovsd will propagate
+sFlow configuration to the switch via ovs-vsctl(1):
+
+root> /etc/init.d/sflowovsd start
+
+To schedule these daemon(s) to start automatically on a reboot, try:
 
 % make schedule
 
 To run in the debugger, change the Makefile to compile with -g,
-recompile, and then run with the "-d" command line option:
+recompile, and then run with the "-d" command line option to
+prevent daemonization:
 
 % gdb hsflowd
 gdb> set args -d
 gdb> r
+
 
 Citrix XenServer
 ================
@@ -40,13 +47,14 @@ Copy that rpm to the XenServer dom0 host, and install it:
 
 [root@xenserver ~]# rpm -Uvh hsflowd-<VERSION>-1.<ARCH>.rpm
 
-Then schedule it to run automatically:
-
-[root@xenserver ~]# /sbin/chkconfig --level 345 hsflowd on
-
 Then start it:
 
 [root@xenserver ~]# /sbin/service hsflowd start
+
+If Open VSwitch is running, starting sflowovsd will propagate
+sFlow configuration to the switch via ovs-vsctl(1):
+
+[root@xenserver ~]# /sbin/service sflowovsd start
 
 Output will go to /var/log/messages.
 

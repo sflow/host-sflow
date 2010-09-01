@@ -49,6 +49,7 @@ extern "C" {
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
+#define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
 #define HSP_DEFAULT_SUBAGENTID 100
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
@@ -84,6 +85,7 @@ extern "C" {
   typedef struct _HSPSFlowSettings {
     HSPCollector *collectors;
     uint32_t numCollectors;
+    uint32_t samplingRate;
     uint32_t pollingInterval;
   } HSPSFlowSettings;
 
@@ -95,6 +97,7 @@ extern "C" {
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;
     HSPSFlowSettings *sFlowSettings;
+    uint32_t revisionNo;
 
     uint32_t subAgentId;
     SFLAdaptor *agentDevice;
@@ -120,6 +123,9 @@ extern "C" {
     EnumHSPState state;
     HSPSFlow *sFlow;
     char *configFile;
+    char *outputFile;
+    uint32_t outputRevisionNo;
+    FILE *f_out;
     char *pidFile;
     // Identity
     char uuid[16];
