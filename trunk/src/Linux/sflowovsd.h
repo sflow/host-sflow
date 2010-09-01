@@ -89,7 +89,8 @@ extern "C" {
     uint32_t sampling_n;
     uint32_t polling_secs;
     uint32_t header_bytes;
-    char *agentIP;
+    char *agent_ip;
+    char *agent_dev;
     uint32_t num_collectors;
     SFVSCollector collectors[SFVS_MAX_COLLECTORS];
     SFVSStringArray *targets;
