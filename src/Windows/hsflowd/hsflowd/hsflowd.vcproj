@@ -217,6 +217,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\Setup\remove.js"
+				>
+			</File>
+			<File
+				RelativePath="..\Setup\setup.js"
+				>
+			</File>
+			<File
 				RelativePath="..\..\..\sflow\sflow_agent.c"
 				>
 			</File>
