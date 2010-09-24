@@ -36,6 +36,8 @@ extern "C" {
 #include "malloc.h" // for malloc_stats()
 #include "sflow_api.h"
 
+#define HSF_XEN 1 // $$$
+
 #ifdef HSF_XEN
 #include "xs.h"
 #include "xenctrl.h"
@@ -45,11 +47,18 @@ extern "C" {
 #define YES 1
 #define NO 0
 
+#define ADD_TO_LIST(linkedlist, obj) \
+  do { \
+    obj->nxt = linkedlist; \
+    linkedlist = obj; \
+  } while(0)
+
 #define HSP_VERSION "1.0.0"
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
+#define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
 #define HSP_DEFAULT_SUBAGENTID 100
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
@@ -119,14 +128,33 @@ extern "C" {
   };
 #endif
 
+  // persistent state for mapping VM domIds to
+  // sFlow datasource indices
+#define HSP_MAX_VMSTORE_LINELEN 100
+#define HSP_VMSTORE_SEPARATORS " \t\r\n="
+  typedef struct _HSPVMStore {
+    struct _HSPVMStore *nxt;
+    char uuid[16];
+    uint32_t dsIndex;
+  } HSPVMStore;
+  
+
+// userData structure to store state for VM data-sources
+typedef struct _HSPVMState {
+  uint32_t network_count;
+  int32_t marked;
+  uint32_t vm_index;
+  uint32_t domId;
+} HSPVMState;
+
   typedef struct _HSP {
     EnumHSPState state;
     HSPSFlow *sFlow;
     char *configFile;
     char *outputFile;
+    char *pidFile;
     uint32_t outputRevisionNo;
     FILE *f_out;
-    char *pidFile;
     // Identity
     char uuid[16];
     // interfaces and MACs
@@ -143,6 +171,13 @@ extern "C" {
     uint32_t num_domains;
 #endif
 
+    // persistent state
+    uint32_t maxDsIndex;
+    char *vmStoreFile;
+    FILE *f_vmStore;
+    int vmStoreInvalid;
+    HSPVMStore *vmStore;
+
     // inter-thread communication
     pthread_mutex_t *config_mut;
     int DNSSD;
@@ -156,16 +191,10 @@ extern "C" {
     uint32_t DNSSD_ttl;
   } HSP;
 
-// userData structure to store state for VM data-sources
-typedef struct _HSPVMState {
-  uint32_t network_count;
-  int32_t marked;
-  uint32_t vm_index;
-} HSPVMState;
-
   // expose some config parser fns
   int HSPReadConfigFile(HSP *sp);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
+  int printUUID(const u_char *a, u_char *buf, int bufLen);
   int parseUUID(char *str, char *uuid);
   HSPSFlowSettings *newSFlowSettings(void);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
