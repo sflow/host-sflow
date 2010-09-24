@@ -54,12 +54,6 @@ extern int debug;
     HSPOBJ_COLLECTOR,
   } EnumHSPObject;
 
-
-#define ADD_TO_LIST(linkedlist, obj) \
-  do { \
-    obj->nxt = linkedlist; \
-    linkedlist = obj; \
-  } while(0)
     
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________
@@ -126,6 +120,51 @@ extern int debug;
     return (isdigit(c) ? (c)-'0': ((toupper(c))-'A')+10)  & 0xf;
   }
   
+
+  static u_char bin2hex(int nib)
+  {
+    return (nib < 10) ? ('0' + nib) : ('A' - 10 + nib);
+  }
+
+/*_________________---------------------------__________________
+  _________________   printHex, hexToBinary   __________________
+  -----------------___________________________------------------
+*/
+
+  static int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix)
+  {
+    int b = 0;
+    if(prefix) {
+      buf[b++] = '0';
+      buf[b++] = 'x';
+    }
+    for(int i = 0; i < len; i++) {
+      if(b > (bufLen - 2)) return 0; // must be room for 2 characters
+      u_char byte = a[i];
+      buf[b++] = bin2hex(byte >> 4);
+      buf[b++] = bin2hex(byte & 0x0f);
+    }
+    return b;
+  }
+  
+  int printUUID(const u_char *a, u_char *buf, int bufLen)
+  {
+    int b = 0;
+    b += printHex(a, 4, buf, bufLen, NO);
+    buf[b++] = '-';
+    b += printHex(a + 4, 2, buf + b, bufLen - b, NO);
+    buf[b++] = '-';
+    b += printHex(a + 6, 2, buf + b, bufLen - b, NO);
+    buf[b++] = '-';
+    b += printHex(a + 8, 2, buf + b, bufLen - b, NO);
+    buf[b++] = '-';
+    b += printHex(a + 10, 6, buf + b, bufLen - b, NO);
+    
+    // should really be lowercase hex - fix that here
+    for(int i = 0; i < b; i++) buf[i] = tolower(buf[i]);
+    
+    return b;
+  }
   
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen)
   {

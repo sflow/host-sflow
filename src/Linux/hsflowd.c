@@ -516,6 +516,77 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    persistent dsIndex     __________________
+    -----------------___________________________------------------
+  */
+
+  static HSPVMStore *newVMStore(HSP *sp, char *uuid, uint32_t dsIndex) {
+    HSPVMStore *vmStore = (HSPVMStore *)my_calloc(sizeof(HSPVMStore));
+    memcpy(vmStore->uuid, uuid, 16);
+    vmStore->dsIndex = dsIndex;
+    ADD_TO_LIST(sp->vmStore, vmStore);
+    return vmStore;
+  }
+
+  static void readVMStore(HSP *sp) {
+    if(sp->f_vmStore == NULL) return;
+    char line[HSP_MAX_VMSTORE_LINELEN+1];
+    rewind(sp->f_vmStore);
+    uint32_t lineNo = 0;
+    while(fgets(line, HSP_MAX_VMSTORE_LINELEN, sp->f_vmStore)) {
+      lineNo++;
+      char *p = line;
+      // comments start with '#'
+      p[strcspn(p, "#")] = '\0';
+      // should just have two tokens, so check for 3
+      uint32_t tokc = 0;
+      char *tokv[3];
+      for(int i = 0; i < 3; i++) {
+	size_t len;
+	p += strspn(p, HSP_VMSTORE_SEPARATORS);
+	if((len = strcspn(p, HSP_VMSTORE_SEPARATORS)) == 0) break;
+	tokv[tokc++] = p;
+	p += len;
+	if(*p != '\0') *p++ = '\0';
+      }
+      // expect UUID=int
+      char uuid[16];
+      if(tokc != 2 || !parseUUID(tokv[0], uuid)) {
+	myLog(LOG_ERR, "readVMStore: bad line %u in %s", lineNo, sp->vmStoreFile);
+      }
+      else {
+	HSPVMStore *vmStore = newVMStore(sp, uuid, strtol(tokv[1], NULL, 0));
+	if(vmStore->dsIndex > sp->maxDsIndex) {
+	  sp->maxDsIndex = vmStore->dsIndex;
+	}
+      }
+    }
+  }
+
+  static void writeVMStore(HSP *sp) {
+    rewind(sp->f_vmStore);
+    for(HSPVMStore *vmStore = sp->vmStore; vmStore != NULL; vmStore = vmStore->nxt) {
+      char uuidStr[51];
+      printUUID((u_char *)vmStore->uuid, (u_char *)uuidStr, 50);
+      fprintf(sp->f_vmStore, "%s=%u", uuidStr, vmStore->dsIndex);
+    }
+    fflush(sp->f_vmStore);
+  }
+
+  uint32_t assignVM_dsIndex(HSP *sp, char *uuid) {
+    // check in case we saw this one before
+    HSPVMStore *vmStore = sp->vmStore;
+    for ( ; vmStore != NULL; vmStore = vmStore->nxt) {
+      if(memcmp(uuid, vmStore->uuid, 16) == 0) return vmStore->dsIndex;
+    }
+    // allocate a new one
+    vmStore = newVMStore(sp, uuid, ++sp->maxDsIndex);
+    // ask it to be written to disk
+    sp->vmStoreInvalid = YES;
+    return sp->maxDsIndex;
+  }
+
+  /*_________________---------------------------__________________
     _________________    configVMs              __________________
     -----------------___________________________------------------
   */
@@ -553,9 +624,10 @@ extern "C" {
 	      uint32_t domId = domaininfo[i].domain;
 	      // dom0 is the hypervisor. We want the others.
 	      if(domId != 0) {
+		uint32_t dsIndex = assignVM_dsIndex(sp, domaininfo[i].uuid);
 		SFLDataSource_instance dsi;
-		// ds_class = <virtualEntity>, ds_index = <domId>, ds_instance = 0
-		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, domId, 0);
+		// ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
+		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
 		SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
 		if(vpoller->userData) {
 		  // it was already there, just clear the mark.
@@ -578,6 +650,8 @@ extern "C" {
 		// remember the index so we can access this individually later
 		HSPVMState *state = (HSPVMState *)vpoller->userData;
 		state->vm_index = num_domains + i;
+		// and the domId, which might have changed (if vm rebooted)
+		state->domId = domId;
 	      }
 	    }
 	  }
@@ -660,20 +734,26 @@ extern "C" {
   
   static void tick(HSP *sp, time_t clk) {
     
-    // possibly refresh the list of VMs
+    // refresh the list of VMs if requested
     if(sp->refreshVMList || (clk % 60) == 0) {
       sp->refreshVMList = NO;
       configVMs(sp);
     }
 
-    // see if a refresh of the interface list was requested
+    // write the persistent state if requested
+    if(sp->vmStoreInvalid) {
+      writeVMStore(sp);
+      sp->vmStoreInvalid = NO;
+    }
+
+    // refresh the interface list if requested
     if(sp->refreshAdaptorList) {
       sp->refreshAdaptorList = NO;
       readInterfaces(sp);
     }
 
 
-    // possibly rewrite the output if the config has changed
+    // rewrite the output if the config has changed
     if(sp->outputRevisionNo != sp->sFlow->revisionNo) {
       syncOutputFile(sp);
       sp->outputRevisionNo = sp->sFlow->revisionNo;
@@ -769,6 +849,7 @@ extern "C" {
     sp->pidFile = HSP_DEFAULT_PIDFILE;
     sp->DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
     sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
+    sp->vmStoreFile = HSP_DEFAULT_VMSTORE_FILE;
   }
 
   /*_________________---------------------------__________________
@@ -1168,6 +1249,14 @@ extern "C" {
 #ifdef HSF_XEN
     // open Xen handles while we still have root privileges
     openXenHandles(sp);
+
+    // open the vmStore file while we still have root priviliges
+    // use mode "w+" because we intend to write it and rewrite it.
+    if((sp->f_vmStore = fopen(sp->vmStoreFile, "w+")) == NULL) {
+      myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile);
+      exit(EXIT_FAILURE);
+    }
+    
 #endif
 
     // don't need to be root any more - we held on to root privileges
@@ -1204,6 +1293,11 @@ extern "C" {
 	      sfl_random_init(seed);
 	    }
 	    
+#ifdef HSF_XEN
+	    // load the persistent state from last time
+	    readVMStore(sp);
+#endif
+
 	    if(sp->DNSSD) {
 	      // launch dnsSD thread.  It will now be responsible for
 	      // the sFlowSettings,  and the current thread will loop
