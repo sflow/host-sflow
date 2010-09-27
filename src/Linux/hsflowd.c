@@ -1097,48 +1097,61 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  static int getMyLimit(int resource, char *resourceName) {
+    struct rlimit rlim = {0};
+    if(getrlimit(resource, &rlim) != 0) {
+      myLog(LOG_ERR, "getrlimit(%s) failed : %s", resourceName, strerror(errno));
+    }
+    else {
+      myLog(LOG_INFO, "getrlimit(%s) = %u (max=%u)", resourceName, rlim.rlim_cur, rlim.rlim_max);
+    }
+    return rlim.rlim_cur;
+  }
+  
+  static int setMyLimit(int resource, char *resourceName, int request) {
+    struct rlimit rlim = {0};
+    rlim.rlim_cur = rlim.rlim_max = request;
+    if(setrlimit(resource, &rlim) != 0) {
+      myLog(LOG_ERR, "setrlimit(%s)=%d failed : %s", resourceName, request, strerror(errno));
+      return NO;
+    }
+    else if(debug) {
+      myLog(LOG_INFO, "setrlimit(%s)=%u", resourceName, request);
+    }
+    return YES;
+  }
+  
+#define GETMYLIMIT(L) getMyLimit((L), STRINGIFY(L))
+#define SETMYLIMIT(L,V) setMyLimit((L), STRINGIFY(L), (V))
+  
+
   static void drop_privileges(int requestMemLockBytes) {
-    if(getuid() == 0) {
-
-      if(requestMemLockBytes) {
-	// Request to lock this process in memory so that we don't get
-	// swapped out. It's probably less than 100KB,  and this way
-	// we don't consume extra resources swapping in and out
-	// every 20 seconds.  The default limit is just 32K on most
-	// systems,  so for this to be useful we have to increase it
-	// somewhat first.
-	struct rlimit rlim = {0};
+    
+    if(getuid() != 0) return;
+    
+    if(requestMemLockBytes) {
+      // Request to lock this process in memory so that we don't get
+      // swapped out. It's probably less than 100KB,  and this way
+      // we don't consume extra resources swapping in and out
+      // every 20 seconds.  The default limit is just 32K on most
+      // systems,  so for this to be useful we have to increase it
+      // somewhat first.
 #ifdef RLIMIT_MEMLOCK
-	rlim.rlim_cur = rlim.rlim_max = requestMemLockBytes;
-	if(setrlimit(RLIMIT_MEMLOCK, &rlim) != 0) {
-	  myLog(LOG_ERR, "setrlimit(RLIMIT_MEMLOCK, %d) failed : %s", requestMemLockBytes, strerror(errno));
-	}
+      SETMYLIMIT(RLIMIT_MEMLOCK, requestMemLockBytes);
 #endif
-	// Because we are dropping privileges we can get away with
-	// using the MLC_FUTURE option to mlockall without fear.  We
-	// won't be allowed to lock more than the limit we just set
-	// above.
-	if(mlockall(MCL_FUTURE) == -1) {
-	  myLog(LOG_ERR, "mlockall(MCL_FUTURE) failed : %s", strerror(errno));
-	}
-
-	// We can also use this as an upper limit on the data segment so that we fail
-	// if there is a memory leak,  rather than grow forever and cause problems.
-#ifdef RLIMIT_DATA
-	rlim.rlim_cur = rlim.rlim_max = requestMemLockBytes;
-	if(setrlimit(RLIMIT_DATA, &rlim) != 0) {
-	  myLog(LOG_ERR, "setrlimit(RLIMIT_DATA, %d) failed : %s", requestMemLockBytes, strerror(errno));
-	}
-#endif
-
-	// consider overriding other limits to make sure we fail quickly if anything is wrong
-	// RLIMIT_STACK
-	// RLIMIT_CORE
-	// RLIMIT_RSS
-	// RLIMIT_NOFILE
-	// RLIMIT_AS
-	// RLIMIT_LOCKS
+      // Because we are dropping privileges we can get away with
+      // using the MLC_FUTURE option to mlockall without fear.  We
+      // won't be allowed to lock more than the limit we just set
+      // above.
+      if(mlockall(MCL_FUTURE) == -1) {
+	myLog(LOG_ERR, "mlockall(MCL_FUTURE) failed : %s", strerror(errno));
       }
+      
+      // We can also use this as an upper limit on the data segment so that we fail
+      // if there is a memory leak,  rather than grow forever and cause problems.
+#ifdef RLIMIT_DATA
+      SETMYLIMIT(RLIMIT_DATA, requestMemLockBytes);
+#endif
       
       // set the real and effective group-id to 'nobody'
       struct passwd *nobody = getpwnam("nobody");
@@ -1150,24 +1163,42 @@ extern "C" {
 	myLog(LOG_ERR, "drop_privileges: setgid(%d) failed : %s", nobody->pw_gid, strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      /*       if(initgroups("nobody", nobody->pw_gid) != 0) { */
-      /* 	myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno)); */
-      /* 	exit(EXIT_FAILURE); */
-      /*       } */
-      /*       endpwent(); */
-      /*       endgrent(); */
+      
+      // It doesn't seem like this part is necessary(?)
+      // if(initgroups("nobody", nobody->pw_gid) != 0) {
+      //  myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno));
+      //  exit(EXIT_FAILURE);
+      // }
+      // endpwent();
+      // endgrent();
+      
+      // now change user
       if(setuid(nobody->pw_uid) != 0) {
 	myLog(LOG_ERR, "drop_privileges: setuid(%d) failed : %s", nobody->pw_uid, strerror(errno));
 	exit(EXIT_FAILURE);
       }
+      
+      if(debug) {
+	GETMYLIMIT(RLIMIT_MEMLOCK);
+	GETMYLIMIT(RLIMIT_NPROC);
+	GETMYLIMIT(RLIMIT_STACK);
+	GETMYLIMIT(RLIMIT_CORE);
+	GETMYLIMIT(RLIMIT_CPU);
+	GETMYLIMIT(RLIMIT_DATA);
+	GETMYLIMIT(RLIMIT_FSIZE);
+	GETMYLIMIT(RLIMIT_RSS);
+	GETMYLIMIT(RLIMIT_NOFILE);
+	GETMYLIMIT(RLIMIT_AS);
+	GETMYLIMIT(RLIMIT_LOCKS);
+      }
     }
   }
-      
+  
   /*_________________---------------------------__________________
     _________________         main              __________________
     -----------------___________________________------------------
   */
-
+  
   int main(int argc, char *argv[])
   {
     HSP *sp = &HSPSamplingProbe;
@@ -1259,11 +1290,6 @@ extern "C" {
     
 #endif
 
-    // don't need to be root any more - we held on to root privileges
-    // to make sure we could write the pid file (and possibly open the
-    // Xen handles,  but from now on we don't want the responsibility...
-    drop_privileges(HSP_RLIMIT_MEMLOCK);
-
     myLog(LOG_INFO, "started");
     
     // initialize the clock so we can detect second boundaries
@@ -1280,47 +1306,47 @@ extern "C" {
       switch(sp->state) {
 	
       case HSPSTATE_READCONFIG:
-	{
-	  if(readInterfaces(sp)
-	     && HSPReadConfigFile(sp)) {
-	    
-	    { // we must have an agentIP, so we can use
-	      // it to seed the random number generator
-	      SFLAddress *agentIP = &sp->sFlow->agentIP;
-	      uint32_t seed;
-	      if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
-	      else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
-	      sfl_random_init(seed);
-	    }
-	    
-#ifdef HSF_XEN
-	    // load the persistent state from last time
-	    readVMStore(sp);
-#endif
-
-	    if(sp->DNSSD) {
-	      // launch dnsSD thread.  It will now be responsible for
-	      // the sFlowSettings,  and the current thread will loop
-	      // in the HSPSTATE_WAITCONFIG state until that pointer
-	      // has been set (sp->sFlow.sFlowSettings)
-	      sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
-	      if(pthread_create(sp->DNSSD_thread, NULL, runDNSSD, sp) != 0) {
-		myLog(LOG_ERR, "pthread_create() failed\n");
-		exit(EXIT_FAILURE);
-	      }
-	    }
-	    else {
-	      // just use the config from the file
-	      installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
-	    }
-	    setState(sp, HSPSTATE_WAITCONFIG);
-	  }
-	  else{
-	    exitStatus = EXIT_FAILURE;
-	    setState(sp, HSPSTATE_END);
-	  }
-	  
+	if(readInterfaces(sp) == 0 || HSPReadConfigFile(sp) == NO) {
+	  exitStatus = EXIT_FAILURE;
+	  setState(sp, HSPSTATE_END);
 	}
+	else {
+	  // we must have an agentIP, so we can use
+	  // it to seed the random number generator
+	  SFLAddress *agentIP = &sp->sFlow->agentIP;
+	  uint32_t seed;
+	  if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
+	  else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
+	  sfl_random_init(seed);
+	}
+	
+#ifdef HSF_XEN
+	// load the persistent state from last time
+	readVMStore(sp);
+#endif
+	
+	if(sp->DNSSD) {
+	  // launch dnsSD thread.  It will now be responsible for
+	  // the sFlowSettings,  and the current thread will loop
+	  // in the HSPSTATE_WAITCONFIG state until that pointer
+	  // has been set (sp->sFlow.sFlowSettings)
+	  sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
+	  if(pthread_create(sp->DNSSD_thread, NULL, runDNSSD, sp) != 0) {
+	    myLog(LOG_ERR, "pthread_create() failed\n");
+	    exit(EXIT_FAILURE);
+	  }
+	}
+	else {
+	  // just use the config from the file
+	  installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
+	}
+	// don't need to be root any more - we held on to root privileges
+	// to make sure we could write the pid file,  and open the output
+	// file, and open the Xen handles, and on Debian we needed to fork
+	// the DNSSD thread before calling setuid (not sure why?).
+	// Anway, from now on we don't want the responsibility...
+	drop_privileges(HSP_RLIMIT_MEMLOCK);
+	setState(sp, HSPSTATE_WAITCONFIG);
 	break;
 	
       case HSPSTATE_WAITCONFIG:
@@ -1329,7 +1355,7 @@ extern "C" {
 	    // we have a config - proceed
 	    if(initAgent(sp)) {
 	      if(debug) {
-		if(debug) myLog(LOG_INFO, "initAgent suceeded");
+		myLog(LOG_INFO, "initAgent suceeded");
 		// print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
 		malloc_stats();
 	      }

@@ -36,8 +36,6 @@ extern "C" {
 #include "malloc.h" // for malloc_stats()
 #include "sflow_api.h"
 
-#define HSF_XEN 1 // $$$
-
 #ifdef HSF_XEN
 #include "xs.h"
 #include "xenctrl.h"
@@ -236,6 +234,9 @@ typedef struct _HSPVMState {
     }
     return YES;
   }
+
+#define STRINGIFY(Y) #Y
+#define STRINGIFY_DEF(D) STRINGIFY(D)
 
 #define DYNAMIC_LOCAL(VAR) VAR
 #define SEMLOCK_DO(_sem) for(int DYNAMIC_LOCAL(_ctrl)=1; DYNAMIC_LOCAL(_ctrl) && lockOrDie(_sem); DYNAMIC_LOCAL(_ctrl)=0, releaseOrDie(_sem))
