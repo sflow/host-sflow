@@ -10,11 +10,19 @@ extern "C" {
 #include "hsflowd.h"
 
   /*_________________---------------------------__________________
-    _________________      readNioCounters      __________________
+    _________________    updateNioCounters      __________________
     -----------------___________________________------------------
   */
   
-  int readNioCounters(SFLHost_nio_counters *nio, char *devFilter) {
+  static HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName) {
+    for(int i = 0; i < nioList->num_adaptors; i++) {
+      HSPAdaptorNIO *adaptor = nioList->adaptors[i];
+      if(!strcmp(adaptor->deviceName, deviceName)) return adaptor;
+    }
+    return NULL;
+  }
+  
+  static  int updateNioCounters(HSP *sp) {
     int interface_count = 0;
     FILE *procFile;
     procFile= fopen("/proc/net/dev", "r");
@@ -36,11 +44,12 @@ extern "C" {
 #define MAX_PROC_LINE_CHARS 240
       char line[MAX_PROC_LINE_CHARS];
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	if(devFilter == NULL || strncmp(line, devFilter, strlen(devFilter)) == 0) {
+	char deviceName[MAX_PROC_LINE_CHARS];
 	  // assume the format is:
 	  // Inter-|   Receive                                                |  Transmit
 	  //  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
-	  if(sscanf(line, "%*[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+	  if(sscanf(line, "%[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+		    deviceName,
 		    &bytes_in,
 		    &pkts_in,
 		    &errs_in,
@@ -48,17 +57,24 @@ extern "C" {
 		    &bytes_out,
 		    &pkts_out,
 		    &errs_out,
-		    &drops_out) == 8) {
-	    interface_count++;
-	    // report the sum over all devices
-	    nio->bytes_in += bytes_in;
-	    nio->pkts_in += (uint32_t)pkts_in;
-	    nio->errs_in += (uint32_t)errs_in;
-	    nio->drops_in += (uint32_t)drops_in;
-	    nio->bytes_out += bytes_out;
-	    nio->pkts_out += (uint32_t)pkts_out;
-	    nio->errs_out += (uint32_t)errs_out;
-	    nio->drops_out += (uint32_t)drops_out;
+		    &drops_out) == 9) {
+	    HSPAdaptorNIO *adaptor = getAdaptorNIO(sp->adaptorNIOList, trimWhitespace(deviceName));
+	    if(adaptor) {
+	      interface_count++;
+	      // accumulate 64-bit counters specially, in case the OS is using only 32-bits
+	      adaptor->nio.bytes_in += (bytes_in - adaptor->last_bytes_in);
+	      adaptor->last_bytes_in = bytes_in;
+	      
+	      adaptor->nio.bytes_out += (bytes_out - adaptor->last_bytes_out);
+	      adaptor->last_bytes_out = bytes_out;
+	      
+	      // the rest are 32-bit in the output
+	      adaptor->nio.pkts_in = (uint32_t)pkts_in;
+	      adaptor->nio.errs_in = (uint32_t)errs_in;
+	      adaptor->nio.drops_in = (uint32_t)drops_in;
+	      adaptor->nio.pkts_out = (uint32_t)pkts_out;
+	      adaptor->nio.errs_out = (uint32_t)errs_out;
+	      adaptor->nio.drops_out = (uint32_t)drops_out;
 	  }
 	}
       }
@@ -68,6 +84,39 @@ extern "C" {
     return interface_count;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________      readNioCounters      __________________
+    -----------------___________________________------------------
+  */
+  
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter) {
+    int interface_count = 0;
+    size_t devFilterLen = devFilter ? strlen(devFilter) : 0;
+
+    // may need to schedule intermediate calls to updateNioCounters()
+    // too (to avoid undetected wraps), but at the very least we need to do
+    // it here.
+    updateNioCounters(sp);
+
+    for(int i = 0; i < sp->adaptorNIOList->num_adaptors; i++) {
+      HSPAdaptorNIO *adaptor = sp->adaptorNIOList->adaptors[i];
+      if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
+	interface_count++;
+	// report the sum over all devices that match the filter
+	nio->bytes_in += adaptor->nio.bytes_in;
+	nio->pkts_in += adaptor->nio.pkts_in;
+	nio->errs_in += adaptor->nio.errs_in;
+	nio->drops_in += adaptor->nio.drops_in;
+	nio->bytes_out += adaptor->nio.bytes_out;
+	nio->pkts_out += adaptor->nio.pkts_out;
+	nio->errs_out += adaptor->nio.errs_out;
+	nio->drops_out += adaptor->nio.drops_out;
+      }
+    }
+    return interface_count;
+  }
+  
 
 #if defined(__cplusplus)
 } /* extern "C" */

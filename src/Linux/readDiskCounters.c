@@ -34,7 +34,7 @@ int remote_mount(const char *device, const char *type)
     -----------------___________________________------------------
   */
   
-  int readDiskCounters(SFLHost_dsk_counters *dsk) {
+  int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk) {
     int gotData = NO;
     FILE *procFile;
     procFile= fopen("/proc/diskstats", "r");
@@ -54,6 +54,11 @@ int remote_mount(const char *device, const char *type)
       /* uint64_t writes_merged = 0;*/
       uint64_t sectors_written = 0;
       uint64_t write_time_ms = 0;
+
+      // handle 64-bit counters specially
+      uint64_t total_sectors_read = 0;
+      uint64_t total_sectors_written = 0;
+
       // limit the number of chars we will read from each line
       // (there can be more than this - fgets will chop for us)
 #define MAX_PROC_LINE_CHARS 240
@@ -75,14 +80,23 @@ int remote_mount(const char *device, const char *type)
 	  gotData = YES;
 	  // report the sum over all disks
 	  dsk->reads += reads;
-	  dsk->bytes_read += (sectors_read * ASSUMED_DISK_SECTOR_BYTES);
+	  total_sectors_read += sectors_read;
 	  dsk->read_time += read_time_ms;
 	  dsk->writes += writes;
-	  dsk->bytes_written += (sectors_written * ASSUMED_DISK_SECTOR_BYTES);
+	  total_sectors_written += sectors_written;
 	  dsk->write_time += write_time_ms;
 	}
       }
       fclose(procFile);
+      
+      // accumulate the 64-bit counters (they may only be 32-bit counters in this OS)
+      sp->diskIO.bytes_read += (total_sectors_read - sp->diskIO.last_sectors_read) * ASSUMED_DISK_SECTOR_BYTES;
+      sp->diskIO.last_sectors_read = total_sectors_read;
+      sp->diskIO.bytes_written += (total_sectors_written - sp->diskIO.last_sectors_written) * ASSUMED_DISK_SECTOR_BYTES;
+      sp->diskIO.last_sectors_written = total_sectors_written;
+      // and copy the accumulated total into the output
+      dsk->bytes_read = sp->diskIO.bytes_read;
+      dsk->bytes_written = sp->diskIO.bytes_written;
     }
 
     // borrowed heavily from ganglia/linux/metrics.c for this part where
