@@ -45,27 +45,60 @@ void newAdaptorList(HSP *sp)
   sp->adaptorList->num_adaptors = 0;
 }
 
-  
+    
 /*________________---------------------------__________________
-  ________________    trimWhitespace         __________________
+  ________________    updateAdaptorNIO       __________________
   ----------------___________________________------------------
 */
 
-static char *trimWhitespace(char *str)
+static HSPAdaptorNIO *findOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName)
 {
-  char *end;
-  
-  // Trim leading space
-  while(isspace(*str)) str++;
-  
-  // Trim trailing space
-  end = str + strlen(str) - 1;
-  while(end > str && isspace(*end)) end--;
-  
-  // Write new null terminator
-  *(end+1) = 0;
-  
-  return str;
+  HSPAdaptorNIO *adaptor = NULL;
+  for(int i = 0; i < nioList->num_adaptors; i++) {
+    adaptor = nioList->adaptors[i];
+    if(adaptor && !strcmp(adaptor->deviceName, deviceName)) {
+      nioList->adaptors[i] = NULL;
+      return adaptor;
+    }
+  }
+  adaptor = (HSPAdaptorNIO *)my_calloc(sizeof(HSPAdaptorNIO));
+  adaptor->deviceName = strdup(deviceName);
+  return adaptor;
+}
+
+void freeAdaptorNIOs(HSPAdaptorNIOList *nioList)
+{
+  for(int i = 0; i < nioList->num_adaptors; i++) {
+    HSPAdaptorNIO *adaptor = nioList->adaptors[i];
+    if(adaptor) {
+      free(adaptor->deviceName);
+      free(adaptor);
+    }
+  }
+  free(nioList->adaptors);
+  nioList->adaptors = NULL;
+  nioList->num_adaptors = 0;
+}
+
+static void updateAdaptorNIO(HSP *sp)
+{
+  uint32_t N = sp->adaptorList->num_adaptors;
+
+  if(sp->adaptorNIOList == NULL) {
+    sp->adaptorNIOList = (HSPAdaptorNIOList *)my_calloc(sizeof(HSPAdaptorNIOList));
+  }
+  // space for new list
+  HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
+  // move pre-existing ones across,  or create new ones if necessary
+  for(int i = 0; i < N; i++) {
+    new_list[i] = findOrCreateAdaptorNIO(sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
+  }
+  // free old ones we don't need any more
+  freeAdaptorNIOs(sp->adaptorNIOList);
+  // and move the new list into place
+  sp->adaptorNIOList->adaptors = new_list;
+  sp->adaptorNIOList->num_adaptors = N;
+  return;
 }
 
 /*________________---------------------------__________________
@@ -194,6 +227,8 @@ int readInterfaces(HSP *sp)
   }
   
   close (fd);
+
+  updateAdaptorNIO(sp);
   
   return sp->adaptorList->num_adaptors;
 }

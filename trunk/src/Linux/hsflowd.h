@@ -137,13 +137,33 @@ extern "C" {
   } HSPVMStore;
   
 
-// userData structure to store state for VM data-sources
-typedef struct _HSPVMState {
-  uint32_t network_count;
-  int32_t marked;
-  uint32_t vm_index;
-  uint32_t domId;
-} HSPVMState;
+  // userData structure to store state for VM data-sources
+  typedef struct _HSPVMState {
+    uint32_t network_count;
+    int32_t marked;
+    uint32_t vm_index;
+    uint32_t domId;
+  } HSPVMState;
+
+  // cache nio counters per adaptor
+  typedef struct _HSPAdaptorNIO {
+    char *deviceName;
+    SFLHost_nio_counters nio;
+    uint64_t last_bytes_in;
+    uint64_t last_bytes_out;
+  } HSPAdaptorNIO;
+
+  typedef struct _HSPAdaptorNIOList {
+    HSPAdaptorNIO **adaptors;
+    uint32_t num_adaptors;
+  } HSPAdaptorNIOList;
+
+  typedef struct _HSPDiskIO {
+    uint64_t last_sectors_read;
+    uint64_t last_sectors_written;
+    uint64_t bytes_read;
+    uint64_t bytes_written;
+  } HSPDiskIO;
 
   typedef struct _HSP {
     EnumHSPState state;
@@ -157,8 +177,11 @@ typedef struct _HSPVMState {
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
+    HSPAdaptorNIOList *adaptorNIOList;
     int refreshAdaptorList;
     int refreshVMList;
+    // 64-bit diskIO accumulators
+    HSPDiskIO diskIO;
     // UDP send sockets
     int socket4;
     int socket6;
@@ -211,12 +234,15 @@ typedef struct _HSPVMState {
   void *my_calloc(size_t bytes);
   void *my_realloc(void *ptr, size_t bytes);
 
+  // utils
+  char *trimWhitespace(char *str);
+
   // read functions
   int readInterfaces(HSP *sp);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
-  int readDiskCounters(SFLHost_dsk_counters *dsk);
-  int readNioCounters(SFLHost_nio_counters *dsk, char *devFilter);
+  int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *dsk, char *devFilter);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
   static inline int lockOrDie(pthread_mutex_t *sem) {

@@ -58,6 +58,28 @@ extern "C" {
     }
     return mem;
   }
+  
+/*________________---------------------------__________________
+  ________________    trimWhitespace         __________________
+  ----------------___________________________------------------
+*/
+
+  char *trimWhitespace(char *str)
+  {
+    char *end;
+    
+    // Trim leading space
+    while(isspace(*str)) str++;
+    
+    // Trim trailing space
+    end = str + strlen(str) - 1;
+    while(end > str && isspace(*end)) end--;
+    
+    // Write new null terminator
+    *(end+1) = 0;
+    
+    return str;
+  }
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -256,7 +278,7 @@ extern "C" {
     // host Net I/O
     SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_NIO;
-    if(readNioCounters(&nioElem.counterBlock.host_nio, NULL)) {
+    if(readNioCounters(sp, &nioElem.counterBlock.host_nio, NULL)) {
       SFLADD_ELEMENT(cs, &nioElem);
     }
 
@@ -277,7 +299,7 @@ extern "C" {
     // host I/O counters
     SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_DSK;
-    if(readDiskCounters(&dskElem.counterBlock.host_dsk)) {
+    if(readDiskCounters(sp, &dskElem.counterBlock.host_dsk)) {
       SFLADD_ELEMENT(cs, &dskElem);
     }
 
@@ -426,7 +448,7 @@ extern "C" {
       nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
       char devFilter[20];
       snprintf(devFilter, 20, "vif%u.", dom_id);
-      uint32_t network_count = readNioCounters((SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter);
+      uint32_t network_count = readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter);
       if(state->network_count != network_count) {
 	// request a refresh if the number of VIFs changed. Not a perfect test
 	// (e.g. if one was removed and another was added at the same time then
