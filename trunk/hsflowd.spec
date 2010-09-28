@@ -44,9 +44,7 @@ make clean
 
 %post
 /sbin/chkconfig --add hsflowd
-if [ -x %{OpenVSwitchControl} ]; then
-  /sbin/chkconfig --add sflowovsd;
-fi
+if [ -x %{OpenVSwitchControl} ]; then /sbin/chkconfig --add sflowovsd; fi
 
 %preun
 if [ $1 = 0 ]; then

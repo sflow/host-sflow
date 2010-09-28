@@ -68,6 +68,7 @@ extern int debug;
     hints.ai_family = family; // PF_INET, PF_INET6 or 0
     int err = getaddrinfo(name, NULL, &hints, &info);
     if(err) {
+      if(debug) myLog(LOG_INFO, "getaddrinfo() failed: %s", gai_strerror(err));
       switch(err) {
       case EAI_NONAME: break;
       case EAI_NODATA: break;
