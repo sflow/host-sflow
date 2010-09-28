@@ -22,8 +22,14 @@ extern "C" {
     return NULL;
   }
   
-  static  int updateNioCounters(HSP *sp) {
-    int interface_count = 0;
+  void updateNioCounters(HSP *sp) {
+
+    // don't do anything if we already refreshed the numbers less than a second ago
+    if(sp->adaptorNIOList.last_update == sp->clk) {
+      return;
+    }
+    sp->adaptorNIOList.last_update = sp->clk;
+
     FILE *procFile;
     procFile= fopen("/proc/net/dev", "r");
     if(procFile) {
@@ -58,16 +64,22 @@ extern "C" {
 		    &pkts_out,
 		    &errs_out,
 		    &drops_out) == 9) {
-	    HSPAdaptorNIO *adaptor = getAdaptorNIO(sp->adaptorNIOList, trimWhitespace(deviceName));
+	    HSPAdaptorNIO *adaptor = getAdaptorNIO(&sp->adaptorNIOList, trimWhitespace(deviceName));
 	    if(adaptor) {
-	      interface_count++;
 	      // accumulate 64-bit counters specially, in case the OS is using only 32-bits
 	      adaptor->nio.bytes_in += (bytes_in - adaptor->last_bytes_in);
 	      adaptor->last_bytes_in = bytes_in;
-	      
 	      adaptor->nio.bytes_out += (bytes_out - adaptor->last_bytes_out);
 	      adaptor->last_bytes_out = bytes_out;
-	      
+
+	      // but if we detect that the OS is using 64-bits then we can turn off the faster
+	      // NIO polling. This should probaly be done based on the kernel version or some
+	      // other include-file definition, but it's not expensive to do it here like this:
+	      if(bytes_in > 0xFFFFFFFF ||
+		 bytes_out > 0xFFFFFFFF) {
+		sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_64BIT;
+	      }
+		
 	      // the rest are 32-bit in the output
 	      adaptor->nio.pkts_in = (uint32_t)pkts_in;
 	      adaptor->nio.errs_in = (uint32_t)errs_in;
@@ -80,8 +92,6 @@ extern "C" {
       }
       fclose(procFile);
     }
-
-    return interface_count;
   }
 
 
@@ -96,11 +106,11 @@ extern "C" {
 
     // may need to schedule intermediate calls to updateNioCounters()
     // too (to avoid undetected wraps), but at the very least we need to do
-    // it here.
+    // it here to make sure the data is up to the second.
     updateNioCounters(sp);
 
-    for(int i = 0; i < sp->adaptorNIOList->num_adaptors; i++) {
-      HSPAdaptorNIO *adaptor = sp->adaptorNIOList->adaptors[i];
+    for(int i = 0; i < sp->adaptorNIOList.num_adaptors; i++) {
+      HSPAdaptorNIO *adaptor = sp->adaptorNIOList.adaptors[i];
       if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
 	interface_count++;
 	// report the sum over all devices that match the filter

@@ -63,6 +63,7 @@ extern "C" {
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
 #define HSP_DEFAULT_DNSSD_MINDELAY 10
 #define HSP_MAX_SUBAGENTID 1000000
+#define HSP_REFRESH_VMS 60
 
 // the limit we will request before calling mlockall()
 // calling res_search() seems to allocate about 11MB
@@ -156,6 +157,16 @@ extern "C" {
   typedef struct _HSPAdaptorNIOList {
     HSPAdaptorNIO **adaptors;
     uint32_t num_adaptors;
+    time_t last_update;
+    // have to poll the NIO counters fast enough to avoid 32-bit rollover
+    // of the bytes counters.  On a 10Gbps interface they can wrap in 
+    // less than 5 seconds.  On a virtual interface the data rate could be
+    // higher still. The program may decide to turn this off. For example,
+    // if it finds evidence that the counters are already 64-bit in the OS,
+    // or if it decides that all interface speeds are limited to 1Gbps or less.
+    time_t polling_secs;
+#define HSP_NIO_POLLING_SECS_32BIT 3
+#define HSP_NIO_POLLING_SECS_64BIT 0 // 0 means "off"
   } HSPAdaptorNIOList;
 
   typedef struct _HSPDiskIO {
@@ -167,6 +178,7 @@ extern "C" {
 
   typedef struct _HSP {
     EnumHSPState state;
+    time_t clk;
     HSPSFlow *sFlow;
     char *configFile;
     char *outputFile;
@@ -177,9 +189,10 @@ extern "C" {
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
-    HSPAdaptorNIOList *adaptorNIOList;
+    HSPAdaptorNIOList adaptorNIOList;
     int refreshAdaptorList;
     int refreshVMList;
+
     // 64-bit diskIO accumulators
     HSPDiskIO diskIO;
     // UDP send sockets
@@ -243,6 +256,7 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
   int readNioCounters(HSP *sp, SFLHost_nio_counters *dsk, char *devFilter);
+  void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
   static inline int lockOrDie(pthread_mutex_t *sem) {
