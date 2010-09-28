@@ -83,21 +83,18 @@ void freeAdaptorNIOs(HSPAdaptorNIOList *nioList)
 static void updateAdaptorNIO(HSP *sp)
 {
   uint32_t N = sp->adaptorList->num_adaptors;
-
-  if(sp->adaptorNIOList == NULL) {
-    sp->adaptorNIOList = (HSPAdaptorNIOList *)my_calloc(sizeof(HSPAdaptorNIOList));
-  }
   // space for new list
   HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
   // move pre-existing ones across,  or create new ones if necessary
   for(int i = 0; i < N; i++) {
-    new_list[i] = findOrCreateAdaptorNIO(sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
+    new_list[i] = findOrCreateAdaptorNIO(&sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
   }
   // free old ones we don't need any more
-  freeAdaptorNIOs(sp->adaptorNIOList);
+  freeAdaptorNIOs(&sp->adaptorNIOList);
   // and move the new list into place
-  sp->adaptorNIOList->adaptors = new_list;
-  sp->adaptorNIOList->num_adaptors = N;
+  sp->adaptorNIOList.adaptors = new_list;
+  sp->adaptorNIOList.num_adaptors = N;
+  sp->adaptorNIOList.last_update = 0;
   return;
 }
 

@@ -754,10 +754,19 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  static void tick(HSP *sp, time_t clk) {
+  static void tick(HSP *sp) {
+    
+    // send a tick to the sFlow agent
+    sfl_agent_tick(sp->sFlow->agent, sp->clk);
+    
+    // possibly poll the nio counters to avoid 32-bit rollover
+    if(sp->adaptorNIOList.polling_secs &&
+       ((sp->clk % sp->adaptorNIOList.polling_secs) == 0)) {
+      updateNioCounters(sp);
+    }
     
     // refresh the list of VMs if requested
-    if(sp->refreshVMList || (clk % 60) == 0) {
+    if(sp->refreshVMList || (sp->clk % HSP_REFRESH_VMS) == 0) {
       sp->refreshVMList = NO;
       configVMs(sp);
     }
@@ -1315,7 +1324,7 @@ extern "C" {
     myLog(LOG_INFO, "started");
     
     // initialize the clock so we can detect second boundaries
-    time_t clk = time(NULL);
+    sp->clk = time(NULL);
 
     // semaphore to protect config shared with DNSSD thread
     sp->config_mut = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
@@ -1342,11 +1351,13 @@ extern "C" {
 	  sfl_random_init(seed);
 	}
 	
-#ifdef HSF_XEN
 	// load the persistent state from last time
 	readVMStore(sp);
-#endif
-	
+
+	// initialize the faster polling of NIO counters
+	// to avoid undetected 32-bit wraps
+	sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_32BIT;
+
 	if(sp->DNSSD) {
 	  // launch dnsSD thread.  It will now be responsible for
 	  // the sFlowSettings,  and the current thread will loop
@@ -1395,12 +1406,12 @@ extern "C" {
 	{
 	  // check for second boundaries and generate ticks for the sFlow library
 	  time_t test_clk = time(NULL);
-	  if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
+	  if((test_clk < sp->clk) || (test_clk - sp->clk) > HSP_MAX_TICKS) {
 	    // avoid a busy-loop of ticks
 	    myLog(LOG_INFO, "time jump detected");
-	    clk = test_clk - 1;
+	    sp->clk = test_clk - 1;
 	  }
-	  while(clk < test_clk) {
+	  while(sp->clk < test_clk) {
 
 	    // this would be a good place to test the memory footprint and
 	    // bail out if it looks like we are leaking memory(?)
@@ -1421,15 +1432,11 @@ extern "C" {
 		  }
 		  sp->previousPollingInterval = piv;
 		}
-		
-		// send a tick to the sFlow agent
-		sfl_agent_tick(sp->sFlow->agent, clk);
-		// and a tick for myself too
-		tick(sp, clk);
+		// clock-tick
+		tick(sp);
 	      }
 	    } // semaphore
-	    
-	    clk++;
+	    sp->clk++;
 	  }
 	}
       case HSPSTATE_END:
