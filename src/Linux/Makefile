@@ -23,6 +23,10 @@ ifeq ($(XEN_DDK),yes)
 	LIBS+= -lxenstore -lxenctrl
 endif
 
+ifeq ($(DEBIAN),)
+	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
+endif
+
 ifeq ($(BINDIR),)
 	BINDIR=/usr/local/sbin
 endif
@@ -102,18 +106,24 @@ install-sflowovsd: sflowovsd
 
 # the chkconfig command may not be available in your VM, but all it does it to put the
 # necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
-# at the required runlevels
+# at the required runlevels.
 
 schedule: schedule-hsflowd schedule-sflowovsd
 
 schedule-hsflowd:
+ifeq ($(DEBIAN),yes)
+	update-rc.d hsflowd defaults
+else
 	/sbin/chkconfig --add hsflowd
 	/sbin/chkconfig --list hsflowd
-
+endif
 schedule-sflowovsd:
+ifeq ($(DEBIAN),yes)
+	update-rc.d sflowovsd defaults
+else
 	/sbin/chkconfig --add sflowovsd
 	/sbin/chkconfig --list sflowovsd
-
+endif
 #### CLEAN ####
 
 clean: clean-hsflowd clean-sflowovsd
