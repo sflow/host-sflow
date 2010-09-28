@@ -51,49 +51,99 @@ extern "C" {
       char line[MAX_PROC_LINE_CHARS];
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
 	char deviceName[MAX_PROC_LINE_CHARS];
-	  // assume the format is:
-	  // Inter-|   Receive                                                |  Transmit
-	  //  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
-	  if(sscanf(line, "%[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
-		    deviceName,
-		    &bytes_in,
-		    &pkts_in,
-		    &errs_in,
-		    &drops_in,
-		    &bytes_out,
-		    &pkts_out,
-		    &errs_out,
-		    &drops_out) == 9) {
-	    HSPAdaptorNIO *adaptor = getAdaptorNIO(&sp->adaptorNIOList, trimWhitespace(deviceName));
-	    if(adaptor) {
-	      // accumulate 64-bit counters specially, in case the OS is using only 32-bits
-	      adaptor->nio.bytes_in += (bytes_in - adaptor->last_bytes_in);
-	      adaptor->last_bytes_in = bytes_in;
-	      adaptor->nio.bytes_out += (bytes_out - adaptor->last_bytes_out);
-	      adaptor->last_bytes_out = bytes_out;
+	// assume the format is:
+	// Inter-|   Receive                                                |  Transmit
+	//  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+	if(sscanf(line, "%[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+		  deviceName,
+		  &bytes_in,
+		  &pkts_in,
+		  &errs_in,
+		  &drops_in,
+		  &bytes_out,
+		  &pkts_out,
+		  &errs_out,
+		  &drops_out) == 9) {
+	  HSPAdaptorNIO *adaptor = getAdaptorNIO(&sp->adaptorNIOList, trimWhitespace(deviceName));
+	  if(adaptor) {
+	    // have to detect discontinuities here, so use a full
+	    // set of latched counters and accumulators.
+	    int accumulate = adaptor->nio.bytes_in ? YES : NO;
+	    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
 
-	      // but if we detect that the OS is using 64-bits then we can turn off the faster
+	    SFLHost_nio_counters delta;
+#define NIO_COMPUTE_DELTA(field) delta.field = field - adaptor->last_nio.field
+	    NIO_COMPUTE_DELTA(pkts_in);
+	    NIO_COMPUTE_DELTA(errs_in);
+	    NIO_COMPUTE_DELTA(drops_in);
+	    NIO_COMPUTE_DELTA(pkts_out);
+	    NIO_COMPUTE_DELTA(errs_out);
+	    NIO_COMPUTE_DELTA(drops_out);
+
+	    if(sp->adaptorNIOList.polling_secs == 0) {
+	      // 64-bit byte counters
+	      NIO_COMPUTE_DELTA(bytes_in);
+	      NIO_COMPUTE_DELTA(bytes_out);
+	    }
+	    else {
+	      // for case where byte counters are 32-bit,  we need
+	      // to use 32-bit unsigned arithmetic to avoid spikes
+	      delta.bytes_in = (uint32_t)bytes_in - adaptor->last_bytes_in32;
+	    delta.bytes_out = (uint32_t)bytes_out - adaptor->last_bytes_out32;
+	      adaptor->last_bytes_in32 = bytes_in;
+	      adaptor->last_bytes_out32 = bytes_out;
+	      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
+	      // if we detect that the OS is using 64-bits then we can turn off the faster
 	      // NIO polling. This should probaly be done based on the kernel version or some
 	      // other include-file definition, but it's not expensive to do it here like this:
-	      if(bytes_in > 0xFFFFFFFF ||
-		 bytes_out > 0xFFFFFFFF) {
-		sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_64BIT;
+	      if(bytes_in > 0xFFFFFFFF || bytes_out > 0xFFFFFFFF) {
+		myLog(LOG_INFO, "detected 64-bit counters in /proc/net/dev");
+		sp->adaptorNIOList.polling_secs = 0;
 	      }
-		
-	      // the rest are 32-bit in the output
-	      adaptor->nio.pkts_in = (uint32_t)pkts_in;
-	      adaptor->nio.errs_in = (uint32_t)errs_in;
-	      adaptor->nio.drops_in = (uint32_t)drops_in;
-	      adaptor->nio.pkts_out = (uint32_t)pkts_out;
-	      adaptor->nio.errs_out = (uint32_t)errs_out;
-	      adaptor->nio.drops_out = (uint32_t)drops_out;
+	    }
+
+	    if(accumulate) {
+	      // sanity check in case the counters were reset under out feet.
+	      // normally we leave this to the upstream collector, but these
+	      // numbers might be getting passed through from the hardware(?)
+	      // so we treat them with particular distrust.
+	      if(delta.bytes_in > maxDeltaBytes ||
+		 delta.bytes_out > maxDeltaBytes ||
+		 delta.pkts_in > HSP_MAX_NIO_DELTA32 ||
+		 delta.pkts_out > HSP_MAX_NIO_DELTA32) {
+		myLog(LOG_ERR, "detected counter discontinuity in /proc/net/dev");
+		accumulate = NO;
+	      }
+	    }
+
+	    if(accumulate) {
+#define NIO_ACCUMULATE(field) adaptor->nio.field += delta.field
+	      NIO_ACCUMULATE(bytes_in);
+	      NIO_ACCUMULATE(pkts_in);
+	      NIO_ACCUMULATE(errs_in);
+	      NIO_ACCUMULATE(drops_in);
+	      NIO_ACCUMULATE(bytes_out);
+	      NIO_ACCUMULATE(pkts_out);
+	      NIO_ACCUMULATE(errs_out);
+	      NIO_ACCUMULATE(drops_out);
+	    }
+
+#define NIO_LATCH(field) adaptor->last_nio.field = field
+	    NIO_LATCH(bytes_in);
+	    NIO_LATCH(pkts_in);
+	    NIO_LATCH(errs_in);
+	    NIO_LATCH(drops_in);
+	    NIO_LATCH(bytes_out);
+	    NIO_LATCH(pkts_out);
+	    NIO_LATCH(errs_out);
+	    NIO_LATCH(drops_out);
 	  }
 	}
       }
       fclose(procFile);
     }
   }
-
+  
 
   /*_________________---------------------------__________________
     _________________      readNioCounters      __________________

@@ -151,8 +151,11 @@ extern "C" {
   typedef struct _HSPAdaptorNIO {
     char *deviceName;
     SFLHost_nio_counters nio;
-    uint64_t last_bytes_in;
-    uint64_t last_bytes_out;
+    SFLHost_nio_counters last_nio;
+    uint32_t last_bytes_in32;
+    uint32_t last_bytes_out32;
+#define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
+#define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
   } HSPAdaptorNIO;
 
   typedef struct _HSPAdaptorNIOList {
@@ -167,7 +170,6 @@ extern "C" {
     // or if it decides that all interface speeds are limited to 1Gbps or less.
     time_t polling_secs;
 #define HSP_NIO_POLLING_SECS_32BIT 3
-#define HSP_NIO_POLLING_SECS_64BIT 0 // 0 means "off"
   } HSPAdaptorNIOList;
 
   typedef struct _HSPDiskIO {
