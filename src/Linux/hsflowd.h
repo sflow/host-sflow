@@ -62,6 +62,7 @@ extern "C" {
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
 #define HSP_DEFAULT_DNSSD_MINDELAY 10
+#define HSP_DNSSD_STACKSIZE 2000000
 #define HSP_MAX_SUBAGENTID 1000000
 #define HSP_REFRESH_VMS 60
 
@@ -183,6 +184,7 @@ extern "C" {
     char *configFile;
     char *outputFile;
     char *pidFile;
+    int dropPriv;
     uint32_t outputRevisionNo;
     FILE *f_out;
     // Identity
@@ -192,7 +194,6 @@ extern "C" {
     HSPAdaptorNIOList adaptorNIOList;
     int refreshAdaptorList;
     int refreshVMList;
-
     // 64-bit diskIO accumulators
     HSPDiskIO diskIO;
     // UDP send sockets
@@ -204,19 +205,16 @@ extern "C" {
     uint32_t page_size;
     uint32_t num_domains;
 #endif
-
     // persistent state
     uint32_t maxDsIndex;
     char *vmStoreFile;
     FILE *f_vmStore;
     int vmStoreInvalid;
     HSPVMStore *vmStore;
-
     // inter-thread communication
     pthread_mutex_t *config_mut;
     int DNSSD;
     uint32_t previousPollingInterval;
-
     // the DNSSD thread and his private state
     pthread_t *DNSSD_thread;
     int DNSSD_countdown;

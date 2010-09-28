@@ -881,6 +881,7 @@ extern "C" {
     sp->DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
     sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
     sp->vmStoreFile = HSP_DEFAULT_VMSTORE_FILE;
+    sp->dropPriv = YES;
   }
 
   /*_________________---------------------------__________________
@@ -890,10 +891,11 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-d] [-v] [-p PIDFile] [-f CONFIGFile] [-u UUID] \n", command);
+    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-f CONFIGFile]\n", command);
     fprintf(stderr,"\n\
              -d:  debug mode - do not fork as a daemon, and log to stderr (repeat for more details)\n\
              -v:  print version number and exit\n\
+             -P:  do not drop privileges (run as root)\n\
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
         -u UUID:  specify UUID as unique ID for this host\n\
   -f CONFIGFile:  specify config file (default is "HSP_DEFAULT_CONFIGFILE")\n\n");
@@ -913,10 +915,11 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dvp:f:o:u:?h")) != -1) {
+    while ((in = getopt(argc, argv, "dvPp:f:o:u:?h")) != -1) {
       switch(in) {
       case 'd': debug++; break;
       case 'v': printf("%s version %s\n", argv[0], HSP_VERSION); exit(EXIT_SUCCESS); break;
+      case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
       case 'f': sp->configFile = optarg; break;
       case 'o': sp->outputFile = optarg; break;
@@ -1321,6 +1324,15 @@ extern "C" {
     
 #endif
 
+    if(sp->dropPriv) {
+      // don't need to be root any more - we held on to root privileges
+      // to make sure we could write the pid file,  and open the output
+      // file, and open the Xen handles, and on Debian we needed to fork
+      // the DNSSD thread before calling setuid (not sure why?).
+      // Anway, from now on we don't want the responsibility...
+      drop_privileges(HSP_RLIMIT_MEMLOCK);
+    }
+
     myLog(LOG_INFO, "started");
     
     // initialize the clock so we can detect second boundaries
@@ -1363,9 +1375,18 @@ extern "C" {
 	  // the sFlowSettings,  and the current thread will loop
 	  // in the HSPSTATE_WAITCONFIG state until that pointer
 	  // has been set (sp->sFlow.sFlowSettings)
+	  // Set a more conservative stacksize here - partly because
+	  // we don't need more,  but mostly because Debian was refusing
+	  // to create the thread - I guess because it was enough to
+	  // blow through our mlockall() allocation.
+	  // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
+	  pthread_attr_t attr;
+	  pthread_attr_init(&attr);
+	  pthread_attr_setstacksize(&attr, HSP_DNSSD_STACKSIZE);
 	  sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
-	  if(pthread_create(sp->DNSSD_thread, NULL, runDNSSD, sp) != 0) {
-	    myLog(LOG_ERR, "pthread_create() failed\n");
+	  int err = pthread_create(sp->DNSSD_thread, &attr, runDNSSD, sp);
+	  if(err != 0) {
+	    myLog(LOG_ERR, "pthread_create() failed: %s\n", strerror(err));
 	    exit(EXIT_FAILURE);
 	  }
 	}
@@ -1373,12 +1394,7 @@ extern "C" {
 	  // just use the config from the file
 	  installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
 	}
-	// don't need to be root any more - we held on to root privileges
-	// to make sure we could write the pid file,  and open the output
-	// file, and open the Xen handles, and on Debian we needed to fork
-	// the DNSSD thread before calling setuid (not sure why?).
-	// Anway, from now on we don't want the responsibility...
-	drop_privileges(HSP_RLIMIT_MEMLOCK);
+
 	setState(sp, HSPSTATE_WAITCONFIG);
 	break;
 	
