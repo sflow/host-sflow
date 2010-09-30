@@ -68,7 +68,8 @@ extern "C" {
 	  if(adaptor) {
 	    // have to detect discontinuities here, so use a full
 	    // set of latched counters and accumulators.
-	    int accumulate = adaptor->nio.bytes_in ? YES : NO;
+	    int accumulate = adaptor->last_update ? YES : NO;
+	    adaptor->last_update = sp->clk;
 	    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
 
 	    SFLHost_nio_counters delta;
@@ -89,7 +90,7 @@ extern "C" {
 	      // for case where byte counters are 32-bit,  we need
 	      // to use 32-bit unsigned arithmetic to avoid spikes
 	      delta.bytes_in = (uint32_t)bytes_in - adaptor->last_bytes_in32;
-	    delta.bytes_out = (uint32_t)bytes_out - adaptor->last_bytes_out32;
+	      delta.bytes_out = (uint32_t)bytes_out - adaptor->last_bytes_out32;
 	      adaptor->last_bytes_in32 = bytes_in;
 	      adaptor->last_bytes_out32 = bytes_out;
 	      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
