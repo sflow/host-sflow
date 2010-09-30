@@ -2,7 +2,7 @@
 # http://host-sflow.sourceforge.net/license.html
 
 PROG=hsflowd
-VERSION=1.03
+VERSION=1.04
 RPM_SOURCES_DIR=/usr/src/redhat/SOURCES
 MY_SOURCES_DIR=$(RPM_SOURCES_DIR)/$(PROG)-$(VERSION)
 
