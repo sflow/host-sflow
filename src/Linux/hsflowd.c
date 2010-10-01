@@ -646,7 +646,7 @@ extern "C" {
 	      uint32_t domId = domaininfo[i].domain;
 	      // dom0 is the hypervisor. We want the others.
 	      if(domId != 0) {
-		uint32_t dsIndex = assignVM_dsIndex(sp, domaininfo[i].uuid);
+		uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
 		SFLDataSource_instance dsi;
 		// ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
 		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
