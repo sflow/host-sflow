@@ -398,16 +398,15 @@ extern "C" {
 
     if(state && xenHandlesOK(sp)) {
       
-      uint32_t dom_id = SFL_DS_INDEX(poller->dsi);
       xc_domaininfo_t domaininfo;
       int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
-      if(n < 0 || domaininfo.domain != dom_id) {
+      if(n < 0 || domaininfo.domain != state->domId) {
 	// Assume something changed under our feet.
 	// Request a reload of the VM information and bail.
 	// We'll try again next time.
 	myLog(LOG_INFO, "request for vm_index %u (dom_id=%u) returned %d (with dom_id=%u)",
 	      state->vm_index,
-	      dom_id,
+	      state->domId,
 	      n,
 	      domaininfo.domain);
 	sp->refreshVMList = YES;
@@ -420,7 +419,7 @@ extern "C" {
       hidElem.tag = SFLCOUNTERS_HOST_HID;
       char query[255];
       char hname[255];
-      snprintf(query, sizeof(query), "/local/domain/%u/name", dom_id);
+      snprintf(query, sizeof(query), "/local/domain/%u/name", state->domId);
       char *xshname = (char *)xs_read(sp->xs_handle, XBT_NULL, query, NULL);
       if(xshname) {
 	// copy the name out here so we can free it straight away
@@ -447,7 +446,7 @@ extern "C" {
       SFLCounters_sample_element nioElem = { 0 };
       nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
       char devFilter[20];
-      snprintf(devFilter, 20, "vif%u.", dom_id);
+      snprintf(devFilter, 20, "vif%u.", state->domId);
       uint32_t network_count = readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter);
       if(state->network_count != network_count) {
 	// request a refresh if the number of VIFs changed. Not a perfect test
@@ -457,7 +456,7 @@ extern "C" {
 	myLog(LOG_INFO, "vif count changed from %u to %u (dom_id=%u). Setting refreshAdaptorList=YES",
 	      state->network_count,
 	      network_count,
-	      dom_id);
+	      state->domId);
 	state->network_count = network_count;
 	sp->refreshAdaptorList = YES;
       }
@@ -469,9 +468,9 @@ extern "C" {
       u_int64_t vcpu_ns = 0;
       for(uint32_t c = 0; c <= domaininfo.max_vcpu_id; c++) {
 	xc_vcpuinfo_t info;
-	if(xc_vcpu_getinfo(sp->xc_handle, dom_id, c, &info) != 0) {
+	if(xc_vcpu_getinfo(sp->xc_handle, state->domId, c, &info) != 0) {
 	  // error or domain is in transition.  Just bail.
-	  myLog(LOG_INFO, "vcpu list in transition (dom_id=%u)", dom_id);
+	  myLog(LOG_INFO, "vcpu list in transition (dom_id=%u)", state->domId);
 	  return;
 	}
 	else {
@@ -514,7 +513,7 @@ extern "C" {
       // VM disk I/O counters
       SFLCounters_sample_element dskElem = { 0 };
       dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-      if(xenstat_dsk(sp, dom_id, &dskElem.counterBlock.host_vrt_dsk)) {
+      if(xenstat_dsk(sp, state->domId, &dskElem.counterBlock.host_vrt_dsk)) {
 	SFLADD_ELEMENT(cs, &dskElem);
       }
 
@@ -527,7 +526,7 @@ extern "C" {
       myAdaptors.adaptors = adaptors;
       myAdaptors.capacity = HSP_MAX_VIFS;
       myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, dom_id, &myAdaptors);
+      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, state->domId, &myAdaptors);
       SFLADD_ELEMENT(cs, &adaptorsElem);
 
       
@@ -651,9 +650,9 @@ extern "C" {
 		// ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
 		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
 		SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-		if(vpoller->userData) {
+		HSPVMState *state = (HSPVMState *)vpoller->userData;
+		if(state) {
 		  // it was already there, just clear the mark.
-		  HSPVMState *state = (HSPVMState *)vpoller->userData;
 		  state->marked = NO;
 		}
 		else {
@@ -662,15 +661,14 @@ extern "C" {
 		  uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
 		  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
 		  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-		  // hang my HSPVMState object on the datasource userData hook
-		  HSPVMState *state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
+		  // hang a new HSPVMState object on the userData hook
+		  state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
 		  state->network_count = 0;
 		  state->marked = NO;
 		  vpoller->userData = state;
 		  sp->refreshAdaptorList = YES;
 		}
 		// remember the index so we can access this individually later
-		HSPVMState *state = (HSPVMState *)vpoller->userData;
 		state->vm_index = num_domains + i;
 		// and the domId, which might have changed (if vm rebooted)
 		state->domId = domId;
