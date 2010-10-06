@@ -35,8 +35,8 @@ make clean
 
 %files
 %defattr(-,root,root,-)
-/usr/local/sbin/hsflowd
-/usr/local/sbin/sflowovsd
+/usr/sbin/hsflowd
+/usr/sbin/sflowovsd
 /etc/hsflowd.conf
 /etc/init.d/hsflowd
 /etc/init.d/sflowovsd

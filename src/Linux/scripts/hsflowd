@@ -7,7 +7,7 @@
 # processname: hsflowd
 # pidfile: /var/run/hsflowd.pid
 
-EXECPREFIX=/usr/local/sbin
+EXECPREFIX=/usr/sbin
 
 inm_running() {
     if [ $# = 0 ] ; then

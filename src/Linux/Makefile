@@ -28,7 +28,7 @@ ifeq ($(DEBIAN),)
 endif
 
 ifeq ($(BINDIR),)
-	BINDIR=/usr/local/sbin
+	BINDIR=/usr/sbin
 endif
 ifeq ($(INITDIR),)
 	INITDIR=/etc/init.d
