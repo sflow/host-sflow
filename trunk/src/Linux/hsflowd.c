@@ -499,6 +499,13 @@ extern "C" {
       // XEN_DOMINF_hvm_guest  : as opposed to a PV guest
       // XEN_DOMINF_debugged   :
 
+      // $$$ may need to set sp->refreshVMList = YES if we find one that is not running.  Ideally
+      // we would send one sample showing that it has stopped, and then stop reporting.  To do that
+      // reliably we would have to set a flag in the datasource vmstate so that ConfigVMs() would
+      // know whether that one sample has been sent or not.  On the other hand,  if we really don't
+      // want to report anything at all for stopped VMs, then we can leave it that ConfigVMs()
+      // does not even instantiate pollers for stopped VMs.
+
       cpuElem.counterBlock.host_vrt_cpu.cpuTime = (vcpu_ns / 1000000);
       cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domaininfo.max_vcpu_id + 1;
       SFLADD_ELEMENT(cs, &cpuElem);
@@ -589,7 +596,7 @@ extern "C" {
     for(HSPVMStore *vmStore = sp->vmStore; vmStore != NULL; vmStore = vmStore->nxt) {
       char uuidStr[51];
       printUUID((u_char *)vmStore->uuid, (u_char *)uuidStr, 50);
-      fprintf(sp->f_vmStore, "%s=%u", uuidStr, vmStore->dsIndex);
+      fprintf(sp->f_vmStore, "%s=%u\n", uuidStr, vmStore->dsIndex);
     }
     fflush(sp->f_vmStore);
   }
@@ -645,6 +652,10 @@ extern "C" {
 	      uint32_t domId = domaininfo[i].domain;
 	      // dom0 is the hypervisor. We want the others.
 	      if(domId != 0) {
+		if(debug) {
+		  // may need to ignore any that are not marked as "running" here
+		  myLog(LOG_INFO, "ConfigVMs(): domId=%u, flags=0x%x", domId, domaininfo[i].flags);
+		}
 		uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
 		SFLDataSource_instance dsi;
 		// ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
@@ -669,6 +680,11 @@ extern "C" {
 		  sp->refreshAdaptorList = YES;
 		}
 		// remember the index so we can access this individually later
+		if(debug) {
+		  if(state->vm_index != (num_domains + i)) {
+		    myLog(LOG_INFO, "domId=%u vm_index %u->%u", domId, state->vm_index, (num_domains + i));
+		  }
+		}
 		state->vm_index = num_domains + i;
 		// and the domId, which might have changed (if vm rebooted)
 		state->domId = domId;
@@ -1359,41 +1375,41 @@ extern "C" {
 	  if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
 	  else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
 	  sfl_random_init(seed);
-	}
+
 	
-	// load the persistent state from last time
-	readVMStore(sp);
+	  // load the persistent state from last time
+	  readVMStore(sp);
 
-	// initialize the faster polling of NIO counters
-	// to avoid undetected 32-bit wraps
-	sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_32BIT;
-
-	if(sp->DNSSD) {
-	  // launch dnsSD thread.  It will now be responsible for
-	  // the sFlowSettings,  and the current thread will loop
-	  // in the HSPSTATE_WAITCONFIG state until that pointer
-	  // has been set (sp->sFlow.sFlowSettings)
-	  // Set a more conservative stacksize here - partly because
-	  // we don't need more,  but mostly because Debian was refusing
-	  // to create the thread - I guess because it was enough to
-	  // blow through our mlockall() allocation.
-	  // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
-	  pthread_attr_t attr;
-	  pthread_attr_init(&attr);
-	  pthread_attr_setstacksize(&attr, HSP_DNSSD_STACKSIZE);
-	  sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
-	  int err = pthread_create(sp->DNSSD_thread, &attr, runDNSSD, sp);
-	  if(err != 0) {
-	    myLog(LOG_ERR, "pthread_create() failed: %s\n", strerror(err));
-	    exit(EXIT_FAILURE);
+	  // initialize the faster polling of NIO counters
+	  // to avoid undetected 32-bit wraps
+	  sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_32BIT;
+	  
+	  if(sp->DNSSD) {
+	    // launch dnsSD thread.  It will now be responsible for
+	    // the sFlowSettings,  and the current thread will loop
+	    // in the HSPSTATE_WAITCONFIG state until that pointer
+	    // has been set (sp->sFlow.sFlowSettings)
+	    // Set a more conservative stacksize here - partly because
+	    // we don't need more,  but mostly because Debian was refusing
+	    // to create the thread - I guess because it was enough to
+	    // blow through our mlockall() allocation.
+	    // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
+	    pthread_attr_t attr;
+	    pthread_attr_init(&attr);
+	    pthread_attr_setstacksize(&attr, HSP_DNSSD_STACKSIZE);
+	    sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
+	    int err = pthread_create(sp->DNSSD_thread, &attr, runDNSSD, sp);
+	    if(err != 0) {
+	      myLog(LOG_ERR, "pthread_create() failed: %s\n", strerror(err));
+	      exit(EXIT_FAILURE);
+	    }
 	  }
+	  else {
+	    // just use the config from the file
+	    installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
+	  }
+	  setState(sp, HSPSTATE_WAITCONFIG);
 	}
-	else {
-	  // just use the config from the file
-	  installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
-	}
-
-	setState(sp, HSPSTATE_WAITCONFIG);
 	break;
 	
       case HSPSTATE_WAITCONFIG:

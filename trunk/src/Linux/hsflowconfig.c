@@ -145,6 +145,10 @@ extern int debug;
       buf[b++] = bin2hex(byte >> 4);
       buf[b++] = bin2hex(byte & 0x0f);
     }
+
+    // add NUL termination
+    buf[b] = '\0';
+
     return b;
   }
   
@@ -163,7 +167,10 @@ extern int debug;
     
     // should really be lowercase hex - fix that here
     for(int i = 0; i < b; i++) buf[i] = tolower(buf[i]);
-    
+
+    // add NUL termination
+    buf[b] = '\0';
+
     return b;
   }
   
