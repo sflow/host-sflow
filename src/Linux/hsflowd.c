@@ -499,13 +499,6 @@ extern "C" {
       // XEN_DOMINF_hvm_guest  : as opposed to a PV guest
       // XEN_DOMINF_debugged   :
 
-      // $$$ may need to set sp->refreshVMList = YES if we find one that is not running.  Ideally
-      // we would send one sample showing that it has stopped, and then stop reporting.  To do that
-      // reliably we would have to set a flag in the datasource vmstate so that ConfigVMs() would
-      // know whether that one sample has been sent or not.  On the other hand,  if we really don't
-      // want to report anything at all for stopped VMs, then we can leave it that ConfigVMs()
-      // does not even instantiate pollers for stopped VMs.
-
       cpuElem.counterBlock.host_vrt_cpu.cpuTime = (vcpu_ns / 1000000);
       cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domaininfo.max_vcpu_id + 1;
       SFLADD_ELEMENT(cs, &cpuElem);
@@ -513,6 +506,14 @@ extern "C" {
       // VM memory counters [ref xenstat.c]
       SFLCounters_sample_element memElem = { 0 };
       memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
+
+      if(debug) myLog(LOG_INFO, "vm domid=%u, dsIndex=%u, vm_index=%u, tot_pages=%u",
+		      state->domId,
+		      SFL_DS_INDEX(poller->dsi),
+		      state->vm_index,
+		      domaininfo.tot_pages);
+
+		      
       memElem.counterBlock.host_vrt_mem.memory = domaininfo.tot_pages * sp->page_size;
       memElem.counterBlock.host_vrt_mem.maxMemory = (domaininfo.max_pages == UINT_MAX) ? -1 : (domaininfo.max_pages * sp->page_size);
       SFLADD_ELEMENT(cs, &memElem);
@@ -704,7 +705,9 @@ extern "C" {
 	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
 	  HSPVMState *state = (HSPVMState *)pl->userData;
 	  if(state->marked) {
-	    myLog(LOG_INFO, "configVMs: removing domain=%u", SFL_DS_INDEX(pl->dsi));
+	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
+		  SFL_DS_INDEX(pl->dsi),
+		  state->domId);
 	    free(pl->userData);
 	    pl->userData = NULL;
 	    sfl_agent_removePoller(sf->agent, &pl->dsi);

@@ -215,9 +215,12 @@ extern int debug;
 
   int dnsSD(HSP *sp, HSPDnsCB callback)
   {
-    int num_servers = dnsSD_Request(sp, SFLOW_DNS_SD, T_SRV, callback);
-    dnsSD_Request(sp, SFLOW_DNS_SD, T_TXT, callback);
-    // it's ok even if just the SRV request succeeded
+    char request[HSP_MAX_DNS_LEN];
+    char *domain_override = sp->DNSSD_domain ? sp->DNSSD_domain : "";
+    snprintf(request, HSP_MAX_DNS_LEN, "%s%s", SFLOW_DNS_SD, domain_override);
+    int num_servers = dnsSD_Request(sp, request, T_SRV, callback);
+    dnsSD_Request(sp, request, T_TXT, callback);
+    // it's ok even if only the SRV request succeeded
     return num_servers; //  -1 on error
   }
 
