@@ -1,6 +1,6 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 1.05
+Version: 1.06
 Release: 1
 License: http://host-sflow.sourceforge.net/license.html
 Group: Applications/Internet
@@ -55,6 +55,8 @@ if [ $1 = 0 ]; then
 fi
 
 %changelog
+* Fri Oct 08 2010 nhm <nhm@noodle.sf.inmon.com>
+- move install from /usr/local/sbin to /usr/sbin
 * Mon Aug 30 2010 nhm <nhm@noodle.sf.inmon.com>
 - add sflowovsd
 * Thu Jul 22 2010 nhm <nhm@chow.sf.inmon.com>
