@@ -217,6 +217,7 @@ extern "C" {
     // inter-thread communication
     pthread_mutex_t *config_mut;
     int DNSSD;
+    char *DNSSD_domain;
     uint32_t previousPollingInterval;
     // the DNSSD thread and his private state
     pthread_t *DNSSD_thread;
@@ -238,6 +239,7 @@ extern "C" {
   
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"
+#define HSP_MAX_DNS_LEN 255
   typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen);
   int dnsSD(HSP *sp, HSPDnsCB callback);
   

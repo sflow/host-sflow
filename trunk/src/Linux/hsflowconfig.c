@@ -318,6 +318,21 @@ extern int debug;
     return t;
   }
 
+  // expectDNSSD_domain
+
+  static HSPToken *expectDNSSD_domain(HSP *sp, HSPToken *tok)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && t->str) {
+      if(sp->DNSSD_domain) free(sp->DNSSD_domain);
+      sp->DNSSD_domain = strdup(t->str);
+      return t;
+    }
+    parseError(sp, tok, "expected domain", "");
+    return NULL;
+  }
+
   // expectDevice
 
    static HSPToken *expectDevice(HSP *sp, HSPToken *tok, SFLAdaptor **p_adaptor)
@@ -514,14 +529,19 @@ extern int debug;
 	case HSPTOKEN_DNSSD:
 	  if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
 	  break;
+	case HSPTOKEN_DNSSD_DOMAIN:
+	  if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
+	  break;
 	case HSPTOKEN_COLLECTOR:
 	  if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	  newCollector(sp->sFlow->sFlowSettings_file);
 	  level[++depth] = HSPOBJ_COLLECTOR;
 	  break;
+	case HSPTOKEN_SAMPLING:
 	case HSPTOKEN_PACKETSAMPLINGRATE:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
 	  break;
+	case HSPTOKEN_POLLING:
 	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
 	  break;
