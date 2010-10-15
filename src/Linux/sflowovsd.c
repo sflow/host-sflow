@@ -14,150 +14,7 @@ extern "C" {
   // globals - easier for signal handler
   SFVS SFVSDaemon;
   int exitStatus = EXIT_SUCCESS;
-  int debug = 0;
-
-
-  /*_________________---------------------------__________________
-    _________________        logging            __________________
-    -----------------___________________________------------------
-  */
-
-  void myLog(int syslogType, char *fmt, ...)
-  {
-    va_list args;
-    va_start(args, fmt);
-    if(debug) {
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
-    }
-    else vsyslog(syslogType, fmt, args);
-  }
-
-  /*_________________---------------------------__________________
-    _________________       my_calloc           __________________
-    -----------------___________________________------------------
-  */
-  
-  void *my_calloc(size_t bytes)
-  {
-    void *mem = calloc(1, bytes);
-    if(mem == NULL) {
-      myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
-      if(debug) malloc_stats();
-      exit(EXIT_FAILURE);
-    }
-    return mem;
-  }
-    
-  /*_________________---------------------------__________________
-    _________________     string fields         __________________
-    -----------------___________________________------------------
-  */
-  
-  static void setStr(char **fieldp, char *str) {
-    if(*fieldp) free(*fieldp);
-    (*fieldp) = str ? strdup(str) : NULL;
-  }
-    
-  /*_________________---------------------------__________________
-    _________________     string array          __________________
-    -----------------___________________________------------------
-  */
-
-  static SFVSStringArray *strArrayNew() {
-    return (SFVSStringArray *)my_calloc(sizeof(SFVSStringArray));
-  }
-
-  static void strArrayAdd(SFVSStringArray *ar, char *str) {
-    if(ar->capacity <= ar->n) {
-      uint32_t oldBytes = ar->capacity * sizeof(char *);
-      ar->capacity = ar->n + 16;
-      uint32_t newBytes = ar->capacity * sizeof(char *);
-      char **newArray = (char **)my_calloc(newBytes);
-      if(ar->strs) {
-	memcpy(newArray, ar->strs, oldBytes);
-	free(ar->strs);
-      }
-      ar->strs = newArray;
-    }
-    if(ar->strs[ar->n]) free(ar->strs[ar->n]);
-    ar->strs[ar->n++] = str ? strdup(str) : NULL;
-  }
-
-  static void strArrayReset(SFVSStringArray *ar) {
-    for(uint32_t i = 0; i < ar->n; i++) {
-      if(ar->strs[i]) {
-	free(ar->strs[i]);
-	ar->strs[i] = NULL;
-      }
-    }
-    ar->n = 0;
-  }
-
-  static void strArrayFree(SFVSStringArray *ar) {
-    strArrayReset(ar);
-    if(ar->strs) free(ar->strs);
-    free(ar);
-  }
-
-  static char **strArray(SFVSStringArray *ar) {
-    return ar->strs;
-  }
-
-  static uint32_t strArrayN(SFVSStringArray *ar) {
-    return ar->n;
-  }
-
-  static char *strArrayAt(SFVSStringArray *ar, int i) {
-    return ar->strs[i];
-  }
-
-  static int mysortcmp(const void *p1, const void* p2) {
-    char *s1 = *(char **)p1;
-    char *s2 = *(char **)p2;
-    if(s1 == s2) return 0;
-    if(s1 == NULL) return -1;
-    if(s2 == NULL) return 1;
-    return strcmp(s1, s2);
-  }
-
-  static void strArraySort(SFVSStringArray *ar) {
-    qsort(ar->strs, ar->n, sizeof(char *), mysortcmp);
-  }
-
-  static char *strArrayStr(SFVSStringArray *ar, char *start, char *quote, char *delim, char *end) {
-    size_t strbufLen = 256;
-    char *strbuf = NULL;
-    FILE *f_strbuf;
-    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
-      myLog(LOG_ERR, "error in open_memstream: %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if(start) fputs(start, f_strbuf);
-    for(uint32_t i = 0; i < ar->n; i++) {
-      if(i && delim) fputs(delim, f_strbuf);
-      char *str = ar->strs[i];
-      if(str) {
-	if(quote) fputs(quote, f_strbuf);
-	fputs(str, f_strbuf);
-	if(quote) fputs(quote, f_strbuf);
-      }
-    }
-    if(end) fputs(end, f_strbuf);
-    fclose(f_strbuf);
-    return strbuf;
-  }
-
-  static int strArrayEqual(SFVSStringArray *ar1, SFVSStringArray *ar2) {
-    if(ar1->n != ar2->n) return NO;
-    for(int i = 0; i < ar1->n; i++) {
-      char *s1 = ar1->strs[i];
-      char *s2 = ar2->strs[i];
-      if((s1 != s2)
-	 && (s1 == NULL || s2 == NULL || strcmp(s1, s2))) return NO;
-    }
-    return YES;
-  }
+  extern int debug;
 
   /*_________________---------------------------__________________
     _________________     setState              __________________
@@ -279,29 +136,6 @@ extern "C" {
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
       break;
-    }
-  }
-
-  /*_________________---------------------------__________________
-    _________________     my_usleep             __________________
-    -----------------___________________________------------------
-  */
-  
-  void my_usleep(uint32_t microseconds) {
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = microseconds;
-    int max_fd = 0;
-    int nfds = select(max_fd + 1,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      &timeout);
-    // may return prematurely if a signal was caught, in which case nfds will be
-    // -1 and errno will be set to EINTR.  If we get any other error, abort.
-    if(nfds < 0 && errno != EINTR) {
-      myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
-      exit(EXIT_FAILURE);
     }
   }
       
@@ -493,65 +327,6 @@ extern "C" {
 
     return (!sv->config.error);
   }
-
-      
-  /*_________________---------------------------__________________
-    _________________     myExec                __________________
-    -----------------___________________________------------------
-
-    like popen(), but more secure coz the shell doesn't get
-    to "reimagine" the args.
-  */
-
-  static int myExec(SFVS *sv, char **cmd, SFVSExecCB lineCB)
-  {
-    int ans = YES;
-    int pfd[2];
-    pid_t cpid;
-    if(pipe(pfd) == -1) {
-      myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if((cpid = fork()) == -1) {
-      myLog(LOG_ERR, "fork() failed : %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if(cpid == 0) {
-      // in child
-      close(pfd[0]);   // close read-end
-      dup2(pfd[1], 1); // stdout -> write-end
-      dup2(pfd[1], 2); // stderr -> write-end
-      close(pfd[1]);
-      // exec program
-      char *env[] = { NULL };
-      if(execve(cmd[0], cmd, env) == -1) {
-	myLog(LOG_ERR, "execve() failed : errno=%d (%s)", errno, strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-    }
-    else {
-      // in parent
-      close(pfd[1]); // close write-end
-      // read from read-end
-      FILE *ovs;
-      if((ovs = fdopen(pfd[0], "r")) == NULL) {
-	myLog(LOG_ERR, "fdopen() failed : %s", strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      char line[SFVS_MAX_LINELEN];
-      while(fgets(line, SFVS_MAX_LINELEN, ovs)) {
-	if(debug > 1) myLog(LOG_INFO, "myExec input> <%s>", line);
-	if((*lineCB)(sv, line) == NO) {
-	  ans = NO;
-	  break;
-	}
-      }
-      fclose(ovs);
-      wait(NULL); // block here until child is done
-    }
-    return ans;
-  }
-
       
   /*_________________---------------------------__________________
     _________________     stripQuotes           __________________
@@ -661,8 +436,9 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  int sFlowList(SFVS *sv, char *line)
+  int sFlowList(void *magic, char *line)
   {
+    SFVS *sv = (SFVS *)magic;
     // expect lines of form <var> : <val>
     int varlen = strcspn(line, ":");
     if(varlen >= strlen(line)) {
@@ -726,7 +502,7 @@ extern "C" {
 	// could go away someday and break any scheme that relies on a simple
 	// string-compare. So parse it into comma-separated tokens.
 	// single-threaded, so we can just use strtok(3)
-	SFVSStringArray *array = strArrayNew();
+	UTStringArray *array = strArrayNew();
 	val = stripQuotes(val, "[]");
 	char *delim = ", ";
 	for(char *tok = strtok(val, delim); tok != NULL; tok=strtok(NULL, delim)) {
@@ -742,8 +518,9 @@ extern "C" {
     return YES;
   }
 
-  int bridgeGetSFlow(SFVS *sv, char *line)
+  int bridgeGetSFlow(void *magic, char *line)
   {
+    SFVS *sv = (SFVS *)magic;
     char *uuid = stripQuotes(line, SFVS_QUOTES);
     if(uuid && strcmp(uuid, sv->sflowUUID) != 0) {
       // doesn't match
@@ -753,8 +530,9 @@ extern "C" {
     return YES;
   }
 
-  int bridgeList(SFVS *sv, char *line)
+  int bridgeList(void *magic, char *line)
   {
+    SFVS *sv = (SFVS *)magic;
     // copy the bridge name
     char *br = stripQuotes(line, SFVS_QUOTES);
     if(debug) myLog(LOG_INFO, "bridgeList> %s", br);
@@ -762,7 +540,8 @@ extern "C" {
       setStr(&sv->bridge, br);
       // now run a command to check (and possible change) the bridge sFlow setting
       char *bridge_get_sflow_cmd[] = { SFVS_OVS_CMD, "get", "bridge", br, "sflow", NULL };
-      if(myExec(sv, bridge_get_sflow_cmd, bridgeGetSFlow) == NO) return NO;
+      char line[SFVS_MAX_LINELEN];
+      if(myExec(sv, bridge_get_sflow_cmd, bridgeGetSFlow, line, SFVS_MAX_LINELEN) == NO) return NO;
     }
     return YES;
   }
@@ -770,8 +549,9 @@ extern "C" {
 #ifdef USEATVAR
   // no need for this - do it all in submit changes
 #else
-  int submitCreate(SFVS *sv, char *line)
+  int submitCreate(void *magic, char *line)
   {
+    SFVS *sv = (SFVS *)magic;
     char *uuid = stripQuotes(line, SFVS_QUOTES);
     if(uuid && strlen(uuid)) {
       // check format to see if it is really a uuid $$$
@@ -781,8 +561,9 @@ extern "C" {
   }
 #endif
 
-  int submitChanges(SFVS *sv, char *line)
+  int submitChanges(void *magic, char *line)
   {
+    SFVS *sv = (SFVS *)magic;
     myLog(LOG_ERR, "sumbitChanges: %s", line);
     // if we get anything at all here, then it must mean something didn't work - but
     // return YES anway so we can log the whole error message if it spans multiple
@@ -800,6 +581,7 @@ extern "C" {
   {
     resetCmd(sv);
     resetExtras(sv);
+    char line[SFVS_MAX_LINELEN];
 
     if(sv->config.error
        || sv->config.num_collectors == 0
@@ -817,7 +599,7 @@ extern "C" {
     }
     if(debug) myLog(LOG_INFO, "==== list sflow ====");
     char *list_sflow_cmd[] = { SFVS_OVS_CMD, "list", "sflow", NULL };
-    if(myExec(sv, list_sflow_cmd, sFlowList) == NO) return NO;
+    if(myExec((void *)sv, list_sflow_cmd, sFlowList, line, SFVS_MAX_LINELEN) == NO) return NO;
 
 #ifdef USEATVAR
     // we can add the create at the end
@@ -829,7 +611,7 @@ extern "C" {
       addCreateSFlow(sv);
       logCmd(sv);
       strArrayAdd(sv->cmd, NULL); // for execve(2)
-      if(myExec(sv, strArray(sv->cmd), submitCreate) == NO) return NO;
+      if(myExec((void *)sv, strArray(sv->cmd), submitCreate, line, SFVS_MAX_LINELEN) == NO) return NO;
       resetCmd(sv);
     }
 #endif
@@ -837,7 +619,7 @@ extern "C" {
     // make sure every bridge is using this sFlow entry
     if(debug) myLog(LOG_INFO, "==== list bridge ====");
     char *list_bridge_cmd[] = { SFVS_OVS_CMD, "list-br", NULL};
-    if(myExec(sv, list_bridge_cmd, bridgeList) == NO) return NO;
+    if(myExec((void *)sv, list_bridge_cmd, bridgeList, line, SFVS_MAX_LINELEN) == NO) return NO;
 
     // now it's safe to delete any extras that we found
     for(int ex = strArrayN(sv->extras); --ex >= 0; ) {
@@ -857,7 +639,7 @@ extern "C" {
     if(strArrayN(sv->cmd) > 1) {
       logCmd(sv);
       strArrayAdd(sv->cmd, NULL); // for execve(2)
-      if(myExec(sv, strArray(sv->cmd), submitChanges) == NO) return NO;
+      if(myExec((void *)sv, strArray(sv->cmd), submitChanges, line, SFVS_MAX_LINELEN) == NO) return NO;
     }
     return sv->cmdFailed ? NO : YES;
   }

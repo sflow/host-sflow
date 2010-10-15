@@ -21,29 +21,17 @@ extern "C" {
 #include <signal.h>
 #include <fcntl.h>
 #include <assert.h>
-
 #include <sys/wait.h>
-
 #include <sys/types.h>
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h> // for PRIu64 etc.
-#include "malloc.h" // for malloc_stats()
-#include "sflow_api.h"
 
-#define YES 1
-#define NO 0
+#include "sflow_api.h"
+#include "util.h"
 
 #define SFVS_VERSION "0.9"
 #define SFVS_DAEMON_NAME "sflowovsd"
 #define SFVS_DEFAULT_PIDFILE "/var/run/sflowovsd.pid"
 #define SFVS_DEFAULT_CONFIGFILE "/etc/hsflowd.auto"
 #define SFVS_MAX_TICKS 60
-
-  typedef struct _SFVSStringArray {
-    char **strs;
-    uint32_t n;
-    uint32_t capacity;
-  } SFVSStringArray;
 
   typedef enum { SFVSSTATE_INIT=0,
 		 SFVSSTATE_READCONFIG,
@@ -93,7 +81,7 @@ extern "C" {
     char *agent_dev;
     uint32_t num_collectors;
     SFVSCollector collectors[SFVS_MAX_COLLECTORS];
-    SFVSStringArray *targets;
+    UTStringArray *targets;
     char *targetStr;
   } SFVSConfig;
 
@@ -108,21 +96,12 @@ extern "C" {
     time_t configFile_modTime;
     char *pidFile;
     SFVSConfig config;
-    SFVSStringArray *cmd;
-    SFVSStringArray *extras;
+    UTStringArray *cmd;
+    UTStringArray *extras;
     char *bridge;
     char *sflowUUID;
     int cmdFailed;
   } SFVS;
-  
-  // logger
-  void myLog(int syslogType, char *fmt, ...);
-
-  // allocation
-  void *my_calloc(size_t bytes);
-
-  // myExec
-  typedef int (*SFVSExecCB)(SFVS *sv, char *line);
 
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -27,13 +27,12 @@ extern "C" {
 #include <pthread.h>
 
 #include <sys/types.h>
-#define __STDC_FORMAT_MACROS
-#include <inttypes.h> // for PRIu64 etc.
 #include "sys/mman.h" // for mlockall()
 #include "pwd.h" // for getpwnam()
 #include "grp.h"
 #include "sys/resource.h" // for setrlimit()
-#include "malloc.h" // for malloc_stats()
+
+#include "util.h"
 #include "sflow_api.h"
 
 #ifdef HSF_XEN
@@ -42,8 +41,10 @@ extern "C" {
 #include "dirent.h"
 #endif
 
-#define YES 1
-#define NO 0
+#ifdef HSF_VRT
+#include "libvirt.h"
+#include "libxml/xmlreader.h"
+#endif
 
 #define ADD_TO_LIST(linkedlist, obj) \
   do { \
@@ -145,6 +146,8 @@ extern "C" {
     int32_t marked;
     uint32_t vm_index;
     uint32_t domId;
+    UTStringArray *interfaces;
+    UTStringArray *volumes;
   } HSPVMState;
 
   // cache nio counters per adaptor
@@ -206,8 +209,11 @@ extern "C" {
     int xc_handle; // libxc
     struct xs_handle *xs_handle; // xenstore
     uint32_t page_size;
-    uint32_t num_domains;
 #endif
+#ifdef HSF_VRT
+    virConnectPtr virConn;
+#endif
+    uint32_t num_domains;
     // persistent state
     uint32_t maxDsIndex;
     char *vmStoreFile;
@@ -242,47 +248,15 @@ extern "C" {
 #define HSP_MAX_DNS_LEN 255
   typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen);
   int dnsSD(HSP *sp, HSPDnsCB callback);
-  
-  // logger
-  void myLog(int syslogType, char *fmt, ...);
-
-  // allocation
-  void *my_calloc(size_t bytes);
-  void *my_realloc(void *ptr, size_t bytes);
-
-  // utils
-  char *trimWhitespace(char *str);
 
   // read functions
   int readInterfaces(HSP *sp);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
-  int readNioCounters(HSP *sp, SFLHost_nio_counters *dsk, char *devFilter);
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, UTStringArray *devNames);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
-
-  static inline int lockOrDie(pthread_mutex_t *sem) {
-    if(sem && pthread_mutex_lock(sem) != 0) {
-      myLog(LOG_ERR, "failed to lock semaphore!");
-      exit(EXIT_FAILURE);
-    }
-    return YES;
-  }
-
-  static inline int releaseOrDie(pthread_mutex_t *sem) {
-    if(sem && pthread_mutex_unlock(sem) != 0) {
-      myLog(LOG_ERR, "failed to unlock semaphore!");
-      exit(EXIT_FAILURE);
-    }
-    return YES;
-  }
-
-#define STRINGIFY(Y) #Y
-#define STRINGIFY_DEF(D) STRINGIFY(D)
-
-#define DYNAMIC_LOCAL(VAR) VAR
-#define SEMLOCK_DO(_sem) for(int DYNAMIC_LOCAL(_ctrl)=1; DYNAMIC_LOCAL(_ctrl) && lockOrDie(_sem); DYNAMIC_LOCAL(_ctrl)=0, releaseOrDie(_sem))
 
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -151,7 +151,7 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter) {
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, UTStringArray *devNames) {
     int interface_count = 0;
     size_t devFilterLen = devFilter ? strlen(devFilter) : 0;
 
@@ -163,16 +163,18 @@ extern "C" {
     for(int i = 0; i < sp->adaptorNIOList.num_adaptors; i++) {
       HSPAdaptorNIO *adaptor = sp->adaptorNIOList.adaptors[i];
       if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
-	interface_count++;
-	// report the sum over all devices that match the filter
-	nio->bytes_in += adaptor->nio.bytes_in;
-	nio->pkts_in += adaptor->nio.pkts_in;
-	nio->errs_in += adaptor->nio.errs_in;
-	nio->drops_in += adaptor->nio.drops_in;
-	nio->bytes_out += adaptor->nio.bytes_out;
-	nio->pkts_out += adaptor->nio.pkts_out;
-	nio->errs_out += adaptor->nio.errs_out;
-	nio->drops_out += adaptor->nio.drops_out;
+	if(devNames == NULL || strArrayIndexOf(devNames, adaptor->deviceName) != -1) {
+	  interface_count++;
+	  // report the sum over all devices that match the filter
+	  nio->bytes_in += adaptor->nio.bytes_in;
+	  nio->pkts_in += adaptor->nio.pkts_in;
+	  nio->errs_in += adaptor->nio.errs_in;
+	  nio->drops_in += adaptor->nio.drops_in;
+	  nio->bytes_out += adaptor->nio.bytes_out;
+	  nio->pkts_out += adaptor->nio.pkts_out;
+	  nio->errs_out += adaptor->nio.errs_out;
+	  nio->drops_out += adaptor->nio.drops_out;
+	}
       }
     }
     return interface_count;
