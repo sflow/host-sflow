@@ -56,7 +56,7 @@ extern "C" {
   
   void my_free(void *ptr)
   {
-    free(ptr);
+    if(ptr) free(ptr);
   }
     
   /*_________________---------------------------__________________
@@ -65,7 +65,7 @@ extern "C" {
   */
   
   void setStr(char **fieldp, char *str) {
-    if(*fieldp) free(*fieldp);
+    if(*fieldp) my_free(*fieldp);
     (*fieldp) = str ? strdup(str) : NULL;
   }
   
@@ -109,11 +109,11 @@ extern "C" {
       char **newArray = (char **)my_calloc(newBytes);
       if(ar->strs) {
 	memcpy(newArray, ar->strs, oldBytes);
-	free(ar->strs);
+	my_free(ar->strs);
       }
       ar->strs = newArray;
     }
-    if(ar->strs[ar->n]) free(ar->strs[ar->n]);
+    if(ar->strs[ar->n]) my_free(ar->strs[ar->n]);
     ar->strs[ar->n++] = str ? strdup(str) : NULL;
   }
 
@@ -121,7 +121,7 @@ extern "C" {
     ar->sorted = NO;
     for(uint32_t i = 0; i < ar->n; i++) {
       if(ar->strs[i]) {
-	free(ar->strs[i]);
+	my_free(ar->strs[i]);
 	ar->strs[i] = NULL;
       }
     }
@@ -130,8 +130,8 @@ extern "C" {
 
    void strArrayFree(UTStringArray *ar) {
     strArrayReset(ar);
-    if(ar->strs) free(ar->strs);
-    free(ar);
+    if(ar->strs) my_free(ar->strs);
+    my_free(ar);
   }
 
    char **strArray(UTStringArray *ar) {
@@ -305,7 +305,7 @@ extern "C" {
     return b;
   }
   
-  static int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen)
+  int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen)
   {
     // read from hex into bin, up to max binLen chars, return number written
     u_char *h = hex;
@@ -330,23 +330,6 @@ extern "C" {
       }
     }
     return i;
-  }
-
-/*_________________---------------------------__________________
-  _________________       parseMAC            __________________
-  -----------------___________________________------------------
-*/
-
-  int parseMAC(char *str, uint64_t *mac)
-  {
-    u_char macbytes[6];
-    if(hexToBinary((u_char *)str, macbytes, 6) != 6) return NO;
-    // cast to 64-bit integer by simply copying in the bytes.
-    // It doesn't matter whether the architecture is big endian
-    // or little endian, we are just using this as a convenient
-    // comparison symbol.
-    memcpy(mac, macbytes, 6);
-    return YES;
   }
 
 /*_________________---------------------------__________________
@@ -460,6 +443,72 @@ extern "C" {
       wait(NULL); // block here until child is done
     }
     return ans;
+  }
+
+    
+  /*________________---------------------------__________________
+    ________________      adaptorList          __________________
+    ----------------___________________________------------------
+  */
+
+  SFLAdaptorList *adaptorListNew()
+  {
+    SFLAdaptorList *adList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
+    adList->capacity = 2; // will grow if necessary
+    adList->adaptors = (SFLAdaptor **)my_calloc(adList->capacity * sizeof(SFLAdaptor *));
+    adList->num_adaptors = 0;
+    return adList;
+  }
+
+  void adaptorListReset(SFLAdaptorList *adList)
+  {
+    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+      if(adList->adaptors[i]) {
+	my_free(adList->adaptors[i]->deviceName);
+	my_free(adList->adaptors[i]);
+	adList->adaptors[i] = NULL;
+      }
+    }
+    adList->num_adaptors = 0;
+  }
+
+  void adaptorListFree(SFLAdaptorList *adList)
+  {
+    adaptorListReset(adList);
+    my_free(adList->adaptors);
+    my_free(adList);
+  }
+  
+  SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
+  {
+    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+      SFLAdaptor *ad = adList->adaptors[i];
+      if(ad && ad->deviceName && !strcmp(ad->deviceName, dev)) {
+	// return the one that was already there
+	return ad;
+      }
+    }
+    return NULL;
+  }
+
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes)
+  {
+    SFLAdaptor *ad = adaptorListGet(adList, dev);
+    if(ad == NULL) {
+      ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
+      ad->deviceName = strdup(dev);
+    }
+    if(adList->num_adaptors == adList->capacity) {
+      // grow
+      adList->capacity *= 2;
+      adList->adaptors = (SFLAdaptor **)my_realloc(adList->adaptors, adList->capacity * sizeof(SFLAdaptor *));
+    }
+    adList->adaptors[adList->num_adaptors++] = ad;
+    if(macBytes) {
+      memcpy(ad->macs[0].mac, macBytes, 6);
+      ad->num_macs = 1;
+    }
+    return ad;
   }
 
 

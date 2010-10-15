@@ -110,7 +110,7 @@ extern "C" {
     uint32_t revisionNo;
 
     uint32_t subAgentId;
-    SFLAdaptor *agentDevice;
+    char *agentDevice;
     SFLAddress agentIP;
   } HSPSFlow; 
 
@@ -146,7 +146,7 @@ extern "C" {
     int32_t marked;
     uint32_t vm_index;
     uint32_t domId;
-    UTStringArray *interfaces;
+    SFLAdaptorList *interfaces;
     UTStringArray *volumes;
   } HSPVMState;
 
@@ -254,7 +254,7 @@ extern "C" {
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
-  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, UTStringArray *devNames);
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 
