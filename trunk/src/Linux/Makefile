@@ -1,37 +1,31 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
-# if XEN_DDK is not set, then assume it should be "yes"
-# if we are on a Xenserver DDK (or equivalent) system.
-# Just test if the xenstore and xenctrl libs are present.
-ifeq ($(XEN_DDK),)
-	XEN_DDK=$(shell if ls /usr/lib/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib/libxenstore.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+# if LVRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe
+# it would be stronger to test for the libvirt-devel rpm? or look for /usr/include/libvirt/libvirt.h?
+ifeq ($(LIBVIRT),)
+	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
 endif
-
-# specify XEN_ROOT path to compile with xen-sources instead
-# e.g. XEN_ROOT=/root/xen-3.2.0
-ifeq ($(XEN_ROOT),)
+ifeq ($(LIBVIRT),yes)
+	CFLAGS+= -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
+	LIBS+= -lvirt -lxml2
 else
+  # if XEN_DDK is not set, then assume it should be "yes" if we are on a Xenserver DDK (or equivalent) system.
+  # Just test if the xenstore and xenctrl libs are present.
+  ifeq ($(XEN_DDK),)
+	XEN_DDK=$(shell if ls /usr/lib/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib/libxenstore.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+  endif
+  # to compile with xen-sources instead, specify XEN_ROOT.  e.g. XEN_ROOT=/root/xen-3.2.0
+  ifeq ($(XEN_ROOT),)
+  else
 	XEN_DDK=no
 	include $(XEN_ROOT)/tools/Rules.mk
 	CFLAGS+= -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
 	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
-endif
-
-ifeq ($(XEN_DDK),yes)
+  endif
+  ifeq ($(XEN_DDK),yes)
 	CFLAGS+= -DHSF_XEN
 	LIBS+= -lxenstore -lxenctrl
-else
-  # if LVRT is not set, then assume it should be "yes"
-  # if we find the /usr/lib/libvirt.so library. Maybe
-  # it would be better to test for the libvirt-devel rpm,
-  # or look for /usr/include/libvirt/libvirt.h
-  ifeq ($(LIBVIRT),)
-	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-  endif
-  ifeq ($(LIBVIRT),yes)
-	CFLAGS+= -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
-	LIBS+= -lvirt -lxml2
   endif
 endif
 
