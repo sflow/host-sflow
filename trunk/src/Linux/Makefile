@@ -21,6 +21,18 @@ endif
 ifeq ($(XEN_DDK),yes)
 	CFLAGS+= -DHSF_XEN
 	LIBS+= -lxenstore -lxenctrl
+else
+  # if LVRT is not set, then assume it should be "yes"
+  # if we find the /usr/lib/libvirt.so library. Maybe
+  # it would be better to test for the libvirt-devel rpm,
+  # or look for /usr/include/libvirt/libvirt.h
+  ifeq ($(LIBVIRT),)
+	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+  endif
+  ifeq ($(LIBVIRT),yes)
+	CFLAGS+= -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
+	LIBS+= -lvirt -lxml2
+  endif
 endif
 
 ifeq ($(DEBIAN),)
@@ -56,7 +68,7 @@ SFLOWDIR=../sflow
 
 OPT = -O3 -DNDEBUG
 #OPT = -g -ggdb -O2
-#OPT= -g -ggdb
+OPT= -g -ggdb
 
 #CC= g++
 CC= gcc -std=gnu99
@@ -70,9 +82,10 @@ READ_OBJS=readInterfaces.o \
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
-             hsflowd.o
+             hsflowd.o \
+             util.o
 
-SFLOWOVS_OBJS=sflowovsd.o
+SFLOWOVS_OBJS=sflowovsd.o util.o
 
 CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE
 LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread

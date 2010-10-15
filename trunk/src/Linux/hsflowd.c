@@ -14,72 +14,7 @@ extern "C" {
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
-  int debug = 0;
-
-  /*_________________---------------------------__________________
-    _________________        logging            __________________
-    -----------------___________________________------------------
-  */
-
-  void myLog(int syslogType, char *fmt, ...)
-  {
-    va_list args;
-    va_start(args, fmt);
-    if(debug) {
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
-    }
-    else vsyslog(syslogType, fmt, args);
-  }
-
-  /*_________________---------------------------__________________
-    _________________       my_calloc           __________________
-    -----------------___________________________------------------
-  */
-  
-  void *my_calloc(size_t bytes)
-  {
-    void *mem = calloc(1, bytes);
-    if(mem == NULL) {
-      myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
-      if(debug) malloc_stats();
-      exit(EXIT_FAILURE);
-    }
-    return mem;
-  }
-  
-  void *my_realloc(void *ptr, size_t bytes)
-  {
-    void *mem = realloc(ptr, bytes);
-    if(mem == NULL) {
-      myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
-      if(debug) malloc_stats();
-      exit(EXIT_FAILURE);
-    }
-    return mem;
-  }
-  
-/*________________---------------------------__________________
-  ________________    trimWhitespace         __________________
-  ----------------___________________________------------------
-*/
-
-  char *trimWhitespace(char *str)
-  {
-    char *end;
-    
-    // Trim leading space
-    while(isspace(*str)) str++;
-    
-    // Trim trailing space
-    end = str + strlen(str) - 1;
-    while(end > str && isspace(*end)) end--;
-    
-    // Write new null terminator
-    *(end+1) = 0;
-    
-    return str;
-  }
+  extern int debug;
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -241,7 +176,7 @@ extern "C" {
 	      // got it - but make sure there is a place to write it
 	      if(adaptor->num_macs > 0) {
 		// OK, just overwrite the 'dummy' one that was there
-		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
+		if(parseMAC(macStr, adaptor->macs[0].mac) == NO) {
 		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
 		}
 	      }
@@ -278,7 +213,7 @@ extern "C" {
     // host Net I/O
     SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_NIO;
-    if(readNioCounters(sp, &nioElem.counterBlock.host_nio, NULL)) {
+    if(readNioCounters(sp, &nioElem.counterBlock.host_nio, NULL, NULL)) {
       SFLADD_ELEMENT(cs, &nioElem);
     }
 
@@ -391,12 +326,14 @@ extern "C" {
 
   void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-#ifdef HSF_XEN
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
     HSPVMState *state = (HSPVMState *)poller->userData;
+    if(state == NULL) return;
 
-    if(state && xenHandlesOK(sp)) {
+#ifdef HSF_XEN
+
+    if(xenHandlesOK(sp)) {
       
       xc_domaininfo_t domaininfo;
       int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
@@ -415,7 +352,6 @@ extern "C" {
       
       // host ID
       SFLCounters_sample_element hidElem = { 0 };
-      memset(&hidElem, 0, sizeof(hidElem));
       hidElem.tag = SFLCOUNTERS_HOST_HID;
       char query[255];
       char hname[255];
@@ -447,7 +383,7 @@ extern "C" {
       nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
       char devFilter[20];
       snprintf(devFilter, 20, "vif%u.", state->domId);
-      uint32_t network_count = readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter);
+      uint32_t network_count = readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter, NULL);
       if(state->network_count != network_count) {
 	// request a refresh if the number of VIFs changed. Not a perfect test
 	// (e.g. if one was removed and another was added at the same time then
@@ -542,6 +478,122 @@ extern "C" {
     }
 
 #endif /* HSF_XEN */
+#ifdef HSF_VRT
+    virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
+    if(domainPtr == NULL) {
+      sp->refreshVMList = YES;
+    }
+    else {
+      // host ID
+      SFLCounters_sample_element hidElem = { 0 };
+      hidElem.tag = SFLCOUNTERS_HOST_HID;
+      const char *hname = virDomainGetName(domainPtr); // no need to free this one
+      if(hname) {
+	// copy the name out here so we can free it straight away
+	hidElem.counterBlock.host_hid.hostname.str = (char *)hname;
+	hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
+	virDomainGetUUID(domainPtr, hidElem.counterBlock.host_hid.uuid);
+	
+	// char *osType = virDomainGetOSType(domainPtr); $$$
+	hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
+	hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
+	//hidElem.counterBlock.host_hid.os_release.str = NULL;
+	//hidElem.counterBlock.host_hid.os_release.len = 0;
+	SFLADD_ELEMENT(cs, &hidElem);
+      }
+      
+      // host parent
+      SFLCounters_sample_element parElem = { 0 };
+      parElem.tag = SFLCOUNTERS_HOST_PAR;
+      parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
+      parElem.counterBlock.host_par.dsIndex = 1;
+      SFLADD_ELEMENT(cs, &parElem);
+
+      // VM Net I/O
+      SFLCounters_sample_element nioElem = { 0 };
+      nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
+      // since we are already maintaining the accumulated network counters (and handling issues like 32-bit
+      // rollover) then we can just use the same mechanism again.  On a non-linux platform we may
+      // want to take advantage of the libvirt call to get the counters (it takes the domain id and the
+      // device name as parameters so you have to call it multiple times),  but even then we would
+      // probably do that down inside the readNioCounters() fn in case there is work to do on the
+      // accumulation and rollover-detection.
+      readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, state->interfaces);
+      SFLADD_ELEMENT(cs, &nioElem);
+      
+      // VM cpu counters [ref xenstat.c]
+      SFLCounters_sample_element cpuElem = { 0 };
+      cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
+      virDomainInfo domainInfo;
+      int domainInfoOK = NO;
+      if(virDomainGetInfo(domainPtr, &domainInfo) != 0) {
+	myLog(LOG_ERR, "virDomainGetInfo() failed");
+      }
+      else {
+	domainInfoOK = YES;
+	// enum virDomainState really is the same as enum SFLVirDomainState
+	cpuElem.counterBlock.host_vrt_cpu.state = domainInfo.state;
+	cpuElem.counterBlock.host_vrt_cpu.cpuTime = (domainInfo.cpuTime / 1000000);
+	cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domainInfo.nrVirtCpu;
+	SFLADD_ELEMENT(cs, &cpuElem);
+      }
+      
+      SFLCounters_sample_element memElem = { 0 };
+      memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
+      if(domainInfoOK) {
+	memElem.counterBlock.host_vrt_mem.memory = domainInfo.memory * 1024;
+	memElem.counterBlock.host_vrt_mem.maxMemory = (domainInfo.maxMem == UINT_MAX) ? -1 : (domainInfo.maxMem * 1024);
+	SFLADD_ELEMENT(cs, &memElem);
+      }
+
+    
+      // VM disk I/O counters
+      SFLCounters_sample_element dskElem = { 0 };
+      dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
+      for(int i = strArrayN(state->volumes); --i >= 0; ) {
+	char *volPath = strArrayAt(state->volumes, i);
+	virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
+	if(volPath == NULL) {
+	  myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
+	}
+	else {
+	  virStorageVolInfo volInfo;
+	  if(virStorageVolGetInfo(volPtr, &volInfo) != 0) {
+	    myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
+	  }
+	  else {
+	    dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
+	    dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
+	    dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
+	    // reads, writes and errors $$$ ?
+	  }
+	}
+	SFLADD_ELEMENT(cs, &dskElem);
+      }
+      
+      // include my slice of the adaptor list
+      SFLCounters_sample_element adaptorsElem = { 0 };
+      adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
+      SFLAdaptorList myAdaptors;
+      SFLAdaptor *adaptors[HSP_MAX_VIFS];
+      myAdaptors.adaptors = adaptors;
+      myAdaptors.capacity = HSP_MAX_VIFS;
+      myAdaptors.num_adaptors = 0;
+      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+	if(strArrayIndexOf(state->interfaces, adaptor->deviceName) != -1) {
+	  myAdaptors.adaptors[myAdaptors.num_adaptors++] = adaptor;
+	}
+      }
+      adaptorsElem.counterBlock.adaptors = &myAdaptors;
+      SFLADD_ELEMENT(cs, &adaptorsElem);
+      
+      
+      sfl_poller_writeCountersSample(poller, cs);
+      
+      virDomainFree(domainPtr);
+    }
+#endif /* HSF_VRT */
   }
 
   /*_________________---------------------------__________________
@@ -615,6 +667,60 @@ extern "C" {
     return sp->maxDsIndex;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________    domain_xml_node        __________________
+    -----------------___________________________------------------
+  */
+
+#ifdef HSF_VRT
+  static char *get_xml_attr(xmlNode *node, char *attrName) {
+    for(xmlAttr *attr = node->properties; attr; attr = attr->next) {
+      if(attr->name) {
+	if(debug) myLog(LOG_INFO, "attribute %s", attr->name);
+	if(attr->children && !strcmp((char *)attr->name, attrName)) {
+	  return (char *)attr->children->content;
+	}
+      }
+    }
+    return NULL;
+  }
+    
+  void domain_xml_node(xmlNode *node, HSPVMState *state) {
+    for(xmlNode *n = node; n; n = n->next) {
+      if(n->type ==XML_ELEMENT_NODE) {
+	if(n->name && n->parent && n->parent->name) {
+	  if(!strcmp((char *)n->parent->name, "interface")) {
+	    if(!strcmp((char *)n->name, "target")) {
+	      char *dev = get_xml_attr(n, "dev");
+	      if(dev) {
+		if(debug) myLog(LOG_INFO, "interface.dev=%s", dev);
+		strArrayAdd(state->interfaces, (char *)dev);
+	      }
+	    }
+	    if(!strcmp((char *)n->name, "mac")) {
+	      char *addr = get_xml_attr(n, "address");
+	      // record the mac address? Or do we know it already?
+	      // There seems to be a slight difference between the
+	      // one here and the one seen by /sbin/ifconfig. Need
+	      // to look at which one appears on the wire...$$$
+	      if(debug) myLog(LOG_INFO, "interface.mac=%s", addr);
+	    }
+	  }
+	  if(!strcmp((char *)n->parent->name, "disk") &&
+	     !strcmp((char *)n->name, "source")) {
+	    char *path = get_xml_attr(n, "file");
+	    if(path) {
+	      if(debug) myLog(LOG_INFO, "disk.path=%s", path);
+	      strArrayAdd(state->volumes, (char *)path);
+	    }
+	  }
+	}
+      }
+      if(n->children) domain_xml_node(n->children, state);
+    }
+  }
+#endif /* HSF_VRT */
   /*_________________---------------------------__________________
     _________________    configVMs              __________________
     -----------------___________________________------------------
@@ -635,7 +741,7 @@ extern "C" {
 
       // 2. create new VM pollers, or clear the mark on existing ones
 #ifdef HSF_XEN
-
+      
       if(xenHandlesOK(sp)) {
 #define DOMAIN_CHUNK_SIZE 256
 	xc_domaininfo_t domaininfo[DOMAIN_CHUNK_SIZE];
@@ -698,6 +804,87 @@ extern "C" {
 	sp->num_domains = num_domains;
       }
 #endif
+
+#ifdef HSF_VRT
+      int num_domains = virConnectNumOfDomains(sp->virConn);
+      if(num_domains == -1) {
+	myLog(LOG_ERR, "virConnectNumOfDomains() returned -1");
+	return;
+      }
+      int *domainIds = (int *)my_calloc(num_domains * sizeof(int));
+      if(virConnectListDomains(sp->virConn, domainIds, num_domains) != num_domains) {
+	free(domainIds);
+	return;
+      }
+      for(int i = 0; i < num_domains; i++) {
+	int domId = domainIds[i];
+	virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, domId);
+	if(domainPtr) {
+	  char uuid[16];
+	  virDomainGetUUID(domainPtr, (u_char *)uuid);
+	  uint32_t dsIndex = assignVM_dsIndex(sp, uuid);
+	  SFLDataSource_instance dsi;
+	  // ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
+	  SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
+	  SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
+	  HSPVMState *state = (HSPVMState *)vpoller->userData;
+	  if(state) {
+	    // it was already there, just clear the mark.
+	    state->marked = NO;
+	    // and reset the information that we are about to refresh
+	    strArrayReset(state->interfaces);
+	    strArrayReset(state->volumes);
+	  }
+	  else {
+	    // new one - tell it what to do.
+	    myLog(LOG_INFO, "configVMs: new domain=%u", domId);
+	    uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+	    sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
+	    sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
+	    // hang a new HSPVMState object on the userData hook
+	    state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
+	    state->network_count = 0;
+	    state->marked = NO;
+	    vpoller->userData = state;
+	    state->interfaces = strArrayNew();
+	    state->volumes = strArrayNew();
+	    sp->refreshAdaptorList = YES; // $$$
+	  }
+	  // remember the index so we can access this individually later
+	  if(debug) {
+	    if(state->vm_index != i) {
+	      myLog(LOG_INFO, "domId=%u vm_index %u->%u", domId, state->vm_index, i);
+	    }
+	  }
+	  state->vm_index = i;
+	  // and the domId, which might have changed (if vm rebooted)
+	  state->domId = domId;
+	  
+	  // get the XML descr - this seems more portable than some of
+	  // the newer libvert API calls,  such as those to list interfaces
+	  char *xmlstr = virDomainGetXMLDesc(domainPtr, 0 /*VIR_DOMAIN_XML_SECURE not allowed for read-only */);
+	  if(xmlstr == NULL) {
+	    myLog(LOG_ERR, "virDomainGetXMLDesc(domain=%u, 0) failed", domId);
+	  }
+	  else {
+	    // parse the XML to get the list of interfaces (and storage nodes?)
+	    xmlDoc *doc = xmlParseMemory(xmlstr, strlen(xmlstr));
+	    if(doc) {
+	      xmlNode *rootNode = xmlDocGetRootElement(doc);
+	      domain_xml_node(rootNode, state);
+	      xmlFreeDoc(doc);
+	    }
+	    free(xmlstr);
+	  }
+	  xmlCleanupParser();
+
+	  virDomainFree(domainPtr);
+	}
+      }
+      // remember the number of domains we found
+      sp->num_domains = num_domains;
+      free(domainIds);
+#endif
       
       // 3. remove any that don't exist any more
       for(SFLPoller *pl = sf->agent->pollers; pl; ) {
@@ -718,7 +905,7 @@ extern "C" {
       }
     }
   }
-
+    
   /*_________________---------------------------__________________
     _________________       printIP             __________________
     -----------------___________________________------------------
@@ -982,29 +1169,6 @@ extern "C" {
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
       break;
-    }
-  }
-
-  /*_________________---------------------------__________________
-    _________________     my_usleep             __________________
-    -----------------___________________________------------------
-  */
-  
-  void my_usleep(uint32_t microseconds) {
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = microseconds;
-    int max_fd = 0;
-    int nfds = select(max_fd + 1,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      &timeout);
-    // may return prematurely if a signal was caught, in which case nfds will be
-    // -1 and errno will be set to EINTR.  If we get any other error, abort.
-    if(nfds < 0 && errno != EINTR) {
-      myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
-      exit(EXIT_FAILURE);
     }
   }
 
@@ -1331,14 +1495,29 @@ extern "C" {
 #ifdef HSF_XEN
     // open Xen handles while we still have root privileges
     openXenHandles(sp);
+#endif
 
+#ifdef HSF_VRT
+    // open the libvirt connection
+    int virErr = virInitialize();
+    if(virErr != 0) {
+      myLog(LOG_ERR, "virInitialize() failed: %d\n", virErr);
+      exit(EXIT_FAILURE);
+    }
+    sp->virConn = virConnectOpenReadOnly(NULL);
+    if(sp->virConn == NULL) {
+      myLog(LOG_ERR, "virConnectOpenReadOnly() failed\n");
+      exit(EXIT_FAILURE);
+    }
+#endif
+    
+#if defined(HSF_XEN) || defined(HSF_VRT)
     // open the vmStore file while we still have root priviliges
     // use mode "w+" because we intend to write it and rewrite it.
     if((sp->f_vmStore = fopen(sp->vmStoreFile, "w+")) == NULL) {
       myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile);
       exit(EXIT_FAILURE);
     }
-    
 #endif
 
     if(sp->dropPriv) {
@@ -1493,6 +1672,10 @@ extern "C" {
     
 #ifdef HSF_XEN
     closeXenHandles(sp);
+#endif
+
+#ifdef HSF_VRT
+    virConnectClose(sp->virConn);
 #endif
 
     if(debug == 0) {
