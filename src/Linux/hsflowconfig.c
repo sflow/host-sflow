@@ -168,28 +168,28 @@ extern int debug;
     parseError(sp, tok, "expected domain", "");
     return NULL;
   }
-
+  
   // expectDevice
-
-   static HSPToken *expectDevice(HSP *sp, HSPToken *tok, SFLAdaptor **p_adaptor)
-   {
-      HSPToken *t = tok;
-      t = t->nxt;
-      if(t && t->str) {
-	 for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	    SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	    if(adaptor && adaptor->deviceName && strcmp(adaptor->deviceName, t->str) == 0) {
-	       if(p_adaptor) *p_adaptor = adaptor;
-	       return t;
-	    }
-	 }
+  
+  static HSPToken *expectDevice(HSP *sp, HSPToken *tok, char **p_devName)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && t->str) {
+      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+	if(adaptor && adaptor->deviceName && strcmp(adaptor->deviceName, t->str) == 0) {
+	  if(p_devName) *p_devName = strdup(adaptor->deviceName);
+	  return t;
+	}
       }
-      parseError(sp, tok, "expected device name", "");
-      return NULL;
-   }
-
+    }
+    parseError(sp, tok, "expected device name", "");
+    return NULL;
+  }
+  
   // expectUUID
-
+  
   static HSPToken *expectUUID(HSP *sp, HSPToken *tok, char *uuid)
   {
     HSPToken *t = tok;
@@ -436,10 +436,13 @@ extern int debug;
       //////////////////////// sFlow /////////////////////////
       if(sp->sFlow->agentIP.type == 0) {
 	 // it may have been defined as agent=<device>
-	 if(sp->sFlow->agentDevice && sp->sFlow->agentDevice->ipAddr.addr) {
+	if(sp->sFlow->agentDevice) {
+	  SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
+	  if(ad && ad->ipAddr.addr) {
 	    sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	    sp->sFlow->agentIP.address.ip_v4 = sp->sFlow->agentDevice->ipAddr;
-	 }
+	    sp->sFlow->agentIP.address.ip_v4 = ad->ipAddr;
+	  }
+	}
       }
       if(sp->sFlow->agentIP.type == 0) {
 	 // nae luck - try to automatically choose the first non-loopback IP address
@@ -450,7 +453,7 @@ extern int debug;
 	       sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
 	       sp->sFlow->agentIP.address.ip_v4 = adaptor->ipAddr;
 	       // fill in the device that we picked too
-	       sp->sFlow->agentDevice = adaptor;
+	       sp->sFlow->agentDevice = strdup(adaptor->deviceName);
 	       break;
 	    }
 	 }
@@ -461,7 +464,7 @@ extern int debug;
 	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
 	  if(adaptor && (adaptor->ipAddr.addr == sp->sFlow->agentIP.address.ip_v4.addr)) {
-	    sp->sFlow->agentDevice = adaptor;
+	    sp->sFlow->agentDevice = strdup(adaptor->deviceName);
 	    break;
 	  }
 	}

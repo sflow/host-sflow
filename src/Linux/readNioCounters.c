@@ -151,7 +151,7 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, UTStringArray *devNames) {
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList) {
     int interface_count = 0;
     size_t devFilterLen = devFilter ? strlen(devFilter) : 0;
 
@@ -163,7 +163,7 @@ extern "C" {
     for(int i = 0; i < sp->adaptorNIOList.num_adaptors; i++) {
       HSPAdaptorNIO *adaptor = sp->adaptorNIOList.adaptors[i];
       if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
-	if(devNames == NULL || strArrayIndexOf(devNames, adaptor->deviceName) != -1) {
+	if(adList == NULL || adaptorListGet(adList, adaptor->deviceName) != NULL) {
 	  interface_count++;
 	  // report the sum over all devices that match the filter
 	  nio->bytes_in += adaptor->nio.bytes_in;

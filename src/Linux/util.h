@@ -31,11 +31,11 @@ extern "C" {
 #define YES 1
 #define NO 0
 
-#include "sflow.h" // for SFLAddress
+#include "sflow.h" // for SFLAddress, SFLAdaptorList...
 
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
-  int parseMAC(char *str, uint64_t *mac);
+  int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
   int parseUUID(char *str, char *uuid);
   int printUUID(const u_char *a, u_char *buf, int bufLen);
   
@@ -103,6 +103,13 @@ extern "C" {
   // calling execve()
   typedef int (*UTExecCB)(void *magic, char *line);
   int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen);
+
+  // SFLAdaptorList
+  SFLAdaptorList *adaptorListNew();
+  void adaptorListReset(SFLAdaptorList *adList);
+  void adaptorListFree(SFLAdaptorList *adlist);
+  SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes);
 
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -176,7 +176,7 @@ extern "C" {
 	      // got it - but make sure there is a place to write it
 	      if(adaptor->num_macs > 0) {
 		// OK, just overwrite the 'dummy' one that was there
-		if(parseMAC(macStr, adaptor->macs[0].mac) == NO) {
+		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
 		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
 		}
 	      }
@@ -574,18 +574,7 @@ extern "C" {
       // include my slice of the adaptor list
       SFLCounters_sample_element adaptorsElem = { 0 };
       adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-      SFLAdaptorList myAdaptors;
-      SFLAdaptor *adaptors[HSP_MAX_VIFS];
-      myAdaptors.adaptors = adaptors;
-      myAdaptors.capacity = HSP_MAX_VIFS;
-      myAdaptors.num_adaptors = 0;
-      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	if(strArrayIndexOf(state->interfaces, adaptor->deviceName) != -1) {
-	  myAdaptors.adaptors[myAdaptors.num_adaptors++] = adaptor;
-	}
-      }
-      adaptorsElem.counterBlock.adaptors = &myAdaptors;
+      adaptorsElem.counterBlock.adaptors = state->interfaces;
       SFLADD_ELEMENT(cs, &adaptorsElem);
       
       
@@ -686,7 +675,7 @@ extern "C" {
     return NULL;
   }
     
-  void domain_xml_node(xmlNode *node, HSPVMState *state) {
+  void domain_xml_interface(xmlNode *node, HSPVMState *state, char **ifname, char **ifmac) {
     for(xmlNode *n = node; n; n = n->next) {
       if(n->type ==XML_ELEMENT_NODE) {
 	if(n->name && n->parent && n->parent->name) {
@@ -695,29 +684,44 @@ extern "C" {
 	      char *dev = get_xml_attr(n, "dev");
 	      if(dev) {
 		if(debug) myLog(LOG_INFO, "interface.dev=%s", dev);
-		strArrayAdd(state->interfaces, (char *)dev);
+		if(ifname) *ifname = dev;
 	      }
 	    }
 	    if(!strcmp((char *)n->name, "mac")) {
 	      char *addr = get_xml_attr(n, "address");
-	      // record the mac address? Or do we know it already?
-	      // There seems to be a slight difference between the
-	      // one here and the one seen by /sbin/ifconfig. Need
-	      // to look at which one appears on the wire...$$$
 	      if(debug) myLog(LOG_INFO, "interface.mac=%s", addr);
-	    }
-	  }
-	  if(!strcmp((char *)n->parent->name, "disk") &&
-	     !strcmp((char *)n->name, "source")) {
-	    char *path = get_xml_attr(n, "file");
-	    if(path) {
-	      if(debug) myLog(LOG_INFO, "disk.path=%s", path);
-	      strArrayAdd(state->volumes, (char *)path);
+	      if(ifmac) *ifmac = addr;
 	    }
 	  }
 	}
       }
-      if(n->children) domain_xml_node(n->children, state);
+      if(n->children) domain_xml_interface(n->children, state, ifname, ifmac);
+    }
+  }
+    
+  void domain_xml_node(xmlNode *node, HSPVMState *state) {
+    for(xmlNode *n = node; n; n = n->next) {
+      if(n->type == XML_ELEMENT_NODE && n->name &&
+	 !strcmp((char *)n->name, "interface")) {
+	char *ifname=NULL,*ifmac=NULL;
+	domain_xml_interface(n, state, &ifname, &ifmac);
+	if(*ifname && *ifmac) {
+	  u_char macBytes[6];
+	  if(hexToBinary((u_char *)ifmac, macBytes, 6) == 6) {
+	    adaptorListAdd(state->interfaces, ifname, macBytes);
+	  }
+	}
+      }
+      else if(n->type == XML_ELEMENT_NODE && n->name && n->parent && n->parent->name &&
+	      !strcmp((char *)n->parent->name, "disk") &&
+	      !strcmp((char *)n->name, "source")) {
+	char *path = get_xml_attr(n, "file");
+	if(path) {
+	  if(debug) myLog(LOG_INFO, "disk.path=%s", path);
+	  strArrayAdd(state->volumes, (char *)path);
+	}
+      }
+      else if(n->children) domain_xml_node(n->children, state);
     }
   }
 #endif /* HSF_VRT */
@@ -832,7 +836,7 @@ extern "C" {
 	    // it was already there, just clear the mark.
 	    state->marked = NO;
 	    // and reset the information that we are about to refresh
-	    strArrayReset(state->interfaces);
+	    adaptorListReset(state->interfaces);
 	    strArrayReset(state->volumes);
 	  }
 	  else {
@@ -846,9 +850,9 @@ extern "C" {
 	    state->network_count = 0;
 	    state->marked = NO;
 	    vpoller->userData = state;
-	    state->interfaces = strArrayNew();
+	    state->interfaces = adaptorListNew();
 	    state->volumes = strArrayNew();
-	    sp->refreshAdaptorList = YES; // $$$
+	    sp->refreshAdaptorList = YES;
 	  }
 	  // remember the index so we can access this individually later
 	  if(debug) {
@@ -867,7 +871,7 @@ extern "C" {
 	    myLog(LOG_ERR, "virDomainGetXMLDesc(domain=%u, 0) failed", domId);
 	  }
 	  else {
-	    // parse the XML to get the list of interfaces (and storage nodes?)
+	    // parse the XML to get the list of interfaces and storage nodes
 	    xmlDoc *doc = xmlParseMemory(xmlstr, strlen(xmlstr));
 	    if(doc) {
 	      xmlNode *rootNode = xmlDocGetRootElement(doc);
@@ -939,7 +943,7 @@ extern "C" {
       char ipbuf[51];
       fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
       if(sp->sFlow->agentDevice) {
-	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice->deviceName);
+	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice);
       }
       for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
 	// <ip> <port> [<priority>]

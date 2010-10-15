@@ -15,38 +15,6 @@ extern "C" {
 extern int debug;
     
 /*________________---------------------------__________________
-  ________________    freeAdaptors           __________________
-  ----------------___________________________------------------
-*/
-
-void freeAdaptors(HSP *sp)
-{
-  if(sp->adaptorList) {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      free(sp->adaptorList->adaptors[i]);
-    }
-    free(sp->adaptorList);
-    sp->adaptorList = NULL;
-  }
-}
-
-  
-/*________________---------------------------__________________
-  ________________    newAdaptorList         __________________
-  ----------------___________________________------------------
-*/
-
-void newAdaptorList(HSP *sp)
-{
-  freeAdaptors(sp);
-  sp->adaptorList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
-  sp->adaptorList->capacity = 4; // will grow if necessary
-  sp->adaptorList->adaptors = (SFLAdaptor **)my_calloc(sp->adaptorList->capacity * sizeof(SFLAdaptor *));
-  sp->adaptorList->num_adaptors = 0;
-}
-
-    
-/*________________---------------------------__________________
   ________________    updateAdaptorNIO       __________________
   ----------------___________________________------------------
 */
@@ -105,7 +73,8 @@ static void updateAdaptorNIO(HSP *sp)
 
 int readInterfaces(HSP *sp)
 {
-  newAdaptorList(sp);
+  if(sp->adaptorList == NULL) sp->adaptorList = adaptorListNew();
+  else adaptorListReset(sp->adaptorList);
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
   // have a list of MAC addresses for each interface (usually only 1).
@@ -165,10 +134,7 @@ int readInterfaces(HSP *sp)
 		// for now just assume that each interface has only one MAC.  It's not clear how we can
 		// learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
 		// create a new "adaptor" entry
-		SFLAdaptor *adaptor = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
-		memcpy(adaptor->macs[0].mac, &ifr.ifr_hwaddr.sa_data, 6);
-		adaptor->num_macs = 1;
-		adaptor->deviceName = strdup(devName);
+		SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data);
 
 		// Try and get the ifIndex for this interface
 		if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
@@ -204,15 +170,6 @@ int readInterfaces(HSP *sp)
 		  // struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
 		  // IP6 addr is now s->sin6_addr;
 		  //}
-		}
-		
-		// add it to the list
-		sp->adaptorList->adaptors[sp->adaptorList->num_adaptors] = adaptor;
-		if(++sp->adaptorList->num_adaptors == sp->adaptorList->capacity)  {
-		  // grow
-		  sp->adaptorList->capacity *= 2;
-		  sp->adaptorList->adaptors = (SFLAdaptor **)my_realloc(sp->adaptorList->adaptors,
-									sp->adaptorList->capacity * sizeof(SFLAdaptor *));
 		}
 	      }
 	    }
