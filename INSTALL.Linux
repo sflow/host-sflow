@@ -6,7 +6,8 @@ To compile and install, try this:
 root> make
 root> make install
 
-Edit /etc/hsflowd.conf to set the collector IP.
+Edit /etc/hsflowd.conf for configuration.  The options are
+described in the comments there.
 
 To start the daemon, run:
 
