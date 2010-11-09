@@ -1,5 +1,6 @@
-/* Copyright (c) 2002-2010 InMon Corp. Licensed under the terms of the InMon sFlow licence: */
-/* http://www.inmon.com/technology/sflowlicense.txt */
+/* This software is distributed under the following license:
+ * http://host-sflow.sourceforge.net/license.html
+ */
 
 
 #if defined(__cplusplus)
