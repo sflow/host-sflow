@@ -550,7 +550,7 @@ typedef struct _SFLAdaptor {
   // SFLIPv6 ip6Addr;
   char *deviceName;
   uint32_t num_macs;
-  SFLMacAddress macs[0];
+  SFLMacAddress macs[1];
 } SFLAdaptor;
 
 typedef struct _SFLAdaptorList {

@@ -15,6 +15,7 @@ extern "C" {
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
   extern int debug;
+  FILE *f_crash;
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -1089,6 +1090,7 @@ extern "C" {
     sp->DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
     sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
     sp->vmStoreFile = HSP_DEFAULT_VMSTORE_FILE;
+    sp->crashFile = HSP_DEFAULT_CRASH_FILE;
     sp->dropPriv = YES;
   }
 
@@ -1159,8 +1161,11 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void signal_handler(int sig) {
+  static void signal_handler(int sig, siginfo_t *info, void *secret) {
     HSP *sp = &HSPSamplingProbe;
+#define HSP_NUM_BACKTRACE_PTRS 50
+    static void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
+
     switch(sig) {
     case SIGTERM:
       myLog(LOG_INFO,"Received SIGTERM");
@@ -1171,7 +1176,46 @@ extern "C" {
       setState(sp, HSPSTATE_END);
       break;
     default:
-      myLog(LOG_INFO,"Received signal %d", sig);
+      {
+	myLog(LOG_INFO,"Received signal %d", sig);
+	ucontext_t *uc = (ucontext_t *)secret;
+	// first make sure we can't go in a loop
+	signal(SIGSEGV, SIG_DFL);
+	signal(SIGFPE, SIG_DFL);
+	signal(SIGILL, SIG_DFL);
+	signal(SIGBUS, SIG_DFL);
+	signal(SIGXFSZ, SIG_DFL);
+
+	// ask for the backtrace pointers
+	size_t siz = backtrace(backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
+
+	if(f_crash == NULL) {
+	  f_crash = stderr;
+	}
+
+	backtrace_symbols_fd(backtracePtrs, siz, fileno(f_crash));
+	fflush(f_crash);
+	// Do something useful with siginfo_t 
+	if (sig == SIGSEGV) {
+	  fprintf(f_crash, "SIGSEGV, faulty address is %p\n", info->si_addr);
+#ifdef REG_EIP
+	  // only defined for 32-bit arch - not sure what the equivalent is in sys/ucontext.h
+	  fprintf(f_crash, "...from %x\n", uc->uc_mcontext.gregs[REG_EIP]);
+#endif
+	}
+	
+#ifdef REG_EIP
+	fprintf(f_crash, "==== reapeat backtrace with REG_EIP =====");
+	// overwrite sigaction with caller's address
+	backtracePtrs[1] = (void *)uc->uc_mcontext.gregs[REG_EIP];
+	// then write again:
+	backtrace_symbols_fd(backtracePtrs, siz, fileno(f_crash));
+	fflush(f_crash);
+#endif
+	// exit with the original signal so we get the right idea
+	exit(sig);
+      }
+
       break;
     }
   }
@@ -1427,8 +1471,17 @@ extern "C" {
     setlogmask(LOG_UPTO(LOG_DEBUG));
 
     // register signal handler
-    signal(SIGTERM,signal_handler);
-    signal(SIGINT,signal_handler); 
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGXFSZ, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
 
     // init
     setDefaults(sp);
@@ -1494,6 +1547,16 @@ extern "C" {
     if((sp->f_out = fopen(sp->outputFile, "w+")) == NULL) {
       myLog(LOG_ERR, "cannot open output file %s : %s", sp->outputFile);
       exit(EXIT_FAILURE);
+    }
+
+    // open a file we can use to write a crash dump (if necessary)
+    if(sp->crashFile) {
+      // the file pointer needs to be a global so it is accessible
+      // to the signal handler
+      if((f_crash = fopen(sp->crashFile, "w")) == NULL) {
+	myLog(LOG_ERR, "cannot open output file %s : %s", sp->crashFile);
+	exit(EXIT_FAILURE);
+      }
     }
     
 #ifdef HSF_XEN
