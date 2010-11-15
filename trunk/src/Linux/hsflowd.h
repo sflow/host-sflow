@@ -32,6 +32,11 @@ extern "C" {
 #include "grp.h"
 #include "sys/resource.h" // for setrlimit()
 
+// for signal backtrace
+#include <execinfo.h>
+#include <signal.h>
+#include <ucontext.h>
+
 #include "util.h"
 #include "sflow_api.h"
 
@@ -58,6 +63,7 @@ extern "C" {
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
 #define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
+#define HSP_DEFAULT_CRASH_FILE "/etc/hsflowd.crash"
 #define HSP_DEFAULT_SUBAGENTID 100
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
@@ -193,6 +199,8 @@ extern "C" {
     int dropPriv;
     uint32_t outputRevisionNo;
     FILE *f_out;
+    // crashdump
+    char *crashFile;
     // Identity
     char uuid[16];
     // interfaces and MACs
