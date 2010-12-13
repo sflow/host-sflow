@@ -111,6 +111,9 @@ extern "C" {
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
   SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes);
 
+  // file utils
+  int truncateOpenFile(FILE *fptr);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

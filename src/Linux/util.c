@@ -510,7 +510,25 @@ extern "C" {
     }
     return ad;
   }
+    
+  /*________________---------------------------__________________
+    ________________      truncateOpenFile     __________________
+    ----------------___________________________------------------
+  */
 
+  int truncateOpenFile(FILE *fptr)
+  {
+    int fd = fileno(fptr);
+    if(fd == -1) {
+      myLog(LOG_ERR, "truncateOpenFile(): fileno() failed : %s", strerror(errno));
+      return NO;
+    }
+    if(ftruncate(fd, lseek(fd, 0, SEEK_CUR) != 0)) {
+      myLog(LOG_ERR, "truncateOpenFile(): ftruncate() failed : %s", strerror(errno));
+      return NO;
+    }
+    return YES;
+  }
 
 #if defined(__cplusplus)
 } /* extern "C" */
