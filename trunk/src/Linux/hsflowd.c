@@ -328,13 +328,13 @@ extern "C" {
   void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     assert(poller->magic);
-    HSP *sp = (HSP *)poller->magic;
     HSPVMState *state = (HSPVMState *)poller->userData;
     if(state == NULL) return;
 
 #ifdef HSF_XEN
 
     if(xenHandlesOK(sp)) {
+      HSP *sp = (HSP *)poller->magic;
       
       xc_domaininfo_t domaininfo;
       int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
@@ -480,108 +480,111 @@ extern "C" {
 
 #endif /* HSF_XEN */
 #ifdef HSF_VRT
-    virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
-    if(domainPtr == NULL) {
-      sp->refreshVMList = YES;
-    }
-    else {
-      // host ID
-      SFLCounters_sample_element hidElem = { 0 };
-      hidElem.tag = SFLCOUNTERS_HOST_HID;
-      const char *hname = virDomainGetName(domainPtr); // no need to free this one
-      if(hname) {
-	// copy the name out here so we can free it straight away
-	hidElem.counterBlock.host_hid.hostname.str = (char *)hname;
-	hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
-	virDomainGetUUID(domainPtr, hidElem.counterBlock.host_hid.uuid);
-	
-	// char *osType = virDomainGetOSType(domainPtr); $$$
-	hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
-	hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
-	//hidElem.counterBlock.host_hid.os_release.str = NULL;
-	//hidElem.counterBlock.host_hid.os_release.len = 0;
-	SFLADD_ELEMENT(cs, &hidElem);
-      }
-      
-      // host parent
-      SFLCounters_sample_element parElem = { 0 };
-      parElem.tag = SFLCOUNTERS_HOST_PAR;
-      parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-      parElem.counterBlock.host_par.dsIndex = 1;
-      SFLADD_ELEMENT(cs, &parElem);
-
-      // VM Net I/O
-      SFLCounters_sample_element nioElem = { 0 };
-      nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
-      // since we are already maintaining the accumulated network counters (and handling issues like 32-bit
-      // rollover) then we can just use the same mechanism again.  On a non-linux platform we may
-      // want to take advantage of the libvirt call to get the counters (it takes the domain id and the
-      // device name as parameters so you have to call it multiple times),  but even then we would
-      // probably do that down inside the readNioCounters() fn in case there is work to do on the
-      // accumulation and rollover-detection.
-      readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, state->interfaces);
-      SFLADD_ELEMENT(cs, &nioElem);
-      
-      // VM cpu counters [ref xenstat.c]
-      SFLCounters_sample_element cpuElem = { 0 };
-      cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-      virDomainInfo domainInfo;
-      int domainInfoOK = NO;
-      if(virDomainGetInfo(domainPtr, &domainInfo) != 0) {
-	myLog(LOG_ERR, "virDomainGetInfo() failed");
+    HSP *sp = (HSP *)poller->magic;
+    if(sp->virConn) {
+      virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
+      if(domainPtr == NULL) {
+	sp->refreshVMList = YES;
       }
       else {
-	domainInfoOK = YES;
-	// enum virDomainState really is the same as enum SFLVirDomainState
-	cpuElem.counterBlock.host_vrt_cpu.state = domainInfo.state;
-	cpuElem.counterBlock.host_vrt_cpu.cpuTime = (domainInfo.cpuTime / 1000000);
-	cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domainInfo.nrVirtCpu;
-	SFLADD_ELEMENT(cs, &cpuElem);
-      }
+	// host ID
+	SFLCounters_sample_element hidElem = { 0 };
+	hidElem.tag = SFLCOUNTERS_HOST_HID;
+	const char *hname = virDomainGetName(domainPtr); // no need to free this one
+	if(hname) {
+	  // copy the name out here so we can free it straight away
+	  hidElem.counterBlock.host_hid.hostname.str = (char *)hname;
+	  hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
+	  virDomainGetUUID(domainPtr, hidElem.counterBlock.host_hid.uuid);
+	
+	  // char *osType = virDomainGetOSType(domainPtr); $$$
+	  hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
+	  hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
+	  //hidElem.counterBlock.host_hid.os_release.str = NULL;
+	  //hidElem.counterBlock.host_hid.os_release.len = 0;
+	  SFLADD_ELEMENT(cs, &hidElem);
+	}
       
-      SFLCounters_sample_element memElem = { 0 };
-      memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-      if(domainInfoOK) {
-	memElem.counterBlock.host_vrt_mem.memory = domainInfo.memory * 1024;
-	memElem.counterBlock.host_vrt_mem.maxMemory = (domainInfo.maxMem == UINT_MAX) ? -1 : (domainInfo.maxMem * 1024);
-	SFLADD_ELEMENT(cs, &memElem);
-      }
+	// host parent
+	SFLCounters_sample_element parElem = { 0 };
+	parElem.tag = SFLCOUNTERS_HOST_PAR;
+	parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
+	parElem.counterBlock.host_par.dsIndex = 1;
+	SFLADD_ELEMENT(cs, &parElem);
 
-    
-      // VM disk I/O counters
-      SFLCounters_sample_element dskElem = { 0 };
-      dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-      for(int i = strArrayN(state->volumes); --i >= 0; ) {
-	char *volPath = strArrayAt(state->volumes, i);
-	virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
-	if(volPath == NULL) {
-	  myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
+	// VM Net I/O
+	SFLCounters_sample_element nioElem = { 0 };
+	nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
+	// since we are already maintaining the accumulated network counters (and handling issues like 32-bit
+	// rollover) then we can just use the same mechanism again.  On a non-linux platform we may
+	// want to take advantage of the libvirt call to get the counters (it takes the domain id and the
+	// device name as parameters so you have to call it multiple times),  but even then we would
+	// probably do that down inside the readNioCounters() fn in case there is work to do on the
+	// accumulation and rollover-detection.
+	readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, state->interfaces);
+	SFLADD_ELEMENT(cs, &nioElem);
+      
+	// VM cpu counters [ref xenstat.c]
+	SFLCounters_sample_element cpuElem = { 0 };
+	cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
+	virDomainInfo domainInfo;
+	int domainInfoOK = NO;
+	if(virDomainGetInfo(domainPtr, &domainInfo) != 0) {
+	  myLog(LOG_ERR, "virDomainGetInfo() failed");
 	}
 	else {
-	  virStorageVolInfo volInfo;
-	  if(virStorageVolGetInfo(volPtr, &volInfo) != 0) {
-	    myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
+	  domainInfoOK = YES;
+	  // enum virDomainState really is the same as enum SFLVirDomainState
+	  cpuElem.counterBlock.host_vrt_cpu.state = domainInfo.state;
+	  cpuElem.counterBlock.host_vrt_cpu.cpuTime = (domainInfo.cpuTime / 1000000);
+	  cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domainInfo.nrVirtCpu;
+	  SFLADD_ELEMENT(cs, &cpuElem);
+	}
+      
+	SFLCounters_sample_element memElem = { 0 };
+	memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
+	if(domainInfoOK) {
+	  memElem.counterBlock.host_vrt_mem.memory = domainInfo.memory * 1024;
+	  memElem.counterBlock.host_vrt_mem.maxMemory = (domainInfo.maxMem == UINT_MAX) ? -1 : (domainInfo.maxMem * 1024);
+	  SFLADD_ELEMENT(cs, &memElem);
+	}
+
+    
+	// VM disk I/O counters
+	SFLCounters_sample_element dskElem = { 0 };
+	dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
+	for(int i = strArrayN(state->volumes); --i >= 0; ) {
+	  char *volPath = strArrayAt(state->volumes, i);
+	  virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
+	  if(volPath == NULL) {
+	    myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
 	  }
 	  else {
-	    dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
-	    dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
-	    dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
-	    // reads, writes and errors $$$ ?
+	    virStorageVolInfo volInfo;
+	    if(virStorageVolGetInfo(volPtr, &volInfo) != 0) {
+	      myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
+	    }
+	    else {
+	      dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
+	      dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
+	      dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
+	      // reads, writes and errors $$$ ?
+	    }
 	  }
+	  SFLADD_ELEMENT(cs, &dskElem);
 	}
-	SFLADD_ELEMENT(cs, &dskElem);
+      
+	// include my slice of the adaptor list
+	SFLCounters_sample_element adaptorsElem = { 0 };
+	adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
+	adaptorsElem.counterBlock.adaptors = state->interfaces;
+	SFLADD_ELEMENT(cs, &adaptorsElem);
+      
+      
+	sfl_poller_writeCountersSample(poller, cs);
+      
+	virDomainFree(domainPtr);
       }
-      
-      // include my slice of the adaptor list
-      SFLCounters_sample_element adaptorsElem = { 0 };
-      adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-      adaptorsElem.counterBlock.adaptors = state->interfaces;
-      SFLADD_ELEMENT(cs, &adaptorsElem);
-      
-      
-      sfl_poller_writeCountersSample(poller, cs);
-      
-      virDomainFree(domainPtr);
     }
 #endif /* HSF_VRT */
   }
@@ -642,6 +645,8 @@ extern "C" {
       fprintf(sp->f_vmStore, "%s=%u\n", uuidStr, vmStore->dsIndex);
     }
     fflush(sp->f_vmStore);
+    // chop off anything that may be lingering from before
+    truncateOpenFile(sp->f_vmStore);
   }
 
   uint32_t assignVM_dsIndex(HSP *sp, char *uuid) {
@@ -811,6 +816,10 @@ extern "C" {
 #endif
 
 #ifdef HSF_VRT
+      if(sp->virConn == NULL) {
+	// no libvirt connection
+	return;
+      }
       int num_domains = virConnectNumOfDomains(sp->virConn);
       if(num_domains == -1) {
 	myLog(LOG_ERR, "virConnectNumOfDomains() returned -1");
@@ -956,6 +965,8 @@ extern "C" {
     // has not changed under his feet then he has a consistent config.
     fprintf(sp->f_out, "rev_end=%u\n", sp->sFlow->revisionNo);
     fflush(sp->f_out);
+    // chop off anything that may be lingering from before
+    truncateOpenFile(sp->f_out);
   }
 
   /*_________________---------------------------__________________
@@ -1574,7 +1585,9 @@ extern "C" {
     sp->virConn = virConnectOpenReadOnly(NULL);
     if(sp->virConn == NULL) {
       myLog(LOG_ERR, "virConnectOpenReadOnly() failed\n");
-      exit(EXIT_FAILURE);
+      // No longer fatal, because there is a dependency on libvirtd running.
+      // If this fails, we simply run without sending per-VM stats.
+      // exit(EXIT_FAILURE);
     }
 #endif
     
