@@ -218,6 +218,8 @@ extern int debug;
     HSPSFlowSettings *st = (HSPSFlowSettings *)calloc(1, sizeof(HSPSFlowSettings));
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
+    st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
+    st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
     return st;
   }
 
@@ -392,6 +394,12 @@ extern int debug;
 	  break;
 	case HSPTOKEN_UUID:
 	  if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
+	  break;
+	case HSPTOKEN_HEADERBYTES:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
+	  break;
+	case HSPTOKEN_ULOGGROUP:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
 	  break;
 	default:
 	  parseError(sp, tok, "unexpected sFlow setting", "");

@@ -1011,6 +1011,48 @@ extern "C" {
     }
   }
 
+#ifdef HSF_ULOG
+  /*_________________---------------------------__________________
+    _________________     openULOG              __________________
+    -----------------___________________________------------------
+    Have to do this before we relinquish root privileges.  
+  */
+
+  static void openULOG(HSP *sp)
+  {
+    // open the netfilter socket to ULOG
+    sp->ulog_soc = socket(PF_NETLINK, SOCK_RAW, NETLINK_NFLOG);
+    if(sp->ulog_soc > 0) {
+      if(debug) myLog(LOG_INFO, "ULOG socket fd=%d", sp->ulog_soc);
+      
+      // set the socket to non-blocking
+      int fdFlags = fcntl(sp->ulog_soc, F_GETFL);
+      fdFlags |= O_NONBLOCK;
+      if(fcntl(sp->ulog_soc, F_SETFL, fdFlags) < 0) {
+	myLog(LOG_ERR, "ULOG fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+      }
+      
+      // bind
+      sp->ulog_bind.nl_family = AF_NETLINK;
+      sp->ulog_bind.nl_pid = getpid();
+      // Note that the ulogGroup setting is only ever retrieved from the config file (i.e. not settable by DNSSD)
+      sp->ulog_bind.nl_groups = 1 << (sp->sFlow->sFlowSettings_file->ulogGroup - 1); // e.g. 16 => group 5
+      if(bind(sp->ulog_soc, (struct sockaddr *)&sp->ulog_bind, sizeof(sp->ulog_bind)) == -1) {
+	myLog(LOG_ERR, "ULOG bind() failed: %s", strerror(errno));
+      }
+      
+      // increase receiver buffer size? (probably not necessary)
+      // uint32_t rcvbuf = HSP_ULOG_RCV_BUF;
+      // setsockopt(sp->ulog_soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    }
+    else {
+      myLog(LOG_ERR, "error opening ULOG socket: %s", strerror(errno));
+      // just disable it
+      sp->ulog_soc = 0;
+    }
+  }
+#endif
+
   /*_________________---------------------------__________________
     _________________         initAgent         __________________
     -----------------___________________________------------------
@@ -1085,6 +1127,17 @@ extern "C" {
     // add <virtualEntity> pollers for each virtual machine
     configVMs(sp);
 
+ #ifdef HSF_ULOG
+    // open the netfilter socket to ULOG while we are still root
+    openULOG(sp);
+
+    // add a 0:0 sampler
+    SFL_DS_SET(dsi, 0, 0, 0); // ds_class == ds_index == ds_instance = 0
+    sf->sampler = sfl_agent_addSampler(sf->agent, &dsi);
+    uint32_t samplingRate = sf->sFlowSettings ? sf->sFlowSettings->samplingRate : SFL_DEFAULT_SAMPLING_RATE;
+    sfl_sampler_set_sFlowFsPacketSamplingRate(sf->sampler, samplingRate);
+    sfl_sampler_set_sFlowFsReceiver(sf->sampler, HSP_SFLOW_RECEIVER_INDEX);
+#endif
     return YES;
   }
 
@@ -1189,7 +1242,6 @@ extern "C" {
     default:
       {
 	myLog(LOG_INFO,"Received signal %d", sig);
-	ucontext_t *uc = (ucontext_t *)secret;
 	// first make sure we can't go in a loop
 	signal(SIGSEGV, SIG_DFL);
 	signal(SIGFPE, SIG_DFL);
@@ -1211,14 +1263,14 @@ extern "C" {
 	  fprintf(f_crash, "SIGSEGV, faulty address is %p\n", info->si_addr);
 #ifdef REG_EIP
 	  // only defined for 32-bit arch - not sure what the equivalent is in sys/ucontext.h
-	  fprintf(f_crash, "...from %x\n", uc->uc_mcontext.gregs[REG_EIP]);
+	  fprintf(f_crash, "...from %x\n", ((ucontext_t *)secret)->uc_mcontext.gregs[REG_EIP]);
 #endif
 	}
 	
 #ifdef REG_EIP
 	fprintf(f_crash, "==== reapeat backtrace with REG_EIP =====");
 	// overwrite sigaction with caller's address
-	backtracePtrs[1] = (void *)uc->uc_mcontext.gregs[REG_EIP];
+	backtracePtrs[1] = (void *)(((ucontext_t *)secret)->uc_mcontext.gregs[REG_EIP]);
 	// then write again:
 	backtrace_symbols_fd(backtracePtrs, siz, fileno(f_crash));
 	fflush(f_crash);
@@ -1325,6 +1377,9 @@ extern "C" {
       else {
 	// initiate server-discovery
 	HSPSFlow *sf = sp->sFlow;
+	// SIGSEGV on Fedora 14 if HSP_RLIMIT_MEMLOCK is non-zero, because calloc returns NULL.
+	// Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
+	// maybe we are supposed to fork the DNSSD thread before dropping privileges?
 	sf->sFlowSettings_dnsSD = newSFlowSettings();
 	// pick up default polling interval from config file
 	sf->sFlowSettings_dnsSD->pollingInterval = sf->sFlowSettings_file->pollingInterval;
@@ -1556,7 +1611,7 @@ extern "C" {
     // open the output file while we still have root priviliges.
     // use mode "w+" because we intend to write it and rewrite it.
     if((sp->f_out = fopen(sp->outputFile, "w+")) == NULL) {
-      myLog(LOG_ERR, "cannot open output file %s : %s", sp->outputFile);
+      myLog(LOG_ERR, "cannot open output file %s : %s", sp->outputFile, strerror(errno));
       exit(EXIT_FAILURE);
     }
 
@@ -1565,7 +1620,7 @@ extern "C" {
       // the file pointer needs to be a global so it is accessible
       // to the signal handler
       if((f_crash = fopen(sp->crashFile, "w")) == NULL) {
-	myLog(LOG_ERR, "cannot open output file %s : %s", sp->crashFile);
+	myLog(LOG_ERR, "cannot open output file %s : %s", sp->crashFile, strerror(errno));
 	exit(EXIT_FAILURE);
       }
     }
@@ -1595,19 +1650,10 @@ extern "C" {
     // open the vmStore file while we still have root priviliges
     // use mode "w+" because we intend to write it and rewrite it.
     if((sp->f_vmStore = fopen(sp->vmStoreFile, "w+")) == NULL) {
-      myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile);
+      myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile, strerror(errno));
       exit(EXIT_FAILURE);
     }
 #endif
-
-    if(sp->dropPriv) {
-      // don't need to be root any more - we held on to root privileges
-      // to make sure we could write the pid file,  and open the output
-      // file, and open the Xen handles, and on Debian we needed to fork
-      // the DNSSD thread before calling setuid (not sure why?).
-      // Anway, from now on we don't want the responsibility...
-      drop_privileges(HSP_RLIMIT_MEMLOCK);
-    }
 
     myLog(LOG_INFO, "started");
     
@@ -1633,7 +1679,7 @@ extern "C" {
 	  // we must have an agentIP, so we can use
 	  // it to seed the random number generator
 	  SFLAddress *agentIP = &sp->sFlow->agentIP;
-	  uint32_t seed;
+	  uint32_t seed = 0;
 	  if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
 	  else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
 	  sfl_random_init(seed);
@@ -1684,6 +1730,18 @@ extern "C" {
 		// print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
 		malloc_stats();
 	      }
+
+	      if(sp->dropPriv) {
+		// don't need to be root any more - we held on to root privileges
+		// to make sure we could write the pid file,  and open the output
+		// file, and open the Xen handles, and delay the opening of the
+		// ULOG socket until we knew the group-number, and on Debian and
+		// Fedora 14 we needed to fork the DNSSD thread before dropping root
+		// priviliges (something to do with mlockall()). Anway, from now on
+		// we just don't want the responsibility...
+		drop_privileges(HSP_RLIMIT_MEMLOCK);
+	      }
+
 	      setState(sp, HSPSTATE_RUN);
 	    }
 	    else {
@@ -1696,6 +1754,9 @@ extern "C" {
 	
       case HSPSTATE_RUN:
 	{
+#ifdef HSF_ULOG
+	  readPackets(sp);
+#endif
 	  // check for second boundaries and generate ticks for the sFlow library
 	  time_t test_clk = time(NULL);
 	  if((test_clk < sp->clk) || (test_clk - sp->clk) > HSP_MAX_TICKS) {
@@ -1731,14 +1792,21 @@ extern "C" {
 	    sp->clk++;
 	  }
 	}
+	break;
+
       case HSPSTATE_END:
 	break;
       }
-      
+
       // set the timeout so that if all is quiet we will
       // still loop around and check for ticks/signals
       // several times per second
+#ifdef HSF_ULOG
+      if(sp->ulog_soc) my_usleep_fd(200000, sp->ulog_soc);
+      else my_usleep(200000);
+#else
       my_usleep(200000);
+#endif
     }
 
     // get here if a signal kicks the state to HSPSTATE_END

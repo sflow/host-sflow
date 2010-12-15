@@ -285,7 +285,7 @@ extern "C" {
   -----------------___________________________------------------
 */
 
-  static int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix)
+  int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix)
   {
     int b = 0;
     if(prefix) {
@@ -378,6 +378,33 @@ extern "C" {
     int max_fd = 0;
     int nfds = select(max_fd + 1,
 		      (fd_set *)NULL,
+		      (fd_set *)NULL,
+		      (fd_set *)NULL,
+		      &timeout);
+    // may return prematurely if a signal was caught, in which case nfds will be
+    // -1 and errno will be set to EINTR.  If we get any other error, abort.
+    if(nfds < 0 && errno != EINTR) {
+      myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________     my_usleep_fd          __________________
+    -----------------___________________________------------------
+    variant that returns early if there is activity on the supplied file descriptor
+  */
+  
+  void my_usleep_fd(uint32_t microseconds, int fd) {
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = microseconds;
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    int max_fd = fd;
+    int nfds = select(max_fd + 1,
+		      &readfds,
 		      (fd_set *)NULL,
 		      (fd_set *)NULL,
 		      &timeout);
