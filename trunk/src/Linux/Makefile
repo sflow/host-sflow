@@ -1,6 +1,10 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
+ifeq ($(ULOG),yes)
+	CFLAGS+=-DHSF_ULOG
+endif
+
 # if LVRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe
 # it would be stronger to test for the libvirt-devel rpm? or look for /usr/include/libvirt/libvirt.h?
 ifeq ($(LIBVIRT),)
@@ -60,9 +64,9 @@ HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 
 SFLOWDIR=../sflow
 
-OPT = -O3 -DNDEBUG
+#OPT = -O3 -DNDEBUG
 #OPT = -g -ggdb -O2
-#OPT= -g -ggdb
+OPT= -g -ggdb
 
 #CC= g++
 CC= gcc -std=gnu99
@@ -72,7 +76,8 @@ READ_OBJS=readInterfaces.o \
           readMemoryCounters.o \
           readDiskCounters.o \
           readHidCounters.o \
-          readNioCounters.o
+          readNioCounters.o \
+	  readPackets.o
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
@@ -155,5 +160,6 @@ readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
+readPackets.o: readPackets.c $(HEADERS)
 sflowovsd.o: sflowovsd.c $(HEADERS)
 

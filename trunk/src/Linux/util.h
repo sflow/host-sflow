@@ -36,6 +36,7 @@ extern "C" {
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
+  int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
   int parseUUID(char *str, char *uuid);
   int printUUID(const u_char *a, u_char *buf, int bufLen);
   
@@ -99,6 +100,7 @@ extern "C" {
 
   // sleep
   void my_usleep(uint32_t microseconds);
+  void my_usleep_fd(uint32_t microseconds, int fd);
 
   // calling execve()
   typedef int (*UTExecCB)(void *magic, char *line);

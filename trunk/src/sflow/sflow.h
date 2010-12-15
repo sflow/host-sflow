@@ -369,6 +369,7 @@ typedef struct _SFLFlow_sample {
 				     0x80000000  indicates a packet sent to
 				     an unknown number of
 				     interfaces greater than 1.*/
+#define SFL_INTERNAL_INTERFACE 0x3FFFFFFF
   uint32_t num_elements;
   SFLFlow_sample_element *elements;
 } SFLFlow_sample;

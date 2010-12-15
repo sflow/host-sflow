@@ -51,6 +51,15 @@ extern "C" {
 #include "libxml/xmlreader.h"
 #endif
 
+#ifdef HSF_ULOG
+#include <linux/netlink.h>
+#include <net/if.h>
+#include <linux/netfilter_ipv4/ipt_ULOG.h>
+#define HSP_MAX_MSG_BYTES 10000
+#define HSP_READPACKET_BATCH 100
+#endif
+
+
 #define ADD_TO_LIST(linkedlist, obj) \
   do { \
     obj->nxt = linkedlist; \
@@ -77,6 +86,8 @@ extern "C" {
 // calling res_search() seems to allocate about 11MB
 // (not sure why), so set the limit accordingly.
 #define HSP_RLIMIT_MEMLOCK (1024 * 1024 * 15)
+// set to 0 to disable the memlock feature
+// #define HSP_RLIMIT_MEMLOCK 0
 
   // only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
@@ -103,12 +114,19 @@ extern "C" {
     uint32_t numCollectors;
     uint32_t samplingRate;
     uint32_t pollingInterval;
+    uint32_t headerBytes;
+#define HSP_MAX_HEADER_BYTES 256
+    uint32_t ulogGroup;
+#define HSP_DEFAULT_ULOG_GROUP 1
   } HSPSFlowSettings;
 
   typedef struct _HSPSFlow {
     struct _HSP *myHSP;
     SFLAgent *agent;
     SFLPoller *poller;
+#ifdef HSF_ULOG
+    SFLSampler *sampler;
+#endif
 
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;
@@ -239,6 +257,12 @@ extern "C" {
     uint32_t DNSSD_startDelay;
     uint32_t DNSSD_retryDelay;
     uint32_t DNSSD_ttl;
+#ifdef HSF_ULOG
+    // ULOG packet-sampling
+    int ulog_soc;
+    struct sockaddr_nl ulog_bind;
+    struct sockaddr_nl ulog_peer;
+#endif
   } HSP;
 
   // expose some config parser fns
@@ -265,6 +289,7 @@ extern "C" {
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
+  int readPackets(HSP *sp);
 
 #if defined(__cplusplus)
 } /* extern "C" */
