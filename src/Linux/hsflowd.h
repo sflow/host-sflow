@@ -124,9 +124,6 @@ extern "C" {
     struct _HSP *myHSP;
     SFLAgent *agent;
     SFLPoller *poller;
-#ifdef HSF_ULOG
-    SFLSampler *sampler;
-#endif
 
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;

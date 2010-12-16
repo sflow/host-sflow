@@ -95,7 +95,7 @@ extern "C" {
 	      adaptor->last_bytes_out32 = bytes_out;
 	      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
 	      // if we detect that the OS is using 64-bits then we can turn off the faster
-	      // NIO polling. This should probaly be done based on the kernel version or some
+	      // NIO polling. This should probably be done based on the kernel version or some
 	      // other include-file definition, but it's not expensive to do it here like this:
 	      if(bytes_in > 0xFFFFFFFF || bytes_out > 0xFFFFFFFF) {
 		myLog(LOG_INFO, "detected 64-bit counters in /proc/net/dev");

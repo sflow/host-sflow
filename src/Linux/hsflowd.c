@@ -1130,13 +1130,6 @@ extern "C" {
  #ifdef HSF_ULOG
     // open the netfilter socket to ULOG while we are still root
     openULOG(sp);
-
-    // add a 0:0 sampler
-    SFL_DS_SET(dsi, 0, 0, 0); // ds_class == ds_index == ds_instance = 0
-    sf->sampler = sfl_agent_addSampler(sf->agent, &dsi);
-    uint32_t samplingRate = sf->sFlowSettings ? sf->sFlowSettings->samplingRate : SFL_DEFAULT_SAMPLING_RATE;
-    sfl_sampler_set_sFlowFsPacketSamplingRate(sf->sampler, samplingRate);
-    sfl_sampler_set_sFlowFsReceiver(sf->sampler, HSP_SFLOW_RECEIVER_INDEX);
 #endif
     return YES;
   }
