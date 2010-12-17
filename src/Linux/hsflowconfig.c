@@ -419,7 +419,7 @@ extern int debug;
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
 	  break;
 	case HSPTOKEN_ULOGPROBABILITY:
-	  if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0d, 1.0d)) == NULL) return NO;
+	  if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
 	  break;
 	default:
 	  parseError(sp, tok, "unexpected sFlow setting", "");
