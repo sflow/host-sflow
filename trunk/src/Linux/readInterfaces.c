@@ -9,6 +9,8 @@ extern "C" {
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <net/if.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
 
 #include "hsflowd.h"
 
@@ -19,16 +21,18 @@ extern int debug;
   ----------------___________________________------------------
 */
 
-static HSPAdaptorNIO *findOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName)
+static HSPAdaptorNIO *extractOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName)
 {
   HSPAdaptorNIO *adaptor = NULL;
   for(int i = 0; i < nioList->num_adaptors; i++) {
     adaptor = nioList->adaptors[i];
     if(adaptor && !strcmp(adaptor->deviceName, deviceName)) {
+      // take it out of the array and return it
       nioList->adaptors[i] = NULL;
       return adaptor;
     }
   }
+  // not found, create a new one
   adaptor = (HSPAdaptorNIO *)my_calloc(sizeof(HSPAdaptorNIO));
   adaptor->deviceName = strdup(deviceName);
   return adaptor;
@@ -55,7 +59,7 @@ static void updateAdaptorNIO(HSP *sp)
   HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
   // move pre-existing ones across,  or create new ones if necessary
   for(int i = 0; i < N; i++) {
-    new_list[i] = findOrCreateAdaptorNIO(&sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
+    new_list[i] = extractOrCreateAdaptorNIO(&sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
   }
   // free old ones we don't need any more
   freeAdaptorNIOs(&sp->adaptorNIOList);
@@ -120,6 +124,7 @@ int readInterfaces(HSP *sp)
 	  else {
 	    int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
 	    int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
+	    int promisc =  (ifr.ifr_flags & IFF_PROMISC) ? YES : NO;
 	    //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
 	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
 	    if(up && !loopback) {
@@ -135,6 +140,7 @@ int readInterfaces(HSP *sp)
 		// learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
 		// create a new "adaptor" entry
 		SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data);
+		adaptor->promiscuous = promisc;
 
 		// Try and get the ifIndex for this interface
 		if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
@@ -171,6 +177,25 @@ int readInterfaces(HSP *sp)
 		  // IP6 addr is now s->sin6_addr;
 		  //}
 		}
+
+		// Try to get the ethtool info for this interface so we can infer the
+		// ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
+		struct ethtool_cmd ecmd = { 0 };
+		ecmd.cmd = ETHTOOL_GSET;
+		ifr.ifr_data = (char *)&ecmd;
+		if(ioctl(fd, SIOCETHTOOL, &ifr) == 0) {
+		  adaptor->ifDirection = ecmd.duplex ? 1 : 2;
+		  uint64_t ifSpeed_mb = 0;
+		  switch(ecmd.speed) {
+		  case SPEED_10: ifSpeed_mb = 10; break;
+		  case SPEED_100: ifSpeed_mb = 100; break;
+		  case SPEED_1000: ifSpeed_mb = 1000; break;
+		  case SPEED_10000: ifSpeed_mb = 10000; break;
+		  default: break;
+		  }
+		  adaptor->ifSpeed = ifSpeed_mb * 1000000;
+		}
+		
 	      }
 	    }
 	  }

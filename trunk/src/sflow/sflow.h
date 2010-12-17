@@ -550,6 +550,9 @@ typedef struct _SFLAdaptor {
   SFLIPv4 ipAddr;
   // SFLIPv6 ip6Addr;
   char *deviceName;
+  uint32_t ifDirection;
+  uint64_t ifSpeed;
+  int32_t promiscuous;
   uint32_t num_macs;
   SFLMacAddress macs[1];
 } SFLAdaptor;

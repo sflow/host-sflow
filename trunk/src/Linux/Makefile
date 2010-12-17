@@ -1,6 +1,11 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
+# if ULOG is not set, assume it should be "yes".
+# (So you can use "make ULOG=no" to compile without this feature)
+ifeq ($(ULOG),)
+	ULOG=yes
+endif
 ifeq ($(ULOG),yes)
 	CFLAGS+=-DHSF_ULOG
 endif
@@ -64,12 +69,14 @@ HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 
 SFLOWDIR=../sflow
 
-#OPT = -O3 -DNDEBUG
-#OPT = -g -ggdb -O2
-OPT= -g -ggdb
-
 #CC= g++
 CC= gcc -std=gnu99
+
+OPT_FULL = -O3 -DNDEBUG
+OPT_DEBUG = -g -ggdb
+ifeq ($(OPT),)
+	OPT=$(OPT_FULL)
+endif
 
 READ_OBJS=readInterfaces.o \
           readCpuCounters.o \

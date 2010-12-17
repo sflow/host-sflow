@@ -550,7 +550,7 @@ extern "C" {
       myLog(LOG_ERR, "truncateOpenFile(): fileno() failed : %s", strerror(errno));
       return NO;
     }
-    if(ftruncate(fd, lseek(fd, 0, SEEK_CUR) != 0)) {
+    if(ftruncate(fd, lseek(fd, 0, SEEK_CUR)) != 0) {
       myLog(LOG_ERR, "truncateOpenFile(): ftruncate() failed : %s", strerror(errno));
       return NO;
     }

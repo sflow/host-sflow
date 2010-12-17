@@ -286,6 +286,7 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
+  HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int readPackets(HSP *sp);
