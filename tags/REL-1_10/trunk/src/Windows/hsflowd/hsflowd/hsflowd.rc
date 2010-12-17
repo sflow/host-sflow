@@ -1,0 +1,40 @@
+
+#include "resource.h"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Version
+//
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 1,0,0,1
+ PRODUCTVERSION 1,0,0,1
+ FILEFLAGSMASK 0x17L
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x4L
+ FILETYPE 0x0L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "InMon Corp"
+            VALUE "FileDescription", "hsflowd"
+            VALUE "FileVersion", "0, 0, 0, 96"
+            VALUE "InternalName", "hsflowd"
+            VALUE "LegalCopyright", "Copyright (C) 2010  ALL RIGHTS RESERVED"
+            VALUE "OriginalFilename", "hsflowd"
+            VALUE "ProductName", "hsflowd"
+            VALUE "ProductVersion", "0, 0, 0, 96"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
