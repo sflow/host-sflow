@@ -6,13 +6,14 @@
 extern "C" {
 #endif
 
+#include "hsflowd.h"
+
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <net/if.h>
+#include <linux/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
-
-#include "hsflowd.h"
 
 extern int debug;
     
@@ -190,7 +191,9 @@ int readInterfaces(HSP *sp)
 		  case SPEED_10: ifSpeed_mb = 10; break;
 		  case SPEED_100: ifSpeed_mb = 100; break;
 		  case SPEED_1000: ifSpeed_mb = 1000; break;
+#ifdef SPEED_10000
 		  case SPEED_10000: ifSpeed_mb = 10000; break;
+#endif
 		  default: break;
 		  }
 		  adaptor->ifSpeed = ifSpeed_mb * 1000000;

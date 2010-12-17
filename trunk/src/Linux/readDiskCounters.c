@@ -6,10 +6,11 @@
 extern "C" {
 #endif
 
+#include "hsflowd.h"
+
 #include <search.h> // for tfind,tsearch,tsdestroy
 #include <sys/statvfs.h> // for statvfs
 
-#include "hsflowd.h"
 /* It looks like we could read this from "fdisk -l",  so the source
    code to fdisk should probably be consulted to find where it can
    be read off */
