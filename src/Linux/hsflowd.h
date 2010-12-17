@@ -52,6 +52,7 @@ extern "C" {
 #endif
 
 #ifdef HSF_ULOG
+#include <linux/types.h>
 #include <linux/netlink.h>
 #include <net/if.h>
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
