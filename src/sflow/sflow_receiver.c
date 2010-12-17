@@ -529,7 +529,7 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
   // check in case this one sample alone is too big for the datagram
   // in fact - if it is even half as big then we should ditch it. Very
   // important to avoid overruning the packet buffer.
-  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize / 2)) {
+  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize)) {
     sflError(receiver, "flow sample too big for datagram");
     return -1;
   }
@@ -721,7 +721,7 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
   // check in case this one sample alone is too big for the datagram
   // in fact - if it is even half as big then we should ditch it. Very
   // important to avoid overruning the packet buffer.
-  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize / 2)) {
+  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize)) {
     sflError(receiver, "counters sample too big for datagram");
     return -1;
   }

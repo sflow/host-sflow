@@ -126,6 +126,23 @@ extern int debug;
     return t;
   }
 
+  // expectDouble
+  HSPToken *expectDouble(HSP *sp, HSPToken *tok, double *arg, double minVal, double maxVal)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || !isdigit(t->str[0])) {
+      parseError(sp, tok, "expected floating-point number", "");
+      return NULL;
+    }
+    *arg = strtod(t->str, NULL);
+    if(*arg < minVal || *arg > maxVal) {
+      parseError(sp, tok, "range error", "");
+      return NULL;
+    }
+    return t;
+  }
+
   // expectIP
 
   HSPToken *expectIP(HSP *sp, HSPToken *tok, SFLAddress *addr, struct sockaddr *sa)
@@ -401,6 +418,9 @@ extern int debug;
 	case HSPTOKEN_ULOGGROUP:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
 	  break;
+	case HSPTOKEN_ULOGPROBABILITY:
+	  if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0d, 1.0d)) == NULL) return NO;
+	  break;
 	default:
 	  parseError(sp, tok, "unexpected sFlow setting", "");
 	  return NO;
@@ -494,6 +514,11 @@ extern int debug;
 	  parseOK = NO;
 	}
       }
+
+      if(sp->sFlow->sFlowSettings_file->ulogProbability > 0) {
+	sp->sFlow->sFlowSettings_file->ulogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->ulogProbability);
+      }
+
     }
 
     return parseOK;

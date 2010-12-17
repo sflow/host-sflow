@@ -74,7 +74,7 @@ extern "C" {
       SFL_DS_SET(dsi, 0, ifIndex, 0); // ds_class,ds_index,ds_instance
       HSPSFlow *sf = sp->sFlow;
       // add sampler, and poller too
-      uint32_t samplingRate = sf->sFlowSettings ? sf->sFlowSettings->samplingRate : SFL_DEFAULT_SAMPLING_RATE;
+      uint32_t samplingRate = sf->sFlowSettings_file->ulogSamplingRate;
       uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
       sampler = sfl_agent_addSampler(sf->agent, &dsi);
       sfl_sampler_set_sFlowFsPacketSamplingRate(sampler, samplingRate);
@@ -226,6 +226,8 @@ extern "C" {
 		}
 		
 		SFLADD_ELEMENT(&fs, &hdrElem);
+		// have to just estimate the sample pool from the samples.  No choice.
+		sampler->samplePool += sfl_sampler_get_sFlowFsPacketSamplingRate(sampler);
 		sfl_sampler_writeFlowSample(sampler, &fs);
 	      }
 	    }

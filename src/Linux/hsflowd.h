@@ -118,6 +118,8 @@ extern "C" {
 #define HSP_MAX_HEADER_BYTES 256
     uint32_t ulogGroup;
 #define HSP_DEFAULT_ULOG_GROUP 1
+    double ulogProbability;
+    uint32_t ulogSamplingRate;
   } HSPSFlowSettings;
 
   typedef struct _HSPSFlow {

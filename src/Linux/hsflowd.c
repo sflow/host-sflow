@@ -1128,8 +1128,12 @@ extern "C" {
     configVMs(sp);
 
  #ifdef HSF_ULOG
-    // open the netfilter socket to ULOG while we are still root
-    openULOG(sp);
+    if(sp->sFlow->sFlowSettings_file->ulogGroup != 0 ||
+       sp->sFlow->sFlowSettings_file->ulogSamplingRate != 0) {
+      // ulog group and ulog sampling probability are both defined, so
+      // open the netfilter socket to ULOG while we are still root
+      openULOG(sp);
+    }
 #endif
     return YES;
   }
