@@ -10,17 +10,22 @@ extern "C" {
 #include "hsflowd.h"
 
   /*_________________---------------------------__________________
-    _________________    updateNioCounters      __________________
+    _________________    getAdaptorNIO          __________________
     -----------------___________________________------------------
   */
   
-  static HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName) {
+  HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName) {
     for(int i = 0; i < nioList->num_adaptors; i++) {
       HSPAdaptorNIO *adaptor = nioList->adaptors[i];
       if(!strcmp(adaptor->deviceName, deviceName)) return adaptor;
     }
     return NULL;
   }
+
+  /*_________________---------------------------__________________
+    _________________    updateNioCounters      __________________
+    -----------------___________________________------------------
+  */
   
   void updateNioCounters(HSP *sp) {
 

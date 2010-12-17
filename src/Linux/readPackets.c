@@ -23,38 +23,42 @@ extern "C" {
   {
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
-
+    
     // device name was copied as userData
     char *devName = (char *)poller->userData;
     
-    // make sure the counters are up to the second
-    updateNioCounters(sp);
-
-    for(int i = 0; i < sp->adaptorNIOList.num_adaptors; i++) {
-      HSPAdaptorNIO *adaptor = sp->adaptorNIOList.adaptors[i];
-      if(devName && adaptor && adaptor->deviceName && !strcmp(devName, adaptor->deviceName)) {
+    if(devName) {
+      // look up the adaptor objects
+      SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, devName);
+      HSPAdaptorNIO *adaptorNIO = getAdaptorNIO(&sp->adaptorNIOList, devName);
+      
+      if(adaptor && adaptorNIO) {
+	// make sure the counters are up to the second
+	updateNioCounters(sp);
+	
 	// generic interface counters
 	SFLCounters_sample_element elem = { 0 };
 	elem.tag = SFLCOUNTERS_GENERIC;
 	elem.counterBlock.generic.ifIndex = poller->dsi.ds_index;
 	elem.counterBlock.generic.ifType = 6; // assume ethernet
-	elem.counterBlock.generic.ifSpeed = 0; // $$$
-	elem.counterBlock.generic.ifDirection = 1; // assume full duplex
-	elem.counterBlock.generic.ifStatus = 3; // means ifAdminStatus==up, ifOperstatus==up
-	elem.counterBlock.generic.ifPromiscuousMode = 0; // $$$
-	elem.counterBlock.generic.ifInOctets = adaptor->nio.bytes_in;
-	elem.counterBlock.generic.ifInUcastPkts = adaptor->nio.pkts_in;
-	elem.counterBlock.generic.ifInMulticastPkts = 0; // $$$
-	elem.counterBlock.generic.ifInBroadcastPkts = 0; // $$$
-	elem.counterBlock.generic.ifInDiscards = adaptor->nio.drops_in;
-	elem.counterBlock.generic.ifInErrors = adaptor->nio.errs_in;
-	elem.counterBlock.generic.ifInUnknownProtos = 0; // $$$
-	elem.counterBlock.generic.ifOutOctets = adaptor->nio.bytes_out;
-	elem.counterBlock.generic.ifOutUcastPkts = adaptor->nio.pkts_out;
-	elem.counterBlock.generic.ifOutMulticastPkts = 0; // $$$
-	elem.counterBlock.generic.ifOutBroadcastPkts = 0; // $$$
-	elem.counterBlock.generic.ifOutDiscards = adaptor->nio.drops_out;
-	elem.counterBlock.generic.ifOutErrors = adaptor->nio.errs_out;
+	elem.counterBlock.generic.ifSpeed = adaptor->ifSpeed;
+	elem.counterBlock.generic.ifDirection = adaptor->ifDirection;
+	elem.counterBlock.generic.ifStatus = 3; // ifAdminStatus==up, ifOperstatus==up
+	elem.counterBlock.generic.ifPromiscuousMode = adaptor->promiscuous;
+	elem.counterBlock.generic.ifInOctets = adaptorNIO->nio.bytes_in;
+	elem.counterBlock.generic.ifInUcastPkts = adaptorNIO->nio.pkts_in;
+#define UNSUPPORTED_SFLOW_COUNTER32 (uint32_t)-1
+	elem.counterBlock.generic.ifInMulticastPkts = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifInBroadcastPkts = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifInDiscards = adaptorNIO->nio.drops_in;
+	elem.counterBlock.generic.ifInErrors = adaptorNIO->nio.errs_in;
+	elem.counterBlock.generic.ifInUnknownProtos = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifOutOctets = adaptorNIO->nio.bytes_out;
+	elem.counterBlock.generic.ifOutUcastPkts = adaptorNIO->nio.pkts_out;
+	elem.counterBlock.generic.ifOutMulticastPkts = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifOutBroadcastPkts = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifOutDiscards = adaptorNIO->nio.drops_out;
+	elem.counterBlock.generic.ifOutErrors = adaptorNIO->nio.errs_out;
 	SFLADD_ELEMENT(cs, &elem);
 	sfl_poller_writeCountersSample(poller, cs);
       }

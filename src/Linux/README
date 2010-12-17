@@ -11,6 +11,8 @@ hsflowd.c		- the Host sFlow daemon (main() is here)
 scripts/hsflowd         - script used by init(1) for starting/stopping daemon
 scripts/hsflowd.conf    - seed configuration file. "make install" will copy
                           this to /etc/hsflowd.conf
+scripts/ulog_sampling   - example script to configure iptables(1) packet-sampling
+
 sFlow OVS daemon
 ================
 sflowovsd.h		- structure definitions
