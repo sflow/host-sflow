@@ -330,12 +330,11 @@ extern "C" {
     assert(poller->magic);
     HSPVMState *state = (HSPVMState *)poller->userData;
     if(state == NULL) return;
+    HSP *sp = (HSP *)poller->magic;
 
 #ifdef HSF_XEN
-
     if(xenHandlesOK(sp)) {
-      HSP *sp = (HSP *)poller->magic;
-      
+
       xc_domaininfo_t domaininfo;
       int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
       if(n < 0 || domaininfo.domain != state->domId) {
@@ -480,7 +479,6 @@ extern "C" {
 
 #endif /* HSF_XEN */
 #ifdef HSF_VRT
-    HSP *sp = (HSP *)poller->magic;
     if(sp->virConn) {
       virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
       if(domainPtr == NULL) {
