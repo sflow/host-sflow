@@ -234,7 +234,11 @@ extern int debug;
   HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)calloc(1, sizeof(HSPSFlowSettings));
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
+    st->samplingRate_http = HSP_SETTING_UNDEFINED;
+    st->samplingRate_memcache = HSP_SETTING_UNDEFINED;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
+    st->pollingInterval_http = HSP_SETTING_UNDEFINED;
+    st->pollingInterval_memcache = HSP_SETTING_UNDEFINED;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
     return st;
@@ -396,9 +400,21 @@ extern int debug;
 	case HSPTOKEN_PACKETSAMPLINGRATE:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
 	  break;
+	case HSPTOKEN_SAMPLING_HTTP:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate_http, 0, 65535)) == NULL) return NO;
+	  break;
+	case HSPTOKEN_SAMPLING_MEMCACHE:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate_memcache, 0, 65535)) == NULL) return NO;
+	  break;
 	case HSPTOKEN_POLLING:
 	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
+	  break;
+	case HSPTOKEN_POLLING_HTTP:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval_http, 0, 300)) == NULL) return NO;
+	  break;
+	case HSPTOKEN_POLLING_MEMCACHE:
+	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval_memcache, 0, 300)) == NULL) return NO;
 	  break;
 	case HSPTOKEN_AGENTIP:
 	  if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
