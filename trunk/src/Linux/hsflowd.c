@@ -946,8 +946,20 @@ extern "C" {
     HSPSFlowSettings *settings = sp->sFlow->sFlowSettings;
     if(settings) {
       fprintf(sp->f_out, "sampling=%u\n", settings->samplingRate);
+      if(settings->samplingRate_http != HSP_SETTING_UNDEFINED) {
+	fprintf(sp->f_out, "sampling.http=%u\n", settings->samplingRate_http);
+      }
+      if(settings->samplingRate_memcache != HSP_SETTING_UNDEFINED) {
+	fprintf(sp->f_out, "sampling.memcache=%u\n", settings->samplingRate_memcache);
+      }
       fprintf(sp->f_out, "header=128\n");
       fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
+      if(settings->pollingInterval_http != HSP_SETTING_UNDEFINED) {
+	fprintf(sp->f_out, "polling.http=%u\n", settings->pollingInterval_http);
+      }
+      if(settings->pollingInterval_memcache != HSP_SETTING_UNDEFINED) {
+	fprintf(sp->f_out, "polling.memcache=%u\n", settings->pollingInterval_memcache);
+      }
       char ipbuf[51];
       fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
       if(sp->sFlow->agentDevice) {
@@ -1342,10 +1354,22 @@ extern "C" {
     else if(strcmp(keyBuf, "sampling") == 0) {
       st->samplingRate = strtol(valBuf, NULL, 0);
     }
+    else if(strcmp(keyBuf, "sampling.http") == 0) {
+      st->samplingRate_http = strtol(valBuf, NULL, 0);
+    }
+    else if(strcmp(keyBuf, "sampling.memcache") == 0) {
+      st->samplingRate_memcache = strtol(valBuf, NULL, 0);
+    }
     else if(strcmp(keyBuf, "txtvers") == 0) {
     }
     else if(strcmp(keyBuf, "polling") == 0) {
       st->pollingInterval = strtol(valBuf, NULL, 0);
+    }
+    else if(strcmp(keyBuf, "polling.http") == 0) {
+      st->pollingInterval_http = strtol(valBuf, NULL, 0);
+    }
+    else if(strcmp(keyBuf, "polling.memcache") == 0) {
+      st->pollingInterval_memcache = strtol(valBuf, NULL, 0);
     }
     else {
       myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);

@@ -110,11 +110,17 @@ extern "C" {
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
 
+#define HSP_SETTING_UNDEFINED -1
+
   typedef struct _HSPSFlowSettings {
     HSPCollector *collectors;
     uint32_t numCollectors;
     uint32_t samplingRate;
+    uint32_t samplingRate_http;
+    uint32_t samplingRate_memcache;
     uint32_t pollingInterval;
+    uint32_t pollingInterval_http;
+    uint32_t pollingInterval_memcache;
     uint32_t headerBytes;
 #define HSP_MAX_HEADER_BYTES 256
     uint32_t ulogGroup;
