@@ -2,9 +2,11 @@
  * http://host-sflow.sourceforge.net/license.html
  */
 
-/////////////////////////////////////////////////////////////////////////////////
-/////////////////////// sFlow Sampling Packet Data Types ////////////////////////
-/////////////////////////////////////////////////////////////////////////////////
+/*
+////////////////////////////////////////////////////////////////////////////////
+////////////////////// sFlow Sampling Packet Data Types ////////////////////////
+////////////////////////////////////////////////////////////////////////////////
+*/
 
 #ifndef SFLOW_H
 #define SFLOW_H 1
@@ -15,15 +17,25 @@ extern "C" {
 
 #ifdef _WIN32
 #include <windows.h>
-#define uint32_t UINT32
 #define u_char UCHAR
 #define uchar UCHAR
+
 #define u_int8_t UCHAR
 #define uint8_t UCHAR
+#define int8_t CHAR
+
+#define u_int16_t WORD
 #define uint16_t WORD
+#define int16_t WORD
+
+#define u_int32_t UINT32
+#define uint32_t UINT32
+#define int32_t INT32
+
+#define u_int64_t UINT64
 #define uint64_t UINT64
 #define int64_t INT64
-#endif //_WIN32
+#endif /*_WIN32 */
 
 typedef struct {
     uint32_t addr;
@@ -548,11 +560,11 @@ typedef struct _SFLMacAddress {
 typedef struct _SFLAdaptor {
   uint32_t ifIndex;
   SFLIPv4 ipAddr;
-  // SFLIPv6 ip6Addr;
+  /* SFLIPv6 ip6Addr; */
   char *deviceName;
   uint32_t ifDirection;
   uint64_t ifSpeed;
-  int32_t promiscuous;
+  uint32_t promiscuous;
   uint32_t num_macs;
   SFLMacAddress macs[1];
 } SFLAdaptor;
