@@ -37,7 +37,7 @@ make clean
 %defattr(-,root,root,-)
 /usr/sbin/hsflowd
 /usr/sbin/sflowovsd
-/etc/hsflowd.conf
+%config /etc/hsflowd.conf
 /etc/init.d/hsflowd
 /etc/init.d/sflowovsd
 %doc README LICENSE INSTALL.Linux
