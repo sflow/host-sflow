@@ -109,6 +109,51 @@ Cleanup:
 	return (uint32_t)ret;
 }
 
+uint64_t readFormattedCounter(char* path)
+{
+    PDH_STATUS Status;
+    PDH_HQUERY Query = NULL;
+    PDH_HCOUNTER Counter;
+	DWORD dwType;
+	PDH_FMT_COUNTERVALUE Value;
+	LONGLONG ret = 0;
+
+    Status = PdhOpenQuery(NULL, 0, &Query);
+    if (Status != ERROR_SUCCESS) 
+    {
+        goto Cleanup;
+    }
+
+    Status = PdhAddCounter(Query, path, 0, &Counter);
+    if (Status != ERROR_SUCCESS) 
+    {
+        goto Cleanup;
+    }
+
+
+	Status = PdhCollectQueryData(Query);
+	if (Status != ERROR_SUCCESS) 
+    {
+        goto Cleanup;
+    }
+
+	Status = PdhGetFormattedCounterValue(Counter, PDH_FMT_LARGE, &dwType, &Value);
+	if (Status != ERROR_SUCCESS) 
+    {
+        goto Cleanup;
+    }
+	ret = Value.largeValue;
+		
+Cleanup:
+
+    if (Query) 
+    {
+        PdhCloseQuery(Query);
+    }
+
+	return (uint64_t)ret;
+}
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
