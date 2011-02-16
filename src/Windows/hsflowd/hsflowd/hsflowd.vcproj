@@ -25,27 +25,29 @@
 			IntermediateDirectory="$(ConfigurationName)"
 			ConfigurationType="1"
 			CharacterSet="2"
+			ExcludeBuckets="3"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+				ExecutionBucket="2"
 			/>
 			<Tool
-				Name="Build NSIS"
+				Name="VCWebServiceProxyGeneratorTool"
+				ExecutionBucket="3"
 			/>
 			<Tool
 				Name="VCXMLDataGeneratorTool"
 			/>
 			<Tool
-				Name="VCWebServiceProxyGeneratorTool"
-			/>
-			<Tool
 				Name="VCMIDLTool"
+				ExecutionBucket="4"
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
+				ExecutionBucket="5"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\..\..\sflow"
 				PreprocessorDefinitions="WIN32;_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS"
@@ -59,15 +61,19 @@
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
+				ExecutionBucket="6"
 			/>
 			<Tool
 				Name="VCResourceCompilerTool"
+				ExecutionBucket="7"
 			/>
 			<Tool
 				Name="VCPreLinkEventTool"
+				ExecutionBucket="8"
 			/>
 			<Tool
 				Name="VCLinkerTool"
+				ExecutionBucket="9"
 				AdditionalDependencies="Ws2_32.lib IPHLPAPI.lib pdh.lib Wbemuuid.lib"
 				LinkIncremental="2"
 				GenerateDebugInformation="true"
@@ -76,24 +82,34 @@
 			/>
 			<Tool
 				Name="VCALinkTool"
+				ExecutionBucket="10"
 			/>
 			<Tool
 				Name="VCManifestTool"
+				ExecutionBucket="11"
 			/>
 			<Tool
 				Name="VCXDCMakeTool"
+				ExecutionBucket="12"
 			/>
 			<Tool
 				Name="VCBscMakeTool"
+				ExecutionBucket="13"
 			/>
 			<Tool
 				Name="VCFxCopTool"
+				ExecutionBucket="14"
 			/>
 			<Tool
-				Name="VCAppVerifierTool"
+				Name="Build_NSIS"
+				ExecutionBucket="15"
 			/>
 			<Tool
 				Name="VCPostBuildEventTool"
+				ExecutionBucket="16"
+			/>
+			<Tool
+				Name="VCAppVerifierTool"
 			/>
 		</Configuration>
 		<Configuration
@@ -103,12 +119,15 @@
 			ConfigurationType="1"
 			CharacterSet="2"
 			WholeProgramOptimization="1"
+			ExcludeBuckets="2;3;16"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
+				CommandLine=""
+				Outputs=""
 				ExecutionBucket="2"
 			/>
 			<Tool
@@ -180,11 +199,12 @@
 				ExecutionBucket="14"
 			/>
 			<Tool
-				Name="VCPostBuildEventTool"
+				Name="Build_NSIS"
 				ExecutionBucket="15"
+				AdditionalOptions="/DBUILD_DIR=$(OutDir) /DOUT_FILE=Setup.exe"
 			/>
 			<Tool
-				Name="Build NSIS"
+				Name="VCPostBuildEventTool"
 				ExecutionBucket="16"
 			/>
 			<Tool
@@ -296,6 +316,10 @@
 			Filter="rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav"
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
+			<File
+				RelativePath="..\install\build_nsis.rules"
+				>
+			</File>
 			<File
 				RelativePath="..\install\collector.ini"
 				>
