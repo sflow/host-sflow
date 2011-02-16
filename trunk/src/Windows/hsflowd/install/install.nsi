@@ -2,7 +2,6 @@
 
 ; HM NIS Edit Wizard helper defines
 !define PRODUCT_NAME "Host sFlow Agent"
-!define PRODUCT_VERSION "1.0"
 !define PRODUCT_PUBLISHER "Host sFlow Project"
 !define PRODUCT_WEB_SITE "http://host-sflow.sourceforge.net/"
 !define PRODUCT_DIR_REGKEY "Software\Microsoft\Windows\CurrentVersion\App Paths\hsflowd.exe"
@@ -53,7 +52,7 @@ FunctionEnd
 ; MUI end ------
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-OutFile "Setup.exe"
+OutFile ${OUT_FILE}
 InstallDir "$PROGRAMFILES\Host sFlow Project\Host sFlow Agent"
 InstallDirRegKey HKLM "${PRODUCT_DIR_REGKEY}" ""
 ShowInstDetails show
@@ -62,9 +61,11 @@ ShowUnInstDetails show
 Section "MainSection" SEC01
   nsSCM::Stop "hsflowd"
   nsSCM::Remove "hsflowd"
+  Push "{1E7B7EE6-2A59-4FCD-B4F8-2679CCB92DC7}"
+  call CallMsiDeinstaller
   SetOutPath "$INSTDIR"
   SetOverwrite ifnewer
-  File "..\Release\hsflowd.exe"
+  File ${BUILD_DIR}\hsflowd.exe
   CreateDirectory "$SMPROGRAMS\\"
   # install service
   nsSCM::Install /NOUNLOAD "hsflowd" "Host sFlow Agent" 16 2 "$INSTDIR\hsflowd.exe" "" "" "" ""
@@ -108,3 +109,33 @@ Section Uninstall
   DeleteRegKey HKLM "${PRODUCT_DIR_REGKEY}"
   SetAutoClose true
 SectionEnd
+
+!define OLDVERSIONWARNING \
+  "An older version of $(^Name) was found on your system. It is recommended that you uninstall the old version before installing the new version.$\r$\n$\r$\nDo you want to uninstall the old version of $(^Name)?"
+!define OLDVERSIONREMOVEERROR \
+  "A problem was encountered while removing the old version of $(^Name). Please uninstall it manually using Programs and Features in Control Panel."
+ 
+ 
+!define INSTALLSTATE_DEFAULT "5"
+!define INSTALLLEVEL_MAXIMUM "0xFFFF"
+!define INSTALLSTATE_ABSENT "2"
+!define ERROR_SUCCESS "0"
+ 
+ 
+Function CallMsiDeinstaller
+  Pop $R0
+ 
+  System::Call "msi::MsiQueryProductStateA(t '$R0') i.r0"
+  StrCmp $0 "${INSTALLSTATE_DEFAULT}" 0 Done
+ 
+  MessageBox MB_YESNO|MB_ICONQUESTION "${OLDVERSIONWARNING}" \
+  IDNO Done
+ 
+  System::Call "msi::MsiConfigureProductA(t '$R0', \
+    i ${INSTALLLEVEL_MAXIMUM}, i ${INSTALLSTATE_ABSENT}) i.r0"
+  StrCmp $0 ${ERROR_SUCCESS} Done
+ 
+    MessageBox MB_OK|MB_ICONEXCLAMATION \
+    "${OLDVERSIONREMOVEERROR}"
+  Done:
+FunctionEnd
