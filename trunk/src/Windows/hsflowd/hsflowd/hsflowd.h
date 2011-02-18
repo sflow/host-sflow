@@ -26,6 +26,7 @@ extern "C" {
 #include <pdhmsg.h>
 
 #include "sflow_api.h"
+#include "loadAverage.h"
 
 #define YES 1
 #define NO 0

@@ -233,6 +233,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\loadAverage.c"
+				>
+			</File>
+			<File
 				RelativePath=".\readCpuCounters.c"
 				>
 			</File>
@@ -288,6 +292,10 @@
 			>
 			<File
 				RelativePath=".\hsflowd.h"
+				>
+			</File>
+			<File
+				RelativePath=".\loadAverage.h"
 				>
 			</File>
 			<File
