@@ -162,6 +162,9 @@ int InitService();
   */
   
   static void tick(HSP *sp, time_t clk) {
+    if(clk%5==0)
+		calcLoad();
+	sfl_agent_tick(sp->sFlow->agent, clk);
   }
 
     /*_________________---------------------------__________________
@@ -327,7 +330,7 @@ void ServiceMain(int argc, char** argv)
     // main loop
     while (ServiceStatus.dwCurrentState == SERVICE_RUNNING)
 	{
-		sfl_agent_tick(sp.sFlow->agent, time(NULL));
+		tick(&sp,time(NULL));
 		Sleep(SLEEP_TIME);
 	}
     return; 

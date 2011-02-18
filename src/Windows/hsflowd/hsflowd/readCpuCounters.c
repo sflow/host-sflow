@@ -10,6 +10,7 @@ extern "C" {
 #include "readWindowsCounters.h"
 
 extern int debug;
+extern double load_1, load_5, load_15;
 
   /*_________________---------------------------__________________
     _________________     readCpuCounters       __________________
@@ -23,6 +24,9 @@ extern int debug;
 	DWORD dwRet,cbData = sizeof(DWORD);
 	HKEY hkey;
 
+	cpu->load_one = (float)load_1;
+	cpu->load_five = (float)load_5;
+	cpu->load_fifteen = (float)load_15;
 	cpu->cpu_user = (uint32_t)readSingleCounter("\\Processor(_Total)\\% User Time");
 	cpu->cpu_system = (uint32_t)readSingleCounter("\\Processor(_Total)\\% Privileged Time");
 	cpu->cpu_idle = (uint32_t)readSingleCounter("\\Processor(_Total)\\% Idle Time");
@@ -63,12 +67,15 @@ extern int debug;
 	cpu->cpu_sintr = UNKNOWN_COUNTER;
 	cpu->cpu_nice = UNKNOWN_COUNTER;
 	cpu->cpu_wio = UNKNOWN_COUNTER;
-	cpu->load_one = UNKNOWN_FLOAT;
-	cpu->load_five = UNKNOWN_FLOAT;
-	cpu->load_fifteen = UNKNOWN_FLOAT;
 	
-	MyLog(LOG_INFO,"readCpuCounters:\n\tuptime:\t\t%lus\n\tcpu_num:\t%d\n\tcpu speed:\t%d MHz\n\tuser: %lu\n\tsystem: %lu\n\tidle: %lu\n\tirq: %lu\n\tthreads_total: %lu\n\tthreads_running: %lu\n",
-			cpu->uptime,cpu->cpu_num,cpu->cpu_speed,cpu->cpu_user,cpu->cpu_system,cpu->cpu_idle,cpu->cpu_intr,cpu->proc_total,cpu->proc_run);
+	MyLog(LOG_INFO,
+		"readCpuCounters:\n\tload_one:\t%f\n\tload_five:\t%f\n\tload_fifteen:\t%f\n"
+		"\tuptime:\t\t%lus\n\tcpu_num:\t%d\n"
+		"\tcpu speed:\t%d MHz\n\tuser: %lu\n\tsystem: %lu\n\tidle: %lu\n\tirq: %lu\n"
+		"\tthreads_total: %lu\n\tthreads_running: %lu\n",
+		cpu->load_one,cpu->load_five,cpu->load_fifteen,cpu->uptime,cpu->cpu_num,
+		cpu->cpu_speed,cpu->cpu_user,cpu->cpu_system,
+		cpu->cpu_idle,cpu->cpu_intr,cpu->proc_total,cpu->proc_run);
 
 	if(thread){ 
 		free(thread);
