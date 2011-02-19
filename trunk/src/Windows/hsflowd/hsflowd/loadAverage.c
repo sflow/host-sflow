@@ -8,6 +8,7 @@ extern "C" {
 
 //globals
 double load_1, load_5, load_15;
+PDH_HQUERY cpu_load_query = NULL;
 
 extern int debug;
 
@@ -29,49 +30,26 @@ int calcLoad(){
 
 double getCpuLoad(){
 	PDH_STATUS Status;
-    PDH_HQUERY Query = NULL;
     PDH_HCOUNTER Counter;
 	DWORD dwType;
 	PDH_FMT_COUNTERVALUE Value;
 	double ret = 0;
-	int i = 0;
-
-    Status = PdhOpenQuery(NULL, 0, &Query);
-    if (Status != ERROR_SUCCESS) 
-    {
-        goto Cleanup;
-    }
-
-    Status = PdhAddCounter(Query, "\\Processor(_Total)\\% Processor Time", 0, &Counter);
-    if (Status != ERROR_SUCCESS) 
-    {
-        goto Cleanup;
-    }
-
-	for(i = 0; i < 2; i++){ //this counter requires at least 2 samples
-		Status = PdhCollectQueryData(Query);
-		if (Status != ERROR_SUCCESS) 
-		{
-			goto Cleanup;
-		}
-		Sleep(500);
+	
+	if(!cpu_load_query){
+		Status = PdhOpenQuery(NULL, 0, &cpu_load_query);
 	}
 
+    Status = PdhAddCounter(cpu_load_query, "\\Processor(_Total)\\% Processor Time", 0, &Counter);
+	Status = PdhCollectQueryData(cpu_load_query);
 	Status = PdhGetFormattedCounterValue(Counter, PDH_FMT_DOUBLE, &dwType, &Value);
-	if (Status != ERROR_SUCCESS) 
-    {
-        goto Cleanup;
-    }
-	ret = Value.doubleValue;
-		
-Cleanup:
-
-    if (Query) 
-    {
-        PdhCloseQuery(Query);
-    }
-
+	ret = Value.doubleValue * getCpuNum();
 	return ret/100.0;
+}
+
+int getCpuNum(){
+	SYSTEM_INFO si;
+	GetSystemInfo(&si);
+	return (int)si.dwNumberOfProcessors;
 }
 
 #if defined(__cplusplus)

@@ -2,7 +2,9 @@
 
 #define SLEEP_TIME 1000
 
+//globals
 int debug = 0;
+uint64_t tick_count = 0;
 SERVICE_STATUS ServiceStatus; 
 SERVICE_STATUS_HANDLE hStatus; 
  
@@ -162,7 +164,7 @@ int InitService();
   */
   
   static void tick(HSP *sp, time_t clk) {
-    if(clk%5==0)
+    if(tick_count++%5==0)
 		calcLoad();
 	sfl_agent_tick(sp->sFlow->agent, clk);
   }
