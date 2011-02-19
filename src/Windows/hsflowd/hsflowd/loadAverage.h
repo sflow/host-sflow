@@ -1,5 +1,4 @@
-#include <math.h>
 
-HANDLE initLoadAverageThread(void);
-DWORD WINAPI LoadAverageProc( LPVOID lpParam );
+int calcLoad(void);
 double getCpuLoad(void);
+int getCpuNum();

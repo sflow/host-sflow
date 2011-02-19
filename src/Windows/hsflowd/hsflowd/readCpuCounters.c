@@ -10,6 +10,7 @@ extern "C" {
 #include "readWindowsCounters.h"
 
 extern int debug;
+extern int cpu_num;
 extern double load_1, load_5, load_15;
 
   /*_________________---------------------------__________________
@@ -34,7 +35,7 @@ extern double load_1, load_5, load_15;
 	cpu->interrupts = (uint32_t)readSingleCounter("\\Processor(_Total)\\Interrupts/sec");
 	cpu->contexts = (uint32_t)readSingleCounter("\\System\\Context Switches/sec");
 	cpu->uptime = (uint32_t)readFormattedCounter("\\System\\System Up Time");
-	cpu->cpu_num = readMultiCounter("\\Processor(*)\\% Processor Time",&processor);
+	cpu->cpu_num = getCpuNum();
 
 	// see http://support.microsoft.com/kb/888282 for ways to determine CPU speed
 	dwRet = RegOpenKeyEx(HKEY_LOCAL_MACHINE,
