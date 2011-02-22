@@ -67,7 +67,6 @@ extern "C" {
     linkedlist = obj; \
   } while(0)
 
-#define HSP_VERSION "1.0.0"
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
