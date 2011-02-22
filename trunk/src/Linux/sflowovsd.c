@@ -292,8 +292,11 @@ extern "C" {
 	      syntaxError(sv, lineNo, "exceeded max collectors");
 	    }
 	  }
+	  else if(strncasecmp(var, "sampling.", 9) == 0) { /* ignore other sampling.<app> settings */ }
+	  else if(strncasecmp(var, "polling.", 8) == 0) { /* ignore other polling.<app> settings */ }
 	  else {
-	    syntaxError(sv, lineNo, "unknown var=value setting");
+	    // don't abort just because we added a new setting for something
+	    // syntaxError(sv, lineNo, "unknown var=value setting");
 	  }
 	}
       }
