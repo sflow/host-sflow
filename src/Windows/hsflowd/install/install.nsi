@@ -14,7 +14,7 @@
 ; MUI Settings
 !define MUI_ABORTWARNING
 !define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
-!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
+!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall-blue.ico"
 
 ; Welcome page
 !insertmacro MUI_PAGE_WELCOME
@@ -61,7 +61,6 @@ ShowUnInstDetails show
 Section "MainSection" SEC01
   nsSCM::Stop "hsflowd"
   nsSCM::Remove "hsflowd"
-  Push "{1E7B7EE6-2A59-4FCD-B4F8-2679CCB92DC7}"
   call CallMsiDeinstaller
   SetOutPath "$INSTDIR"
   SetOverwrite ifnewer
@@ -123,15 +122,13 @@ SectionEnd
  
  
 Function CallMsiDeinstaller
-  Pop $R0
- 
-  System::Call "msi::MsiQueryProductStateA(t '$R0') i.r0"
+  System::Call "msi::MsiQueryProductStateA(t '{1E7B7EE6-2A59-4FCD-B4F8-2679CCB92DC7}') i.r0"
   StrCmp $0 "${INSTALLSTATE_DEFAULT}" 0 Done
  
   MessageBox MB_YESNO|MB_ICONQUESTION "${OLDVERSIONWARNING}" \
   IDNO Done
  
-  System::Call "msi::MsiConfigureProductA(t '$R0', \
+  System::Call "msi::MsiConfigureProductA(t '{1E7B7EE6-2A59-4FCD-B4F8-2679CCB92DC7}', \
     i ${INSTALLLEVEL_MAXIMUM}, i ${INSTALLSTATE_ABSENT}) i.r0"
   StrCmp $0 ${ERROR_SUCCESS} Done
  
