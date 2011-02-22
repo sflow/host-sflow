@@ -1199,7 +1199,7 @@ extern "C" {
     while ((in = getopt(argc, argv, "dvPp:f:o:u:?h")) != -1) {
       switch(in) {
       case 'd': debug++; break;
-      case 'v': printf("%s version %s\n", argv[0], HSP_VERSION); exit(EXIT_SUCCESS); break;
+      case 'v': printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION)); exit(EXIT_SUCCESS); break;
       case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
       case 'f': sp->configFile = optarg; break;

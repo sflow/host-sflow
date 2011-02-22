@@ -2,7 +2,9 @@
 # http://host-sflow.sourceforge.net/license.html
 
 PROG=hsflowd
-VERSION=1.11
+SPEC=$(PROG).spec
+VERSION := $(shell sed -ne 's/^Version: *//p' $(SPEC))
+RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC))
 RPM_SOURCES_DIR=/usr/src/redhat/SOURCES
 MY_SOURCES_DIR=$(RPM_SOURCES_DIR)/$(PROG)-$(VERSION)
 
@@ -12,7 +14,7 @@ all: $(PROG)
 
 hsflowd:
 	cd src/sflow; $(MAKE)
-	cd src/$(PLATFORM); $(MAKE)
+	cd src/$(PLATFORM); $(MAKE) VERSION=$(VERSION)
 
 clean:
 	cd src/sflow; $(MAKE) clean
@@ -29,3 +31,7 @@ rpm:
 	cp -r . $(MY_SOURCES_DIR)
 	tar cz -C $(RPM_SOURCES_DIR) -f $(MY_SOURCES_DIR).tar.gz $(PROG)-$(VERSION)
 	rpmbuild -ba $(PROG).spec
+
+xenserver: rpm
+	cd xenserver-ddk; make
+
