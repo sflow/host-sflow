@@ -34,12 +34,16 @@ double getCpuLoad(){
 	DWORD dwType;
 	PDH_FMT_COUNTERVALUE Value;
 	double ret = 0;
+	CHAR localizedPath[PDH_MAX_COUNTER_PATH];
 	
 	if(!cpu_load_query){
 		Status = PdhOpenQuery(NULL, 0, &cpu_load_query);
 	}
 
-    Status = PdhAddCounter(cpu_load_query, "\\Processor(_Total)\\% Processor Time", 0, &Counter);
+	strcpy(localizedPath,"\\Processor(_Total)\\% Processor Time");
+	localizePath(localizedPath);
+
+    Status = PdhAddCounter(cpu_load_query, localizedPath, 0, &Counter);
 	Status = PdhCollectQueryData(cpu_load_query);
 	Status = PdhGetFormattedCounterValue(Counter, PDH_FMT_DOUBLE, &dwType, &Value);
 	ret = Value.doubleValue * getCpuNum();
