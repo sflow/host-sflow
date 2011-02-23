@@ -43,9 +43,9 @@ make clean
 %doc README LICENSE INSTALL.Linux
 
 %post
+# schedule daemon(s)
 /sbin/chkconfig --add hsflowd
 if [ -x %{OpenVSwitchControl} ]; then /sbin/chkconfig --add sflowovsd; fi
-
 # need this logic just for Xenserver package. It preserves config
 # across Xenserver upgrades by copying the config to another directory
 # so that we get a chance to merge the old and new configs.
