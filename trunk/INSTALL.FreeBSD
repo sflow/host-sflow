@@ -1,0 +1,32 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+To compile and install, try this:
+
+root> make
+root> make install
+
+Edit /etc/hsflowd.conf for configuration.  The options are
+described in the comments there.
+
+To start the daemon, run:
+
+root> /etc/init.d/hsflowd start
+
+and check the syslog (e.g. /var/log/messages) for errors.
+
+To schedule this daemon to start automatically on a reboot, try:
+
+% make schedule
+
+To run in the debugger, change the Makefile to compile with -g,
+recompile, and then run with the "-d" command line option to
+prevent daemonization:
+
+% gdb hsflowd
+gdb> set args -d
+gdb> r
+
+
+
+
