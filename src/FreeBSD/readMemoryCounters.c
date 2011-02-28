@@ -55,7 +55,6 @@ int getSysvmtotal(struct vmtotal *vmt)
      if(getSys64("vm.stats.vm.v_page_size", &val64)) {
        gotData = YES;
        page_size = (uint32_t)val64; /* Convert to bytes */
-printf("Page size %d\n",page_size);
      }
 
      /* Mem_total */
