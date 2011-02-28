@@ -145,16 +145,6 @@ extern "C" {
   } HSPVMStore;
   
 
-  // userData structure to store state for VM data-sources
-  typedef struct _HSPVMState {
-    uint32_t network_count;
-    int32_t marked;
-    uint32_t vm_index;
-    uint32_t domId;
-    SFLAdaptorList *interfaces;
-    UTStringArray *volumes;
-  } HSPVMState;
-
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     char *deviceName;
