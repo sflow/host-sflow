@@ -9,43 +9,46 @@ extern "C" {
 #include "hsflowd.h"
 #include <sys/sysctl.h>
 
+void
+cpu_uuid_func(char *host_uuid, size_t *len)
+{
+   int mib[2]; 
+
+   mib[0] = CTL_KERN;
+   mib[1] = KERN_HOSTUUID;
+   sysctl(mib, 2, host_uuid, len, NULL, 0);
+}
   /*_________________---------------------------__________________
     _________________     readHidCounters       __________________
     -----------------___________________________------------------
   */
   
-  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) {
-	int gotData = NO;
-#if defined(FreeBSD)
+int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) 
+{
+    char host_uuid[40];
+    size_t uu_len = 40;
+    int gotData = NO;
  
-     size_t len = hbufLen;
-     if(sysctlbyname("kern.hostname", hbuf, &len, NULL, 0) != 0) {
-       myLog(LOG_ERR, "sysctl(<kern.hostname>) failed : %s", strerror(errno));
-     }
-     else {
-       gotData = YES;
-       hid->hostname.str = hbuf;
-       hid->hostname.len = strlen(hbuf);
-     }
-#else
-    FILE *procFile;
-    procFile= fopen("/proc/sys/kernel/hostname", "r");
-    if(procFile) {
-      if(fgets(hbuf, hbufLen, procFile)) {
-	gotData = YES;
-	int len = strlen(hbuf);
-	// fgets may include a newline
-	if(hbuf[len-1] == '\n') --len;
-	hid->hostname.str = hbuf;
-	hid->hostname.len = len;
-      }
-      fclose(procFile);
+    size_t len = hbufLen;
+    if(sysctlbyname("kern.hostname", hbuf, &len, NULL, 0) != 0) {
+      myLog(LOG_ERR, "sysctl(<kern.hostname>) failed : %s", strerror(errno));
     }
-#endif
-
+    else {
+      gotData = YES;
+      hid->hostname.str = hbuf;
+      hid->hostname.len = strlen(hbuf);
+    }
+    
     // UUID
-    memcpy(hid->uuid, sp->uuid, 16);
-
+    
+    if(sp->uuid[0] == 0) /* not specified in config file */
+      {
+	cpu_uuid_func(host_uuid, &uu_len);
+	parseUUID(host_uuid,(char *)hid->uuid);
+      }
+    else
+      memcpy(hid->uuid, sp->uuid, 16);
+    
     // machine_type
     hid->machine_type = SFLMT_unknown;
 #ifdef __i386__
@@ -86,8 +89,6 @@ extern "C" {
     hid->os_name = SFLOS_freebsd;
 
     // os release
-
-#if defined(FreeBSD)
     len = rbufLen;
  
      if(sysctlbyname("kern.osrelease", rbuf, &len, NULL, 0) != 0) {
@@ -98,22 +99,6 @@ extern "C" {
        hid->os_release.str = rbuf;
        hid->os_release.len = strlen(rbuf);
      }
-
-#else
-    procFile= fopen("/proc/sys/kernel/osrelease", "r");
-    if(procFile) {
-      if(fgets(rbuf, rbufLen, procFile)) {
-	gotData = YES;
-	int len = strlen(rbuf);
-	// fgets may include a newline
-	if(rbuf[len-1] == '\n') --len;
-	hid->os_release.str = rbuf;
-	hid->os_release.len = len;
-      }
-      fclose(procFile);
-    }
-#endif
-    
     return gotData;
   }
 

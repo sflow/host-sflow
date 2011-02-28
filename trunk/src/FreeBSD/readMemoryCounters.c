@@ -10,6 +10,7 @@ extern "C" {
 #include "hsflowd.h"
 #include <sys/sysctl.h>
 #include <sys/vmmeter.h>
+#include <vm/vm_param.h>
 
 int getSys64(char *field, uint64_t *val64p) {
      size_t len = sizeof(*val64p);
@@ -18,13 +19,25 @@ int getSys64(char *field, uint64_t *val64p) {
        return NO;
      }
      if(len == 4) {
-       uint32_t val32;
-       memcpy (&val32, val64p, 4);
-       *val64p = (uint64_t)val32;
+ 
+        uint32_t val32;
+        memcpy (&val32, val64p, 4);
+        *val64p = (uint64_t)val32;
      }
      return YES;
 }
- 
+
+int getSysvmtotal(struct vmtotal *vmt) 
+{
+	int mib[2];
+        size_t len;
+
+        mib[0] = CTL_VM;
+        mib[1] = VM_TOTAL;
+        len = sizeof(struct vmtotal);
+        sysctl(mib, 2, vmt, &len, NULL, 0);
+     	return YES;
+}
 
   /*_________________---------------------------__________________
     _________________     readMemoryCounters    __________________
@@ -33,80 +46,94 @@ int getSys64(char *field, uint64_t *val64p) {
   
   int readMemoryCounters(SFLHost_mem_counters *mem) {
     int gotData = NO;
-    size_t len;
-    struct vmtotal vmtotal;
 
-#if defined(FreeBSD)
     uint64_t val64;
+    struct vmtotal vmt;
+    uint32_t page_size=4096; /* start with a guess */
  
-/*
-     if(getSys64("hw.memsize", &val64)) {
-        gotData = YES;
-       mem->mem_total = val64;
-     }
-*/
-     len=sizeof(struct vmtotal);
-     if(sysctlbyname("vm.total", &vmtotal, &len, NULL, 0) != 0) {
-       mem->mem_cached = vmtotal.t_avmshr;
+     /* Get the page size */
+     if(getSys64("vm.stats.vm.v_page_size", &val64)) {
+       gotData = YES;
+       page_size = (uint32_t)val64; /* Convert to bytes */
+printf("Page size %d\n",page_size);
      }
 
+     /* Mem_total */
+     /* ... in MB to match what top shows */
      if(getSys64("hw.physmem", &val64)) {
        gotData = YES;
        mem->mem_total = val64;
      }
-     if(getSys64("hw.usermem", &val64)) {
+
+#if defined(OPTION1)
+     /* Mem_cached = cache+inactive ( cached pages + (next)inactive pages ) */
+     /* ... in MB */
+     if(getSys64("vm.stats.vm.v_cache_count", &val64)) {
        gotData = YES;
-       // $$$ mem->mem_total = val64;
+       mem->mem_cached = (val64 * page_size);
      }
-     // swap $$$
- /*   if(strcmp(var, "pgpgin") == 0) mem->page_in = (uint32_t)val64; */
- /*     else if(strcmp(var, "pgpgout") == 0) mem->page_out = (uint32_t)val64; */
- /*     else if(strcmp(var, "pswpin") == 0) mem->swap_in = (uint32_t)val64; */
- 
- /*     else if(strcmp(var, "pswpout") == 0) mem->swap_out = (uint32_t)val64; */
-     return gotData;
- 
+     /* Add to the mem_cached from above */
+     /* ... in MB */
+     if(getSys64("vm.stats.vm.v_inactive_count", &val64)) {
+       gotData = YES;
+       mem->mem_cached += (val64 * page_size); /* add the inactive mem */
+     }
 #else
-    FILE *procFile;
-    // limit the number of chars we will read from each line
-    // (there can be more than this - fgets will chop for us)
-#define MAX_PROC_LINE_CHARS 80
-    char line[MAX_PROC_LINE_CHARS];
-    char var[MAX_PROC_LINE_CHARS];
-    uint64_t val64;
-
-    procFile= fopen("/proc/meminfo", "r");
-    if(procFile) {
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	if(sscanf(line, "%s %"SCNu64"", var, &val64) == 2) {
-	  gotData = YES;
-	  if(strcmp(var, "MemTotal:") == 0) mem->mem_total = val64 * 1024;
-	  else if(strcmp(var, "MemFree:") == 0) mem->mem_free = val64 * 1024;
-	  else if(strcmp(var, "Buffers:") == 0) mem->mem_buffers = val64 * 1024;
-	  else if(strcmp(var, "Cached:") == 0) mem->mem_cached = val64 * 1024;
-	  else if(strcmp(var, "SwapTotal:") == 0) mem->swap_total = val64 * 1024;
-	  else if(strcmp(var, "SwapFree:") == 0) mem->swap_free = val64 * 1024;
-	}
-      }
-      fclose(procFile);
-    }
-
-    procFile= fopen("/proc/vmstat", "r");
-    if(procFile) {
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	if(sscanf(line, "%s %"SCNu64"", var, &val64) == 2) {
-	  gotData = YES;
-	  if(strcmp(var, "pgpgin") == 0) mem->page_in = (uint32_t)val64;
-	  else if(strcmp(var, "pgpgout") == 0) mem->page_out = (uint32_t)val64;
-	  else if(strcmp(var, "pswpin") == 0) mem->swap_in = (uint32_t)val64;
-	  else if(strcmp(var, "pswpout") == 0) mem->swap_out = (uint32_t)val64;
-	}
-      }
-      fclose(procFile);
-    }
-
-    return gotData;
+     /* Mem_cached */
+     if(getSysvmtotal(&vmt)) {
+       gotData = YES;
+       mem->mem_cached = ((vmt.t_rm - vmt.t_arm )* page_size);
+     }
 #endif
+     /* Mem_shared */
+     if(getSysvmtotal(&vmt)) {
+       gotData = YES;
+       mem->mem_shared = ((vmt.t_armshr )* page_size);
+     }
+
+     /* Page_in */
+     if(getSys64("vm.stats.vm.v_vnodein", &val64)) {
+       gotData = YES;
+       mem->page_in = val64;
+     }
+
+     /* Page_out */
+     if(getSys64("vm.stats.vm.v_vnodeout", &val64)) {
+       gotData = YES;
+       mem->page_out = val64;
+     }
+
+     /* Swap_total */
+     if(getSys64("vm.swap_total", &val64)) {
+       gotData = YES;
+       mem->swap_total = val64;
+     }
+
+     /* Swap_free */
+     if(getSys64("vm.stats.vm.v_swappgsout", &val64)) {
+       gotData = YES;
+       mem->swap_free = mem->swap_total - (val64 * page_size);
+     }
+
+     /* Swap_in */
+     if(getSys64("vm.stats.vm.v_swapin", &val64)) {
+       gotData = YES;
+       mem->swap_in = val64;
+     }
+
+     /* Swap_out */
+     if(getSys64("vm.stats.vm.v_swapout", &val64)) {
+       gotData = YES;
+       mem->swap_out = val64;
+     }
+
+     /* Mem_free .. in MB */
+     if(getSysvmtotal(&vmt)) {
+       gotData = YES;
+       mem->mem_free = vmt.t_free * page_size;
+     }
+
+     return gotData;
   }
 
 

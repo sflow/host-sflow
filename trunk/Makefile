@@ -1,37 +1,51 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
+# note - shell invocation with `` quotes is portable
+# between GNU and BSD make
+
 PROG=hsflowd
-SPEC=$(PROG).spec
-VERSION := $(shell sed -ne 's/^Version: *//p' $(SPEC))
-RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC))
 RPM_SOURCES_DIR=/usr/src/redhat/SOURCES
 MY_SOURCES_DIR=$(RPM_SOURCES_DIR)/$(PROG)-$(VERSION)
 
-PLATFORM=$(shell uname)
+all: $(PROG) 
 
-all: $(PROG)
-
-hsflowd:
+$(PROG):
 	cd src/sflow; $(MAKE)
-	cd src/$(PLATFORM); $(MAKE) VERSION=$(VERSION)
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+        cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL
 
 clean:
 	cd src/sflow; $(MAKE) clean
-	cd src/$(PLATFORM); $(MAKE) clean
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+        cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL clean
 
 install:
-	cd src/$(PLATFORM); $(MAKE) install
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+        cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL install
 
 schedule:
-	cd src/$(PLATFORM); $(MAKE) schedule
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+        cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL schedule
 
 rpm:
+	VERSION=`./getVersion`
 	rm -rf $(MY_SOURCES_DIR)
 	cp -r . $(MY_SOURCES_DIR)
-	tar cz -C $(RPM_SOURCES_DIR) -f $(MY_SOURCES_DIR).tar.gz $(PROG)-$(VERSION)
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+	tar cz -C $(RPM_SOURCES_DIR) -f $(MY_SOURCES_DIR).tar.gz $(PROG)-$$VERSION
 	rpmbuild -ba $(PROG).spec
 
 xenserver: rpm
-	cd xenserver-ddk; make
+	cd xenserver-ddk; $(MAKE)
 

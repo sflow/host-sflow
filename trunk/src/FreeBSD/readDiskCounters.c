@@ -8,169 +8,337 @@ extern "C" {
 
 #include "hsflowd.h"
 
-#include <search.h> // for tfind,tsearch,tsdestroy
+#include <sys/mount.h>
 #include <sys/statvfs.h> // for statvfs
+#include <paths.h>
+#include <devstat.h>
+#include <limits.h>
+#include <kvm.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
 
-/* It looks like we could read this from "fdisk -l",  so the source
-   code to fdisk should probably be consulted to find where it can
-   be read off */
-#define ASSUMED_DISK_SECTOR_BYTES 512
-typedef int (* comparison_fn_t)(const void *, const void *);
+
+/*
+ * A big thanks to Ganglia for all of the libmetrics code !!! 
+ */
+
+#define MAXNAMELEN 256
  
-static void 
-tdestroy_action(void *node, VISIT order, int level) 
+/*_________________---------------------------__________________
+  _________________     check vfs name        __________________
+  -----------------___________________________------------------
+*/
+#define VFCF_NONLOCAL   (VFCF_NETWORK|VFCF_SYNTHETIC|VFCF_LOOPBACK)
+static int        skipvfs = 1;
+
+static int
+checkvfsname(vfsname, vfslist)
+        const char *vfsname;
+        const char **vfslist;
 {
-    switch(order) {
-       case preorder:
-       case postorder:
-          break;
-       case endorder:
-       case leaf:
-          free(node);
-     }
-}
-   
-static void 
-tdestroy(void *root, void (*ignore)(void *node)) 
-{ 
-	twalk((void *)root, (void *)tdestroy_action); 
+
+        if (vfslist == NULL)
+                return (0);
+        while (*vfslist != NULL) {
+                if (strcmp(vfsname, *vfslist) == 0)
+                        return (skipvfs);
+                ++vfslist;
+        }
+        return (!skipvfs);
 }
 
-
-  /*_________________---------------------------__________________
-    _________________     remote_mount          __________________
-    -----------------___________________________------------------
-    from Ganglia/linux/metrics.c
-  */
-
-int remote_mount(const char *device, const char *type)
+/*_________________---------------------------__________________
+  _________________     regetmntinfo          __________________
+  -----------------___________________________------------------
+*/
+static size_t
+regetmntinfo(struct statfs **mntbufp, long mntsize, const char **vfslist)
 {
-  return ((strchr(device,':') != 0)
-	  || (!strcmp(type, "smbfs") && device[0]=='/' && device[1]=='/')
-	  || (!strncmp(type, "nfs", 3)) || (!strcmp(type, "autofs"))
-	  || (!strcmp(type,"gfs")) || (!strcmp(type,"none")) );
+        int i, j;
+        struct statfs *mntbuf;
+
+        if (vfslist == NULL)
+                return (getmntinfo(mntbufp, MNT_WAIT));
+
+        mntbuf = *mntbufp;
+        for (j = 0, i = 0; i < mntsize; i++) {
+                if (checkvfsname(mntbuf[i].f_fstypename, vfslist))
+                        continue;
+                (void)statfs(mntbuf[i].f_mntonname,&mntbuf[j]);
+                j++;
+        }
+        return (j);
 }
 
-  /*_________________---------------------------__________________
-    _________________     readDiskCounters      __________________
-    -----------------___________________________------------------
-  */
+/*_________________---------------------------__________________
+  _________________     makenetvfslist        __________________
+  -----------------___________________________------------------
+*/
+static char *
+makenetvfslist(void)
+{
+        char *str = NULL, *strptr, **listptr = NULL;
+        size_t slen;
+        int cnt = 0;
+	int i;
+
+#if __FreeBSD_version > 500000
+        struct xvfsconf *xvfsp, *keep_xvfsp = NULL;
+        size_t buflen;
+        int maxvfsconf;
+
+        if (sysctlbyname("vfs.conflist", NULL, &buflen, NULL, 0) < 0) {
+                printf("sysctl(vfs.conflist)");
+                goto done;
+        }
+        keep_xvfsp = xvfsp = malloc(buflen);
+        if (xvfsp == NULL) {
+                printf("malloc failed");
+                goto done;
+        }
+        if (sysctlbyname("vfs.conflist", xvfsp, &buflen, NULL, 0) < 0) {
+                printf("sysctl(vfs.conflist)");
+                goto done;
+        }
+        maxvfsconf = buflen / sizeof(struct xvfsconf);
+
+        if ((listptr = malloc(sizeof(char*) * maxvfsconf)) == NULL) {
+                printf("malloc failed");
+                goto done;
+        }
+
+        cnt = 0;
+        for (i = 0; i < maxvfsconf; i++, xvfsp++) {
+                if (xvfsp->vfc_typenum == 0)
+                        continue;
+                if (xvfsp->vfc_flags & VFCF_NONLOCAL)
+                        continue;
+
+                listptr[cnt] = strdup(xvfsp->vfc_name);
+                if (listptr[cnt] == NULL) {
+                        printf("malloc failed");
+                        goto done;
+                }
+                cnt++;
+        }
+#else
+        int mib[3], maxvfsconf;
+        size_t miblen;
+        struct ovfsconf *ptr;
+
+        mib[0] = CTL_VFS; mib[1] = VFS_GENERIC; mib[2] = VFS_MAXTYPENUM;
+        miblen=sizeof(maxvfsconf);
+        if (sysctl(mib, (unsigned int)(sizeof(mib) / sizeof(mib[0])),
+            &maxvfsconf, &miblen, NULL, 0)) {
+                printf("sysctl failed");
+                goto done;
+        }
+
+        if ((listptr = malloc(sizeof(char*) * maxvfsconf)) == NULL) {
+                printf("malloc failed");
+                goto done;
+        }
+
+        cnt = 0;
+        while ((ptr = getvfsent()) != NULL && cnt < maxvfsconf) {
+                if (ptr->vfc_flags & VFCF_NONLOCAL)
+                        continue;
+
+                listptr[cnt] = strdup(ptr->vfc_name);
+                if (listptr[cnt] == NULL) {
+                        printf("malloc failed");
+                        goto done;
+                }
+                cnt++;
+        }
+#endif
+
+        if (cnt == 0)
+                goto done;
+        /*
+         * Count up the string lengths, we need a extra byte to hold
+         * the between entries ',' or the NUL at the end.
+         */
+        slen = 0;
+        for (i = 0; i < cnt; i++)
+                slen += strlen(listptr[i]);
+        /* for ',' */
+        slen += cnt - 1;
+        /* Add 3 for initial "no" and the NUL. */
+        slen += 3;
+
+        if ((str = malloc(slen)) == NULL) {
+                printf("malloc failed");
+                goto done;
+        }
+
+        str[0] = 'n';
+        str[1] = 'o';
+        for (i = 0, strptr = str + 2; i < cnt; i++) {
+                if (i > 0)
+                    *strptr++ = ',';
+                strcpy(strptr, listptr[i]);
+                strptr += strlen(listptr[i]);
+        }
+        *strptr = '\0';
+
+done:
+#if __FreeBSD_version > 500000
+        if (keep_xvfsp != NULL)
+                free(keep_xvfsp);
+#endif
+        if (listptr != NULL) {
+                for(i = 0; i < cnt && listptr[i] != NULL; i++)
+                        free(listptr[i]);
+                free(listptr);
+        }
+        return (str);
+
+}
+
+/*_________________---------------------------__________________
+  _________________     makevfslist           __________________
+  -----------------___________________________------------------
+*/
+static const char **
+makevfslist(fslist)
+        char *fslist;
+{
+        const char **av;
+        int i;
+        char *nextcp;
+
+        if (fslist == NULL)
+                return (NULL);
+        if (fslist[0] == 'n' && fslist[1] == 'o') {
+                fslist += 2;
+                skipvfs = 0;
+        }
+        for (i = 0, nextcp = fslist; *nextcp; nextcp++)
+                if (*nextcp == ',')
+                        i++;
+        if ((av = malloc((size_t)(i + 2) * sizeof(char *))) == NULL) {
+                printf("malloc failed");
+                return (NULL);
+        }
+        nextcp = fslist;
+        i = 0;
+        av[i++] = nextcp;
+        while ((nextcp = strchr(nextcp, ',')) != NULL) {
+                *nextcp++ = '\0';
+                av[i++] = nextcp;
+        }
+        av[i++] = NULL;
+        return (av);
+}
+
+
+/*_________________---------------------------__________________
+  _________________     find_disk_space       __________________
+  -----------------___________________________------------------
+*/
+static float
+find_disk_space(double *total, double *tot_avail)
+{
+        struct statfs *mntbuf;
+        const char *fstype;
+        const char **vfslist;
+        char *netvfslist;
+        size_t i, mntsize;
+        size_t used, availblks;
+        const double reported_units = 1e9;
+        double toru;
+        float pct;
+        float most_full = 0.0;
+
+        *total = 0.0;
+        *tot_avail = 0.0;
+
+        fstype = "ufs";
+
+        netvfslist = makenetvfslist();
+        vfslist = makevfslist(netvfslist);
+        mntsize = getmntinfo(&mntbuf, MNT_NOWAIT);
+        mntsize = regetmntinfo(&mntbuf, mntsize, vfslist);
+        for (i = 0; i < mntsize; i++) {
+                if ((mntbuf[i].f_flags & MNT_IGNORE) == 0) {
+                        used = mntbuf[i].f_blocks - mntbuf[i].f_bfree;
+                        availblks = mntbuf[i].f_bavail + used;
+                        pct = (availblks == 0 ? 100.0 :
+                            (double)used / (double)availblks * 100.0);
+                        if (pct > most_full)
+                                most_full = pct;
+
+                        toru = reported_units/mntbuf[i].f_bsize;
+                        *total += mntbuf[i].f_blocks / toru;
+                        *tot_avail += mntbuf[i].f_bavail / toru;
+                }
+        }
+        free(vfslist);
+        free(netvfslist);
+
+        return most_full;
+}
+
+/*_________________---------------------------__________________
+  _________________     readDiskCounters      __________________
+  -----------------___________________________------------------
+*/
   
-  int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk) {
-    int gotData = NO;
-    FILE *procFile;
-    procFile= fopen("/proc/diskstats", "r");
-    if(procFile) {
-      // ASCII numbers in /proc/diskstats may be 64-bit (if not now
-      // then someday), so it seems safer to read into
-      // 64-bit ints with scanf first,  then copy them
-      // into the host_dsk structure from there.
-      uint32_t majorNo;
-      uint32_t minorNo;
-      
-      uint64_t reads = 0;
-      /* uint64_t reads_merged = 0;*/
-      uint64_t sectors_read = 0;
-      uint64_t read_time_ms = 0;
-      uint64_t writes = 0;
-      /* uint64_t writes_merged = 0;*/
-      uint64_t sectors_written = 0;
-      uint64_t write_time_ms = 0;
+int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk) 
+{
+	int gotData = NO;
+        struct statinfo stats;
+        struct devinfo  dinfo;
+        char    dev_name[MAXNAMELEN];
+	kvm_t           *kd = NULL;
+	int 	i, found;
+        struct devstat  dev;
+	double total_space, total_free;
 
-      // handle 64-bit counters specially
-      uint64_t total_sectors_read = 0;
-      uint64_t total_sectors_written = 0;
+        memset(&stats, 0, sizeof(stats));
+        memset(&dinfo, 0, sizeof(dinfo));
+	/* Clear out any old stats */
+      	dsk->bytes_read = 0;
+      	dsk->bytes_written  = 0;
+	dsk->reads = 0;
+	dsk->writes = 0;
+	dsk->read_time = 0;
+	dsk->write_time = 0;
 
-      // limit the number of chars we will read from each line
-      // (there can be more than this - fgets will chop for us)
-#define MAX_PROC_LINE_CHARS 240
-      char line[MAX_PROC_LINE_CHARS];
-      char devName[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	if(sscanf(line, "%"SCNu32" %"SCNu32" %s %"SCNu64" %*u %"SCNu64" %"SCNu64" %"SCNu64" %*u %"SCNu64" %"SCNu64"",
-		  &majorNo,
-		  &minorNo,
-		  devName,
-		  &reads,
-		  /*&reads_merged,*/
-		  &sectors_read,
-		  &read_time_ms,
-		  &writes,
-		  /*&writes_merged,*/
-		  &sectors_written,
-		  &write_time_ms) == 9) {
-	  gotData = YES;
-	  // report the sum over all disks
-	  dsk->reads += reads;
-	  total_sectors_read += sectors_read;
-	  dsk->read_time += read_time_ms;
-	  dsk->writes += writes;
-	  total_sectors_written += sectors_written;
-	  dsk->write_time += write_time_ms;
+        stats.dinfo = &dinfo;
+        if (devstat_getdevs(kd, &stats) == -1)
+		goto next;
+        for(found = 0, i = 0; i < (stats.dinfo)->numdevs; i++) {
+       	     dev = (stats.dinfo)->devices[i];
+             snprintf(dev_name, MAXNAMELEN-1, "%s%d",dev.device_name, 
+		dev.unit_number);
+
+      	     dsk->bytes_read += dev.bytes[DEVSTAT_READ];
+      	     dsk->bytes_written += dev.bytes[DEVSTAT_WRITE];
+	     dsk->reads += dev.operations[DEVSTAT_READ];
+	     dsk->writes += dev.operations[DEVSTAT_WRITE];
+	     dsk->read_time += dev.duration[DEVSTAT_READ].sec;
+	     dsk->write_time += dev.duration[DEVSTAT_WRITE].sec;
+
 	}
-      }
-      fclose(procFile);
-      
-      // accumulate the 64-bit counters (they may only be 32-bit counters in this OS)
-      sp->diskIO.bytes_read += (total_sectors_read - sp->diskIO.last_sectors_read) * ASSUMED_DISK_SECTOR_BYTES;
-      sp->diskIO.last_sectors_read = total_sectors_read;
-      sp->diskIO.bytes_written += (total_sectors_written - sp->diskIO.last_sectors_written) * ASSUMED_DISK_SECTOR_BYTES;
-      sp->diskIO.last_sectors_written = total_sectors_written;
-      // and copy the accumulated total into the output
-      dsk->bytes_read = sp->diskIO.bytes_read;
-      dsk->bytes_written = sp->diskIO.bytes_written;
-    }
+	free((stats.dinfo)->mem_ptr);
 
-    // borrowed heavily from ganglia/linux/metrics.c for this part where
-    // we read the mount points and then interrogate them to add up the
-    // disk space on local disks.
-    procFile = fopen("/proc/mounts", "r");
-    if(procFile) {
-#undef MAX_PROC_LINE_CHARS
-#define MAX_PROC_LINE_CHARS 240
-      char line[MAX_PROC_LINE_CHARS];
-      char device[MAX_PROC_LINE_CHARS];
-      char mount[MAX_PROC_LINE_CHARS];
-      char type[MAX_PROC_LINE_CHARS];
-      char mode[MAX_PROC_LINE_CHARS];
-      void *treeRoot = NULL;
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	if(sscanf(line, "%s %s %s %s", device, mount, type, mode) == 4) {
-	  // must start with /dev/ or /dev2/
-	  if(strncmp(device, "/dev/", 5) == 0 ||
-	     strncmp(device, "/dev2/", 6) == 0) {
-	    // must be read-write
-	    if(strncmp(mode, "ro", 2) != 0) {
-	      // must be local
-	      if(!remote_mount(device, type)) {
-		// don't count it again if it was seen before
-		if(tfind(device, &treeRoot, (comparison_fn_t)strcmp) == NULL) {
-		  // not found, so remember it
-		  tsearch(strdup(device), &treeRoot, (comparison_fn_t)strcmp);
-		  // and get the numbers
-		  struct statvfs svfs;
-		  if(statvfs(mount, &svfs) == 0) {
-		    if(svfs.f_blocks) {
-		      uint64_t dtot64 = (uint64_t)svfs.f_blocks * (uint64_t)svfs.f_bsize;
-		      uint64_t dfree64 = (uint64_t)svfs.f_bavail * (uint64_t)svfs.f_bsize;
-		      dsk->disk_total += dtot64;
-		      dsk->disk_free += dfree64;
-		      // percent used (as % * 100)
-		      uint32_t pc = (uint32_t)(((dtot64 - dfree64) * 10000) / dtot64);
-		      if(pc > dsk->part_max_used) dsk->part_max_used = pc;
-		    }
-		  }
-		}
-	      }
-	    }
-	  }
-	}
-      }
-      tdestroy(treeRoot, free);
-      fclose(procFile);
-    }
+	/* Now find the disk space total and free */
+	find_disk_space(&total_space, &total_free);
+	dsk->disk_total = total_space * 1000000000; /* From GB to B */
+	dsk->disk_free = total_free * 1000000000;   /* From GB to B */
+	// percent used (as % * 100)
+	uint32_t pc = (uint32_t)(((total_space - total_free) * 100.0) 
+			/ total_space);
+	if(pc > dsk->part_max_used) 
+		dsk->part_max_used = pc;
+
+	gotData = YES;
+
+next:	
     
-    return gotData;
+    	return gotData;
   }
 
 

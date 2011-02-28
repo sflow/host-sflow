@@ -10,11 +10,51 @@ extern "C" {
 
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
+#include <net/if_dl.h>
 #include <net/if.h>
 #include <ifaddrs.h>
 
 extern int debug;
     
+int 
+find_mac(char *name, u_char *dest)
+{
+	int			mib[6];
+	size_t			len;
+	char			*buf;
+	unsigned char		*ptr;
+	struct if_msghdr	*ifm;
+	struct sockaddr_dl	*sdl;
+
+
+	mib[0] = CTL_NET;
+	mib[1] = AF_ROUTE;
+	mib[2] = 0;
+	mib[3] = AF_LINK;
+	mib[4] = NET_RT_IFLIST;
+	if ((mib[5] = if_nametoindex(name)) == 0) {
+		return(1);
+	}
+
+	if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
+		return(1);
+	}
+
+	if ((buf = malloc(len)) == NULL) {
+		return(1);
+	}
+
+	if (sysctl(mib, 6, buf, &len, NULL, 0) < 0) {
+		return(1);
+	}
+
+	ifm = (struct if_msghdr *)buf;
+	sdl = (struct sockaddr_dl *)(ifm + 1);
+	ptr = (unsigned char *)LLADDR(sdl);
+	memcpy(dest,ptr,6);
+	return(0);
+}
 /*________________---------------------------__________________
   ________________    updateAdaptorNIO       __________________
   ----------------___________________________------------------
@@ -78,6 +118,7 @@ int readInterfaces(HSP *sp)
 {
 
 	char *a;
+	u_char dest_mac[6];
 	struct sockaddr_in *foo;
   if(sp->adaptorList == NULL) sp->adaptorList = adaptorListNew();
   else adaptorListReset(sp->adaptorList);
@@ -116,8 +157,13 @@ struct ifaddrs *ifap;
 
 	/***** THE NEW WAY ******/
 
+	find_mac(devName,&dest_mac[0]);
+	SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, 
+	  (u_char *)&dest_mac); 
+/*
 	SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, 
 	  (u_char *)&(ifp->ifa_addr->sa_data)); 
+*/
 	adaptor->promiscuous = promisc;
 
         address_family = ifp->ifa_addr->sa_family;
