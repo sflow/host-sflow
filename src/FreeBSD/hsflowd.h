@@ -17,9 +17,7 @@ extern "C" {
 #include <time.h>
 #include <errno.h>
 #include <netdb.h>
-#if defined(FreeBSD)
 #include <netinet/in.h>
-#endif
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <syslog.h>
@@ -35,35 +33,8 @@ extern "C" {
 #include "grp.h"
 #include "sys/resource.h" // for setrlimit()
 
-#if !defined(FreeBSD)
-// for signal backtrace
-#include <execinfo.h>
-#include <signal.h>
-#include <ucontext.h>
-#endif
-
 #include "util.h"
 #include "sflow_api.h"
-
-#ifdef HSF_XEN
-#include "xs.h"
-#include "xenctrl.h"
-#include "dirent.h"
-#endif
-
-#ifdef HSF_VRT
-#include "libvirt.h"
-#include "libxml/xmlreader.h"
-#endif
-
-#ifdef HSF_ULOG
-#include <linux/types.h>
-#include <linux/netlink.h>
-#include <net/if.h>
-#include <linux/netfilter_ipv4/ipt_ULOG.h>
-#define HSP_MAX_MSG_BYTES 10000
-#define HSP_READPACKET_BATCH 100
-#endif
 
 
 #define ADD_TO_LIST(linkedlist, obj) \
@@ -241,14 +212,6 @@ extern "C" {
     // UDP send sockets
     int socket4;
     int socket6;
-#ifdef HSF_XEN
-    int xc_handle; // libxc
-    struct xs_handle *xs_handle; // xenstore
-    uint32_t page_size;
-#endif
-#ifdef HSF_VRT
-    virConnectPtr virConn;
-#endif
     uint32_t num_domains;
     // persistent state
     uint32_t maxDsIndex;
@@ -267,12 +230,6 @@ extern "C" {
     uint32_t DNSSD_startDelay;
     uint32_t DNSSD_retryDelay;
     uint32_t DNSSD_ttl;
-#ifdef HSF_ULOG
-    // ULOG packet-sampling
-    int ulog_soc;
-    struct sockaddr_nl ulog_bind;
-    struct sockaddr_nl ulog_peer;
-#endif
   } HSP;
 
   // expose some config parser fns

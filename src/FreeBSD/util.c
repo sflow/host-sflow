@@ -37,9 +37,6 @@ extern "C" {
     void *mem = calloc(1, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
-#if !defined(FreeBSD)
-      if(debug) malloc_stats();
-#endif
       exit(EXIT_FAILURE);
     }
     return mem;
@@ -50,9 +47,6 @@ extern "C" {
     void *mem = realloc(ptr, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
-#if !defined(FreeBSD)
-      if(debug) malloc_stats();
-#endif
       exit(EXIT_FAILURE);
     }
     return mem;
@@ -94,127 +88,6 @@ extern "C" {
     
     return str;
   }
-    
-  /*_________________---------------------------__________________
-    _________________     string array          __________________
-    -----------------___________________________------------------
-  */
-
-  UTStringArray *strArrayNew() {
-    return (UTStringArray *)my_calloc(sizeof(UTStringArray));
-  }
-
-   void strArrayAdd(UTStringArray *ar, char *str) {
-    ar->sorted = NO;
-    if(ar->capacity <= ar->n) {
-      uint32_t oldBytes = ar->capacity * sizeof(char *);
-      ar->capacity = ar->n + 16;
-      uint32_t newBytes = ar->capacity * sizeof(char *);
-      char **newArray = (char **)my_calloc(newBytes);
-      if(ar->strs) {
-	memcpy(newArray, ar->strs, oldBytes);
-	my_free(ar->strs);
-      }
-      ar->strs = newArray;
-    }
-    if(ar->strs[ar->n]) my_free(ar->strs[ar->n]);
-    ar->strs[ar->n++] = str ? strdup(str) : NULL;
-  }
-
-   void strArrayReset(UTStringArray *ar) {
-    ar->sorted = NO;
-    for(uint32_t i = 0; i < ar->n; i++) {
-      if(ar->strs[i]) {
-	my_free(ar->strs[i]);
-	ar->strs[i] = NULL;
-      }
-    }
-    ar->n = 0;
-  }
-
-   void strArrayFree(UTStringArray *ar) {
-    strArrayReset(ar);
-    if(ar->strs) my_free(ar->strs);
-    my_free(ar);
-  }
-
-   char **strArray(UTStringArray *ar) {
-    return ar->strs;
-  }
-
-   uint32_t strArrayN(UTStringArray *ar) {
-    return ar->n;
-  }
-
-   char *strArrayAt(UTStringArray *ar, int i) {
-    return ar->strs[i];
-  }
-
-  static int mysortcmp(const void *p1, const void* p2) {
-    char *s1 = *(char **)p1;
-    char *s2 = *(char **)p2;
-    if(s1 == s2) return 0;
-    if(s1 == NULL) return -1;
-    if(s2 == NULL) return 1;
-    return strcmp(s1, s2);
-  }
-
-   void strArraySort(UTStringArray *ar) {
-    qsort(ar->strs, ar->n, sizeof(char *), mysortcmp);
-    ar->sorted = YES;
-  }
-
-#if defined(FreeBSD) && !defined(open_memstream)
-FILE * open_memstream(char **, size_t *);
-#endif
-
-   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end) {
-    size_t strbufLen = 256;
-    char *strbuf = NULL;
-    FILE *f_strbuf;
-    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
-      myLog(LOG_ERR, "error in open_memstream: %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if(start) fputs(start, f_strbuf);
-    for(uint32_t i = 0; i < ar->n; i++) {
-      if(i && delim) fputs(delim, f_strbuf);
-      char *str = ar->strs[i];
-      if(str) {
-	if(quote) fputs(quote, f_strbuf);
-	fputs(str, f_strbuf);
-	if(quote) fputs(quote, f_strbuf);
-      }
-    }
-    if(end) fputs(end, f_strbuf);
-    fclose(f_strbuf);
-    return strbuf;
-  }
-
-   int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2) {
-    if(ar1->n != ar2->n) return NO;
-    for(int i = 0; i < ar1->n; i++) {
-      char *s1 = ar1->strs[i];
-      char *s2 = ar2->strs[i];
-      if((s1 != s2)
-	 && (s1 == NULL || s2 == NULL || strcmp(s1, s2))) return NO;
-    }
-    return YES;
-  }
-    
-  int strArrayIndexOf(UTStringArray *ar, char *str) {
-    //if(ar->sorted) {
-    //  char **ptr = (char **)bsearch(&str, ar->strs, ar->n, sizeof(char *), mysortcmp);
-    //  return ptr ? (ptr - ar->strs) : 0;
-    //}
-    //else
-    for(int i = 0; i < ar->n; i++) {
-      char *instr = ar->strs[i];
-      if(str == instr) return i;
-      if(str && instr && !strcmp(str, instr)) return i;
-    }
-    return -1;
-  } 
 
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________
@@ -232,9 +105,6 @@ FILE * open_memstream(char **, size_t *);
       if(debug) myLog(LOG_INFO, "getaddrinfo() failed: %s", gai_strerror(err));
       switch(err) {
       case EAI_NONAME: break;
-#if !defined(FreeBSD)
-      case EAI_NODATA: break;
-#endif
       case EAI_AGAIN: break; // loop and try again?
       default: myLog(LOG_ERR, "getaddrinfo() error: %s", gai_strerror(err)); break;
       }
@@ -431,63 +301,6 @@ FILE * open_memstream(char **, size_t *);
       exit(EXIT_FAILURE);
     }
   }
-      
-  /*_________________---------------------------__________________
-    _________________     myExec                __________________
-    -----------------___________________________------------------
-
-    like popen(), but more secure coz the shell doesn't get
-    to "reimagine" the args.
-  */
-
-  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen)
-  {
-    int ans = YES;
-    int pfd[2];
-    pid_t cpid;
-    if(pipe(pfd) == -1) {
-      myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if((cpid = fork()) == -1) {
-      myLog(LOG_ERR, "fork() failed : %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if(cpid == 0) {
-      // in child
-      close(pfd[0]);   // close read-end
-      dup2(pfd[1], 1); // stdout -> write-end
-      dup2(pfd[1], 2); // stderr -> write-end
-      close(pfd[1]);
-      // exec program
-      char *env[] = { NULL };
-      if(execve(cmd[0], cmd, env) == -1) {
-	myLog(LOG_ERR, "execve() failed : errno=%d (%s)", errno, strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-    }
-    else {
-      // in parent
-      close(pfd[1]); // close write-end
-      // read from read-end
-      FILE *ovs;
-      if((ovs = fdopen(pfd[0], "r")) == NULL) {
-	myLog(LOG_ERR, "fdopen() failed : %s", strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      while(fgets(line, lineLen, ovs)) {
-	if(debug > 1) myLog(LOG_INFO, "myExec input> <%s>", line);
-	if((*lineCB)(magic, line) == NO) {
-	  ans = NO;
-	  break;
-	}
-      }
-      fclose(ovs);
-      wait(NULL); // block here until child is done
-    }
-    return ans;
-  }
-
     
   /*________________---------------------------__________________
     ________________      adaptorList          __________________
