@@ -16,20 +16,14 @@ extern "C" {
 #include <string.h>
 #include <errno.h>
 #include <netdb.h>
-#if defined(FreeBSD)
 #include <netinet/in.h>
-#endif
 #include <sys/socket.h>
 #include <syslog.h>
 
 #include <sys/types.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h> // for PRIu64 etc.
-#if defined(FreeBSD)
 #include <stdlib.h>
-#else
-#include "malloc.h" // for malloc_stats()
-#endif
 
 #include <sys/wait.h>
 #include <ctype.h> // for isspace() etc.
@@ -82,36 +76,9 @@ extern "C" {
   char *trimWhitespace(char *str);
   void setStr(char **fieldp, char *str);
 
-  // string array
-  typedef struct _UTStringArray {
-    char **strs;
-    uint32_t n;
-    uint32_t capacity;
-    int8_t sorted;
-  } UTStringArray;
-
-  UTStringArray *strArrayNew();
-  void strArrayAdd(UTStringArray *ar, char *str);
-  void strArrayReset(UTStringArray *ar);
-  void strArrayFree(UTStringArray *ar);
-  char **strArray(UTStringArray *ar);
-  uint32_t strArrayN(UTStringArray *ar);
-  char *strArrayAt(UTStringArray *ar, int i);
-  void strArraySort(UTStringArray *ar);
-  char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end);
-  int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
-  int strArrayIndexOf(UTStringArray *ar, char *str);
-
-  // string utils
-  char *trimWhitespace(char *str);
-
   // sleep
   void my_usleep(uint32_t microseconds);
   void my_usleep_fd(uint32_t microseconds, int fd);
-
-  // calling execve()
-  typedef int (*UTExecCB)(void *magic, char *line);
-  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen);
 
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew();
