@@ -153,6 +153,9 @@ extern "C" {
     size_t len;
     double load[3];
     long cp_time[CPUSTATES];
+    uint32_t stathz = sysconf(_SC_CLK_TCK);
+    
+#define STATHZ_TO_MS(t) (((t) * 1000) / stathz)
 
     getloadavg(load, 3);
     cpu->load_one = (float)load[0];
@@ -171,16 +174,17 @@ extern "C" {
       // len should be 20. is it really an array of long, though?
       // might want to just read up to 40 bytes and then see what we get.
       // myLog(LOG_INFO, "kerm.cp_time len=%u", len);
-      cpu->cpu_user = (uint32_t)cp_time[CP_USER];
-      cpu->cpu_nice = (uint32_t)cp_time[CP_NICE];
-      cpu->cpu_system = (uint32_t)cp_time[CP_SYS];
-      cpu->cpu_idle = (uint32_t)cp_time[CP_IDLE];
-      cpu->cpu_intr = (uint32_t)cp_time[CP_INTR];
+      cpu->cpu_user = STATHZ_TO_MS(cp_time[CP_USER]);
+      cpu->cpu_nice = STATHZ_TO_MS(cp_time[CP_NICE]);
+      cpu->cpu_system = STATHZ_TO_MS(cp_time[CP_SYS]);
+      cpu->cpu_idle = STATHZ_TO_MS(cp_time[CP_IDLE]);
+      cpu->cpu_intr = STATHZ_TO_MS(cp_time[CP_INTR]);
     }
 
-    cpu ->cpu_wio = (uint32_t)-1; // $$$
+    cpu->cpu_wio = (uint32_t)-1; // unsupported
+    // note "vm.stats.sys.v_soft" gives us the number of soft interrupts, not the time spent
+    cpu->cpu_sintr = (uint32_t)-1; // unsupported
 
-    if(getSys64("vm.stats.sys.v_soft", &val64)) cpu->cpu_sintr = (uint32_t)val64;
     if(getSys64("vm.stats.sys.v_intr", &val64)) cpu->interrupts = (uint32_t)val64;
     if(getSys64("vm.stats.sys.v_swtch", &val64)) cpu->contexts = (uint32_t)val64;
 
