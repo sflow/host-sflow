@@ -8,8 +8,44 @@ extern "C" {
 #endif
 
 #include "util.h"
+#include <sys/sysctl.h>
+
 
   int debug = 0;
+
+    
+  /*________________---------------------------__________________
+    ________________      getSys64             __________________
+    ----------------___________________________------------------
+  */
+
+  int getSys64(char *field, uint64_t *val64p) {
+    size_t len = sizeof(*val64p);
+    if(sysctlbyname(field, val64p, &len, NULL, 0) != 0) {
+      myLog(LOG_ERR, "sysctl(%s) failed : %s", field, strerror(errno));
+      return NO;
+    }
+    if(len == 4) {
+      uint32_t val32;
+      memcpy (&val32, val64p, 4);
+      *val64p = (uint64_t)val32;
+    }
+    return YES;
+  }
+    
+  /*________________---------------------------__________________
+    ________________      getSys32             __________________
+    ----------------___________________________------------------
+  */
+
+  int getSys32(char *field, uint32_t *val32p) {
+    size_t len = sizeof(*val32p);
+    if(sysctlbyname(field, val32p, &len, NULL, 0) != 0) {
+      myLog(LOG_ERR, "sysctl(%s) failed : %s", field, strerror(errno));
+      return NO;
+    }
+    return YES;
+  }
 
   /*_________________---------------------------__________________
     _________________        logging            __________________

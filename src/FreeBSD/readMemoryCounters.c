@@ -12,21 +12,6 @@ extern "C" {
 #include <sys/vmmeter.h>
 #include <vm/vm_param.h>
 
-int getSys64(char *field, uint64_t *val64p) {
-     size_t len = sizeof(*val64p);
-     if(sysctlbyname(field, val64p, &len, NULL, 0) != 0) {
-       myLog(LOG_ERR, "sysctl(%s) failed : %s", field, strerror(errno));
-       return NO;
-     }
-     if(len == 4) {
- 
-        uint32_t val32;
-        memcpy (&val32, val64p, 4);
-        *val64p = (uint64_t)val32;
-     }
-     return YES;
-}
-
 int getSysvmtotal(struct vmtotal *vmt) 
 {
 	int mib[2];
