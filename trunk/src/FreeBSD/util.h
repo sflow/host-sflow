@@ -34,6 +34,10 @@ extern "C" {
 
 #include "sflow.h" // for SFLAddress, SFLAdaptorList...
 
+  // sysctl
+  int getSys64(char *field, uint64_t *val64p);
+  int getSys32(char *field, uint32_t *val32p);
+
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
