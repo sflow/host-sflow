@@ -17,6 +17,7 @@ extern "C" {
     _________________   getRunningProcesses     __________________
     -----------------___________________________------------------
     or is this running_threads? $$$
+    from Ganglia libmetrics.
   */
 
   static  uint32_t  getRunningProcesses( void )
@@ -69,6 +70,7 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________   getTotalProcesses       __________________
     -----------------___________________________------------------
+    from Ganglia libmetrics.
   */
   
   static uint32_t  getTotalProcesses( void )
@@ -86,6 +88,7 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________   getCpuSpeed             __________________
     -----------------___________________________------------------
+    from Ganglia libmetrics.
   */
 
   static uint32_t  getCpuSpeed ( void )
