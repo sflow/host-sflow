@@ -45,8 +45,7 @@ READ_OBJS=readInterfaces.o \
           readMemoryCounters.o \
           readDiskCounters.o \
           readHidCounters.o \
-          readNioCounters.o \
-	  readPackets.o
+          readNioCounters.o
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
@@ -75,16 +74,10 @@ install-hsflowd: hsflowd
 
 #### SCHEDULE ####
 
-# the chkconfig command may not be available in your VM, but all 
-# it does it to put the
-# necessary links into the /etc/rc.d/ directories to 
-# start and stop the daemon at the required runlevels.
-
 schedule: schedule-hsflowd
 
 schedule-hsflowd:
-	/sbin/chkconfig --add hsflowd
-	/sbin/chkconfig --list hsflowd
+	@/bin/sh -c 'if grep -c hsflowd_enable /etc/rc.conf > /dev/null; then echo "already scheduled"; else echo "hsflowd_enable=\"YES\"" >> /etc/rc.conf; fi'
 
 #### CLEAN ####
 
@@ -108,6 +101,5 @@ readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
-readPackets.o: readPackets.c $(HEADERS)
 
 
