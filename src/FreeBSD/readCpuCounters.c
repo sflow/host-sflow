@@ -12,6 +12,7 @@ extern "C" {
 #include <sys/vmmeter.h>
 #include <kvm.h>
 
+  extern int debug;
 
   /*_________________---------------------------__________________
     _________________   getRunningProcesses     __________________
@@ -28,23 +29,28 @@ extern "C" {
     int nentries;
     kvm_t *kd = NULL;
     int what = KERN_PROC_ALL;
-  
-    uint32_t val32;
-  
-    val32 = 0;
-  
-    // $$$ call kvm_open() here, and kvm_close() below?
-  
-    if (kd) {
     
+    uint32_t val32;
+    
+    val32 = 0;
+    
+    // it looks like we don't need to be root to call kvm_open
+    // just to read the process table (in the way that the ps(1) command does).
+    kd=kvm_open("/dev/null", "/dev/null", "/dev/null", O_RDONLY, "kvm_open");
+    if (kd == NULL) {
+      myLog(LOG_ERR, "kvm_open() failed");
+    }
+    else {
+      
 #ifdef KERN_PROC_NOTHREADS
       what |= KERN_PROC_NOTHREADS;
 #endif
       
       if ((kp = kvm_getprocs(kd, what, 0, &nentries)) == 0 || nentries < 0) {
-	// got nothing
+	myLog(LOG_ERR, "kvm_getprocs() failed");
       }
       else {
+	if(debug) myLog(LOG_INFO,"kvm_getprocs found %u entries", nentries);
 	
 	for (i = 0; i < nentries; kp++, i++) {
 #ifdef KINFO_PROC_SIZE
@@ -60,9 +66,10 @@ extern "C" {
 	  }
 	}
       }
+      kvm_close(kd);
     }
     
-    if (val32 > 0) val32--;
+    if (val32 > 0) val32--; // subtract one for me
     return val32;
   }
   
