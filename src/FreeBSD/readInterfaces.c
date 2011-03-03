@@ -17,43 +17,34 @@ extern "C" {
 
 extern int debug;
     
-int 
+static void
 find_mac(char *name, u_char *dest)
 {
-	int			mib[6];
-	size_t			len;
-	char			*buf;
-	unsigned char		*ptr;
-	struct if_msghdr	*ifm;
-	struct sockaddr_dl	*sdl;
+  size_t			len;
+  char			*buf;
+  unsigned char		*ptr;
+  struct if_msghdr	*ifm;
+  struct sockaddr_dl	*sdl;
+  int mib[6] = { CTL_NET, AF_ROUTE, 0, AF_LINK, NET_RT_IFLIST, 0 };
 
+  if ((mib[5] = if_nametoindex(name)) == 0) {
+    return;
+  }
+  
+  if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
+    return;
+  }
+  
+  buf = my_calloc(len);
+	
+  if (sysctl(mib, 6, buf, &len, NULL, 0) >= 0) {
+    ifm = (struct if_msghdr *)buf;
+    sdl = (struct sockaddr_dl *)(ifm + 1);
+    ptr = (unsigned char *)LLADDR(sdl);
+    memcpy(dest, ptr, 6);
+  }
 
-	mib[0] = CTL_NET;
-	mib[1] = AF_ROUTE;
-	mib[2] = 0;
-	mib[3] = AF_LINK;
-	mib[4] = NET_RT_IFLIST;
-	if ((mib[5] = if_nametoindex(name)) == 0) {
-		return(1);
-	}
-
-	if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
-		return(1);
-	}
-
-	if ((buf = malloc(len)) == NULL) {
-		return(1);
-	}
-
-	if (sysctl(mib, 6, buf, &len, NULL, 0) < 0) {
-		return(1);
-	}
-
-	ifm = (struct if_msghdr *)buf;
-	sdl = (struct sockaddr_dl *)(ifm + 1);
-	ptr = (unsigned char *)LLADDR(sdl);
-	memcpy(dest,ptr,6);
-	return(0);
+  my_free(buf);
 }
 /*________________---------------------------__________________
   ________________    updateAdaptorNIO       __________________
