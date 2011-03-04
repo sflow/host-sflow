@@ -17,6 +17,7 @@ extern "C" {
 #include <sys/param.h>
 #include <sys/sysctl.h>
 
+  extern int debug;
 
   /*
    * A big thanks to Ganglia for all of the libmetrics code !!! 
