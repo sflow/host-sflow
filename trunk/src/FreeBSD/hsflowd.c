@@ -636,7 +636,7 @@ signal_handler(int sig, siginfo_t *info, void *secret)
     sp->DNSSD_countdown = sfl_random(sp->DNSSD_startDelay);
     time_t clk = time(NULL);
     while(1) {
-      my_usleep(1000000);
+      my_usleep(999983); // just under a second
       time_t test_clk = time(NULL);
       if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
 	// avoid a flurry of ticks if the clock jumps

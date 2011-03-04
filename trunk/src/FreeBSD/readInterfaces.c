@@ -15,95 +15,95 @@ extern "C" {
 #include <net/if.h>
 #include <ifaddrs.h>
 
-extern int debug;
+  extern int debug;
     
-static void
-find_mac(char *name, u_char *dest)
-{
-  size_t			len;
-  char			*buf;
-  unsigned char		*ptr;
-  struct if_msghdr	*ifm;
-  struct sockaddr_dl	*sdl;
-  int mib[6] = { CTL_NET, AF_ROUTE, 0, AF_LINK, NET_RT_IFLIST, 0 };
+  static void
+  find_mac(char *name, u_char *dest)
+  {
+    size_t			len;
+    char			*buf;
+    unsigned char		*ptr;
+    struct if_msghdr	*ifm;
+    struct sockaddr_dl	*sdl;
+    int mib[6] = { CTL_NET, AF_ROUTE, 0, AF_LINK, NET_RT_IFLIST, 0 };
 
-  if ((mib[5] = if_nametoindex(name)) == 0) {
-    return;
-  }
+    if ((mib[5] = if_nametoindex(name)) == 0) {
+      return;
+    }
   
-  if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
-    return;
-  }
+    if (sysctl(mib, 6, NULL, &len, NULL, 0) < 0) {
+      return;
+    }
   
-  buf = my_calloc(len);
+    buf = my_calloc(len);
 	
-  if (sysctl(mib, 6, buf, &len, NULL, 0) >= 0) {
-    ifm = (struct if_msghdr *)buf;
-    sdl = (struct sockaddr_dl *)(ifm + 1);
-    ptr = (unsigned char *)LLADDR(sdl);
-    memcpy(dest, ptr, 6);
-  }
-
-  my_free(buf);
-}
-/*________________---------------------------__________________
-  ________________    updateAdaptorNIO       __________________
-  ----------------___________________________------------------
-*/
-
-static HSPAdaptorNIO *extractOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName)
-{
-  HSPAdaptorNIO *adaptor = NULL;
-  for(int i = 0; i < nioList->num_adaptors; i++) {
-    adaptor = nioList->adaptors[i];
-    if(adaptor && !strcmp(adaptor->deviceName, deviceName)) {
-      // take it out of the array and return it
-      nioList->adaptors[i] = NULL;
-      return adaptor;
+    if (sysctl(mib, 6, buf, &len, NULL, 0) >= 0) {
+      ifm = (struct if_msghdr *)buf;
+      sdl = (struct sockaddr_dl *)(ifm + 1);
+      ptr = (unsigned char *)LLADDR(sdl);
+      memcpy(dest, ptr, 6);
     }
-  }
-  // not found, create a new one
-  adaptor = (HSPAdaptorNIO *)my_calloc(sizeof(HSPAdaptorNIO));
-  adaptor->deviceName = strdup(deviceName);
-  return adaptor;
-}
 
-void freeAdaptorNIOs(HSPAdaptorNIOList *nioList)
-{
-  for(int i = 0; i < nioList->num_adaptors; i++) {
-    HSPAdaptorNIO *adaptor = nioList->adaptors[i];
-    if(adaptor) {
-      free(adaptor->deviceName);
-      free(adaptor);
+    my_free(buf);
+  }
+  /*________________---------------------------__________________
+    ________________    updateAdaptorNIO       __________________
+    ----------------___________________________------------------
+  */
+
+  static HSPAdaptorNIO *extractOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName)
+  {
+    HSPAdaptorNIO *adaptor = NULL;
+    for(int i = 0; i < nioList->num_adaptors; i++) {
+      adaptor = nioList->adaptors[i];
+      if(adaptor && !strcmp(adaptor->deviceName, deviceName)) {
+	// take it out of the array and return it
+	nioList->adaptors[i] = NULL;
+	return adaptor;
+      }
     }
+    // not found, create a new one
+    adaptor = (HSPAdaptorNIO *)my_calloc(sizeof(HSPAdaptorNIO));
+    adaptor->deviceName = strdup(deviceName);
+    return adaptor;
   }
-  free(nioList->adaptors);
-  nioList->adaptors = NULL;
-  nioList->num_adaptors = 0;
-}
 
-static void updateAdaptorNIO(HSP *sp)
-{
-  uint32_t N = sp->adaptorList->num_adaptors;
-  // space for new list
-  HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
-  // move pre-existing ones across,  or create new ones if necessary
-  for(int i = 0; i < N; i++) {
-    new_list[i] = extractOrCreateAdaptorNIO(&sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
+  void freeAdaptorNIOs(HSPAdaptorNIOList *nioList)
+  {
+    for(int i = 0; i < nioList->num_adaptors; i++) {
+      HSPAdaptorNIO *adaptor = nioList->adaptors[i];
+      if(adaptor) {
+	free(adaptor->deviceName);
+	free(adaptor);
+      }
+    }
+    free(nioList->adaptors);
+    nioList->adaptors = NULL;
+    nioList->num_adaptors = 0;
   }
-  // free old ones we don't need any more
-  freeAdaptorNIOs(&sp->adaptorNIOList);
-  // and move the new list into place
-  sp->adaptorNIOList.adaptors = new_list;
-  sp->adaptorNIOList.num_adaptors = N;
-  sp->adaptorNIOList.last_update = 0;
-  return;
-}
 
-/*________________---------------------------__________________
-  ________________      readInterfaces       __________________
-  ----------------___________________________------------------
-*/
+  static void updateAdaptorNIO(HSP *sp)
+  {
+    uint32_t N = sp->adaptorList->num_adaptors;
+    // space for new list
+    HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
+    // move pre-existing ones across,  or create new ones if necessary
+    for(int i = 0; i < N; i++) {
+      new_list[i] = extractOrCreateAdaptorNIO(&sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
+    }
+    // free old ones we don't need any more
+    freeAdaptorNIOs(&sp->adaptorNIOList);
+    // and move the new list into place
+    sp->adaptorNIOList.adaptors = new_list;
+    sp->adaptorNIOList.num_adaptors = N;
+    sp->adaptorNIOList.last_update = 0;
+    return;
+  }
+
+  /*________________---------------------------__________________
+    ________________      readInterfaces       __________________
+    ----------------___________________________------------------
+  */
 
   int readInterfaces(HSP *sp)
   {

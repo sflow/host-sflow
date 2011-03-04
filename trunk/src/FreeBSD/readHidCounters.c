@@ -9,22 +9,22 @@ extern "C" {
 #include "hsflowd.h"
 #include <sys/sysctl.h>
 
-void
-cpu_uuid_func(char *host_uuid, size_t *len)
-{
-   int mib[2]; 
-
-   mib[0] = CTL_KERN;
-   mib[1] = KERN_HOSTUUID;
-   sysctl(mib, 2, host_uuid, len, NULL, 0);
-}
+  void
+  cpu_uuid_func(char *host_uuid, size_t *len)
+  {
+    int mib[2]; 
+  
+    mib[0] = CTL_KERN;
+    mib[1] = KERN_HOSTUUID;
+    sysctl(mib, 2, host_uuid, len, NULL, 0);
+  }
   /*_________________---------------------------__________________
     _________________     readHidCounters       __________________
     -----------------___________________________------------------
   */
   
-int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) 
-{
+  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) 
+  {
     char host_uuid[40];
     size_t uu_len = 40;
     int gotData = NO;
@@ -91,14 +91,14 @@ int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen,
     // os release
     len = rbufLen;
  
-     if(sysctlbyname("kern.osrelease", rbuf, &len, NULL, 0) != 0) {
-       myLog(LOG_ERR, "sysctl(<kern.osrelease>) failed : %s", strerror(errno));
-     }
-     else {
-       gotData = YES;
-       hid->os_release.str = rbuf;
-       hid->os_release.len = strlen(rbuf);
-     }
+    if(sysctlbyname("kern.osrelease", rbuf, &len, NULL, 0) != 0) {
+      myLog(LOG_ERR, "sysctl(<kern.osrelease>) failed : %s", strerror(errno));
+    }
+    else {
+      gotData = YES;
+      hid->os_release.str = rbuf;
+      hid->os_release.len = strlen(rbuf);
+    }
     return gotData;
   }
 
