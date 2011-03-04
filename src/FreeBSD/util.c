@@ -103,10 +103,10 @@ extern "C" {
     (*fieldp) = str ? strdup(str) : NULL;
   }
   
-/*________________---------------------------__________________
-  ________________    trimWhitespace         __________________
-  ----------------___________________________------------------
-*/
+  /*________________---------------------------__________________
+    ________________    trimWhitespace         __________________
+    ----------------___________________________------------------
+  */
 
   char *trimWhitespace(char *str)
   {
@@ -148,10 +148,10 @@ extern "C" {
     }
   
     if(info == NULL) 
-    {
+      {
         myLog(LOG_ERR, "getaddrinfo() error2: ");
 	return NO;
-    }
+      }
   
     if(info->ai_addr) {
       // answer is now in info - a linked list of answers with sockaddr values.
@@ -202,10 +202,10 @@ extern "C" {
     return (nib < 10) ? ('0' + nib) : ('A' - 10 + nib);
   }
 
-/*_________________---------------------------__________________
-  _________________   printHex, hexToBinary   __________________
-  -----------------___________________________------------------
-*/
+  /*_________________---------------------------__________________
+    _________________   printHex, hexToBinary   __________________
+    -----------------___________________________------------------
+  */
 
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix)
   {
@@ -254,10 +254,10 @@ extern "C" {
     return i;
   }
 
-/*_________________---------------------------__________________
-  _________________   parseUUID, printUUID    __________________
-  -----------------___________________________------------------
-*/
+  /*_________________---------------------------__________________
+    _________________   parseUUID, printUUID    __________________
+    -----------------___________________________------------------
+  */
 
   int parseUUID(char *str, char *uuid)
   {
@@ -343,17 +343,17 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-SFLAdaptorList *adaptorListNew()
-{
+  SFLAdaptorList *adaptorListNew()
+  {
     SFLAdaptorList *adList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
     adList->capacity = 2; // will grow if necessary
     adList->adaptors = (SFLAdaptor **)my_calloc(adList->capacity * sizeof(SFLAdaptor *));
     adList->num_adaptors = 0;
     return adList;
-}
+  }
 
-void adaptorListReset(SFLAdaptorList *adList)
-{
+  void adaptorListReset(SFLAdaptorList *adList)
+  {
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
       if(adList->adaptors[i]) {
 	my_free(adList->adaptors[i]->deviceName);
@@ -362,17 +362,17 @@ void adaptorListReset(SFLAdaptorList *adList)
       }
     }
     adList->num_adaptors = 0;
-}
+  }
 
-void adaptorListFree(SFLAdaptorList *adList)
-{
+  void adaptorListFree(SFLAdaptorList *adList)
+  {
     adaptorListReset(adList);
     my_free(adList->adaptors);
     my_free(adList);
-}
+  }
  
-SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
-{
+  SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
+  {
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
       SFLAdaptor *ad = adList->adaptors[i];
       if(ad && ad->deviceName && !strcmp(ad->deviceName, dev)) {
@@ -381,10 +381,10 @@ SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
       }
     }
     return NULL;
-}
+  }
 
-SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes)
-{
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes)
+  {
     SFLAdaptor *ad = adaptorListGet(adList, dev);
     if(ad == NULL) {
       ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
@@ -401,7 +401,7 @@ SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes)
       ad->num_macs = 1;
     }
     return ad;
-}
+  }
     
   /*________________---------------------------__________________
     ________________      truncateOpenFile     __________________

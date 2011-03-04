@@ -93,7 +93,7 @@ extern "C" {
 	      uint64_t bytes_out = ifm->ifm_data.ifi_obytes;
 	      uint64_t pkts_out = ifm->ifm_data.ifi_opackets;
 	      uint64_t errs_out = ifm->ifm_data.ifi_oerrors;
-	      uint64_t drops_out = ifm->ifm_data.ifi_collisions; // $$$ collisions are not drops ???
+	      uint64_t drops_out = (uint64_t)-1; /* unsupported */
 	      
 	      // have to detect discontinuities here, so use a full
 	      // set of latched counters and accumulators.
