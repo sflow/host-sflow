@@ -1,0 +1,28 @@
+To build open the solution file in Visual Studio.  I used version 2008 but it should build in 2010 as well.
+There is no x64 configuration defined but it has been built succesfully for x64.  NOTE:  You can run the 32 bit build on 64 bit Windows versions.
+
+INSTALL:
+	0. Please note you must complete this steps with elevated privileges on Windows Vista or Later.  One way to do this is to right click on cmd.exe and select "run as administrator".
+	1. Copy hsflowd.exe to a suitable location.  %WINDIR%\system32 might be a good choice.  
+	2. Configure hsflowd as a Windows Service: `sc create hsflowd type= own start= auto error= normal binPath= path\to\hsflowd.exe DisplayName= "Host sFlow Agent"`
+	3. Configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v collector /d name.or.ip.of.collector
+
+Debug:
+	hfslowd is implemented as a Windows service, but it can also be invoked from the command line.  When invoked from the command line hsflowd is in debug mode and will output error and information to stderr. In order to run from the command line the service must already be installed per the instructions above.
+
+Supported Windows versions:
+	hsflowd is known to run on:
+		Windows XP
+		Windows XP x64
+		Windows Server 2003 x64
+		Windows 7 x64
+	It should run unchanged on:
+		Windows Vista
+		Windows Vista x64
+		Windows 7
+		Windows Server 2003
+		Windows Server 2008
+		Windows Server 2008 x64
+	If you compile and run it on these systems please let us know!
+		
+
