@@ -47,3 +47,6 @@ rpm:
 
 xenserver: rpm
 	cd xenserver-ddk; $(MAKE) clean; $(MAKE)
+
+.PHONY: $(PROG) clean install schedule rpm xenserver
+
