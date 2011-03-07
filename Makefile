@@ -6,7 +6,6 @@
 
 PROG=hsflowd
 RPM_SOURCES_DIR=/usr/src/redhat/SOURCES
-MY_SOURCES_DIR=$(RPM_SOURCES_DIR)/$(PROG)-$(VERSION)
 
 all: $(PROG) 
 
@@ -37,13 +36,13 @@ schedule:
         cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL schedule
 
 rpm:
-	VERSION=`./getVersion`
-	rm -rf $(MY_SOURCES_DIR)
-	cp -r . $(MY_SOURCES_DIR)
 	PLATFORM=`uname`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
-	tar cz -C $(RPM_SOURCES_DIR) -f $(MY_SOURCES_DIR).tar.gz $(PROG)-$$VERSION
+	MYSRCDIR=$(RPM_SOURCES_DIR)/$(PROG)-$$MYVER; \
+	rm -rf $$MYSRCDIR; \
+	cp -r . $$MYSRCDIR; \
+	tar cz -C $(RPM_SOURCES_DIR) -f $$MYSRCDIR.tar.gz $(PROG)-$$MYVER; \
 	rpmbuild -ba $(PROG).spec
 
 xenserver: rpm
