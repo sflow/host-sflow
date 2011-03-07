@@ -47,5 +47,4 @@ rpm:
 	rpmbuild -ba $(PROG).spec
 
 xenserver: rpm
-	cd xenserver-ddk; $(MAKE)
-
+	cd xenserver-ddk; $(MAKE) clean; $(MAKE)
