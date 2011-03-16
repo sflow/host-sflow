@@ -156,7 +156,7 @@ extern "C" {
       strArrayAdd(sv->config.targets, target);
     }
     strArraySort(sv->config.targets);
-    if(sv->config.targetStr) free(sv->config.targetStr);
+    if(sv->config.targetStr) my_free(sv->config.targetStr);
     sv->config.targetStr = strArrayStr(sv->config.targets, "[", "\"", ", ", "]");
   }
 
@@ -364,7 +364,7 @@ extern "C" {
     char *setting = my_calloc(bytes);
     snprintf(setting, bytes, "%s=%s", ovsvar, valstr);
     addOvsArg(sv, setting);
-    free(setting);
+    my_free(setting);
   }
 
   static void addOvsVarEqVal_int(SFVS *sv, char *ovsvar, uint32_t intval) {
@@ -421,7 +421,7 @@ extern "C" {
   static void logCmd(SFVS *sv) {
     char *cmdstr = strArrayStr(sv->cmd, "<", NULL, " ", ">");
     myLog(LOG_INFO, "cmd: %s\n", cmdstr);
-    free(cmdstr);
+    my_free(cmdstr);
   }
 
   static void resetCmd(SFVS *sv) {

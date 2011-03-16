@@ -18,6 +18,7 @@ extern "C" {
 #include <netdb.h>
 #include <sys/socket.h>
 #include <syslog.h>
+#include <assert.h>
 
 #include <sys/types.h>
 #define __STDC_FORMAT_MACROS
@@ -27,6 +28,9 @@ extern "C" {
 #include <sys/wait.h>
 #include <ctype.h> // for isspace() etc.
 #include "pthread.h"
+
+#include "sys/syscall.h" /* just for gettid() */
+#define MYGETTID (pid_t)syscall(SYS_gettid)
 
 #define YES 1
 #define NO 0
@@ -43,10 +47,35 @@ extern "C" {
   // logger
   void myLog(int syslogType, char *fmt, ...);
 
-  // allocation
-  void *my_calloc(size_t bytes);
-  void *my_realloc(void *ptr, size_t bytes);
-  void my_free(void *ptr);
+  // OS allocation
+  void *my_os_calloc(size_t bytes);
+  void *my_os_realloc(void *ptr, size_t bytes);
+  void my_os_free(void *ptr);
+
+  // realm allocation (buffer recycling)
+  void *UTHeapQNew(size_t len);
+  void *UTHeapQReAlloc(void *buf, size_t newSiz);
+  void UTHeapQFree(void *buf);
+  void UTHeapQKeep(void *buf);
+
+#define SYS_CALLOC calloc
+#define SYS_REALLOC realloc
+#define SYS_FREE free
+
+#ifdef UTHEAP
+#define my_calloc UTHeapQNew
+#define my_realloc UTHeapQReAlloc
+#define my_free UTHeapQFree
+#else
+#define my_calloc my_os_calloc
+#define my_realloc my_os_realloc
+#define my_free my_os_free
+#endif
+
+  // safer string fns
+  uint32_t my_strnlen(const char *s, uint32_t max);
+  uint32_t my_strlen(const char *s);
+  char *my_strdup(char *str);
 
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {

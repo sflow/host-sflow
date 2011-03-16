@@ -27,7 +27,7 @@ static HSPAdaptorNIO *extractOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char
   HSPAdaptorNIO *adaptor = NULL;
   for(int i = 0; i < nioList->num_adaptors; i++) {
     adaptor = nioList->adaptors[i];
-    if(adaptor && !strcmp(adaptor->deviceName, deviceName)) {
+    if(adaptor && !strncmp(adaptor->deviceName, deviceName, IFNAMSIZ)) {
       // take it out of the array and return it
       nioList->adaptors[i] = NULL;
       return adaptor;
@@ -35,7 +35,7 @@ static HSPAdaptorNIO *extractOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char
   }
   // not found, create a new one
   adaptor = (HSPAdaptorNIO *)my_calloc(sizeof(HSPAdaptorNIO));
-  adaptor->deviceName = strdup(deviceName);
+  adaptor->deviceName = my_strdup(deviceName);
   return adaptor;
 }
 
@@ -44,12 +44,14 @@ void freeAdaptorNIOs(HSPAdaptorNIOList *nioList)
   for(int i = 0; i < nioList->num_adaptors; i++) {
     HSPAdaptorNIO *adaptor = nioList->adaptors[i];
     if(adaptor) {
-      free(adaptor->deviceName);
-      free(adaptor);
+      my_free(adaptor->deviceName);
+      my_free(adaptor);
     }
   }
-  free(nioList->adaptors);
-  nioList->adaptors = NULL;
+  if(nioList->adaptors) {
+    my_free(nioList->adaptors);
+    nioList->adaptors = NULL;
+  }
   nioList->num_adaptors = 0;
 }
 

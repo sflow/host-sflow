@@ -16,6 +16,8 @@ extern "C" {
    be read off */
 #define ASSUMED_DISK_SECTOR_BYTES 512
 
+  extern int debug;
+
   /*_________________---------------------------__________________
     _________________     remote_mount          __________________
     -----------------___________________________------------------
@@ -29,6 +31,7 @@ int remote_mount(const char *device, const char *type)
 	  || (!strncmp(type, "nfs", 3)) || (!strcmp(type, "autofs"))
 	  || (!strcmp(type,"gfs")) || (!strcmp(type,"none")) );
 }
+
 
   /*_________________---------------------------__________________
     _________________     readDiskCounters      __________________
@@ -125,7 +128,7 @@ int remote_mount(const char *device, const char *type)
 		// don't count it again if it was seen before
 		if(tfind(device, &treeRoot, (comparison_fn_t)strcmp) == NULL) {
 		  // not found, so remember it
-		  tsearch(strdup(device), &treeRoot, (comparison_fn_t)strcmp);
+		  tsearch(my_strdup(device), &treeRoot, (comparison_fn_t)strcmp);
 		  // and get the numbers
 		  struct statvfs svfs;
 		  if(statvfs(mount, &svfs) == 0) {
@@ -145,7 +148,7 @@ int remote_mount(const char *device, const char *type)
 	  }
 	}
       }
-      tdestroy(treeRoot, free);
+      tdestroy(treeRoot, my_free);
       fclose(procFile);
     }
     

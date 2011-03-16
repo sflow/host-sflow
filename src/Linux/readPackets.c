@@ -89,7 +89,7 @@ extern "C" {
       // remember the device name to make the lookups easier later.
       // Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
       // in case it gets freed at some point.  The device name is enough.
-      poller->userData = (void *)strdup(devName);
+      poller->userData = (void *)my_strdup(devName);
     }
     return sampler;
   }
