@@ -27,14 +27,16 @@ extern "C" {
     else vsyslog(syslogType, fmt, args);
   }
 
+
   /*_________________---------------------------__________________
-    _________________       my_calloc           __________________
+    _________________       my_os_allocation    __________________
     -----------------___________________________------------------
   */
-  
-  void *my_calloc(size_t bytes)
+
+  void *my_os_calloc(size_t bytes)
   {
-    void *mem = calloc(1, bytes);
+    if(debug) myLog(LOG_INFO, "my_os_calloc(%u)", bytes);
+    void *mem = SYS_CALLOC(1, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
       if(debug) malloc_stats();
@@ -43,9 +45,10 @@ extern "C" {
     return mem;
   }
 
-  void *my_realloc(void *ptr, size_t bytes)
+  void *my_os_realloc(void *ptr, size_t bytes)
   {
-    void *mem = realloc(ptr, bytes);
+    if(debug) myLog(LOG_INFO, "my_os_realloc(%u)", bytes);
+    void *mem = SYS_REALLOC(ptr, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
       if(debug) malloc_stats();
@@ -54,9 +57,168 @@ extern "C" {
     return mem;
   }
   
-  void my_free(void *ptr)
+  void my_os_free(void *ptr)
   {
-    if(ptr) free(ptr);
+    if(ptr) SYS_FREE(ptr);
+  }
+
+
+  /*_________________---------------------------------------__________________
+    _________________  Realm allocation (buffer recycling)  __________________
+    -----------------_______________________________________------------------
+  */
+
+  typedef union _UTHeapHeader {
+    uint64_t hdrBits64[2];     // force sizeof(UTBufferHeader) == 128bits to ensure alignment
+    union _UTHeapHeader *nxt;  // valid when in linked list waiting to be reallocated
+    struct {                   // valid when buffer being used - store bookkeeping info here
+      uint32_t realmIdx;
+      uint16_t refCount;
+#define UT_MAX_REFCOUNT 0xFFFF
+      uint16_t queueIdx;
+    } h;
+  } UTHeapHeader;
+
+  static UTHeapHeader *UTHeapQHdr(void *buf) {
+    return (UTHeapHeader *)buf - 1;
+  }
+ 
+  typedef struct _UTHeapRealm {
+#define UT_MAX_BUFFER_Q 32
+    UTHeapHeader *bufferLists[UT_MAX_BUFFER_Q];
+    pid_t realmIdx;
+    uint32_t totalAllocatedBytes;
+  } UTHeapRealm;
+
+  // separate realm for each thread
+  static __thread UTHeapRealm utRealm;
+  
+  static uint32_t UTHeapQSize(void *buf) {
+    UTHeapHeader *utBuf = UTHeapQHdr(buf);
+    return (1 << utBuf->h.queueIdx) - sizeof(UTHeapHeader);
+  }
+
+  /*_________________---------------------------__________________
+    _________________         UTHeapQNew        __________________
+    -----------------___________________________------------------
+    Variable-length, recyclable
+  */
+
+  void *UTHeapQNew(size_t len) {
+    // initialize the realm so that we can trap on any cross-thread
+    // allocation activity.
+    if(utRealm.realmIdx == 0) {
+      utRealm.realmIdx = MYGETTID;
+    }
+    // take it up to the nearest power of 2, including room for my header
+    // but make sure it is at least 16 bytes (queue 4), so we always have
+    // 128-bit alignment (just in case it is needed)
+    int queueIdx = 4;
+    for(int l = (len + 15) >> 4; l > 0; l >>= 1) queueIdx++;
+    UTHeapHeader *utBuf = (UTHeapHeader *)utRealm.bufferLists[queueIdx];
+    if(utBuf) {
+      // peel it off
+      utRealm.bufferLists[queueIdx] = utBuf->nxt;
+    }
+    else {
+      // allocate a new one
+      utBuf = (UTHeapHeader *)my_os_calloc(1<<queueIdx);
+      utRealm.totalAllocatedBytes += (1<<queueIdx);
+    }
+    // remember the details so we know what to do on free (overwriting the nxt pointer)
+    utBuf->h.realmIdx = utRealm.realmIdx;
+    utBuf->h.refCount = 1;
+    utBuf->h.queueIdx = queueIdx;
+    // return a pointer to just after the header
+    return (char *)utBuf + sizeof(UTHeapHeader);
+  }
+
+
+  /*_________________---------------------------__________________
+    _________________    UTHeapQFree            __________________
+    -----------------___________________________------------------
+  */
+
+  void UTHeapQFree(void *buf)
+  {
+    UTHeapHeader *utBuf = UTHeapQHdr(buf);
+    int rc = utBuf->h.refCount;
+    assert(rc != 0);
+    assert(utBuf->h.realmIdx == utRealm.realmIdx);
+
+    // UT_MAX_REFCOUNT => immortality
+    if(rc != UT_MAX_REFCOUNT) {
+      // decrement the ref count
+      if(--rc != 0) {
+	// not zero yet, so just write back the decremented refcount
+	utBuf->h.refCount = rc;
+      }
+      else {
+	// reference count reached zero, so it's time to free this buffer for real
+	// read the queue index before we overwrite it
+	uint8_t queueIdx = utBuf->h.queueIdx;
+	memset(utBuf, 0, 1 << queueIdx);
+	// put it back on the queue
+	utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
+	utRealm.bufferLists[queueIdx] = utBuf;
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________      UTHeapQReAlloc       __________________
+    -----------------___________________________------------------
+  */
+
+  void *UTHeapQReAlloc(void *buf, size_t newSiz)
+  {
+    size_t siz = UTHeapQSize(buf);
+    if(newSiz <= siz) return buf;
+    void *newBuf = UTHeapQNew(newSiz);
+    memcpy(newBuf, buf, siz);
+    UTHeapQFree(buf);
+    return newBuf;
+  }
+
+  /*_________________---------------------------__________________
+    _________________      UTHeapQKeep          __________________
+    -----------------___________________________------------------
+  */
+
+  void UTHeapQKeep(void *buf)
+  {
+    // might even need to grab the semaphore for this operation too?
+    UTHeapHeader *utBuf = UTHeapQHdr(buf);
+    assert(utBuf->h.refCount > 0);
+    assert(utBuf->h.realmIdx == utRealm.realmIdx);
+    if(++utBuf->h.refCount == 0) utBuf->h.refCount = UT_MAX_REFCOUNT;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     safe string fns       __________________
+    -----------------___________________________------------------
+  */
+  
+#define UT_DEFAULT_MAX_STRLEN 65535
+
+  uint32_t my_strnlen(const char *s, uint32_t max) {
+    uint32_t i;
+    if(s == NULL) return 0;
+    for(i = 0; i < max; i++) if(s[i] == '\0') return i;
+    return max;
+  }
+
+  uint32_t my_strlen(const char *s) {
+    return my_strnlen(s, UT_DEFAULT_MAX_STRLEN);
+  }
+
+  char *my_strdup(char *str)
+  {
+    if(str == NULL) return NULL;
+    uint32_t len = my_strlen(str);
+    char *newStr = my_calloc(len+1);
+    memcpy(newStr, str, len);
+    return newStr;
   }
     
   /*_________________---------------------------__________________
@@ -66,7 +228,7 @@ extern "C" {
   
   void setStr(char **fieldp, char *str) {
     if(*fieldp) my_free(*fieldp);
-    (*fieldp) = str ? strdup(str) : NULL;
+    (*fieldp) = my_strdup(str);
   }
   
 /*________________---------------------------__________________
@@ -114,7 +276,7 @@ extern "C" {
       ar->strs = newArray;
     }
     if(ar->strs[ar->n]) my_free(ar->strs[ar->n]);
-    ar->strs[ar->n++] = str ? strdup(str) : NULL;
+    ar->strs[ar->n++] = my_strdup(str);
   }
 
    void strArrayReset(UTStringArray *ar) {
@@ -523,7 +685,7 @@ extern "C" {
     SFLAdaptor *ad = adaptorListGet(adList, dev);
     if(ad == NULL) {
       ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
-      ad->deviceName = strdup(dev);
+      ad->deviceName = my_strdup(dev);
     }
     if(adList->num_adaptors == adList->capacity) {
       // grow
@@ -556,8 +718,7 @@ extern "C" {
     }
     return YES;
   }
-
+    
 #if defined(__cplusplus)
-} /* extern "C" */
+}  /* extern "C" */
 #endif
-

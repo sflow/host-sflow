@@ -29,7 +29,7 @@ extern "C" {
 
   static int agentCB_free(void *magic, SFLAgent *agent, void *obj)
   {
-    free(obj);
+    my_free(obj);
     return 0;
   }
 
@@ -181,7 +181,7 @@ extern "C" {
 		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
 		}
 	      }
-	      free(macStr);
+	      free(macStr); // allocated by xs_read()
 	    }
 	  }
 	}
@@ -330,6 +330,9 @@ extern "C" {
     assert(poller->magic);
     HSPVMState *state = (HSPVMState *)poller->userData;
     if(state == NULL) return;
+
+#if defined(HSF_XEN) || defined(HSF_VRT)
+
     HSP *sp = (HSP *)poller->magic;
 
 #ifdef HSF_XEN
@@ -360,7 +363,7 @@ extern "C" {
       if(xshname) {
 	// copy the name out here so we can free it straight away
 	strncpy(hname, xshname, 255);
-	free(xshname);
+	free(xshname); // allocated by xs_read
 	hidElem.counterBlock.host_hid.hostname.str = hname;
 	hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
 	memcpy(hidElem.counterBlock.host_hid.uuid, &domaininfo.handle, 16);
@@ -585,6 +588,7 @@ extern "C" {
       }
     }
 #endif /* HSF_VRT */
+#endif /* HSF_XEN | HSF_VRT */
   }
 
   /*_________________---------------------------__________________
@@ -825,7 +829,7 @@ extern "C" {
       }
       int *domainIds = (int *)my_calloc(num_domains * sizeof(int));
       if(virConnectListDomains(sp->virConn, domainIds, num_domains) != num_domains) {
-	free(domainIds);
+	my_free(domainIds);
 	return;
       }
       for(int i = 0; i < num_domains; i++) {
@@ -886,7 +890,7 @@ extern "C" {
 	      domain_xml_node(rootNode, state);
 	      xmlFreeDoc(doc);
 	    }
-	    free(xmlstr);
+	    free(xmlstr); // allocated by virDomainGetXMLDesc()
 	  }
 	  xmlCleanupParser();
 
@@ -895,7 +899,7 @@ extern "C" {
       }
       // remember the number of domains we found
       sp->num_domains = num_domains;
-      free(domainIds);
+      my_free(domainIds);
 #endif
       
       // 3. remove any that don't exist any more
@@ -907,7 +911,7 @@ extern "C" {
 	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
 		  SFL_DS_INDEX(pl->dsi),
 		  state->domId);
-	    free(pl->userData);
+	    my_free(pl->userData);
 	    pl->userData = NULL;
 	    sfl_agent_removePoller(sf->agent, &pl->dsi);
 	    sp->refreshAdaptorList = YES;

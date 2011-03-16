@@ -95,7 +95,7 @@ extern int debug;
   static uint32_t getMultiplier(char *str)
   {
     uint32_t mult = 1;
-    uint32_t len = strlen(str);
+    uint32_t len = my_strlen(str);
     char last = toupper(str[len - 1]);
     if(last == 'K' || last == 'M' || last == 'G') {
       // number of the form "100M" or "1G"
@@ -115,10 +115,10 @@ extern int debug;
       parseError(sp, tok, "expected integer", "");
       return NULL;
     }
-    char *str = strdup(t->str); // take a copy so we can modify it
+    char *str = my_strdup(t->str); // take a copy so we can modify it
     uint32_t mult = getMultiplier(str);
     *arg = (mult * strtol(str, NULL, 0));
-    free(str);
+    my_free(str);
     if(*arg < minVal || *arg > maxVal) {
       parseError(sp, tok, "range error", "");
       return NULL;
@@ -178,8 +178,8 @@ extern int debug;
     HSPToken *t = tok;
     t = t->nxt;
     if(t && t->str) {
-      if(sp->DNSSD_domain) free(sp->DNSSD_domain);
-      sp->DNSSD_domain = strdup(t->str);
+      if(sp->DNSSD_domain) my_free(sp->DNSSD_domain);
+      sp->DNSSD_domain = my_strdup(t->str);
       return t;
     }
     parseError(sp, tok, "expected domain", "");
@@ -196,7 +196,7 @@ extern int debug;
       for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
 	if(adaptor && adaptor->deviceName && strcmp(adaptor->deviceName, t->str) == 0) {
-	  if(p_devName) *p_devName = strdup(adaptor->deviceName);
+	  if(p_devName) *p_devName = my_strdup(adaptor->deviceName);
 	  return t;
 	}
       }
@@ -224,7 +224,7 @@ extern int debug;
   */
 
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings) {
-    HSPCollector *col = (HSPCollector *)calloc(1, sizeof(HSPCollector));
+    HSPCollector *col = (HSPCollector *)my_calloc(sizeof(HSPCollector));
     ADD_TO_LIST(sFlowSettings->collectors, col);
     sFlowSettings->numCollectors++;
     col->udpPort = SFL_DEFAULT_COLLECTOR_PORT;
@@ -232,7 +232,7 @@ extern int debug;
   }
 
   HSPSFlowSettings *newSFlowSettings(void) {
-    HSPSFlowSettings *st = (HSPSFlowSettings *)calloc(1, sizeof(HSPSFlowSettings));
+    HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
     st->samplingRate_http = HSP_SETTING_UNDEFINED;
     st->samplingRate_memcache = HSP_SETTING_UNDEFINED;
@@ -247,14 +247,14 @@ extern int debug;
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
     for(HSPCollector *coll = sFlowSettings->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
-      free(coll);
+      my_free(coll);
       coll = nextColl;
     }
-    free(sFlowSettings);
+    my_free(sFlowSettings);
   }
 
   static HSPSFlow *newSFlow(HSP *sp) {
-    HSPSFlow *sf = (HSPSFlow *)calloc(1, sizeof(HSPSFlow));
+    HSPSFlow *sf = (HSPSFlow *)my_calloc(sizeof(HSPSFlow));
     sf->sFlowSettings_file = newSFlowSettings();
     sf->subAgentId = HSP_DEFAULT_SUBAGENTID;
     sp->sFlow = sf; // just one of these, not a list
@@ -263,8 +263,8 @@ extern int debug;
   }
 
   static HSPToken *newToken(char *str, int len) {
-    HSPToken *token = (HSPToken *)calloc(1, sizeof(HSPToken));
-    token->str = (char *)calloc(1, len + 1);
+    HSPToken *token = (HSPToken *)my_calloc(sizeof(HSPToken));
+    token->str = (char *)my_calloc(len + 1);
     memcpy(token->str, str, len);
     // if it is special token, then record the index number here too
     for(uint32_t i = 0; i < HSPTOKEN_NUM_TOKENS; i++) {
@@ -497,7 +497,7 @@ extern int debug;
 	       sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
 	       sp->sFlow->agentIP.address.ip_v4 = adaptor->ipAddr;
 	       // fill in the device that we picked too
-	       sp->sFlow->agentDevice = strdup(adaptor->deviceName);
+	       sp->sFlow->agentDevice = my_strdup(adaptor->deviceName);
 	       break;
 	    }
 	 }
@@ -508,7 +508,7 @@ extern int debug;
 	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
 	  if(adaptor && (adaptor->ipAddr.addr == sp->sFlow->agentIP.address.ip_v4.addr)) {
-	    sp->sFlow->agentDevice = strdup(adaptor->deviceName);
+	    sp->sFlow->agentDevice = my_strdup(adaptor->deviceName);
 	    break;
 	  }
 	}
