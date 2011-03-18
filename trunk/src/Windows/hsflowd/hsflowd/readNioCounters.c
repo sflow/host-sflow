@@ -21,67 +21,78 @@ extern int debug;
 	uint32_t i, icount;
 	
 	icount = readMultiCounter("\\Network Interface(*)\\Bytes Received/sec",&value);
-	for(i = 0; i < icount; i++){
-		nio->bytes_in += value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->bytes_in += value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Packets Received/sec",&value);
-	for(i = 0; i < icount; i++){
-		nio->pkts_in += (uint32_t)value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->pkts_in += (uint32_t)value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Packets Received Errors",&value);
-	for(i = 0; i < icount; i++){
-		nio->errs_in += (uint32_t)value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->errs_in += (uint32_t)value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Packets Received Discarded",&value);
-	for(i = 0; i < icount; i++){
-		nio->drops_in += (uint32_t)value[i].RawValue.FirstValue;
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->drops_in += (uint32_t)value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Bytes Sent/sec",&value);
-	for(i = 0; i < icount; i++){
-		nio->bytes_out += value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->bytes_out += value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Packets Sent/sec",&value);
-	for(i = 0; i < icount; i++){
-		nio->pkts_out += (uint32_t)value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->pkts_out += (uint32_t)value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Packets Outbound Errors",&value);
-	for(i = 0; i < icount; i++){
-		nio->errs_out += (uint32_t)value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->errs_out += (uint32_t)value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
 	icount = readMultiCounter("\\Network Interface(*)\\Packets Outbound Discarded",&value);
-	for(i = 0; i < icount; i++){
-		nio->drops_out += (uint32_t)value[i].RawValue.FirstValue;
-	}
-	if(value){
-		free(value);
+	if(value) {
+		for(i = 0; i < icount; i++){
+			nio->drops_out += (uint32_t)value[i].RawValue.FirstValue;
+		}
+		my_free(value);
+		value = NULL;
 	}
 
-	MyLog(LOG_INFO,"readNioCounters:\n\trbytes:\t%lu\n\trdrops:\t%lu\n\trerrs:\t%lu\n\trpkts:\t%lu\n\ttbytes:\t%lu\n\ttdrops:\t%lu\n\tterrs:\t%lu\n\ttpkts:\t%lu\n",
+	myLog(LOG_INFO,"readNioCounters:\n\trbytes:\t%lu\n\trdrops:\t%lu\n\trerrs:\t%lu\n\trpkts:\t%lu\n\ttbytes:\t%lu\n\ttdrops:\t%lu\n\tterrs:\t%lu\n\ttpkts:\t%lu\n",
 			nio->bytes_in,nio->drops_in,nio->errs_in,nio->pkts_in,nio->bytes_out,nio->drops_out,nio->errs_out,nio->pkts_out);
 
 	gotData = YES;

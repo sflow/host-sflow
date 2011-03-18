@@ -8,7 +8,7 @@ extern "C" {
 
 //globals
 double load_1, load_5, load_15;
-PDH_HQUERY cpu_load_query = NULL;
+
 
 extern int debug;
 
@@ -29,25 +29,21 @@ int calcLoad(){
 }
 
 double getCpuLoad(){
-	PDH_STATUS Status;
     PDH_HCOUNTER Counter;
 	DWORD dwType;
 	PDH_FMT_COUNTERVALUE Value;
 	double ret = 0;
-	CHAR localizedPath[PDH_MAX_COUNTER_PATH];
+	PDH_HQUERY cpu_load_query = NULL;
 	
-	if(!cpu_load_query){
-		Status = PdhOpenQuery(NULL, 0, &cpu_load_query);
+	if(PdhOpenQuery(NULL, 0, &cpu_load_query) == ERROR_SUCCESS) {
+		if(PdhAddCounter(cpu_load_query, "\\Processor(_Total)\\% Processor Time", 0, &Counter) == ERROR_SUCCESS &&
+		PdhCollectQueryData(cpu_load_query) == ERROR_SUCCESS &&
+		PdhGetFormattedCounterValue(Counter, PDH_FMT_DOUBLE, &dwType, &Value) == ERROR_SUCCESS) {
+			ret = (Value.doubleValue * getCpuNum()) / 100.0;
+		}
+		if (cpu_load_query) PdhCloseQuery(cpu_load_query);
 	}
-
-	strcpy(localizedPath,"\\Processor(_Total)\\% Processor Time");
-	localizePath(localizedPath);
-
-    Status = PdhAddCounter(cpu_load_query, localizedPath, 0, &Counter);
-	Status = PdhCollectQueryData(cpu_load_query);
-	Status = PdhGetFormattedCounterValue(Counter, PDH_FMT_DOUBLE, &dwType, &Value);
-	ret = Value.doubleValue * getCpuNum();
-	return ret/100.0;
+	return ret;
 }
 
 int getCpuNum(){

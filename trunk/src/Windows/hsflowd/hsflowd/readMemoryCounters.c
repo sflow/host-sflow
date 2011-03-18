@@ -23,7 +23,7 @@ extern int debug;
 	memStat.dwLength = sizeof(memStat);
 	if(GlobalMemoryStatusEx(&memStat) == 0){
 
-		MyLog(LOG_ERR,"GlobalMemoryStatusEx failed: %d\n",GetLastError());
+		myLog(LOG_ERR,"GlobalMemoryStatusEx failed: %d\n",GetLastError());
 		return NO;
 	}
 
@@ -43,7 +43,7 @@ extern int debug;
 
 	gotData = YES;
 
-	MyLog(LOG_INFO,"readMemoryCounters:\n\ttotal: %I64d\n\tfree: %I64d\n\tcached: %I64d\n\tswap_in: %d\n\tswap_out: %d\n",
+	myLog(LOG_INFO,"readMemoryCounters:\n\ttotal: %I64d\n\tfree: %I64d\n\tcached: %I64d\n\tswap_in: %d\n\tswap_out: %d\n",
 			mem->mem_total,mem->mem_free,mem->mem_cached,mem->swap_in,mem->swap_out);
 
     return gotData;

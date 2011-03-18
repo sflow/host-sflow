@@ -1,3 +1,10 @@
+/* Copyright (c) 2009 InMon Corp. ALL RIGHTS RESERVED */
+/* License: http://www.inmon.com/products/virtual-probe/license.php */
+
+#if defined(__cplusplus)
+extern "C" {
+#endif
+
 #include "hsflowd.h"
 
 #define SLEEP_TIME 1000
@@ -12,21 +19,7 @@ void  ServiceMain(int argc, char** argv);
 void  ControlHandler(DWORD request); 
 int InitService();
 
-/*_________________---------------------------__________________
-    _________________        logging            __________________
-    -----------------___________________________------------------
-  */
 
-  void MyLog(int syslogType, char *fmt, ...)
-  {
-    va_list args;
-    va_start(args, fmt);
-    if(debug) {
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
-    }
-    //else vsyslog(syslogType, fmt, args);
-  }
 /*_________________---------------------------__________________
   _________________     agent callbacks       __________________
   -----------------___________________________------------------
@@ -34,18 +27,18 @@ int InitService();
 
   static void *agentCB_alloc(void *magic, SFLAgent *agent, size_t bytes)
   {
-    return calloc(1, bytes);
+    return my_calloc(bytes);
   }
 
   static int agentCB_free(void *magic, SFLAgent *agent, void *obj)
   {
-    free(obj);
+    my_free(obj);
     return 0;
   }
 
   static void agentCB_error(void *magic, SFLAgent *agent, char *msg)
   {
-	  MyLog(LOG_ERR,"agentCB_error: %s",msg);	  
+	  myLog(LOG_ERR,"agentCB_error: %s",msg);	  
   }
 
   
@@ -81,7 +74,7 @@ int InitService();
 
     if(socklen && fd > 0) {
 		result = sendto(fd,
-			    pkt,
+			    (const char *)pkt,
 			    pktLen,
 			    0,
 			    (struct sockaddr *)&coll->sendSocketAddr,
@@ -89,11 +82,11 @@ int InitService();
 	if(result == -1 && errno != EINTR) {
 	  if(debug){
 		  int sockerr = WSAGetLastError();
-		  MyLog(LOG_ERR,"sendto error code: %d",sockerr);
+		  myLog(LOG_ERR,"sendto error code: %d",sockerr);
 	  }
 	}
 	if(result == 0) {
-	  MyLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
+	  myLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
 	}
       }
     }
@@ -107,19 +100,13 @@ int InitService();
 	SFLCounters_sample_element memElem;
 	SFLCounters_sample_element dskElem;
 	SFLCounters_sample_element adaptorsElem;
-	char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
-    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
-    HSP *sp = (HSP *)poller->magic;
+
+	HSP *sp = (HSP *)poller->magic;
 	
     memset(&hidElem, 0, sizeof(hidElem));
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    if(readHidCounters(&hidElem.counterBlock.host_hid,
-		       hnamebuf,
-		       SFL_MAX_HOSTNAME_CHARS,
-		       osrelbuf,
-		       SFL_MAX_OSRELEASE_CHARS)) {
-      SFLADD_ELEMENT(cs, &hidElem);
-    }
+	hidElem.counterBlock.host_hid = sp->host_hid; // structure copy
+    SFLADD_ELEMENT(cs, &hidElem);
 
     // host Net I/O
     memset(&nioElem, 0, sizeof(nioElem));
@@ -156,6 +143,7 @@ int InitService();
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
     sfl_poller_writeCountersSample(poller, cs);
+	myLog(LOG_INFO, "UTHeap totalAllocatedBytes = %I64u", UTHeapQTotal());
   }
 
   /*_________________---------------------------__________________
@@ -186,10 +174,10 @@ int InitService();
 	WSADATA WSAData;
 	int WSARes = 0;
 
-    MyLog(LOG_ERR,"creating sfl agent\n");
+    myLog(LOG_ERR,"creating sfl agent\n");
 
     if(sf->collectors == NULL) {
-	  MyLog(LOG_ERR,"No collectors defined\n");
+	  myLog(LOG_ERR,"No collectors defined\n");
       return NO;
     }
 
@@ -197,22 +185,22 @@ int InitService();
 
 	WSARes = WSAStartup(MAKEWORD(2, 2),&WSAData);
     if(WSARes != 0){
-		MyLog(LOG_ERR,"WSAStartup failed: %d\n",WSARes);
+		myLog(LOG_ERR,"WSAStartup failed: %d",WSARes);
 		exit(WSARes);
 	}
     // open the sockets if not open already - one for v4 and another for v6
     if(sp->socket4 <= 0) {
       if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-		  MyLog(LOG_ERR,"socket error");
+		  myLog(LOG_ERR,"socket error");
     }
     if(sp->socket6 <= 0) {
       if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-		  MyLog(LOG_ERR,"socket error");
+		  myLog(LOG_ERR,"socket error");
     }
 
 	
     time(&now);
-    sf->agent = (SFLAgent *)calloc(1, sizeof(SFLAgent));
+    sf->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
     sfl_agent_init(sf->agent,
 		   &sf->agentIP,
 		   sf->subAgentId,
@@ -265,14 +253,14 @@ int InitService();
 	HSPCollector *coll;
 
     if(sf == NULL) return;
-    if(sf->sFlowSettings) free(sf->sFlowSettings);
+    if(sf->sFlowSettings) my_free(sf->sFlowSettings);
     if(sf->agent) sfl_agent_release(sf->agent);
     for(coll = sf->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
-      free(coll);
+      my_free(coll);
       coll = nextColl;
     }
-    free(sf);
+    my_free(sf);
   }
 
 
@@ -325,6 +313,12 @@ void ServiceMain(int argc, char** argv)
     ServiceStatus.dwCurrentState = SERVICE_RUNNING; 
     SetServiceStatus (hStatus, &ServiceStatus);
 
+    // look up host-id fields at startup only (hostname
+	// may change dynamically so will have to revisit this $$$)
+	sp.host_hid.hostname.str = (char *)my_calloc(SFL_MAX_HOSTNAME_CHARS+1);
+	sp.host_hid.os_release.str = (char *)my_calloc(SFL_MAX_OSRELEASE_CHARS+1);
+	readHidCounters(&sp, &sp.host_hid);
+
 	readInterfaces(&sp);
 	HSPReadConfig(&sp);
 	initAgent(&sp);
@@ -367,3 +361,6 @@ void ControlHandler(DWORD request)
     return; 
 } 
 
+#if defined(__cplusplus)
+} /* extern "C" */
+#endif
