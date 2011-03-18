@@ -25,6 +25,7 @@ extern "C" {
 #include <pdh.h>
 #include <pdhmsg.h>
 
+#include "util.h"
 #include "sflow_api.h"
 #include "loadAverage.h"
 
@@ -44,14 +45,7 @@ extern "C" {
 #define UNKNOWN_INT 0
 #define UNKNOWN_FLOAT -1
 
-#define LOG_EMERG 0
-#define LOG_ALERT 1
-#define LOG_CRIT 2
-#define LOG_ERR 3
-#define LOG_WARNING 4
-#define LOG_NOTICE 5
-#define LOG_INFO 6
-#define LOG_DEBUG 7
+
 
   // forward declarations
   struct _HSPSFlow;
@@ -89,13 +83,11 @@ extern "C" {
     // UDP send sockets
     int socket4;
     int socket6;
+	SFLHost_hid_counters host_hid;
   } HSP;
 
   // config parser
   int HSPReadConfig(HSP *sp);
-
-  // logger
-  void MyLog(int syslogType, char *fmt, ...);
 
   // read functions
   int readInterfaces(HSP *sp);
@@ -103,7 +95,7 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(SFLHost_dsk_counters *dsk);
   int readNioCounters(SFLHost_nio_counters *dsk);
-  int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
+  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid);
   int readSystemUUID(u_char *uuidbuf);
 
 #if defined(__cplusplus)

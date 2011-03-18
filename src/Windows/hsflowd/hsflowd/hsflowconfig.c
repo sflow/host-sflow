@@ -21,13 +21,13 @@ extern int debug;
     
 
   static HSPSFlowSettings *newSFlowSettings(HSPSFlow *sf) {
-    HSPSFlowSettings *st = (HSPSFlowSettings *)calloc(1, sizeof(HSPSFlowSettings));
+    HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     return st;
   }
 
   static HSPSFlow *newSFlow(HSP *sp) {
-    HSPSFlow *sf = (HSPSFlow *)calloc(1, sizeof(HSPSFlow));
+    HSPSFlow *sf = (HSPSFlow *)my_calloc(sizeof(HSPSFlow));
     sf->sFlowSettings = newSFlowSettings(sf);
     sf->subAgentId = 0;
     sp->sFlow = sf; // just one of these, not a list
@@ -36,7 +36,7 @@ extern int debug;
   }
 
   static HSPCollector *newCollector(HSPSFlow *sf) {
-    HSPCollector *col = (HSPCollector *)calloc(1, sizeof(HSPCollector));
+    HSPCollector *col = (HSPCollector *)my_calloc(sizeof(HSPCollector));
     ADD_TO_LIST(sf->collectors, col);
     sf->numCollectors++;
     col->udpPort = SFL_DEFAULT_COLLECTOR_PORT;
@@ -82,7 +82,7 @@ extern int debug;
 	sendSocketAddr->sin_family = AF_INET;
 	sendSocketAddr->sin_addr.s_addr = col->ipAddr.address.ip_v4.addr;
 	
-	MyLog(LOG_INFO,"collector: %s",collector_ip);
+	myLog(LOG_INFO,"collector: %s",collector_ip);
 
     return gotData;
   }

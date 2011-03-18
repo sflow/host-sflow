@@ -21,7 +21,7 @@ extern double load_1, load_5, load_15;
   int readCpuCounters(SFLHost_cpu_counters *cpu) {
     int gotData = NO;
 	uint32_t i = 0;
-	PPDH_RAW_COUNTER_ITEM thread = NULL, processor = NULL;
+	PPDH_RAW_COUNTER_ITEM thread = NULL;
 	DWORD dwRet,cbData = sizeof(DWORD);
 	HKEY hkey;
 
@@ -52,6 +52,7 @@ extern double load_1, load_5, load_15;
 			                     (LPBYTE) &cpu->cpu_speed,
 			                     &cbData );
 		if(dwRet != ERROR_SUCCESS) cpu->cpu_speed = -1;
+		RegCloseKey(hkey);
 	}
 
 	cpu->proc_total = readMultiCounter("\\Thread(*)\\Thread State",&thread);
@@ -62,6 +63,7 @@ extern double load_1, load_5, load_15;
 				cpu->proc_run++;
 			}
 		}
+		my_free(thread);
 	}
 
 	//These have no obvious Windows equivalent
@@ -69,7 +71,7 @@ extern double load_1, load_5, load_15;
 	cpu->cpu_nice = UNKNOWN_COUNTER;
 	cpu->cpu_wio = UNKNOWN_COUNTER;
 	
-	MyLog(LOG_INFO,
+	myLog(LOG_INFO,
 		"readCpuCounters:\n\tload_one:\t%f\n\tload_five:\t%f\n\tload_fifteen:\t%f\n"
 		"\tuptime:\t\t%lus\n\tcpu_num:\t%d\n"
 		"\tcpu speed:\t%d MHz\n\tuser: %lu\n\tsystem: %lu\n\tidle: %lu\n\tirq: %lu\n"
@@ -78,12 +80,6 @@ extern double load_1, load_5, load_15;
 		cpu->cpu_speed,cpu->cpu_user,cpu->cpu_system,
 		cpu->cpu_idle,cpu->cpu_intr,cpu->proc_total,cpu->proc_run);
 
-	if(thread){ 
-		free(thread);
-	}
-	if(processor){
-		free(processor);
-	}
 
 	gotData = YES;
 

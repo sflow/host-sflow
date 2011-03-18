@@ -18,11 +18,16 @@ void freeAdaptors(HSP *sp)
   uint32_t i;
 
   if(sp->adaptorList) {
+	  if(sp->adaptorList->adaptors) {
     for( i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      free(sp->adaptorList->adaptors[i]);
+      if(sp->adaptorList->adaptors[i]) my_free(sp->adaptorList->adaptors[i]);
     }
-    free(sp->adaptorList);
-    sp->adaptorList = NULL;
+	my_free(sp->adaptorList->adaptors);
+	  }
+    if(sp->adaptorList) {
+	  my_free(sp->adaptorList);
+	  sp->adaptorList = NULL;
+	}
   }
 }
 
@@ -35,9 +40,9 @@ void freeAdaptors(HSP *sp)
 void newAdaptorList(HSP *sp)
 {
   freeAdaptors(sp);
-  sp->adaptorList = (SFLAdaptorList *)malloc(sizeof(SFLAdaptorList));
+  sp->adaptorList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
   sp->adaptorList->capacity = 4; // will grow if necessary
-  sp->adaptorList->adaptors = (SFLAdaptor **)malloc(sp->adaptorList->capacity * sizeof(SFLAdaptor *));
+  sp->adaptorList->adaptors = (SFLAdaptor **)my_calloc(sp->adaptorList->capacity * sizeof(SFLAdaptor *));
   sp->adaptorList->num_adaptors = 0;
 }
 
@@ -78,42 +83,42 @@ int readInterfaces(HSP *sp)
 
   newAdaptorList(sp);
 
-  pAdapterInfo = (IP_ADAPTER_INFO *) malloc(sizeof (IP_ADAPTER_INFO));
+  pAdapterInfo = (IP_ADAPTER_INFO *) my_calloc(sizeof (IP_ADAPTER_INFO));
   if (pAdapterInfo == NULL) {
-      MyLog(LOG_ERR,"Error allocating memory needed to call GetAdaptersinfo\n");
+      myLog(LOG_ERR,"Error allocating memory needed to call GetAdaptersinfo\n");
       return 1;
   }
   if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
-        free(pAdapterInfo);
-        pAdapterInfo = (IP_ADAPTER_INFO *) malloc(ulOutBufLen);
+        my_free(pAdapterInfo);
+        pAdapterInfo = (IP_ADAPTER_INFO *) my_calloc(ulOutBufLen);
         if (pAdapterInfo == NULL) {
-            MyLog(LOG_ERR,"Error allocating memory needed to call GetAdaptersinfo\n");
+            myLog(LOG_ERR,"Error allocating memory needed to call GetAdaptersinfo\n");
             return 1;
         }
    }
   if ((dwRetVal = GetAdaptersInfo(pAdapterInfo, &ulOutBufLen)) == NO_ERROR) {
         pAdapter = pAdapterInfo;
 		while (pAdapter) {
-			adaptor = (SFLAdaptor *)calloc(1, sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
+			adaptor = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
 			memcpy(adaptor->macs[0].mac,pAdapter->Address,6);
 			adaptor->num_macs = 1;
-			adaptor->deviceName = _strdup(pAdapter->AdapterName);
+			adaptor->deviceName = my_strdup(pAdapter->AdapterName);
 			adaptor->ifIndex = pAdapter->Index;
 			adaptor->ipAddr.addr = inet_addr(pAdapter->IpAddressList.IpAddress.String);
 			sp->adaptorList->adaptors[sp->adaptorList->num_adaptors] = adaptor;
 			if(++sp->adaptorList->num_adaptors == sp->adaptorList->capacity)  {
 		  	// grow
 		  		sp->adaptorList->capacity *= 2;
-		  		sp->adaptorList->adaptors = (SFLAdaptor **)realloc(sp->adaptorList->adaptors,
+		  		sp->adaptorList->adaptors = (SFLAdaptor **)my_realloc(sp->adaptorList->adaptors,
 								     sp->adaptorList->capacity * sizeof(SFLAdaptor *));
 			}
-			MyLog(LOG_INFO,"AdapterInfo:\n\tAdapterName:\t%s\n\tDescription:\t%s\n",pAdapter->AdapterName,pAdapter->Description);
+			myLog(LOG_INFO,"AdapterInfo:\n\tAdapterName:\t%s\n\tDescription:\t%s\n",pAdapter->AdapterName,pAdapter->Description);
 			pAdapter = pAdapter->Next;
 		}
   }
   
 
-  if (pAdapterInfo) free(pAdapterInfo);
+  if (pAdapterInfo) my_free(pAdapterInfo);
   return sp->adaptorList->num_adaptors;
 }
 

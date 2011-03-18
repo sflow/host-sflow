@@ -15,6 +15,7 @@ typedef struct smbiosHeader
 	uint16_t handle;
 }smbiosHeader;
 
+
 //3.3.2
 typedef struct smbiosSystemInformation
 {
@@ -30,15 +31,15 @@ typedef struct smbiosSystemInformation
 }smbiosSystemInformation;
 
 //http://msdn.microsoft.com/en-us/library/ms724379(VS.85).aspx
-typedef struct RawSMBIOSData
-{
-    BYTE	Used20CallingMethod;
-    BYTE	SMBIOSMajorVersion;
-    BYTE	SMBIOSMinorVersion;
-    BYTE	DmiRevision;
-    DWORD	Length;
-	BYTE	SMBIOSTableData[];
-}RawSMBIOSData;
+//typedef struct RawSMBIOSData
+//{
+//    BYTE	Used20CallingMethod;
+//    BYTE	SMBIOSMajorVersion;
+//    BYTE	SMBIOSMinorVersion;
+//    BYTE	DmiRevision;
+//    DWORD	Length;
+//	BYTE	SMBIOSTableData[1];
+//}RawSMBIOSData;
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

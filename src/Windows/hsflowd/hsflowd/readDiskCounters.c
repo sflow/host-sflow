@@ -38,10 +38,10 @@ extern int debug;
 
 	len = GetLogicalDriveStrings(1024, szBuffer);
 	if(len == 0) {
-		if(debug) MyLog(LOG_ERR, "GetLogicalDriveStrings() failed: %d", GetLastError());
+		if(debug) myLog(LOG_ERR, "GetLogicalDriveStrings() failed: %d", GetLastError());
 	}
 	else if(len > HSF_MAX_DRIVESTRINGS_LEN) {
-		if(debug) MyLog(LOG_ERR, "GetLogicalDriveStrings() needs more buffer space (%u bytes)", len);
+		if(debug) myLog(LOG_ERR, "GetLogicalDriveStrings() needs more buffer space (%u bytes)", len);
 	}
 	else {
 		dsk->disk_total = 0;
@@ -66,7 +66,7 @@ extern int debug;
 			i += lstrlen(szBuffer + i) + 1;
 		}
 	}
-	MyLog(LOG_INFO,"readDiskCounters:\n\tdisk_total: %I64u\n\tdisk_free: %I64u\n\tpart_max_used: %.2f%%\n\treads:\t%lu\n\tread_time:\t%lu\n\tbytes_read:\t%lu\n\twrites:\t%lu\n\twrite_time:\t%lu\n\tbytes_written:\t%ul\n",
+	myLog(LOG_INFO,"readDiskCounters:\n\tdisk_total: %I64u\n\tdisk_free: %I64u\n\tpart_max_used: %.2f%%\n\treads:\t%lu\n\tread_time:\t%lu\n\tbytes_read:\t%lu\n\twrites:\t%lu\n\twrite_time:\t%lu\n\tbytes_written:\t%ul\n",
 	 dsk->disk_total,dsk->disk_free,(dsk->part_max_used / 100.0),dsk->reads,dsk->read_time,dsk->bytes_read,dsk->writes,dsk->write_time,dsk->bytes_written);
 
 	gotData = YES;

@@ -13,30 +13,34 @@ extern int debug;
     _________________     readHidCounters       __________________
     -----------------___________________________------------------
   */
-  
-int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen){
-    int gotData = NO;
+ 
+
+int readHidCounters(HSP *sp, SFLHost_hid_counters *hid){
 	DWORD dwRes;
 	OSVERSIONINFO osvi;
 	SYSTEM_INFO si;
+#define MAX_FDQN_CHARS 255
+	char dnsBuf[MAX_FDQN_CHARS+1];
+	DWORD dnsLen = MAX_FDQN_CHARS;
 
-	ZeroMemory(hbuf,hbufLen);
-	dwRes = GetComputerNameEx(ComputerNameDnsHostname,hbuf,&hbufLen);
-	if(dwRes){ 
-		hid->hostname.str = hbuf;
-		hid->hostname.len = hbufLen;
+	if(GetComputerNameEx(ComputerNameDnsHostname,dnsBuf,&dnsLen)) {
+		uint32_t copyLen = dnsLen < SFL_MAX_HOSTNAME_CHARS ? dnsLen :  SFL_MAX_HOSTNAME_CHARS;
+		memcpy(hid->hostname.str, dnsBuf, copyLen);
+		hid->hostname.str[copyLen] = '\0';
 	}
-	
+
 	hid->os_name = SFLOS_windows;
 
 	ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
     osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
 	dwRes = GetVersionEx(&osvi);
 	if(dwRes){
-		ZeroMemory(rbuf,rbufLen);
-		sprintf(rbuf,"%d.%d.%d %s",osvi.dwMajorVersion,osvi.dwMinorVersion,osvi.dwBuildNumber,osvi.szCSDVersion);
-		hid->os_release.str = rbuf;
-		hid->os_release.len = strlen(rbuf);
+      sprintf_s(hid->os_release.str,SFL_MAX_OSRELEASE_CHARS,"%d.%d.%d %s",
+			osvi.dwMajorVersion,
+			osvi.dwMinorVersion,
+			osvi.dwBuildNumber,
+			osvi.szCSDVersion);
+		hid->os_release.len = my_strlen(hid->os_release.str);
 	}
 
 	GetNativeSystemInfo(&si);
@@ -54,8 +58,8 @@ int readHidCounters(SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rb
 	}
 
 	dwRes = readSystemUUID(hid->uuid);
-	
-	MyLog(LOG_INFO,"readHidCounters:\n\thostname:\t%s\n\trelease:\t%s\n\tmachine_type:\t%d\n",hid->hostname.str,hid->os_release.str,hid->machine_type);
+
+	myLog(LOG_INFO,"readHidCounters:\n\thostname:\t%s\n\trelease:\t%s\n\tmachine_type:\t%d\n",hid->hostname.str,hid->os_release.str,hid->machine_type);
 
     return YES;
   }

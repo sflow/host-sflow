@@ -52,62 +52,62 @@ int readSystemUUID(u_char *uuidbuf){
 
 	hr =  CoInitializeEx(0, COINIT_MULTITHREADED);
 	if (! SUCCEEDED( hr ) ){
-		MyLog(LOG_ERR,"readSystemUUID: failed to initialize COM");
+		myLog(LOG_ERR,"readSystemUUID: failed to initialize COM");
 		gotData = NO;
 		goto Cleanup;
 	}
 	
 	hr =  CoInitializeSecurity(NULL,-1,NULL,NULL,RPC_C_AUTHN_LEVEL_DEFAULT,RPC_C_IMP_LEVEL_IMPERSONATE,NULL,EOAC_NONE,NULL);
-	hr = CoCreateInstance( &CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, &IID_IWbemLocator, (LPVOID *) &pLocator );
+	hr = CoCreateInstance( CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *) &pLocator );
 	if(! SUCCEEDED( hr ) ){
-		MyLog(LOG_ERR,"readSystemUUID: failed to create WMI instance");
+		myLog(LOG_ERR,"readSystemUUID: failed to create WMI instance");
 		gotData = NO;
 		goto Cleanup;
 	}
 
-	hr = pLocator->lpVtbl->ConnectServer(pLocator,path, NULL, NULL, NULL, 0, NULL, NULL, &pNamespace );
-	pLocator->lpVtbl->Release(pLocator);
+	hr = pLocator->ConnectServer(path, NULL, NULL, NULL, 0, NULL, NULL, &pNamespace );
+	pLocator->Release();
 	if( WBEM_S_NO_ERROR != hr ){
-		MyLog(LOG_ERR,"getSystemUUID: ConnectServer() failed for namespace");
+		myLog(LOG_ERR,"getSystemUUID: ConnectServer() failed for namespace");
 		gotData = NO;
 		goto Cleanup;
 	}
 
-	hr = pNamespace->lpVtbl->CreateInstanceEnum( pNamespace,className, 0, NULL, &pEnumSMBIOS );
-	pNamespace->lpVtbl->Release(pNamespace);
+	hr = pNamespace->CreateInstanceEnum(className, 0, NULL, &pEnumSMBIOS );
+	pNamespace->Release();
 	if (! SUCCEEDED( hr ) ){
-		MyLog(LOG_ERR,"getSystemUUID: CreateInstanceEnum() failed for MSSmBios_RawSMBiosTables");
+		myLog(LOG_ERR,"getSystemUUID: CreateInstanceEnum() failed for MSSmBios_RawSMBiosTables");
 		gotData = NO;
 		goto Cleanup;
 	}
 
-	hr = pEnumSMBIOS->lpVtbl->Next(pEnumSMBIOS, 4000, 1, &pSmbios, &uReturned );
-	pEnumSMBIOS->lpVtbl->Release(pEnumSMBIOS);
+	hr = pEnumSMBIOS->Next(4000, 1, &pSmbios, &uReturned );
+	pEnumSMBIOS->Release();
 	if ( 1 != uReturned ){
-		MyLog(LOG_ERR,"getSystemUUID: Next() failed for pEnumSMBIOS");
+		myLog(LOG_ERR,"getSystemUUID: Next() failed for pEnumSMBIOS");
 		gotData = NO;
 		goto Cleanup;
 	}
 	
-	pSmbios->lpVtbl->Get(pSmbios,propName,0L,&pVal,&type,NULL);
+	pSmbios->Get(propName,0L,&pVal,&type,NULL);
 	if ( ( VT_UI1 | VT_ARRAY) != pVal.vt){
-		MyLog(LOG_ERR,"getSystemUUID: Get() failed for pSmbios");
+		myLog(LOG_ERR,"getSystemUUID: Get() failed for pSmbios");
 	    gotData = NO;
 		goto Cleanup;
 	}
 
 	pArray = V_ARRAY(&pVal);
 	smbufSize = pArray->rgsabound[0].cElements;
-	smbiosData = (smbiosHeader*)malloc(smbufSize);
+	smbiosData = (smbiosHeader*)my_calloc(smbufSize);
 	if(!smbiosData){
-		MyLog(LOG_ERR,"getSystemUUID: failed to allocate buffer for smbiosData");
+		myLog(LOG_ERR,"getSystemUUID: failed to allocate buffer for smbiosData");
 		gotData = NO;
 		goto Cleanup;
 	}
 	memcpy((void*)smbiosData,pArray->pvData,smbufSize);
 	uuidPtr = (u_char*)getUUIDPtr(smbufSize,smbiosData);
 	if(!uuidPtr){
-		MyLog(LOG_ERR,"getSystemUUID: failed to find UUID in SMBIOS");
+		myLog(LOG_ERR,"getSystemUUID: failed to find UUID in SMBIOS");
 		gotData = NO;
 		goto Cleanup;
 	}
@@ -118,7 +118,7 @@ Cleanup:
 	SysFreeString(propName);
 	SysFreeString(className);
 	SysFreeString(path);
-	if(smbiosData) free(smbiosData);
+	if(smbiosData) my_free(smbiosData);
 
 	return gotData;
 }
