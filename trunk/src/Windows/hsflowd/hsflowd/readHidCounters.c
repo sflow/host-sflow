@@ -27,6 +27,7 @@ int readHidCounters(HSP *sp, SFLHost_hid_counters *hid){
 		uint32_t copyLen = dnsLen < SFL_MAX_HOSTNAME_CHARS ? dnsLen :  SFL_MAX_HOSTNAME_CHARS;
 		memcpy(hid->hostname.str, dnsBuf, copyLen);
 		hid->hostname.str[copyLen] = '\0';
+		hid->hostname.len = copyLen;
 	}
 
 	hid->os_name = SFLOS_windows;
