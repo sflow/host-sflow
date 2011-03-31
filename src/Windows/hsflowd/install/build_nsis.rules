@@ -7,7 +7,7 @@
 		<CustomBuildRule
 			Name="Build_NSIS"
 			DisplayName="Build NSIS"
-			CommandLine="makensis.exe /DBUILD_DIR=&quot;..\$(ConfigurationName)&quot; /DOUT_FILE=&quot;..\$(ConfigurationName)\Setup.exe&quot; /DPRODUCT_VERSION=1.12 [inputs]"
+			CommandLine="makensis.exe /DBUILD_DIR=&quot;..\$(ConfigurationName)&quot; /DOUT_FILE=&quot;..\$(ConfigurationName)\Setup.exe&quot; /DPRODUCT_VERSION=1.13 [inputs]"
 			Outputs="$(InputName).exe"
 			FileExtensions="*.nsi"
 			ExecutionDescription="Building NSIS"
