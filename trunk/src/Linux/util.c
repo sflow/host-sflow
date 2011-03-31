@@ -156,7 +156,7 @@ extern "C" {
       else {
 	// reference count reached zero, so it's time to free this buffer for real
 	// read the queue index before we overwrite it
-	uint8_t queueIdx = utBuf->h.queueIdx;
+	uint16_t queueIdx = utBuf->h.queueIdx;
 	memset(utBuf, 0, 1 << queueIdx);
 	// put it back on the queue
 	utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
@@ -216,7 +216,7 @@ extern "C" {
   {
     if(str == NULL) return NULL;
     uint32_t len = my_strlen(str);
-    char *newStr = my_calloc(len+1);
+    char *newStr = (char *)my_calloc(len+1);
     memcpy(newStr, str, len);
     return newStr;
   }
