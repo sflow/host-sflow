@@ -1144,8 +1144,8 @@ extern "C" {
  #ifdef HSF_ULOG
     if(sp->sFlow->sFlowSettings_file->ulogGroup != 0 ||
        sp->sFlow->sFlowSettings_file->ulogSamplingRate != 0) {
-      // ulog group and ulog sampling probability are both defined, so
-      // open the netfilter socket to ULOG while we are still root
+      // some ulog settings are defined, so open the netfilter
+      // socket to ULOG while we are still root
       openULOG(sp);
     }
 #endif
@@ -1303,8 +1303,27 @@ extern "C" {
   
   static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
+    if(settings && sf->sFlowSettings_file) {
+      // calculate the ULOG sub-sampling rate to use.  We may get the local ULOG sampling-rate
+      // from the config file and the desired sampling rate from DNS-SD,  so that's why
+      // we have to reconcile the two here.
+      uint32_t ulogsr = sf->sFlowSettings_file->ulogSamplingRate;
+      if(ulogsr == 0) {
+	// assume we have to do all sampling in user-space
+	settings->ulogSubSamplingRate = settings->ulogActualSamplingRate = settings->samplingRate;
+      }
+      else {
+	// use an integer divide to get the sub-sampling rate, but make sure we round up
+	settings->ulogSubSamplingRate = (settings->samplingRate + ulogsr - 1) / ulogsr;
+	// and pre-calculate the actual sampling rate that we will end up applying
+	settings->ulogActualSamplingRate = settings->ulogSubSamplingRate * ulogsr;
+      }
+    }
+    
     sf->sFlowSettings = settings;
     sf->revisionNo++;
+
+    
   }
 
   /*_________________---------------------------__________________
@@ -1404,8 +1423,7 @@ extern "C" {
 	// Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
 	// maybe we are supposed to fork the DNSSD thread before dropping privileges?
 	sf->sFlowSettings_dnsSD = newSFlowSettings();
-	// pick up default polling interval from config file
-	sf->sFlowSettings_dnsSD->pollingInterval = sf->sFlowSettings_file->pollingInterval;
+
 	// we want the min ttl, so clear it here
 	sp->DNSSD_ttl = 0;
 	// now make the requests

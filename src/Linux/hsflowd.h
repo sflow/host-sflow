@@ -126,6 +126,8 @@ extern "C" {
 #define HSP_DEFAULT_ULOG_GROUP 1
     double ulogProbability;
     uint32_t ulogSamplingRate;
+    uint32_t ulogSubSamplingRate;
+    uint32_t ulogActualSamplingRate;
   } HSPSFlowSettings;
 
   typedef struct _HSPSFlow {
