@@ -655,8 +655,6 @@ signal_handler(int sig, siginfo_t *info, void *secret)
 	// Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
 	// maybe we are supposed to fork the DNSSD thread before dropping privileges?
 	sf->sFlowSettings_dnsSD = newSFlowSettings();
-	// pick up default polling interval from config file
-	sf->sFlowSettings_dnsSD->pollingInterval = sf->sFlowSettings_file->pollingInterval;
 	// we want the min ttl, so clear it here
 	sp->DNSSD_ttl = 0;
 	// now make the requests
