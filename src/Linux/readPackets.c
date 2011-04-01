@@ -78,7 +78,7 @@ extern "C" {
       SFL_DS_SET(dsi, 0, ifIndex, 0); // ds_class,ds_index,ds_instance
       HSPSFlow *sf = sp->sFlow;
       // add sampler (with sub-sampling rate), and poller too
-      uint32_t samplingRate = sf->sFlowSettings_file->ulogSubSamplingRate;
+      uint32_t samplingRate = sf->sFlowSettings->ulogSubSamplingRate;
       uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
       sampler = sfl_agent_addSampler(sf->agent, &dsi);
       sfl_sampler_set_sFlowFsPacketSamplingRate(sampler, samplingRate);
@@ -103,7 +103,10 @@ extern "C" {
   {
     int batch = 0;
     static uint32_t MySkipCount=1;
-
+    if(sp->sFlow->sFlowSettings->ulogSubSamplingRate == 0) {
+      // packet sampling was disabled by setting desired rate to 0
+      return 0;
+    }
     if(sp->ulog_soc) {
       for( ; batch < HSP_READPACKET_BATCH; batch++) {
 	char buf[HSP_MAX_MSG_BYTES];
