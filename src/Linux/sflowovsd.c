@@ -574,11 +574,16 @@ extern "C" {
   int readVersion(void *magic, char *line)
   {
     SFVS *sv = (SFVS *)magic;
-    char *ver = stripQuotes(line, SFVS_QUOTES);
     // the compulsory use of --id==@tok appeared between 1.0 and 1.1.0pre1
-    // so use it if we see a version number >= 1.1
-    sv->useAtVar = (memcmp(ver, "1.1", 3) >= 0);
-    return YES;
+    // but before that it was not supported at all.  The format of this
+    // version string may change at any time,  so the safest way to test
+    // this is to assume that we can use --id==@tok unless we see a very
+    // specific version string:
+    if(memcmp(line, "ovs-vsctl (Open vSwitch) 1.0", 28) == 0) {
+      if(debug) myLog(LOG_INFO, "detected ovs-vsctl version 1.0 - turning off use if --id=@tok");
+      sv->useAtVar = NO;
+    }
+    return NO; // only want the first line
   }
   
   /*_________________---------------------------__________________
@@ -594,8 +599,12 @@ extern "C" {
 
     if(debug) myLog(LOG_INFO, "==== ovs-vsctl version ====");
     char *version_cmd[] = { SFVS_OVS_CMD, "--version", NULL};
-    if(myExec((void *)sv, version_cmd, readVersion, line, SFVS_MAX_LINELEN) == NO) return NO;
-
+    // don't abort if this fails: readVersion returns NO as an easy way
+    // to only see the first line. (Line number should really be supplied to
+    // callback from myExec)
+    sv->useAtVar = YES; // assume newer version
+    myExec((void *)sv, version_cmd, readVersion, line, SFVS_MAX_LINELEN);
+    
     if(sv->config.error
        || sv->config.num_collectors == 0
        || (sv->config.sampling_n == 0 && sv->config.polling_secs == 0)) {
