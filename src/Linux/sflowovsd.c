@@ -580,7 +580,7 @@ extern "C" {
     // this is to assume that we can use --id==@tok unless we see a very
     // specific version string:
     if(memcmp(line, "ovs-vsctl (Open vSwitch) 1.0", 28) == 0) {
-      if(debug) myLog(LOG_INFO, "detected ovs-vsctl version 1.0 - turning off use if --id=@tok");
+      if(debug) myLog(LOG_INFO, "detected ovs-vsctl version 1.0 - turning off use of --id=@tok");
       sv->useAtVar = NO;
     }
     return NO; // only want the first line
