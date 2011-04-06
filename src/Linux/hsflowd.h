@@ -124,16 +124,12 @@ extern "C" {
     HSPCollector *collectors;
     uint32_t numCollectors;
     uint32_t samplingRate;
-    uint32_t samplingRate_http;
-    uint32_t samplingRate_memcache;
     uint32_t pollingInterval;
-    uint32_t pollingInterval_http;
-    uint32_t pollingInterval_memcache;
     uint32_t headerBytes;
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
-#define HSP_DEFAULT_ULOG_GROUP 1
+#define HSP_DEFAULT_ULOG_GROUP 0
     double ulogProbability;
     uint32_t ulogSamplingRate;
     uint32_t ulogSubSamplingRate;
@@ -284,14 +280,13 @@ extern "C" {
 
   // expose some config parser fns
   int HSPReadConfigFile(HSP *sp);
-  int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
-  int printUUID(const u_char *a, u_char *buf, int bufLen);
-  int parseUUID(char *str, char *uuid);
   HSPSFlowSettings *newSFlowSettings(void);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
-  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
-  
+  void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
+  void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
+  void clearApplicationSettings(HSPSFlowSettings *settings);
+    
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"
 #define HSP_MAX_DNS_LEN 255

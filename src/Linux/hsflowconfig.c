@@ -234,11 +234,7 @@ extern int debug;
   HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
-    st->samplingRate_http = HSP_SETTING_UNDEFINED;
-    st->samplingRate_memcache = HSP_SETTING_UNDEFINED;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
-    st->pollingInterval_http = HSP_SETTING_UNDEFINED;
-    st->pollingInterval_memcache = HSP_SETTING_UNDEFINED;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
     return st;
@@ -273,6 +269,64 @@ extern int debug;
       }
     }
     return token;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   getApplicationSettings  __________________
+    -----------------___________________________------------------
+  */
+  
+  static HSPApplicationSettings *getApplicationSettings(HSPSFlowSettings *settings, char *app, int create)
+  {
+    HSPApplicationSettings *appSettings = settings->applicationSettings;
+    for(; appSettings; appSettings = appSettings->nxt) if(my_strequal(app, appSettings->application)) break;
+    if(appSettings == NULL && create) {
+      appSettings = (HSPApplicationSettings *)my_calloc(sizeof(HSPApplicationSettings));
+      appSettings->application = my_strdup(app);
+      appSettings->nxt = settings->applicationSettings;
+      settings->applicationSettings = appSettings;
+    }
+    return appSettings;
+  }
+
+  /*_________________----------------------------__________________
+    _________________   clearApplicationSettings __________________
+    -----------------____________________________------------------
+  */
+  
+  void clearApplicationSettings(HSPSFlowSettings *settings)
+  {
+    for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; ) {
+      HSPApplicationSettings *nextAppSettings = appSettings->nxt;
+      my_free(appSettings->application);
+      my_free(appSettings);
+      appSettings = nextAppSettings;
+    }
+  }
+
+
+  /*_________________----------------------------__________________
+    _________________   setApplicationSampling   __________________
+    -----------------____________________________------------------
+  */
+  
+  void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n)
+  {
+    HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
+    appSettings->sampling_n = n;
+    appSettings->got_sampling_n = YES;
+  }
+
+  /*_________________----------------------------__________________
+    _________________   setApplicationPolling    __________________
+    -----------------____________________________------------------
+  */
+  
+  void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs)
+  {
+    HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
+    appSettings->polling_secs = secs;
+    appSettings->got_polling_secs = YES;
   }
 
   /*_________________---------------------------__________________
@@ -400,21 +454,9 @@ extern int debug;
 	case HSPTOKEN_PACKETSAMPLINGRATE:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
 	  break;
-	case HSPTOKEN_SAMPLING_HTTP:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate_http, 0, 65535)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_SAMPLING_MEMCACHE:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate_memcache, 0, 65535)) == NULL) return NO;
-	  break;
 	case HSPTOKEN_POLLING:
 	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
 	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_POLLING_HTTP:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval_http, 0, 300)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_POLLING_MEMCACHE:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval_memcache, 0, 300)) == NULL) return NO;
 	  break;
 	case HSPTOKEN_AGENTIP:
 	  if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
@@ -438,8 +480,23 @@ extern int debug;
 	  if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
 	  break;
 	default:
-	  parseError(sp, tok, "unexpected sFlow setting", "");
-	  return NO;
+	  // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
+	  if(tok->str && strncasecmp(tok->str, "sampling.", 9) == 0) {
+	    char *app = tok->str + 9;
+	    uint32_t sampling_n=0;
+	    if((tok = expectInteger32(sp, tok, &sampling_n, 0, 65535)) == NULL) return NO;
+	    setApplicationSampling(sp->sFlow->sFlowSettings_file, app, sampling_n);
+	  }
+	  else if(tok->str && strncasecmp(tok->str, "polling.", 8) == 0) {
+	    char *app = tok->str + 8;
+	    uint32_t polling_secs=0;
+	    if((tok = expectInteger32(sp, tok, &polling_secs, 0, 300)) == NULL) return NO;
+	    setApplicationPolling(sp->sFlow->sFlowSettings_file, app, polling_secs);
+	  }
+	  else {
+	    parseError(sp, tok, "unexpected sFlow setting", "");
+	    return NO;
+	  }
 	  break;
 	}
 	break;
