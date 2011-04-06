@@ -956,7 +956,7 @@ extern "C" {
       if(settings->samplingRate_memcache != HSP_SETTING_UNDEFINED) {
 	fprintf(sp->f_out, "sampling.memcache=%u\n", settings->samplingRate_memcache);
       }
-      fprintf(sp->f_out, "header=" STRINGIFY(SFL_DEFAULT_HEADER_SIZE) "\n");
+      fprintf(sp->f_out, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
       fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
       if(settings->pollingInterval_http != HSP_SETTING_UNDEFINED) {
 	fprintf(sp->f_out, "polling.http=%u\n", settings->pollingInterval_http);

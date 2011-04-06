@@ -637,6 +637,7 @@ extern "C" {
       while(fgets(line, lineLen, ovs)) {
 	if(debug > 1) myLog(LOG_INFO, "myExec input> <%s>", line);
 	if((*lineCB)(magic, line) == NO) {
+	  if(debug > 1) myLog(LOG_INFO, "myExec callback returned NO");
 	  ans = NO;
 	  break;
 	}
