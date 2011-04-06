@@ -659,6 +659,7 @@ extern "C" {
     }
 
     // if we decided to make any changes, submit them now
+    sv->cmdFailed = NO;
     if(strArrayN(sv->cmd) > 1) {
       logCmd(sv);
       strArrayAdd(sv->cmd, NULL); // for execve(2)
