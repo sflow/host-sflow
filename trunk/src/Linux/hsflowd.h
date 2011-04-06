@@ -111,6 +111,15 @@ extern "C" {
 
 #define HSP_SETTING_UNDEFINED -1
 
+  typedef struct _HSPApplicationSettings {
+    struct _HSPApplicationSettings *nxt;
+    char *application;
+    int got_sampling_n;
+    uint32_t sampling_n;
+    int got_polling_secs;
+    uint32_t polling_secs;
+  } HSPApplicationSettings;
+
   typedef struct _HSPSFlowSettings {
     HSPCollector *collectors;
     uint32_t numCollectors;
@@ -122,6 +131,7 @@ extern "C" {
     uint32_t pollingInterval_memcache;
     uint32_t headerBytes;
 #define HSP_MAX_HEADER_BYTES 256
+    HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
 #define HSP_DEFAULT_ULOG_GROUP 1
     double ulogProbability;

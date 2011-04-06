@@ -956,13 +956,17 @@ extern "C" {
       if(settings->samplingRate_memcache != HSP_SETTING_UNDEFINED) {
 	fprintf(sp->f_out, "sampling.memcache=%u\n", settings->samplingRate_memcache);
       }
-      fprintf(sp->f_out, "header=128\n");
+      fprintf(sp->f_out, "header=" STRINGIFY(SFL_DEFAULT_HEADER_SIZE) "\n");
       fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
       if(settings->pollingInterval_http != HSP_SETTING_UNDEFINED) {
 	fprintf(sp->f_out, "polling.http=%u\n", settings->pollingInterval_http);
       }
       if(settings->pollingInterval_memcache != HSP_SETTING_UNDEFINED) {
 	fprintf(sp->f_out, "polling.memcache=%u\n", settings->pollingInterval_memcache);
+      }
+      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+	if(appSettings->got_sampling_n) fprintf(sp->f_out, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	if(appSettings->got_polling_secs) fprintf(sp->f_out, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
       }
       char ipbuf[51];
       fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
@@ -1327,6 +1331,64 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________   getApplicationSettings  __________________
+    -----------------___________________________------------------
+  */
+  
+  static HSPApplicationSettings *getApplicationSettings(HSPSFlowSettings *settings, char *app, int create)
+  {
+    HSPApplicationSettings *appSettings = settings->applicationSettings;
+    for(; appSettings; appSettings = appSettings->nxt) if(my_strequal(app, appSettings->application)) break;
+    if(appSettings == NULL && create) {
+      appSettings = (HSPApplicationSettings *)my_calloc(sizeof(HSPApplicationSettings));
+      appSettings->application = my_strdup(app);
+      appSettings->nxt = settings->applicationSettings;
+      settings->applicationSettings = appSettings;
+    }
+    return appSettings;
+  }
+
+  /*_________________----------------------------__________________
+    _________________   clearApplicationSettings __________________
+    -----------------____________________________------------------
+  */
+  
+  static void clearApplicationSettings(HSPSFlowSettings *settings)
+  {
+    for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; ) {
+      HSPApplicationSettings *nextAppSettings = appSettings->nxt;
+      my_free(appSettings->application);
+      my_free(appSettings);
+      appSettings = nextAppSettings;
+    }
+  }
+
+
+  /*_________________----------------------------__________________
+    _________________   setApplicationSampling   __________________
+    -----------------____________________________------------------
+  */
+  
+  static void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n)
+  {
+    HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
+    appSettings->sampling_n = n;
+    appSettings->got_sampling_n = YES;
+  }
+
+  /*_________________----------------------------__________________
+    _________________   setApplicationPolling    __________________
+    -----------------____________________________------------------
+  */
+  
+  static void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs)
+  {
+    HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
+    appSettings->polling_secs = secs;
+    appSettings->got_polling_secs = YES;
+  }
+
+  /*_________________---------------------------__________________
     _________________        runDNSSD           __________________
     -----------------___________________________------------------
   */
@@ -1356,46 +1418,62 @@ extern "C" {
       myLog(LOG_INFO, "dnsSD: (rtype=%u,ttl=%u) <%s>=<%s>", rtype, ttl, keyBuf, valBuf);
     }
 
-    if(key == NULL && val && valLen > 3) {
-      uint32_t delim = strcspn(valBuf, "/");
-      if(delim > 0 && delim < valLen) {
-	valBuf[delim] = '\0';
-	HSPCollector *coll = newCollector(st);
-	if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
-	  myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but forward lookup failed");
-	  // turn off the collector by clearing the address type
-	  coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
-	}
-	coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
-	if(coll->udpPort < 1 || coll->udpPort > 65535) {
-	  myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but bad port: %d", coll->udpPort);
-	  // turn off the collector by clearing the address type
-	  coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+    if(key == NULL) {
+      // no key => SRV response.  We always ask for SRV first,  then TXT, so we can take
+      // this opportunity to clear out the TXT state from last time
+      clearApplicationSettings(st);
+
+      // now see if we got a collector
+      if(val && valLen > 3) {
+	uint32_t delim = strcspn(valBuf, "/");
+	if(delim > 0 && delim < valLen) {
+	  valBuf[delim] = '\0';
+	  HSPCollector *coll = newCollector(st);
+	  if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
+	    myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but forward lookup failed");
+	    // turn off the collector by clearing the address type
+	    coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	  }
+	  coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
+	  if(coll->udpPort < 1 || coll->udpPort > 65535) {
+	    myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but bad port: %d", coll->udpPort);
+	    // turn off the collector by clearing the address type
+	    coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	  }
 	}
       }
     }
-    else if(strcmp(keyBuf, "sampling") == 0) {
-      st->samplingRate = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "sampling.http") == 0) {
-      st->samplingRate_http = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "sampling.memcache") == 0) {
-      st->samplingRate_memcache = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "txtvers") == 0) {
-    }
-    else if(strcmp(keyBuf, "polling") == 0) {
-      st->pollingInterval = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "polling.http") == 0) {
-      st->pollingInterval_http = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "polling.memcache") == 0) {
-      st->pollingInterval_memcache = strtol(valBuf, NULL, 0);
-    }
     else {
-      myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
+      // we have a key, so this is a TXT record line
+      if(strcmp(keyBuf, "sampling") == 0) {
+	st->samplingRate = strtol(valBuf, NULL, 0);
+      }
+      else if(strcmp(keyBuf, "sampling.http") == 0) {
+	st->samplingRate_http = strtol(valBuf, NULL, 0);
+      }
+      else if(strcmp(keyBuf, "sampling.memcache") == 0) {
+	st->samplingRate_memcache = strtol(valBuf, NULL, 0);
+      }
+      else if(my_strnequal(keyBuf, "sampling.", 9)) {
+	setApplicationSampling(st, keyBuf+9, strtol(valBuf, NULL, 0));
+      }
+      else if(strcmp(keyBuf, "txtvers") == 0) {
+      }
+      else if(strcmp(keyBuf, "polling") == 0) {
+	st->pollingInterval = strtol(valBuf, NULL, 0);
+      }
+      else if(strcmp(keyBuf, "polling.http") == 0) {
+	st->pollingInterval_http = strtol(valBuf, NULL, 0);
+      }
+      else if(strcmp(keyBuf, "polling.memcache") == 0) {
+	st->pollingInterval_memcache = strtol(valBuf, NULL, 0);
+      }
+      else if(my_strnequal(keyBuf, "polling.", 8)) {
+	setApplicationPolling(st, keyBuf+8, strtol(valBuf, NULL, 0));
+      }
+      else {
+	myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
+      }
     }
   }
 

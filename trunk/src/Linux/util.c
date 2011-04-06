@@ -220,6 +220,19 @@ extern "C" {
     memcpy(newStr, str, len);
     return newStr;
   }
+   
+  int my_strnequal(char *s1, char *s2, uint32_t max) {
+    if(s1 == s2) return YES;
+    if(s1 == NULL || s2 == NULL) return NO;
+    uint32_t len1 = my_strnlen(s1, max);
+    uint32_t len2 = my_strnlen(s2, max);
+    if(len1 != len2) return NO;
+    return (memcmp(s1, s2, len1) == 0);
+  }
+   
+  int my_strequal(char *s1, char *s2) {
+    return my_strnequal(s1, s2, UT_DEFAULT_MAX_STRLEN);
+  }
     
   /*_________________---------------------------__________________
     _________________     setStr                __________________

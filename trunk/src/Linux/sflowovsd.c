@@ -406,9 +406,9 @@ extern "C" {
 
   static void addCreateSFlow(SFVS *sv) {
     addOvsArg(sv, "--");
-#ifdef USEATVAR
-    addOvsArg(sv, "--id=" SFVS_NEW_SFLOW_ID);
-#endif
+    if(sv->useAtVar) {
+      addOvsArg(sv, "--id=" SFVS_NEW_SFLOW_ID);
+    }
     addOvsArg(sv, "create");
     addOvsArg(sv, "sflow");
     addOvsVarEqVal(sv, "agent", sv->config.agent_dev);
@@ -549,9 +549,6 @@ extern "C" {
     return YES;
   }
 
-#ifdef USEATVAR
-  // no need for this - do it all in submit changes
-#else
   int submitCreate(void *magic, char *line)
   {
     SFVS *sv = (SFVS *)magic;
@@ -562,7 +559,6 @@ extern "C" {
     }
     return YES;
   }
-#endif
 
   int submitChanges(void *magic, char *line)
   {
@@ -574,7 +570,17 @@ extern "C" {
     sv->cmdFailed = YES;
     return YES;
   }
-    
+
+  int readVersion(void *magic, char *line)
+  {
+    SFVS *sv = (SFVS *)magic;
+    char *ver = stripQuotes(line, SFVS_QUOTES);
+    // the compulsory use of --id==@tok appeared between 1.0 and 1.1.0pre1
+    // so use it if we see a version number >= 1.1
+    sv->useAtVar = (memcmp(ver, "1.1", 3) >= 0);
+    return YES;
+  }
+  
   /*_________________---------------------------__________________
     _________________        syncOVS            __________________
     -----------------___________________________------------------
@@ -585,6 +591,10 @@ extern "C" {
     resetCmd(sv);
     resetExtras(sv);
     char line[SFVS_MAX_LINELEN];
+
+    if(debug) myLog(LOG_INFO, "==== ovs-vsctl version ====");
+    char *version_cmd[] = { SFVS_OVS_CMD, "--version", NULL};
+    if(myExec((void *)sv, version_cmd, readVersion, line, SFVS_MAX_LINELEN) == NO) return NO;
 
     if(sv->config.error
        || sv->config.num_collectors == 0
@@ -604,20 +614,21 @@ extern "C" {
     char *list_sflow_cmd[] = { SFVS_OVS_CMD, "list", "sflow", NULL };
     if(myExec((void *)sv, list_sflow_cmd, sFlowList, line, SFVS_MAX_LINELEN) == NO) return NO;
 
-#ifdef USEATVAR
-    // we can add the create at the end
-#else
-    // create new sFlow object if there were none found (i.e. if
-    // the sflowUUID has not changed from the initial setting we
-    // gave it.
-    if(strcmp(SFVS_NEW_SFLOW_ID, sv->sflowUUID) == 0) {
-      addCreateSFlow(sv);
-      logCmd(sv);
-      strArrayAdd(sv->cmd, NULL); // for execve(2)
-      if(myExec((void *)sv, strArray(sv->cmd), submitCreate, line, SFVS_MAX_LINELEN) == NO) return NO;
-      resetCmd(sv);
+    if(sv->useAtVar) {
+      // we can add the create at the end
     }
-#endif
+    else {
+      // create new sFlow object if there were none found (i.e. if
+      // the sflowUUID has not changed from the initial setting we
+      // gave it.
+      if(strcmp(SFVS_NEW_SFLOW_ID, sv->sflowUUID) == 0) {
+	addCreateSFlow(sv);
+	logCmd(sv);
+	strArrayAdd(sv->cmd, NULL); // for execve(2)
+	if(myExec((void *)sv, strArray(sv->cmd), submitCreate, line, SFVS_MAX_LINELEN) == NO) return NO;
+	resetCmd(sv);
+      }
+    }
 
     // make sure every bridge is using this sFlow entry
     if(debug) myLog(LOG_INFO, "==== list bridge ====");
@@ -629,14 +640,14 @@ extern "C" {
       addDestroySFlow(sv, strArrayAt(sv->extras, ex));
     }
 
-#ifdef USEATVAR
-    // create new sFlow object if there were none found (i.e. if
-    // the sflowUUID has not changed from the initial setting we
-    // gave it.
-    if(strcmp(SFVS_NEW_SFLOW_ID, sv->sflowUUID) == 0) {
-      addCreateSFlow(sv);
+    if(sv->useAtVar) {
+      // create new sFlow object if there were none found (i.e. if
+      // the sflowUUID has not changed from the initial setting we
+      // gave it.
+      if(strcmp(SFVS_NEW_SFLOW_ID, sv->sflowUUID) == 0) {
+	addCreateSFlow(sv);
+      }
     }
-#endif
 
     // if we decided to make any changes, submit them now
     if(strArrayN(sv->cmd) > 1) {
