@@ -76,6 +76,8 @@ extern "C" {
   uint32_t my_strnlen(const char *s, uint32_t max);
   uint32_t my_strlen(const char *s);
   char *my_strdup(char *str);
+  int my_strnequal(char *s1, char *s2, uint32_t max);
+  int my_strequal(char *s1, char *s2);
 
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {
