@@ -563,10 +563,13 @@ extern "C" {
   int submitChanges(void *magic, char *line)
   {
     SFVS *sv = (SFVS *)magic;
-    myLog(LOG_ERR, "sumbitChanges: %s", line);
-    // if we get anything at all here, then it must mean something didn't work - but
+    myLog(LOG_INFO, "sumbitChanges: %s", line);
+    // if we get anything at all here, then it probably means something didn't work - but
     // return YES anway so we can log the whole error message if it spans multiple
-    // lines.
+    // lines.  Note that with the --id=@tok settings we do now see the UUID of the newly
+    // created sFlow object here.  Hence the change from LOG_ERR to LOG_INFO. It would
+    // be a little awkward to change myExec to separate stdout and stderr, so this is the
+    // best we can do without making bigger changes.
     sv->cmdFailed = YES;
     return YES;
   }
