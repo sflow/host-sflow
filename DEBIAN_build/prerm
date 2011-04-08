@@ -1,0 +1,2 @@
+update-rc.d hsflowd remove
+update-rc.d sflowovsd remove
