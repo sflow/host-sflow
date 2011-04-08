@@ -45,6 +45,18 @@ rpm:
 	tar cz -C $(RPM_SOURCES_DIR) -f $$MYSRCDIR.tar.gz $(PROG)-$$MYVER; \
 	rpmbuild -ba $(PROG).spec
 
+deb: $(PROG)
+	PLATFORM=`uname`; \
+	MYARCH=`uname -m`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+        mkdir -p DEBIAN/usr/sbin; \
+	mkdir -p DEBIAN/etc/init.d; \
+	install -m 700 src/Linux/hsflowd src/Linux/sflowovsd DEBIAN/usr/sbin; \
+	install -m 700 src/Linux/scripts/hsflowd src/Linux/scripts/sflowovsd DEBIAN/etc/init.d; \
+	install -m 644 src/Linux/scripts/hsflowd.conf DEBIAN/etc; \
+	dpkg -b . hsflowd_$${MYVER}-$${MYREL}_$$MYARCH.deb
+
 xenserver: rpm
 	cd xenserver-ddk; $(MAKE) clean; $(MAKE)
 

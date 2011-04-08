@@ -1,0 +1,9 @@
+Package: hsflowd
+Version: 1.15
+Section: web 
+Priority: optional
+Architecture: all
+Essential: no
+Installed-Size: 1024
+Maintainer: Neil McKee [neil.mckee@inmon.com]
+Description: sFlow(R) monitoring agent
