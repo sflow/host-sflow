@@ -50,12 +50,20 @@ deb: $(PROG)
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
-        mkdir -p DEBIAN/usr/sbin; \
-	mkdir -p DEBIAN/etc/init.d; \
-	install -m 700 src/Linux/hsflowd src/Linux/sflowovsd DEBIAN/usr/sbin; \
-	install -m 700 src/Linux/scripts/hsflowd src/Linux/scripts/sflowovsd DEBIAN/etc/init.d; \
-	install -m 644 src/Linux/scripts/hsflowd.conf DEBIAN/etc; \
-	dpkg -b . hsflowd_$${MYVER}-$${MYREL}_$$MYARCH.deb
+	mkdir -p debian/DEBIAN; \
+        mkdir -p debian/usr/sbin; \
+	mkdir -p debian/etc/init.d; \
+	install DEBIAN_build/control debian/DEBIAN; \
+	sed -i -e s/_PACKAGE_/$(PROG)/g debian/DEBIAN/control; \
+	sed -i -e s/_VERSION_/$${MYVER}-$${MYREL}/g debian/DEBIAN/control; \
+	chmod 644 debian/DEBIAN/control; \
+	install -m 555 DEBIAN_build/postinst debian/DEBIAN; \
+	install -m 555 DEBIAN_build/prerm debian/DEBIAN; \
+	install -m 700 src/Linux/hsflowd src/Linux/sflowovsd debian/usr/sbin; \
+	install -m 700 src/Linux/scripts/hsflowd src/Linux/scripts/sflowovsd debian/etc/init.d; \
+	install -m 644 src/Linux/scripts/hsflowd.conf debian/etc; \
+	find ./debian -type d | xargs chmod 755; \
+	dpkg-deb --build debian hsflowd_$${MYVER}-$${MYREL}_$$MYARCH.deb
 
 xenserver: rpm
 	cd xenserver-ddk; $(MAKE) clean; $(MAKE)
