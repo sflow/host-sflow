@@ -176,6 +176,10 @@ case "$1" in
 	;;
 
      restart)
+	$0 stop
+	$0 start
+	;;
+
 force-reload)
 	$0 stop
 	$0 start
