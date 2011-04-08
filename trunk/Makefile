@@ -62,7 +62,10 @@ deb: $(PROG)
 	install -m 700 src/Linux/hsflowd src/Linux/sflowovsd debian/usr/sbin; \
 	install -m 700 src/Linux/scripts/hsflowd src/Linux/scripts/sflowovsd debian/etc/init.d; \
 	install -m 644 src/Linux/scripts/hsflowd.conf debian/etc; \
-	find ./debian -type d | xargs chmod 755; \
+        pushd debian; \
+	find . -type d | xargs chmod 755; \
+        md5sum `find usr etc -type f` > DEBIAN/md5sums; \
+        popd; \
 	dpkg-deb --build debian hsflowd_$${MYVER}-$${MYREL}_$$MYARCH.deb
 
 xenserver: rpm
