@@ -7,6 +7,16 @@
 # processname: hsflowd
 # pidfile: /var/run/hsflowd.pid
 
+### BEGIN INIT INFO
+# Provides:          hsflowd
+# Required-Start:    $syslog $network $named
+# Required-Stop:     $syslog
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Short-Description: Host sFlow Daemon
+# Description:       Host sFlow Daemon
+### END INIT INFO
+
 EXECPREFIX=/usr/sbin
 
 inm_running() {
@@ -149,25 +159,29 @@ inm_kill() {
 
 # See how we were called.
 case "$1" in
-    start)
+       start)
 	echo -n "hsflowd start: "
 	inm_daemon hsflowd && echo "OK" || echo "FAILED"
 	;;
-   stop)
+
+        stop)
 	echo -n "hsflowd stop: "
 	inm_kill hsflowd && echo "OK" || echo "FAILED"
 	;;
-    status)
+
+      status)
 	echo -n "hsflowd status: "
 	pid=`inm_pid hsflowd`
 	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
 	;;
-  restart)
+
+     restart)
+force-reload)
 	$0 stop
 	$0 start
 	;;
   *)
-	echo "Usage: $0 {start|stop|status|restart}"
+	echo "Usage: $0 {start|stop|status|restart|force-reload}"
 	exit 1
 esac
 

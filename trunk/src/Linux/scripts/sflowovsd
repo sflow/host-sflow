@@ -7,6 +7,16 @@
 # processname: sflowovsd
 # pidfile: /var/run/sflowovsd.pid
 
+### BEGIN INIT INFO
+# Provides:          sflowovsd
+# Required-Start:    $syslog $network $named
+# Required-Stop:     $syslog
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Short-Description: sFlow Daemon to configure sFlow on Open VSwitch
+# Description:       sFlow Daemon to configure sFlow on Open VSwitch
+### END INIT INFO
+
 EXECPREFIX=/usr/sbin
 
 inm_running() {
@@ -111,12 +121,13 @@ case "$1" in
 	pid=`inm_pid sflowovsd`
 	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
 	;;
+  force-reload)
   restart)
 	$0 stop
 	$0 start
 	;;
   *)
-	echo "Usage: $0 {start|stop|status|restart}"
+	echo "Usage: $0 {start|stop|status|restart|force-reload}"
 	exit 1
 esac
 
