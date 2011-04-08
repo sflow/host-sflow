@@ -108,21 +108,25 @@ inm_kill() {
 
 # See how we were called.
 case "$1" in
-    start)
+  start)
 	echo -n "sflowovsd start: "
 	inm_daemon sflowovsd && echo "OK" || echo "FAILED"
 	;;
-   stop)
+  stop)
 	echo -n "sflowovsd stop: "
 	inm_kill sflowovsd && echo "OK" || echo "FAILED"
 	;;
-    status)
+  status)
 	echo -n "sflowovsd status: "
 	pid=`inm_pid sflowovsd`
 	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
 	;;
-  force-reload)
   restart)
+	$0 stop
+	$0 start
+
+	;;
+  force-reload)
 	$0 stop
 	$0 start
 	;;
