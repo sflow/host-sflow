@@ -1,0 +1,9 @@
+#!/bin/bash
+#MOD_STATISTIC="-m statistic --mode random --probability 0.01"
+#NFLOG_SAMPLING="--nflog-group 5 --nflog-prefix SFLOW --nflog-threshold 4"
+ULOG_SAMPLING="--ulog-nlgroup 1 --ulog-prefix SFLOW --ulog-qthreshold 10"
+iptables -I INPUT -j ULOG $ULOG_SAMPLING
+iptables -I INPUT -i lo -j ACCEPT
+iptables -I OUTPUT -j ULOG $ULOG_SAMPLING
+/sbin/service iptables save
+iptables --list --verbose

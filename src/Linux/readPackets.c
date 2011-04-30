@@ -79,17 +79,21 @@ extern "C" {
       HSPSFlow *sf = sp->sFlow;
       // add sampler (with sub-sampling rate), and poller too
       uint32_t samplingRate = sf->sFlowSettings->ulogSubSamplingRate;
-      uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
       sampler = sfl_agent_addSampler(sf->agent, &dsi);
       sfl_sampler_set_sFlowFsPacketSamplingRate(sampler, samplingRate);
       sfl_sampler_set_sFlowFsReceiver(sampler, HSP_SFLOW_RECEIVER_INDEX);
-      SFLPoller *poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
-      sfl_poller_set_sFlowCpInterval(poller, pollingInterval);
-      sfl_poller_set_sFlowCpReceiver(poller, HSP_SFLOW_RECEIVER_INDEX);
-      // remember the device name to make the lookups easier later.
-      // Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
-      // in case it gets freed at some point.  The device name is enough.
-      poller->userData = (void *)my_strdup(devName);
+      if(devName) {
+	uint32_t pollingInterval = sf->sFlowSettings ?
+	  sf->sFlowSettings->pollingInterval :
+	  SFL_DEFAULT_POLLING_INTERVAL;
+	SFLPoller *poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
+	sfl_poller_set_sFlowCpInterval(poller, pollingInterval);
+	sfl_poller_set_sFlowCpReceiver(poller, HSP_SFLOW_RECEIVER_INDEX);
+	// remember the device name to make the lookups easier later.
+	// Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
+	// in case it gets freed at some point.  The device name is enough.
+	poller->userData = (void *)my_strdup(devName);
+      }
     }
     return sampler;
   }
@@ -176,15 +180,17 @@ extern "C" {
 		
 		SFL_FLOW_SAMPLE_TYPE fs = { 0 };
 	
-		SFLSampler *sampler = NULL;
+		char *sampler_dev = NULL;
+		uint32_t sampler_ifIndex = SFL_INTERNAL_INTERFACE;
 
 		// set the ingress and egress ifIndex numbers.
 		// Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
 		if(pkt->indev_name[0]) {
 		  SFLAdaptor *in = adaptorListGet(sp->adaptorList, pkt->indev_name);
-		  if(in && in->ifIndex) {
+		  if(in) {
 		    fs.input = in->ifIndex;
-		    sampler = getSampler(sp, pkt->indev_name, in->ifIndex);
+		    sampler_dev = pkt->indev_name;
+		    sampler_ifIndex = in->ifIndex;
 		  }
 		}
 		else {
@@ -194,18 +200,18 @@ extern "C" {
 		  SFLAdaptor *out = adaptorListGet(sp->adaptorList, pkt->outdev_name);
 		  if(out && out->ifIndex) {
 		    fs.output = out->ifIndex;
-		    sampler = getSampler(sp, pkt->outdev_name, out->ifIndex);
+		    sampler_dev = pkt->outdev_name;
+		    sampler_ifIndex = out->ifIndex;
 		  }
 		}
 		else {
 		  fs.output = SFL_INTERNAL_INTERFACE;
 		}
 
-		if(sampler == NULL) {
-		  // maybe ULOG sent us a packet on device lo(?)
-		  if(debug > 1) myLog(LOG_INFO, "dropped sample with no ifIndex\n");
-		}
-		else {
+		// assign a sampler even if the device was NULL or ifIndex was missing
+		SFLSampler *sampler = getSampler(sp, sampler_dev, sampler_ifIndex);
+
+		if(sampler) {
 		  SFLFlow_sample_element hdrElem = { 0 };
 		  hdrElem.tag = SFLFLOW_HEADER;
 		  uint32_t FCS_bytes = 4;
