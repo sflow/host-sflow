@@ -188,19 +188,16 @@ int readInterfaces(HSP *sp)
 		ifr.ifr_data = (char *)&ecmd;
 		if(ioctl(fd, SIOCETHTOOL, &ifr) == 0) {
 		  adaptor->ifDirection = ecmd.duplex ? 1 : 2;
-		  uint64_t ifSpeed_mb = 0;
-		  switch(ecmd.speed) {
-		  case SPEED_10: ifSpeed_mb = 10; break;
-		  case SPEED_100: ifSpeed_mb = 100; break;
-		  case SPEED_1000: ifSpeed_mb = 1000; break;
-#ifdef SPEED_10000
-		  case SPEED_10000: ifSpeed_mb = 10000; break;
-#endif
-		  default: break;
+		  uint64_t ifSpeed_mb = (ecmd.speed_hi << 16 | ecmd.speed);
+		  if(ifSpeed_mb == (uint16_t)-1 ||
+		     ifSpeed_mb == (uint32_t)-1) {
+		    // unknown
+		    adaptor->ifSpeed = 0;
 		  }
-		  adaptor->ifSpeed = ifSpeed_mb * 1000000;
+		  else {
+		    adaptor->ifSpeed = ifSpeed_mb * 1000000;
+		  }
 		}
-		
 	      }
 	    }
 	  }

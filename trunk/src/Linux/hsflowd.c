@@ -89,12 +89,21 @@ extern "C" {
   }
 
 #ifdef HSF_XEN
+
+#ifdef XENCTRL_HAS_XC_INTERFACE
+#define HSF_XENCTRL_INTERFACE_OPEN() xc_interface_open(NULL /*logger*/, NULL/*dombuild_logger*/, XC_OPENFLAG_NON_REENTRANT);
+#define HSF_XENCTRL_HANDLE_OK(h) ((h) != NULL)
+#else
+#define HSF_XENCTRL_INTERFACE_OPEN() xc_interface_open()
+#define HSF_XENCTRL_HANDLE_OK(h) ((h) && (h) != -1)
+#endif
+
   static void openXenHandles(HSP *sp)
   {
     // need to do this while we still have root privileges
     if(sp->xc_handle == 0) {
-      sp->xc_handle = xc_interface_open();
-      if(sp->xc_handle <= 0) {
+      sp->xc_handle = HSF_XENCTRL_INTERFACE_OPEN();
+      if(!HSF_XENCTRL_HANDLE_OK(sp->xc_handle)) {
         myLog(LOG_ERR, "xc_interface_open() failed : %s", strerror(errno));
       }
       else {
@@ -109,7 +118,7 @@ extern "C" {
         sp->page_size = PAGE_SIZE;
 #else
         sp->page_size = sysconf(_SC_PAGE_SIZE);
-        if(pgsiz < 0) {
+        if(sp->page_size <= 0) {
           myLog(LOG_ERR, "Failed to retrieve page size : %s", strerror(errno));
           abort();
         }
@@ -124,7 +133,7 @@ extern "C" {
 
   static void closeXenHandles(HSP *sp)
   {
-    if(sp->xc_handle && sp->xc_handle != -1) {
+    if(HSF_XENCTRL_HANDLE_OK(sp->xc_handle)) {
       xc_interface_close(sp->xc_handle);
       sp->xc_handle = 0;
     }
@@ -386,7 +395,7 @@ extern "C" {
       nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
       char devFilter[20];
       snprintf(devFilter, 20, "vif%u.", state->domId);
-      uint32_t network_count = readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter, NULL);
+      uint32_t network_count = readNioCounters(sp, &nioElem.counterBlock.host_vrt_nio, devFilter, NULL);
       if(state->network_count != network_count) {
 	// request a refresh if the number of VIFs changed. Not a perfect test
 	// (e.g. if one was removed and another was added at the same time then

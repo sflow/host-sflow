@@ -576,16 +576,18 @@ extern "C" {
 
   int readVersion(void *magic, char *line)
   {
-    SFVS *sv = (SFVS *)magic;
     // the compulsory use of --id==@tok appeared between 1.0 and 1.1.0pre1
     // but before that it was not supported at all.  The format of this
     // version string may change at any time,  so the safest way to test
     // this is to assume that we can use --id==@tok unless we see a very
     // specific version string:
+#ifdef DETECT_OVS10
     if(memcmp(line, "ovs-vsctl (Open vSwitch) 1.0", 28) == 0) {
       if(debug) myLog(LOG_INFO, "detected ovs-vsctl version 1.0 - turning off use of --id=@tok");
+      SFVS *sv = (SFVS *)magic;
       sv->useAtVar = NO;
     }
+#endif
     return NO; // only want the first line
   }
   
