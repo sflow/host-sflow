@@ -69,6 +69,8 @@ extern "C" {
     sv->cmd = strArrayNew();
     sv->extras = strArrayNew();
     sv->config.targets = strArrayNew();
+    sv->ovs10 = NO;
+    sv->useAtVar = YES;
   }
 
   /*_________________---------------------------__________________
@@ -409,6 +411,7 @@ extern "C" {
     if(sv->useAtVar) {
       addOvsArg(sv, "--id=" SFVS_NEW_SFLOW_ID);
     }
+    sv->usingAtVar = sv->useAtVar;
     addOvsArg(sv, "create");
     addOvsArg(sv, "sflow");
     addOvsVarEqVal(sv, "agent", sv->config.agent_dev);
@@ -571,23 +574,25 @@ extern "C" {
     // be a little awkward to change myExec to separate stdout and stderr, so this is the
     // best we can do without making bigger changes.
     sv->cmdFailed = YES;
+    if(sv->usingAtVar && sv->ovs10 && sv->usedAtVarOK == NO) {
+      if(debug) myLog(LOG_INFO, "command with --id=@tok failed and version is 1.0.*, so turn off --id=@tok");
+      sv->useAtVar = NO;
+    }
     return YES;
   }
 
   int readVersion(void *magic, char *line)
   {
+    SFVS *sv = (SFVS *)magic;
     // the compulsory use of --id==@tok appeared between 1.0 and 1.1.0pre1
     // but before that it was not supported at all.  The format of this
     // version string may change at any time,  so the safest way to test
     // this is to assume that we can use --id==@tok unless we see a very
     // specific version string:
-#ifdef DETECT_OVS10
     if(memcmp(line, "ovs-vsctl (Open vSwitch) 1.0", 28) == 0) {
-      if(debug) myLog(LOG_INFO, "detected ovs-vsctl version 1.0 - turning off use of --id=@tok");
-      SFVS *sv = (SFVS *)magic;
-      sv->useAtVar = NO;
+      if(debug) myLog(LOG_INFO, "detected ovs-vsctl version 1.0 - may turn off use of --id=@tok");
+      sv->ovs10 = YES;
     }
-#endif
     return NO; // only want the first line
   }
   
@@ -607,9 +612,11 @@ extern "C" {
     // don't abort if this fails: readVersion returns NO as an easy way
     // to only see the first line. (Line number should really be supplied to
     // callback from myExec)
-    sv->useAtVar = YES; // assume newer version
+    sv->ovs10 = NO; // assume newer version
+    sv->usingAtVar = NO;
     myExec((void *)sv, version_cmd, readVersion, line, SFVS_MAX_LINELEN);
-    
+    // adapt if OVS is upgraded under our feet
+    if(sv->ovs10 == NO) sv->useAtVar = YES; 
     if(sv->config.error
        || sv->config.num_collectors == 0
        || (sv->config.sampling_n == 0 && sv->config.polling_secs == 0)) {
@@ -669,6 +676,10 @@ extern "C" {
       logCmd(sv);
       strArrayAdd(sv->cmd, NULL); // for execve(2)
       if(myExec((void *)sv, strArray(sv->cmd), submitChanges, line, SFVS_MAX_LINELEN) == NO) return NO;
+      if(sv->usingAtVar && sv->cmdFailed == NO) {
+        // remember that it worked at least once
+        sv->usedAtVarOK = YES;
+      }
     }
     return sv->cmdFailed ? NO : YES;
   }
