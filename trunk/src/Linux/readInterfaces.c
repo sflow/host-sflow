@@ -13,6 +13,9 @@ extern "C" {
 #include <net/if.h>
 #include <linux/types.h>
 #include <linux/ethtool.h>
+#ifndef ethtool_cmd_speed
+#define ethtool_cmd_speed(e) (e)->speed
+#endif
 #include <linux/sockios.h>
 
 extern int debug;
@@ -188,7 +191,7 @@ int readInterfaces(HSP *sp)
 		ifr.ifr_data = (char *)&ecmd;
 		if(ioctl(fd, SIOCETHTOOL, &ifr) == 0) {
 		  adaptor->ifDirection = ecmd.duplex ? 1 : 2;
-		  uint64_t ifSpeed_mb = (ecmd.speed_hi << 16 | ecmd.speed);
+		  uint64_t ifSpeed_mb = ethtool_cmd_speed(&ecmd);
 		  if(ifSpeed_mb == (uint16_t)-1 ||
 		     ifSpeed_mb == (uint32_t)-1) {
 		    // unknown
