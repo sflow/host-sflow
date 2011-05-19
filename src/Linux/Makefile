@@ -93,7 +93,7 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 SFLOWOVS_OBJS=sflowovsd.o util.o
 
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP -DDETECT_OVS10
 LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
 #### BUILD ####

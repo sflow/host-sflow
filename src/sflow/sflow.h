@@ -705,16 +705,9 @@ typedef struct _SFLHost_vrt_dsk_counters {
 /* Virtual Domain Network statistics */
 /* opaque = counter_data; enterprise = 0; format = 2104 */
 
-typedef struct _SFLHost_vrt_nio_counters {
-  uint64_t bytes_in;
-  uint32_t pkts_in;
-  uint32_t errs_in;
-  uint32_t drops_in;
-  uint64_t bytes_out;
-  uint32_t pkts_out;
-  uint32_t errs_out;
-  uint32_t drops_out;
-} SFLHost_vrt_nio_counters;
+/* for now this is exactly the same as the nio_counters
+   so just use a #define for the type */
+#define SFLHost_vrt_nio_counters SFLHost_nio_counters
 
 /* Counters data */
 

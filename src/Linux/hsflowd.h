@@ -245,7 +245,11 @@ extern "C" {
     int socket4;
     int socket6;
 #ifdef HSF_XEN
+#ifdef XENCTRL_HAS_XC_INTERFACE
+    xc_interface *xc_handle;
+#else
     int xc_handle; // libxc
+#endif
     struct xs_handle *xs_handle; // xenstore
     uint32_t page_size;
 #endif
