@@ -102,6 +102,9 @@ extern "C" {
     char *sflowUUID;
     int cmdFailed;
     int useAtVar;
+    int usingAtVar;
+    int usedAtVarOK;
+    int ovs10;
   } SFVS;
 
 #if defined(__cplusplus)
