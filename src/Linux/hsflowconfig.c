@@ -185,6 +185,23 @@ extern int debug;
     parseError(sp, tok, "expected domain", "");
     return NULL;
   }
+
+  // expectLoopback
+
+  static HSPToken *expectLoopback(HSP *sp, HSPToken *tok)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || (strcasecmp(t->str, "on") != 0 && strcasecmp(t->str, "off") != 0)) {
+      parseError(sp, tok, "expected 'on' or 'off'", "");
+      return NULL;
+    }
+    // enable or disable the inclusion in loopback interfaces
+    sp->loopback = (strcasecmp(t->str, "on") == 0);
+    // have to force another read here, otherwise we have to wait for ever
+    sp->refreshAdaptorList = YES;
+    return t;
+  }
   
   // expectDevice
   
@@ -439,6 +456,9 @@ extern int debug;
       case HSPOBJ_SFLOW:
 
 	switch(tok->stok) {
+	case HSPTOKEN_LOOPBACK:
+	  if((tok = expectLoopback(sp, tok)) == NULL) return NO;
+	  break;
 	case HSPTOKEN_DNSSD:
 	  if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
 	  break;

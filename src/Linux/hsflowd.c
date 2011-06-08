@@ -961,6 +961,7 @@ extern "C" {
       fprintf(sp->f_out, "sampling=%u\n", settings->samplingRate);
       fprintf(sp->f_out, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
       fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
+      // make sure the application specific ones always come after the general ones - to simplify the override logic there
       for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
 	if(appSettings->got_sampling_n) fprintf(sp->f_out, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
 	if(appSettings->got_polling_secs) fprintf(sp->f_out, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);

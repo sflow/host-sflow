@@ -181,7 +181,7 @@ extern "C" {
 		SFL_FLOW_SAMPLE_TYPE fs = { 0 };
 	
 		char *sampler_dev = NULL;
-		uint32_t sampler_ifIndex = SFL_INTERNAL_INTERFACE;
+		uint32_t sampler_ifIndex = 0;
 
 		// set the ingress and egress ifIndex numbers.
 		// Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
@@ -208,58 +208,60 @@ extern "C" {
 		  fs.output = SFL_INTERNAL_INTERFACE;
 		}
 
-		// assign a sampler even if the device was NULL or ifIndex was missing
-		SFLSampler *sampler = getSampler(sp, sampler_dev, sampler_ifIndex);
-
-		if(sampler) {
-		  SFLFlow_sample_element hdrElem = { 0 };
-		  hdrElem.tag = SFLFLOW_HEADER;
-		  uint32_t FCS_bytes = 4;
-		  uint32_t maxHdrLen = sampler->sFlowFsMaximumHeaderSize;
-		  hdrElem.flowType.header.frame_length = pkt->data_len + FCS_bytes;
-		  hdrElem.flowType.header.stripped = FCS_bytes;
-		
-		  u_char hdr[HSP_MAX_HEADER_BYTES];
-		
-		  if(pkt->mac_len == 14) {
-		    // set the header_protocol to ethernet and
-		    // reunite the mac header and payload in one buffer
-		    hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
-		    memcpy(hdr, pkt->mac, 14);
-		    maxHdrLen -= 14;
-		    uint32_t payloadBytes = (pkt->data_len < maxHdrLen) ? pkt->data_len : maxHdrLen;
-		    memcpy(hdr+14, pkt->payload, payloadBytes);
-		    hdrElem.flowType.header.header_length = payloadBytes + 14;
-		    hdrElem.flowType.header.header_bytes = hdr;
-		    hdrElem.flowType.header.frame_length += 14;
-		  }
-		  else {
-		    // no need to copy - just point at the payload
-		    u_char ipversion = pkt->payload[0] >> 4;
-		    if(ipversion != 4 && ipversion != 6) {
-		      if(debug) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
+		// must have an ifIndex
+		if(sampler_ifIndex) {
+		  SFLSampler *sampler = getSampler(sp, sampler_dev, sampler_ifIndex);
+		  
+		  if(sampler) {
+		    SFLFlow_sample_element hdrElem = { 0 };
+		    hdrElem.tag = SFLFLOW_HEADER;
+		    uint32_t FCS_bytes = 4;
+		    uint32_t maxHdrLen = sampler->sFlowFsMaximumHeaderSize;
+		    hdrElem.flowType.header.frame_length = pkt->data_len + FCS_bytes;
+		    hdrElem.flowType.header.stripped = FCS_bytes;
+		    
+		    u_char hdr[HSP_MAX_HEADER_BYTES];
+		    
+		    if(pkt->mac_len == 14) {
+		      // set the header_protocol to ethernet and
+		      // reunite the mac header and payload in one buffer
+		      hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+		      memcpy(hdr, pkt->mac, 14);
+		      maxHdrLen -= 14;
+		      uint32_t payloadBytes = (pkt->data_len < maxHdrLen) ? pkt->data_len : maxHdrLen;
+		      memcpy(hdr+14, pkt->payload, payloadBytes);
+		      hdrElem.flowType.header.header_length = payloadBytes + 14;
+		      hdrElem.flowType.header.header_bytes = hdr;
+		      hdrElem.flowType.header.frame_length += 14;
 		    }
 		    else {
-		      hdrElem.flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
-		      hdrElem.flowType.header.stripped += 14; // assume ethernet was (or will be) the framing
-		      hdrElem.flowType.header.header_length = (pkt->data_len < maxHdrLen) ? pkt->data_len : maxHdrLen;
-		      hdrElem.flowType.header.header_bytes = pkt->payload;
+		      // no need to copy - just point at the payload
+		      u_char ipversion = pkt->payload[0] >> 4;
+		      if(ipversion != 4 && ipversion != 6) {
+			if(debug) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
+		      }
+		      else {
+			hdrElem.flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
+			hdrElem.flowType.header.stripped += 14; // assume ethernet was (or will be) the framing
+			hdrElem.flowType.header.header_length = (pkt->data_len < maxHdrLen) ? pkt->data_len : maxHdrLen;
+			hdrElem.flowType.header.header_bytes = pkt->payload;
+		      }
 		    }
+		    
+		    SFLADD_ELEMENT(&fs, &hdrElem);
+		    // submit the actual sampling rate so it goes out with the sFlow feed
+		    // otherwise the sampler object would fill in his own (sub-sampling) rate.
+		    uint32_t actualSamplingRate = sp->sFlow->sFlowSettings->ulogActualSamplingRate;
+		    fs.sampling_rate = actualSamplingRate;
+		    
+		    // estimate the sample pool from the samples.  Could maybe do this
+		    // above with the (possibly more granular) ulogSamplingRate, but then
+		    // we would have to look up the sampler object every time, which
+		    // might be too expensive in the case where ulogSamplingRate==1.
+		    sampler->samplePool += actualSamplingRate;
+		    
+		    sfl_sampler_writeFlowSample(sampler, &fs);
 		  }
-		
-		  SFLADD_ELEMENT(&fs, &hdrElem);
-		  // submit the actual sampling rate so it goes out with the sFlow feed
-		  // otherwise the sampler object would fill in his own (sub-sampling) rate.
-		  uint32_t actualSamplingRate = sp->sFlow->sFlowSettings->ulogActualSamplingRate;
-		  fs.sampling_rate = actualSamplingRate;
-
-		  // estimate the sample pool from the samples.  Could maybe do this
-		  // above with the (possibly more granular) ulogSamplingRate, but then
-		  // we would have to look up the sampler object every time, which
-		  // might be too expensive in the case where ulogSamplingRate==1.
-		  sampler->samplePool += actualSamplingRate;
-
-		  sfl_sampler_writeFlowSample(sampler, &fs);
 		}
 	      }
 	    }

@@ -101,6 +101,7 @@ int readInterfaces(HSP *sp)
   if(procFile) {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
+
     // limit the number of chars we will read from each line
     // (there can be more than this - fgets will chop for us)
 #define MAX_PROC_LINE_CHARS 80
@@ -130,7 +131,7 @@ int readInterfaces(HSP *sp)
 	    int promisc =  (ifr.ifr_flags & IFF_PROMISC) ? YES : NO;
 	    //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
 	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
-	    if(up && !loopback) {
+	    if(up && (sp->loopback || !loopback)) {
 	      
 	       // Get the MAC Address for this interface
 	      if(ioctl(fd,SIOCGIFHWADDR, &ifr) != 0) {
@@ -138,68 +139,67 @@ int readInterfaces(HSP *sp)
 		      devName,
 		      strerror(errno));
 	      }
+
+	      // for now just assume that each interface has only one MAC.  It's not clear how we can
+	      // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
+	      // create a new "adaptor" entry
+	      SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data);
+	      adaptor->promiscuous = promisc;
+	      
+	      // Try and get the ifIndex for this interface
+	      if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
+		// only complain about this if we are debugging
+		if(debug) {
+		  myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
+			devName,
+			strerror(errno));
+		}
+	      }
 	      else {
-		// for now just assume that each interface has only one MAC.  It's not clear how we can
-		// learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
-		// create a new "adaptor" entry
-		SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data);
-		adaptor->promiscuous = promisc;
-
-		// Try and get the ifIndex for this interface
-		if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
-		  // only complain about this if we are debugging
-		  if(debug) {
-		    myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
-			  devName,
-			  strerror(errno));
-		  }
+		adaptor->ifIndex = ifr.ifr_ifindex;
+	      }
+	      
+	      // Try to get the IP address for this interface
+	      if(ioctl(fd,SIOCGIFADDR, &ifr) != 0) {
+		// only complain about this if we are debugging
+		if(debug) {
+		  myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s",
+			devName,
+			strerror(errno));
+		}
+	      }
+	      else {
+		if (ifr.ifr_addr.sa_family == AF_INET) {
+		  struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
+		  // IP addr is now s->sin_addr
+		  adaptor->ipAddr.addr = s->sin_addr.s_addr;
+		}
+		//else if (ifr.ifr_addr.sa_family == AF_INET6) {
+		// not sure this ever happens - on a linux system IPv6 addresses
+		// are picked up from /proc/net/if_inet6
+		// struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
+		// IP6 addr is now s->sin6_addr;
+		//}
+	      }
+	      
+	      // Try to get the ethtool info for this interface so we can infer the
+	      // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
+	      struct ethtool_cmd ecmd = { 0 };
+	      ecmd.cmd = ETHTOOL_GSET;
+	      ifr.ifr_data = (char *)&ecmd;
+	      if(ioctl(fd, SIOCETHTOOL, &ifr) == 0) {
+		adaptor->ifDirection = ecmd.duplex ? 1 : 2;
+		uint64_t ifSpeed_mb = ecmd.speed;
+		// ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
+		// speed_hi field too,  but we would need to run autoconf-style
+		// tests to see if it was there and we are trying to avoid that.
+		if(ifSpeed_mb == (uint16_t)-1 ||
+		   ifSpeed_mb == (uint32_t)-1) {
+		  // unknown
+		  adaptor->ifSpeed = 0;
 		}
 		else {
-		  adaptor->ifIndex = ifr.ifr_ifindex;
-		}
-	       
-		// Try to get the IP address for this interface
-		if(ioctl(fd,SIOCGIFADDR, &ifr) != 0) {
-		  // only complain about this if we are debugging
-		  if(debug) {
-		    myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s",
-			  devName,
-			  strerror(errno));
-		  }
-		}
-		else {
-		  if (ifr.ifr_addr.sa_family == AF_INET) {
-		    struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
-		    // IP addr is now s->sin_addr
-		    adaptor->ipAddr.addr = s->sin_addr.s_addr;
-		  }
-		  //else if (ifr.ifr_addr.sa_family == AF_INET6) {
-		  // not sure this ever happens - on a linux system IPv6 addresses
-		  // are picked up from /proc/net/if_inet6
-		  // struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
-		  // IP6 addr is now s->sin6_addr;
-		  //}
-		}
-
-		// Try to get the ethtool info for this interface so we can infer the
-		// ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
-		struct ethtool_cmd ecmd = { 0 };
-		ecmd.cmd = ETHTOOL_GSET;
-		ifr.ifr_data = (char *)&ecmd;
-		if(ioctl(fd, SIOCETHTOOL, &ifr) == 0) {
-		  adaptor->ifDirection = ecmd.duplex ? 1 : 2;
-		  uint64_t ifSpeed_mb = ecmd.speed;
-                  // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
-		  // speed_hi field too,  but we would need to run autoconf-style
-		  // tests to see if it was there and we are trying to avoid that.
-		  if(ifSpeed_mb == (uint16_t)-1 ||
-		     ifSpeed_mb == (uint32_t)-1) {
-		    // unknown
-		    adaptor->ifSpeed = 0;
-		  }
-		  else {
-		    adaptor->ifSpeed = ifSpeed_mb * 1000000;
-		  }
+		  adaptor->ifSpeed = ifSpeed_mb * 1000000;
 		}
 	      }
 	    }
