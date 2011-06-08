@@ -280,6 +280,7 @@ extern "C" {
     struct sockaddr_nl ulog_bind;
     struct sockaddr_nl ulog_peer;
 #endif
+    int loopback;
   } HSP;
 
   // expose some config parser fns
