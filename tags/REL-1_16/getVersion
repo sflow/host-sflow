@@ -1,1 +1,0 @@
-sed -ne 's/^Version: *//p' hsflowd.spec
