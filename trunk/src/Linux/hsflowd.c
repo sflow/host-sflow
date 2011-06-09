@@ -348,7 +348,10 @@ extern "C" {
     if(xenHandlesOK(sp)) {
 
       xc_domaininfo_t domaininfo;
-      int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
+      // it seems that xc_domain_getinfolist takes the domId after all
+      // so state->vm_index is not actually needed any more
+      // int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
+      int32_t n = xc_domain_getinfolist(sp->xc_handle, state->domId, 1, &domaininfo);
       if(n < 0 || domaininfo.domain != state->domId) {
 	// Assume something changed under our feet.
 	// Request a reload of the VM information and bail.
@@ -757,6 +760,7 @@ extern "C" {
 	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
 	  HSPVMState *state = (HSPVMState *)pl->userData;
 	  state->marked = YES;
+	  state->vm_index = 0;
 	}
       }
 
@@ -778,11 +782,22 @@ extern "C" {
 	  else {
 	    for(uint32_t i = 0; i < new_domains; i++) {
 	      uint32_t domId = domaininfo[i].domain;
-	      // dom0 is the hypervisor. We want the others.
-	      if(domId != 0) {
+	      // dom0 is the hypervisor. We used to ignore it, but actually
+              // it should be included. Hope this doesn't break everything.
+	      //if(domId != 0) {
 		if(debug) {
 		  // may need to ignore any that are not marked as "running" here
-		  myLog(LOG_INFO, "ConfigVMs(): domId=%u, flags=0x%x", domId, domaininfo[i].flags);
+		  myLog(LOG_INFO, "ConfigVMs(): domId=%u flags=0x%x tot_pages=%"PRIu64" max_pages=%"PRIu64" shared_info_frame=%"PRIu64" cpu_time=%"PRIu64" nr_online_vcpus=%u max_vcpu_id=%u ssidref=%u handle=%x",
+			domId,
+	 		domaininfo[i].flags,
+	 		domaininfo[i].tot_pages,
+	 		domaininfo[i].max_pages,
+	 		domaininfo[i].shared_info_frame,
+	 		domaininfo[i].cpu_time,
+	 		domaininfo[i].nr_online_vcpus,
+	 		domaininfo[i].max_vcpu_id,
+	 		domaininfo[i].ssidref,
+	 		domaininfo[i].handle);
 		}
 		uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
 		SFLDataSource_instance dsi;
@@ -808,16 +823,21 @@ extern "C" {
 		  sp->refreshAdaptorList = YES;
 		}
 		// remember the index so we can access this individually later
-		if(debug) {
-		  if(state->vm_index != (num_domains + i)) {
-		    myLog(LOG_INFO, "domId=%u vm_index %u->%u", domId, state->vm_index, (num_domains + i));
+		// (actually this was a misunderstanding - the vm_index is not
+		// really needed at all.  Should take it out. Can still detect
+		// duplicates using the 'marked' flag).
+		if(state->vm_index) {
+		  if(debug) {
+		    myLog(LOG_INFO, "duplicate entry for domId=%u vm_index %u repeated at %u (keep first one)", domId, state->vm_index, (num_domains + i));
 		  }
 		}
-		state->vm_index = num_domains + i;
+                else {
+		  state->vm_index = num_domains + i;
+                }
 		// and the domId, which might have changed (if vm rebooted)
 		state->domId = domId;
 	      }
-	    }
+	    // } 
 	  }
 	  num_domains += new_domains;
 	} while(new_domains > 0);
