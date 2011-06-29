@@ -1021,7 +1021,7 @@ extern "C" {
       updateNioCounters(sp);
     }
     
-    // refresh the list of VMs if requested
+    // refresh the list of VMs periodically or on request
     if(sp->refreshVMList || (sp->clk % HSP_REFRESH_VMS) == 0) {
       sp->refreshVMList = NO;
       configVMs(sp);
@@ -1033,8 +1033,8 @@ extern "C" {
       sp->vmStoreInvalid = NO;
     }
 
-    // refresh the interface list if requested
-    if(sp->refreshAdaptorList) {
+    // refresh the interface list perioducally or on request
+    if(sp->refreshAdaptorList || (sp->clk % HSP_REFRESH_ADAPTORS) == 0) {
       sp->refreshAdaptorList = NO;
       readInterfaces(sp);
     }

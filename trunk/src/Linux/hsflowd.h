@@ -81,6 +81,7 @@ extern "C" {
 #define HSP_DNSSD_STACKSIZE 2000000
 #define HSP_MAX_SUBAGENTID 1000000
 #define HSP_REFRESH_VMS 60
+#define HSP_REFRESH_ADAPTORS 180
 
 // the limit we will request before calling mlockall()
 // calling res_search() seems to allocate about 11MB
