@@ -539,15 +539,28 @@ extern "C" {
   int bridgeList(void *magic, char *line)
   {
     SFVS *sv = (SFVS *)magic;
-    // copy the bridge name
-    char *br = stripQuotes(line, SFVS_QUOTES);
-    if(debug) myLog(LOG_INFO, "bridgeList> %s", br);
-    if(br && (br[0] != '\0')) {
-      setStr(&sv->bridge, br);
-      // now run a command to check (and possible change) the bridge sFlow setting
-      char *bridge_get_sflow_cmd[] = { SFVS_OVS_CMD, "get", "bridge", br, "sflow", NULL };
-      char line[SFVS_MAX_LINELEN];
-      if(myExec(sv, bridge_get_sflow_cmd, bridgeGetSFlow, line, SFVS_MAX_LINELEN) == NO) return NO;
+    // we're looking for the lines that have "name : <bridge-name>"
+    // or specifically the sequence:
+    // name
+    // <whitespace>
+    // :
+    // <whitespace>
+    // <bridge-name>
+    // sscanf with format string "name%*[\t ]:%*[\t ]%s" works, but
+    // assumes that the whitespace is not empty.  I don't think we
+    // can necessarily assume that (?)
+    char bridgeName[SFVS_MAX_LINELEN];
+    if(sscanf(line, "name%*[\t ]:%*[\t ]%s", bridgeName) == 1) {
+      // copy the bridge name
+      char *br = stripQuotes(bridgeName, SFVS_QUOTES);
+      if(debug) myLog(LOG_INFO, "bridgeList> %s", br);
+      if(br && (br[0] != '\0')) {
+	setStr(&sv->bridge, br);
+	// now run a command to check (and possible change) the bridge sFlow setting
+	char *bridge_get_sflow_cmd[] = { SFVS_OVS_CMD, "get", "bridge", br, "sflow", NULL };
+	char line[SFVS_MAX_LINELEN];
+	if(myExec(sv, bridge_get_sflow_cmd, bridgeGetSFlow, line, SFVS_MAX_LINELEN) == NO) return NO;
+      }
     }
     return YES;
   }
@@ -653,7 +666,7 @@ extern "C" {
 
     // make sure every bridge is using this sFlow entry
     if(debug) myLog(LOG_INFO, "==== list bridge ====");
-    char *list_bridge_cmd[] = { SFVS_OVS_CMD, "list-br", NULL};
+    char *list_bridge_cmd[] = { SFVS_OVS_CMD, "list", "bridge", NULL};
     if(myExec((void *)sv, list_bridge_cmd, bridgeList, line, SFVS_MAX_LINELEN) == NO) return NO;
 
     // now it's safe to delete any extras that we found
