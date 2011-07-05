@@ -258,6 +258,7 @@ extern int debug;
   }
 
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
+    clearApplicationSettings(sFlowSettings);
     for(HSPCollector *coll = sFlowSettings->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
       my_free(coll);
