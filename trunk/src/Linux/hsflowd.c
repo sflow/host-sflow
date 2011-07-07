@@ -170,7 +170,7 @@ extern "C" {
       uint32_t vif_domid=0;
       uint32_t vif_netid=0;
       int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
-      if(debug > 3) myLog(LOG_INFO, "\_xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32")",
+      if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32")",
 			  isVirtual ? "YES" : "NO",
 			  adaptor->deviceName,
 			  vif_domid,
@@ -189,7 +189,7 @@ extern "C" {
 	      myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
 	    }
 	    else{
-	      if(debug > 3) myLog(LOG_INFO, "\_xenstat_adaptors(): got MAC from xenstore: %s", macStr);
+	      if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
 	      // got it - but make sure there is a place to write it
 	      if(adaptor->num_macs > 0) {
 		// OK, just overwrite the 'dummy' one that was there
