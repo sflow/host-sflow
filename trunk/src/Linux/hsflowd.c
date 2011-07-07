@@ -164,11 +164,17 @@ extern "C" {
 
   static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
   {
+    if(debug > 3) myLog(LOG_INFO, "xenstat_adaptors(): looking for vif%"PRIu32".<netid>", dom_id);
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      uint32_t vif_domid;
-      uint32_t vif_netid;
+      uint32_t vif_domid=0;
+      uint32_t vif_netid=0;
       int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
+      if(debug > 3) myLog(LOG_INFO, "\_xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32")",
+			  isVirtual ? "YES" : "NO",
+			  adaptor->deviceName,
+			  vif_domid,
+			  vif_netid);
       if((isVirtual && dom_id == vif_domid) ||
 	 (!isVirtual && dom_id == 0)) {
 	// include this one (if we have room)
@@ -180,9 +186,10 @@ extern "C" {
 	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
 	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
 	    if(macStr == NULL) {
-	      myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
+	      myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
 	    }
 	    else{
+	      if(debug > 3) myLog(LOG_INFO, "\_xenstat_adaptors(): got MAC from xenstore: %s", macStr);
 	      // got it - but make sure there is a place to write it
 	      if(adaptor->num_macs > 0) {
 		// OK, just overwrite the 'dummy' one that was there
