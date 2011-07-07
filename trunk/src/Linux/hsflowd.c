@@ -171,8 +171,8 @@ extern "C" {
       uint32_t vif_netid=0;
       int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
       if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32")",
-			  isVirtual ? "YES" : "NO",
 			  adaptor->deviceName,
+			  isVirtual ? "YES" : "NO",
 			  vif_domid,
 			  vif_netid);
       if((isVirtual && dom_id == vif_domid) ||
