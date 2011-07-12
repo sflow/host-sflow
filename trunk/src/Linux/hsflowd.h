@@ -191,6 +191,7 @@ extern "C" {
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     char *deviceName;
+    int32_t bond_master;
     SFLHost_nio_counters nio;
     SFLHost_nio_counters last_nio;
     uint32_t last_bytes_in32;
