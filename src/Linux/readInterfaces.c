@@ -62,7 +62,14 @@ static void updateAdaptorNIO(HSP *sp)
   HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
   // move pre-existing ones across,  or create new ones if necessary
   for(int i = 0; i < N; i++) {
-    new_list[i] = extractOrCreateAdaptorNIO(&sp->adaptorNIOList, sp->adaptorList->adaptors[i]->deviceName);
+    SFLAdaptor *ad = sp->adaptorList->adaptors[i];
+    HSPAdaptorNIO *adnio = extractOrCreateAdaptorNIO(&sp->adaptorNIOList, ad->deviceName);
+    // could just point from the HSPAdaptorNIO struct to the SFLAdaptor struct.  They are
+    // only separate because the SFLAdaptor one is known to the sFlow library and is used
+    // to encode the XML output. Still,  it seems safer to just copy the values across
+    // here on a need-to-know basis rather than risk dangling pointers or double-freeing.
+    adnio->bond_master = ad->bond_master;
+    new_list[i] = adnio;
   }
   // free old ones we don't need any more
   freeAdaptorNIOs(&sp->adaptorNIOList);
@@ -129,6 +136,7 @@ int readInterfaces(HSP *sp)
 	    int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
 	    int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
 	    int promisc =  (ifr.ifr_flags & IFF_PROMISC) ? YES : NO;
+	    int bond_master = (ifr.ifr_flags & IFF_MASTER) ? YES : NO;
 	    //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
 	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
 	    if(up && (sp->loopback || !loopback)) {
@@ -145,7 +153,8 @@ int readInterfaces(HSP *sp)
 	      // create a new "adaptor" entry
 	      SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data);
 	      adaptor->promiscuous = promisc;
-	      
+	      adaptor->bond_master = bond_master;
+
 	      // Try and get the ifIndex for this interface
 	      if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
 		// only complain about this if we are debugging

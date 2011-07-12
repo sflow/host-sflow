@@ -70,7 +70,8 @@ extern "C" {
 		  &errs_out,
 		  &drops_out) == 9) {
 	  HSPAdaptorNIO *adaptor = getAdaptorNIO(&sp->adaptorNIOList, trimWhitespace(deviceName));
-	  if(adaptor) {
+	  // exclude bond_master interfaces here to avoid double-counting
+	  if(adaptor && !adaptor->bond_master) {
 	    // have to detect discontinuities here, so use a full
 	    // set of latched counters and accumulators.
 	    int accumulate = adaptor->last_update ? YES : NO;

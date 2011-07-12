@@ -565,6 +565,7 @@ typedef struct _SFLAdaptor {
   uint32_t ifDirection;
   uint64_t ifSpeed;
   uint32_t promiscuous;
+  uint32_t bond_master;
   uint32_t num_macs;
   SFLMacAddress macs[1];
 } SFLAdaptor;
