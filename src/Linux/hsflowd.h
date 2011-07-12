@@ -27,10 +27,11 @@ extern "C" {
 #include <pthread.h>
 
 #include <sys/types.h>
-#include "sys/mman.h" // for mlockall()
-#include "pwd.h" // for getpwnam()
-#include "grp.h"
-#include "sys/resource.h" // for setrlimit()
+#include <sys/mman.h> // for mlockall()
+#include <pwd.h> // for getpwnam()
+#include <grp.h>
+#include <sys/resource.h> // for setrlimit()
+#include <limits.h> // for UINT_MAX
 
 // for signal backtrace
 #include <execinfo.h>
