@@ -82,13 +82,19 @@ int remote_mount(const char *device, const char *type)
 		  &sectors_written,
 		  &write_time_ms) == 9) {
 	  gotData = YES;
-	  // report the sum over all disks
-	  dsk->reads += reads;
-	  total_sectors_read += sectors_read;
-	  dsk->read_time += read_time_ms;
-	  dsk->writes += writes;
-	  total_sectors_written += sectors_written;
-	  dsk->write_time += write_time_ms;
+	  // report the sum over all disks - except software RAID devices and logical volumes
+	  // because that would cause double-counting.   We identify those by their
+	  // major numbers:
+	  // Software RAID = 9
+	  // Logical Vol = 253
+	  if(majorNo != 9 && majorNo != 253) {
+	    dsk->reads += reads;
+	    total_sectors_read += sectors_read;
+	    dsk->read_time += read_time_ms;
+	    dsk->writes += writes;
+	    total_sectors_written += sectors_written;
+	    dsk->write_time += write_time_ms;
+	  }
 	}
       }
       fclose(procFile);
