@@ -576,7 +576,7 @@ extern "C" {
 	for(int i = strArrayN(state->volumes); --i >= 0; ) {
 	  char *volPath = strArrayAt(state->volumes, i);
 	  virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
-	  if(volPath == NULL) {
+	  if(volPtr == NULL) {
 	    myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
 	  }
 	  else {
@@ -591,8 +591,8 @@ extern "C" {
 	      // reads, writes and errors $$$ ?
 	    }
 	  }
-	  SFLADD_ELEMENT(cs, &dskElem);
 	}
+	SFLADD_ELEMENT(cs, &dskElem);
       
 	// include my slice of the adaptor list
 	SFLCounters_sample_element adaptorsElem = { 0 };
