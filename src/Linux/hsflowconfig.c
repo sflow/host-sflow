@@ -567,18 +567,42 @@ extern int debug;
 	}
       }
       if(sp->sFlow->agentIP.type == 0) {
-	 // nae luck - try to automatically choose the first non-loopback IP address
-	 for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	    SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	    // only the non-loopback devices should be listed here, so just take the first
-	    if(adaptor && adaptor->ipAddr.addr) {
-	       sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	       sp->sFlow->agentIP.address.ip_v4 = adaptor->ipAddr;
-	       // fill in the device that we picked too
-	       sp->sFlow->agentDevice = my_strdup(adaptor->deviceName);
-	       break;
+	// nae luck - try to automatically choose the first non-loopback IP address
+	// only the non-loopback devices should be listed here, unless the loopback
+	// flag was set specially to include them.  However we want to suppress
+	// self-assigned IP addresses too,  so use a priority scheme...
+	
+	typedef enum { IPSP_NONE=0,
+		       IPSP_LOOPBACK,
+		       IPSP_SELFASSIGNED,
+		       IPSP_OK } EnumIPSelectionPriority;
+
+	SFLAdaptor *selectedAdaptor = NULL;
+	EnumIPSelectionPriority selectedPriority = IPSP_NONE;
+
+	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+	  if(adaptor && adaptor->ipAddr.addr) {
+	    u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
+	    EnumIPSelectionPriority ipPriority = IPSP_OK;
+	    if(ipbytes[0] == 127) {
+	      ipPriority = IPSP_LOOPBACK;
 	    }
-	 }
+	    else if (ipbytes[0] == 169 &&
+		     ipbytes[1] == 254) {
+	      ipPriority = IPSP_SELFASSIGNED;
+	    }
+	    if(ipPriority > selectedPriority) {
+	      selectedAdaptor = adaptor;
+	      selectedPriority = ipPriority;
+	    }
+	  }
+	}
+	if(selectedAdaptor) {
+	  sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
+	  sp->sFlow->agentIP.address.ip_v4 = selectedAdaptor->ipAddr;
+	  sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
+	}
       }
 
       if(sp->sFlow->agentIP.type == SFLADDRESSTYPE_IP_V4 && sp->sFlow->agentDevice == NULL) {
