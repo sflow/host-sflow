@@ -663,27 +663,13 @@ extern "C" {
     return adList;
   }
 
-  void adaptorListReset(SFLAdaptorList *adList)
+  static void adaptorFree(SFLAdaptor *ad)
   {
-    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
-      SFLAdaptor *ad = adList->adaptors[i];
-      if(ad) {
-	my_free(ad->deviceName);
-	if(ad->userData) {
-	  my_free(ad->userData);
-	}
-	my_free(ad);
-	adList->adaptors[i] = NULL;
-      }
+    if(ad) {
+      if(ad->deviceName) my_free(ad->deviceName);
+      if(ad->userData) my_free(ad->userData);
+      my_free(ad);
     }
-    adList->num_adaptors = 0;
-  }
-
-  void adaptorListFree(SFLAdaptorList *adList)
-  {
-    adaptorListReset(adList);
-    my_free(adList->adaptors);
-    my_free(adList);
   }
 
   void adaptorListMarkAll(SFLAdaptorList *adList)
@@ -691,6 +677,35 @@ extern "C" {
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
       SFLAdaptor *ad = adList->adaptors[i];
       if(ad) ad->marked = YES;
+    }
+  }
+
+  void adaptorListFreeMarked(SFLAdaptorList *adList)
+  {
+    uint32_t removed = 0;
+    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+      SFLAdaptor *ad = adList->adaptors[i];
+      if(ad && ad->marked) {
+	adaptorFree(ad);
+	adList->adaptors[i] = NULL;
+	removed++;
+      }
+    }
+    if(removed > 0) {
+      uint32_t found = 0;
+      // now pack the array and update the num_adaptors count
+      for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+	SFLAdaptor *ad = adList->adaptors[i];
+	if(ad) adList->adaptors[found++] = ad;
+      }
+      // cross-check
+      if((found + removed) != adList->num_adaptors) {
+	myLog(LOG_ERR, "adaptorListFreeMarked: found(%u) + removed(%u) != num_adaptors(%u)",
+	      found,
+	      removed,
+	      adList->num_adaptors);
+      }
+      adList->num_adaptors = found;
     }
   }
   

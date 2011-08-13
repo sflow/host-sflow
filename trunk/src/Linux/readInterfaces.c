@@ -25,7 +25,7 @@ extern int debug;
 int readInterfaces(HSP *sp)
 {
   if(sp->adaptorList == NULL) sp->adaptorList = adaptorListNew();
-  else adaptorListReset(sp->adaptorList);
+  else adaptorListMarkAll(sp->adaptorList);
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
   // have a list of MAC addresses for each interface (usually only 1).
@@ -87,8 +87,13 @@ int readInterfaces(HSP *sp)
 
 	      // for now just assume that each interface has only one MAC.  It's not clear how we can
 	      // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
-	      // create a new "adaptor" entry
+	      // find or create a new "adaptor" entry
 	      SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data, sizeof(HSPAdaptorNIO));
+
+	      // clear the mark so we don't free it below
+	      adaptor->marked = NO;
+
+	      // this flag might belong in the adaptorNIO struct
 	      adaptor->promiscuous = promisc;
 
 	      // remember some useful flags in the userData structure
@@ -161,6 +166,9 @@ int readInterfaces(HSP *sp)
   }
   
   close (fd);
+
+  // now remove and free any that are still marked
+  adaptorListFreeMarked(sp->adaptorList);
 
   return sp->adaptorList->num_adaptors;
 }

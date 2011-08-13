@@ -139,8 +139,8 @@ extern "C" {
 
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew();
-  void adaptorListReset(SFLAdaptorList *adList);
-  void adaptorListFree(SFLAdaptorList *adlist);
+  void adaptorListMarkAll(SFLAdaptorList *adList);
+  void adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
   SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
 

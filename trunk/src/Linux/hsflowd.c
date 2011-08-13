@@ -735,7 +735,9 @@ extern "C" {
 	if(*ifname && *ifmac) {
 	  u_char macBytes[6];
 	  if(hexToBinary((u_char *)ifmac, macBytes, 6) == 6) {
-	    adaptorListAdd(state->interfaces, ifname, macBytes);
+	    SFLAdaptor *ad = adaptorListAdd(state->interfaces, ifname, macBytes, 0);
+	    // clear the mark so we don't free it
+	    ad->marked = NO;
 	  }
 	}
       }
@@ -884,7 +886,7 @@ extern "C" {
 	    // it was already there, just clear the mark.
 	    state->marked = NO;
 	    // and reset the information that we are about to refresh
-	    adaptorListReset(state->interfaces);
+	    adaptorListMarkAll(state->interfaces);
 	    strArrayReset(state->volumes);
 	  }
 	  else {
@@ -929,8 +931,8 @@ extern "C" {
 	    free(xmlstr); // allocated by virDomainGetXMLDesc()
 	  }
 	  xmlCleanupParser();
-
 	  virDomainFree(domainPtr);
+	  adaptorListFreeMarked(state->interfaces);
 	}
       }
       // remember the number of domains we found
