@@ -1023,8 +1023,8 @@ extern "C" {
     sfl_agent_tick(sp->sFlow->agent, sp->clk);
     
     // possibly poll the nio counters to avoid 32-bit rollover
-    if(sp->adaptorNIOList.polling_secs &&
-       ((sp->clk % sp->adaptorNIOList.polling_secs) == 0)) {
+    if(sp->nio_polling_secs &&
+       ((sp->clk % sp->nio_polling_secs) == 0)) {
       updateNioCounters(sp);
     }
     
@@ -1763,7 +1763,7 @@ extern "C" {
 
 	  // initialize the faster polling of NIO counters
 	  // to avoid undetected 32-bit wraps
-	  sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_32BIT;
+	  sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
 	  
 	  if(sp->DNSSD) {
 	    // launch dnsSD thread.  It will now be responsible for

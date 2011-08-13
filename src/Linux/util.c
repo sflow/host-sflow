@@ -666,9 +666,13 @@ extern "C" {
   void adaptorListReset(SFLAdaptorList *adList)
   {
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
-      if(adList->adaptors[i]) {
-	my_free(adList->adaptors[i]->deviceName);
-	my_free(adList->adaptors[i]);
+      SFLAdaptor *ad = adList->adaptors[i];
+      if(ad) {
+	my_free(ad->deviceName);
+	if(ad->userData) {
+	  my_free(ad->userData);
+	}
+	my_free(ad);
 	adList->adaptors[i] = NULL;
       }
     }
@@ -680,6 +684,14 @@ extern "C" {
     adaptorListReset(adList);
     my_free(adList->adaptors);
     my_free(adList);
+  }
+
+  void adaptorListMarkAll(SFLAdaptorList *adList)
+  {
+    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+      SFLAdaptor *ad = adList->adaptors[i];
+      if(ad) ad->marked = YES;
+    }
   }
   
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
@@ -694,22 +706,24 @@ extern "C" {
     return NULL;
   }
 
-  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes)
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize)
   {
     SFLAdaptor *ad = adaptorListGet(adList, dev);
     if(ad == NULL) {
       ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
       ad->deviceName = my_strdup(dev);
-    }
-    if(adList->num_adaptors == adList->capacity) {
-      // grow
-      adList->capacity *= 2;
-      adList->adaptors = (SFLAdaptor **)my_realloc(adList->adaptors, adList->capacity * sizeof(SFLAdaptor *));
-    }
-    adList->adaptors[adList->num_adaptors++] = ad;
-    if(macBytes) {
-      memcpy(ad->macs[0].mac, macBytes, 6);
-      ad->num_macs = 1;
+      ad->userData = my_calloc(userDataSize);
+      
+      if(adList->num_adaptors == adList->capacity) {
+	// grow
+	adList->capacity *= 2;
+	adList->adaptors = (SFLAdaptor **)my_realloc(adList->adaptors, adList->capacity * sizeof(SFLAdaptor *));
+      }
+      adList->adaptors[adList->num_adaptors++] = ad;
+      if(macBytes) {
+	memcpy(ad->macs[0].mac, macBytes, 6);
+	ad->num_macs = 1;
+      }
     }
     return ad;
   }

@@ -10,19 +10,6 @@ extern "C" {
 #include "hsflowd.h"
 
   /*_________________---------------------------__________________
-    _________________    getAdaptorNIO          __________________
-    -----------------___________________________------------------
-  */
-  
-  HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName) {
-    for(int i = 0; i < nioList->num_adaptors; i++) {
-      HSPAdaptorNIO *adaptor = nioList->adaptors[i];
-      if(!strcmp(adaptor->deviceName, deviceName)) return adaptor;
-    }
-    return NULL;
-  }
-
-  /*_________________---------------------------__________________
     _________________    updateNioCounters      __________________
     -----------------___________________________------------------
   */
@@ -30,10 +17,10 @@ extern "C" {
   void updateNioCounters(HSP *sp) {
 
     // don't do anything if we already refreshed the numbers less than a second ago
-    if(sp->adaptorNIOList.last_update == sp->clk) {
+    if(sp->nio_last_update == sp->clk) {
       return;
     }
-    sp->adaptorNIOList.last_update = sp->clk;
+    sp->nio_last_update = sp->clk;
 
     FILE *procFile;
     procFile= fopen("/proc/net/dev", "r");
@@ -69,81 +56,84 @@ extern "C" {
 		  &pkts_out,
 		  &errs_out,
 		  &drops_out) == 9) {
-	  HSPAdaptorNIO *adaptor = getAdaptorNIO(&sp->adaptorNIOList, trimWhitespace(deviceName));
-	  // exclude bond_master interfaces here to avoid double-counting
-	  if(adaptor && !adaptor->bond_master) {
-	    // have to detect discontinuities here, so use a full
-	    // set of latched counters and accumulators.
-	    int accumulate = adaptor->last_update ? YES : NO;
-	    adaptor->last_update = sp->clk;
-	    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
+	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(deviceName));
+	  if(adaptor && adaptor->userData) {
+	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	    // exclude bond_master interfaces here to avoid double-counting
+	    if(!niostate->bond_master) {
+	      // have to detect discontinuities here, so use a full
+	      // set of latched counters and accumulators.
+	      int accumulate = niostate->last_update ? YES : NO;
+	      niostate->last_update = sp->clk;
+	      uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
 
-	    SFLHost_nio_counters delta;
-#define NIO_COMPUTE_DELTA(field) delta.field = field - adaptor->last_nio.field
-	    NIO_COMPUTE_DELTA(pkts_in);
-	    NIO_COMPUTE_DELTA(errs_in);
-	    NIO_COMPUTE_DELTA(drops_in);
-	    NIO_COMPUTE_DELTA(pkts_out);
-	    NIO_COMPUTE_DELTA(errs_out);
-	    NIO_COMPUTE_DELTA(drops_out);
+	      SFLHost_nio_counters delta;
+#define NIO_COMPUTE_DELTA(field) delta.field = field - niostate->last_nio.field
+	      NIO_COMPUTE_DELTA(pkts_in);
+	      NIO_COMPUTE_DELTA(errs_in);
+	      NIO_COMPUTE_DELTA(drops_in);
+	      NIO_COMPUTE_DELTA(pkts_out);
+	      NIO_COMPUTE_DELTA(errs_out);
+	      NIO_COMPUTE_DELTA(drops_out);
 
-	    if(sp->adaptorNIOList.polling_secs == 0) {
-	      // 64-bit byte counters
-	      NIO_COMPUTE_DELTA(bytes_in);
-	      NIO_COMPUTE_DELTA(bytes_out);
-	    }
-	    else {
-	      // for case where byte counters are 32-bit,  we need
-	      // to use 32-bit unsigned arithmetic to avoid spikes
-	      delta.bytes_in = (uint32_t)bytes_in - adaptor->last_bytes_in32;
-	      delta.bytes_out = (uint32_t)bytes_out - adaptor->last_bytes_out32;
-	      adaptor->last_bytes_in32 = bytes_in;
-	      adaptor->last_bytes_out32 = bytes_out;
-	      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
-	      // if we detect that the OS is using 64-bits then we can turn off the faster
-	      // NIO polling. This should probably be done based on the kernel version or some
-	      // other include-file definition, but it's not expensive to do it here like this:
-	      if(bytes_in > 0xFFFFFFFF || bytes_out > 0xFFFFFFFF) {
-		myLog(LOG_INFO, "detected 64-bit counters in /proc/net/dev");
-		sp->adaptorNIOList.polling_secs = 0;
+	      if(sp->nio_polling_secs == 0) {
+		// 64-bit byte counters
+		NIO_COMPUTE_DELTA(bytes_in);
+		NIO_COMPUTE_DELTA(bytes_out);
 	      }
-	    }
-
-	    if(accumulate) {
-	      // sanity check in case the counters were reset under out feet.
-	      // normally we leave this to the upstream collector, but these
-	      // numbers might be getting passed through from the hardware(?)
-	      // so we treat them with particular distrust.
-	      if(delta.bytes_in > maxDeltaBytes ||
-		 delta.bytes_out > maxDeltaBytes ||
-		 delta.pkts_in > HSP_MAX_NIO_DELTA32 ||
-		 delta.pkts_out > HSP_MAX_NIO_DELTA32) {
-		myLog(LOG_ERR, "detected counter discontinuity in /proc/net/dev");
-		accumulate = NO;
+	      else {
+		// for case where byte counters are 32-bit,  we need
+		// to use 32-bit unsigned arithmetic to avoid spikes
+		delta.bytes_in = (uint32_t)bytes_in - niostate->last_bytes_in32;
+		delta.bytes_out = (uint32_t)bytes_out - niostate->last_bytes_out32;
+		niostate->last_bytes_in32 = bytes_in;
+		niostate->last_bytes_out32 = bytes_out;
+		maxDeltaBytes = HSP_MAX_NIO_DELTA32;
+		// if we detect that the OS is using 64-bits then we can turn off the faster
+		// NIO polling. This should probably be done based on the kernel version or some
+		// other include-file definition, but it's not expensive to do it here like this:
+		if(bytes_in > 0xFFFFFFFF || bytes_out > 0xFFFFFFFF) {
+		  myLog(LOG_INFO, "detected 64-bit counters in /proc/net/dev");
+		  sp->nio_polling_secs = 0;
+		}
 	      }
-	    }
 
-	    if(accumulate) {
-#define NIO_ACCUMULATE(field) adaptor->nio.field += delta.field
-	      NIO_ACCUMULATE(bytes_in);
-	      NIO_ACCUMULATE(pkts_in);
-	      NIO_ACCUMULATE(errs_in);
-	      NIO_ACCUMULATE(drops_in);
-	      NIO_ACCUMULATE(bytes_out);
-	      NIO_ACCUMULATE(pkts_out);
-	      NIO_ACCUMULATE(errs_out);
-	      NIO_ACCUMULATE(drops_out);
-	    }
+	      if(accumulate) {
+		// sanity check in case the counters were reset under out feet.
+		// normally we leave this to the upstream collector, but these
+		// numbers might be getting passed through from the hardware(?)
+		// so we treat them with particular distrust.
+		if(delta.bytes_in > maxDeltaBytes ||
+		   delta.bytes_out > maxDeltaBytes ||
+		   delta.pkts_in > HSP_MAX_NIO_DELTA32 ||
+		   delta.pkts_out > HSP_MAX_NIO_DELTA32) {
+		  myLog(LOG_ERR, "detected counter discontinuity in /proc/net/dev");
+		  accumulate = NO;
+		}
+	      }
 
-#define NIO_LATCH(field) adaptor->last_nio.field = field
-	    NIO_LATCH(bytes_in);
-	    NIO_LATCH(pkts_in);
-	    NIO_LATCH(errs_in);
-	    NIO_LATCH(drops_in);
-	    NIO_LATCH(bytes_out);
-	    NIO_LATCH(pkts_out);
-	    NIO_LATCH(errs_out);
-	    NIO_LATCH(drops_out);
+	      if(accumulate) {
+#define NIO_ACCUMULATE(field) niostate->nio.field += delta.field
+		NIO_ACCUMULATE(bytes_in);
+		NIO_ACCUMULATE(pkts_in);
+		NIO_ACCUMULATE(errs_in);
+		NIO_ACCUMULATE(drops_in);
+		NIO_ACCUMULATE(bytes_out);
+		NIO_ACCUMULATE(pkts_out);
+		NIO_ACCUMULATE(errs_out);
+		NIO_ACCUMULATE(drops_out);
+	      }
+
+#define NIO_LATCH(field) niostate->last_nio.field = field
+	      NIO_LATCH(bytes_in);
+	      NIO_LATCH(pkts_in);
+	      NIO_LATCH(errs_in);
+	      NIO_LATCH(drops_in);
+	      NIO_LATCH(bytes_out);
+	      NIO_LATCH(pkts_out);
+	      NIO_LATCH(errs_out);
+	      NIO_LATCH(drops_out);
+	    }
 	  }
 	}
       }
@@ -166,20 +156,21 @@ extern "C" {
     // it here to make sure the data is up to the second.
     updateNioCounters(sp);
 
-    for(int i = 0; i < sp->adaptorNIOList.num_adaptors; i++) {
-      HSPAdaptorNIO *adaptor = sp->adaptorNIOList.adaptors[i];
+    for(int i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
 	if(adList == NULL || adaptorListGet(adList, adaptor->deviceName) != NULL) {
+	  HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
 	  interface_count++;
 	  // report the sum over all devices that match the filter
-	  nio->bytes_in += adaptor->nio.bytes_in;
-	  nio->pkts_in += adaptor->nio.pkts_in;
-	  nio->errs_in += adaptor->nio.errs_in;
-	  nio->drops_in += adaptor->nio.drops_in;
-	  nio->bytes_out += adaptor->nio.bytes_out;
-	  nio->pkts_out += adaptor->nio.pkts_out;
-	  nio->errs_out += adaptor->nio.errs_out;
-	  nio->drops_out += adaptor->nio.drops_out;
+	  nio->bytes_in += niostate->nio.bytes_in;
+	  nio->pkts_in += niostate->nio.pkts_in;
+	  nio->errs_in += niostate->nio.errs_in;
+	  nio->drops_in += niostate->nio.drops_in;
+	  nio->bytes_out += niostate->nio.bytes_out;
+	  nio->pkts_out += niostate->nio.pkts_out;
+	  nio->errs_out += niostate->nio.errs_out;
+	  nio->drops_out += niostate->nio.drops_out;
 	}
       }
     }
