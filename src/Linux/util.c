@@ -672,6 +672,24 @@ extern "C" {
     }
   }
 
+  void adaptorListReset(SFLAdaptorList *adList)
+  {
+    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+      if(adList->adaptors[i]) {
+	adaptorFree(adList->adaptors[i]);
+	adList->adaptors[i] = NULL;
+      }
+    }
+    adList->num_adaptors = 0;
+  }
+
+  void adaptorListFree(SFLAdaptorList *adList)
+  {
+    adaptorListReset(adList);
+    my_free(adList->adaptors);
+    my_free(adList);
+  }
+
   void adaptorListMarkAll(SFLAdaptorList *adList)
   {
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
