@@ -583,9 +583,10 @@ extern int debug;
 	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
 	  if(adaptor && adaptor->ipAddr.addr) {
+	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
 	    u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
 	    EnumIPSelectionPriority ipPriority = IPSP_OK;
-	    if(ipbytes[0] == 127) {
+	    if(adaptorNIO->loopback) {
 	      ipPriority = IPSP_LOOPBACK;
 	    }
 	    else if (ipbytes[0] == 169 &&

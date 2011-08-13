@@ -191,7 +191,7 @@ extern "C" {
 
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
-    char *deviceName;
+    int32_t loopback;
     int32_t bond_master;
     SFLHost_nio_counters nio;
     SFLHost_nio_counters last_nio;
@@ -201,20 +201,6 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
   } HSPAdaptorNIO;
-
-  typedef struct _HSPAdaptorNIOList {
-    HSPAdaptorNIO **adaptors;
-    uint32_t num_adaptors;
-    time_t last_update;
-    // have to poll the NIO counters fast enough to avoid 32-bit rollover
-    // of the bytes counters.  On a 10Gbps interface they can wrap in 
-    // less than 5 seconds.  On a virtual interface the data rate could be
-    // higher still. The program may decide to turn this off. For example,
-    // if it finds evidence that the counters are already 64-bit in the OS,
-    // or if it decides that all interface speeds are limited to 1Gbps or less.
-    time_t polling_secs;
-#define HSP_NIO_POLLING_SECS_32BIT 3
-  } HSPAdaptorNIOList;
 
   typedef struct _HSPDiskIO {
     uint64_t last_sectors_read;
@@ -239,7 +225,18 @@ extern "C" {
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
-    HSPAdaptorNIOList adaptorNIOList;
+    // HSPAdaptorNIOList adaptorNIOList;
+
+    // have to poll the NIO counters fast enough to avoid 32-bit rollover
+    // of the bytes counters.  On a 10Gbps interface they can wrap in
+    // less than 5 seconds.  On a virtual interface the data rate could be
+    // higher still. The program may decide to turn this off. For example,
+    // if it finds evidence that the counters are already 64-bit in the OS,
+    // or if it decides that all interface speeds are limited to 1Gbps or less.
+    time_t nio_last_update;
+    time_t nio_polling_secs;
+#define HSP_NIO_POLLING_SECS_32BIT 3
+
     int refreshAdaptorList;
     int refreshVMList;
     // 64-bit diskIO accumulators
@@ -307,7 +304,7 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
-  HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName);
+  HSPAdaptorNIO *getAdaptorNIO(SFLAdaptorList *adaptorList, char *deviceName);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int readPackets(HSP *sp);

@@ -16,69 +16,6 @@ extern "C" {
 #include <linux/sockios.h>
 
 extern int debug;
-    
-/*________________---------------------------__________________
-  ________________    updateAdaptorNIO       __________________
-  ----------------___________________________------------------
-*/
-
-static HSPAdaptorNIO *extractOrCreateAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName)
-{
-  HSPAdaptorNIO *adaptor = NULL;
-  for(int i = 0; i < nioList->num_adaptors; i++) {
-    adaptor = nioList->adaptors[i];
-    if(adaptor && !strncmp(adaptor->deviceName, deviceName, IFNAMSIZ)) {
-      // take it out of the array and return it
-      nioList->adaptors[i] = NULL;
-      return adaptor;
-    }
-  }
-  // not found, create a new one
-  adaptor = (HSPAdaptorNIO *)my_calloc(sizeof(HSPAdaptorNIO));
-  adaptor->deviceName = my_strdup(deviceName);
-  return adaptor;
-}
-
-void freeAdaptorNIOs(HSPAdaptorNIOList *nioList)
-{
-  for(int i = 0; i < nioList->num_adaptors; i++) {
-    HSPAdaptorNIO *adaptor = nioList->adaptors[i];
-    if(adaptor) {
-      my_free(adaptor->deviceName);
-      my_free(adaptor);
-    }
-  }
-  if(nioList->adaptors) {
-    my_free(nioList->adaptors);
-    nioList->adaptors = NULL;
-  }
-  nioList->num_adaptors = 0;
-}
-
-static void updateAdaptorNIO(HSP *sp)
-{
-  uint32_t N = sp->adaptorList->num_adaptors;
-  // space for new list
-  HSPAdaptorNIO **new_list = (HSPAdaptorNIO **)my_calloc(N * sizeof(HSPAdaptorNIO *));
-  // move pre-existing ones across,  or create new ones if necessary
-  for(int i = 0; i < N; i++) {
-    SFLAdaptor *ad = sp->adaptorList->adaptors[i];
-    HSPAdaptorNIO *adnio = extractOrCreateAdaptorNIO(&sp->adaptorNIOList, ad->deviceName);
-    // could just point from the HSPAdaptorNIO struct to the SFLAdaptor struct.  They are
-    // only separate because the SFLAdaptor one is known to the sFlow library and is used
-    // to encode the XML output. Still,  it seems safer to just copy the values across
-    // here on a need-to-know basis rather than risk dangling pointers or double-freeing.
-    adnio->bond_master = ad->bond_master;
-    new_list[i] = adnio;
-  }
-  // free old ones we don't need any more
-  freeAdaptorNIOs(&sp->adaptorNIOList);
-  // and move the new list into place
-  sp->adaptorNIOList.adaptors = new_list;
-  sp->adaptorNIOList.num_adaptors = N;
-  sp->adaptorNIOList.last_update = 0;
-  return;
-}
 
 /*________________---------------------------__________________
   ________________      readInterfaces       __________________
@@ -151,9 +88,13 @@ int readInterfaces(HSP *sp)
 	      // for now just assume that each interface has only one MAC.  It's not clear how we can
 	      // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
 	      // create a new "adaptor" entry
-	      SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data);
+	      SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data, sizeof(HSPAdaptorNIO));
 	      adaptor->promiscuous = promisc;
-	      adaptor->bond_master = bond_master;
+
+	      // remember some useful flags in the userData structure
+	      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	      adaptorNIO->loopback = loopback;
+	      adaptorNIO->bond_master = bond_master;
 
 	      // Try and get the ifIndex for this interface
 	      if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
@@ -221,8 +162,6 @@ int readInterfaces(HSP *sp)
   
   close (fd);
 
-  updateAdaptorNIO(sp);
-  
   return sp->adaptorList->num_adaptors;
 }
   

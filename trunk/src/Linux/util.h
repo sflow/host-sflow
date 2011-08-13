@@ -142,7 +142,7 @@ extern "C" {
   void adaptorListReset(SFLAdaptorList *adList);
   void adaptorListFree(SFLAdaptorList *adlist);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
-  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes);
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
 
   // file utils
   int truncateOpenFile(FILE *fptr);

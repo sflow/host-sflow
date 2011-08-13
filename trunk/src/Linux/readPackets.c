@@ -30,9 +30,9 @@ extern "C" {
     if(devName) {
       // look up the adaptor objects
       SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, devName);
-      HSPAdaptorNIO *adaptorNIO = getAdaptorNIO(&sp->adaptorNIOList, devName);
+      if(adaptor && adaptor->userData) {
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
       
-      if(adaptor && adaptorNIO) {
 	// make sure the counters are up to the second
 	updateNioCounters(sp);
 	
@@ -200,6 +200,21 @@ extern "C" {
 		  SFLAdaptor *out = adaptorListGet(sp->adaptorList, pkt->outdev_name);
 		  if(out && out->ifIndex) {
 		    fs.output = out->ifIndex;
+		    // the sampler_dev may have already been set above.  By overriding
+		    // it here we are biasing towards egress-sampling for packets that
+		    // matched both an ingress and an egress interface.  In practice
+		    // most packets will only match one or the other,  though.  They
+		    // will either be "eth0 -> lo" or "lo -> eth0".  Since we don't
+		    // usually allow "lo" to be in the adaptorList,  the upshot is
+		    // that we are offering bidirectional sampling on the "eth0" (and
+		    // similar) interfaces.
+		    // It might be more stable if we biased towards ingress-sampling
+		    // and only set these vars if they were not set before,  but
+		    // further investigation is required.  For example,  the really
+		    // correct thing to do might be to generate a separate sample
+		    // for each interface,  even though it was the same packet.  That
+		    // way we would have true bidirectional sampling on any
+		    // interface that makes it into the adaptorList.
 		    sampler_dev = pkt->outdev_name;
 		    sampler_ifIndex = out->ifIndex;
 		  }
