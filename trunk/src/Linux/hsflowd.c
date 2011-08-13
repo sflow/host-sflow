@@ -949,10 +949,13 @@ extern "C" {
 	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
 		  SFL_DS_INDEX(pl->dsi),
 		  state->domId);
-	    my_free(pl->userData);
+	    if(state->volumes) strArrayFree(state->volumes);
+	    if(state->interfaces) adaptorListFree(state->interfaces);
+	    my_free(state);
 	    pl->userData = NULL;
 	    sfl_agent_removePoller(sf->agent, &pl->dsi);
 	    sp->refreshAdaptorList = YES;
+
 	  }
 	}
 	pl = nextPl;
