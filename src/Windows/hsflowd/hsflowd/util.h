@@ -117,9 +117,13 @@ extern "C" {
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew();
   void adaptorListReset(SFLAdaptorList *adList);
-  void adaptorListFree(SFLAdaptorList *adlist);
+  void adaptorListFree(SFLAdaptorList *adList);
+  void adaptorListMarkAll(SFLAdaptorList *adList);
+  void adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
-  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes);
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
+
+  void readAddresses(void);
 
   // file utils
   int truncateOpenFile(FILE *fptr);

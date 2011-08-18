@@ -32,7 +32,7 @@ extern "C" {
 #define YES 1
 #define NO 0
 
-#define HSP_VERSION "1.0.0"
+#define HSP_VERSION "1.13"
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
@@ -74,12 +74,31 @@ extern "C" {
     SFLAddress agentIP;
   } HSPSFlow; 
 
+   // cache nio counters per adaptor
+  typedef struct _HSPAdaptorNIO {
+    char *deviceName;
+    int32_t bond_master;
+	SFLHost_nio_counters new_nio;
+    SFLHost_nio_counters nio;
+    SFLHost_nio_counters last_nio;
+    uint32_t last_bytes_in32;
+    uint32_t last_bytes_out32;
+#define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
+#define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
+    time_t last_update;
+  } HSPAdaptorNIO;
+
   typedef struct _HSP {
     HSPSFlow *sFlow;
     char *configFile;
     char *pidFile;
+	time_t clk;
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
+	time_t nio_last_update;
+	time_t nio_polling_secs;
+#define HSP_NIO_POLLING_SECS_32BIT 3
+
     // UDP send sockets
     int socket4;
     int socket6;
@@ -94,7 +113,8 @@ extern "C" {
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(SFLHost_dsk_counters *dsk);
-  int readNioCounters(SFLHost_nio_counters *dsk);
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *dsk);
+  void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid);
   int readSystemUUID(u_char *uuidbuf);
 
