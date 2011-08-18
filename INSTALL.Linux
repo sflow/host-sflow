@@ -32,33 +32,16 @@ prevent daemonization:
 gdb> set args -d
 gdb> r
 
+To build an rpm, try:
 
-Citrix XenServer
-================
-
-To compile for XenServer, install these sources into the
-equivalent XenServer DDK VM, and compile with XEN_DDK=yes:
-
-DDK> export XEN_DDK=yes
-DDK> make rpm
+% make rpm
 
 The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
 (where <ARCH> is i386 or x86_64 or ...)
-Copy that rpm to the XenServer dom0 host, and install it:
 
-[root@xenserver ~]# rpm -Uvh hsflowd-<VERSION>-1.<ARCH>.rpm
+To build a Debian package, try:
 
-Then start it:
+% make deb
 
-[root@xenserver ~]# /sbin/service hsflowd start
-
-If Open VSwitch is running, starting sflowovsd will propagate
-sFlow configuration to the switch via ovs-vsctl(1):
-
-[root@xenserver ~]# /sbin/service sflowovsd start
-
-Output will go to /var/log/messages.
-
-
-
-
+The hsflowd-<version>-<release>.deb package should appear
+in the current directory.
