@@ -43,6 +43,7 @@ extern int debug;
     return col;
   }
 
+
   int HSPReadConfig(HSP *sp)
   {
 	HSPCollector *col;
@@ -52,8 +53,11 @@ extern int debug;
 	int gotData = NO;
 	struct sockaddr_in *sendSocketAddr;
 
+
     newSFlow(sp);
 	sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
+	/* TODO: make agent-address selection smarter */
+	// readAddresses();
 	sp->sFlow->agentIP.address.ip_v4 = sp->adaptorList->adaptors[0]->ipAddr;
 	newCollector(sp->sFlow);
 	col = sp->sFlow->collectors;

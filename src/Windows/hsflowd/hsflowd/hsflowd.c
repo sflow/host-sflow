@@ -111,7 +111,7 @@ int InitService();
     // host Net I/O
     memset(&nioElem, 0, sizeof(nioElem));
     nioElem.tag = SFLCOUNTERS_HOST_NIO;
-    if(readNioCounters(&nioElem.counterBlock.host_nio)) {
+    if(readNioCounters(sp, &nioElem.counterBlock.host_nio)) {
       SFLADD_ELEMENT(cs, &nioElem);
     }
 	
@@ -151,10 +151,13 @@ int InitService();
     -----------------___________________________------------------
   */
   
-  static void tick(HSP *sp, time_t clk) {
+  static void tick(HSP *sp) {
     if(tick_count++%5==0)
 		calcLoad();
-	sfl_agent_tick(sp->sFlow->agent, clk);
+	if(sp->nio_polling_secs && (sp->clk % sp->nio_polling_secs) == 0) {
+			updateNioCounters(sp);
+	}
+	sfl_agent_tick(sp->sFlow->agent, sp->clk);
   }
 
     /*_________________---------------------------__________________
@@ -318,6 +321,8 @@ void ServiceMain(int argc, char** argv)
 	sp.host_hid.hostname.str = (char *)my_calloc(SFL_MAX_HOSTNAME_CHARS+1);
 	sp.host_hid.os_release.str = (char *)my_calloc(SFL_MAX_OSRELEASE_CHARS+1);
 	readHidCounters(&sp, &sp.host_hid);
+	
+	sp.nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
 
 	readInterfaces(&sp);
 	HSPReadConfig(&sp);
@@ -326,7 +331,8 @@ void ServiceMain(int argc, char** argv)
     // main loop
     while (ServiceStatus.dwCurrentState == SERVICE_RUNNING)
 	{
-		tick(&sp,time(NULL));
+		sp.clk = time(NULL);
+		tick(&sp);
 		Sleep(SLEEP_TIME);
 	}
     return; 
