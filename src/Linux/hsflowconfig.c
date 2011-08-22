@@ -606,17 +606,6 @@ extern int debug;
 	}
       }
 
-      if(sp->sFlow->agentIP.type == SFLADDRESSTYPE_IP_V4 && sp->sFlow->agentDevice == NULL) {
-	// try to fill in the device field too (because we need to give that one to open vswitch).
-	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	  if(adaptor && (adaptor->ipAddr.addr == sp->sFlow->agentIP.address.ip_v4.addr)) {
-	    sp->sFlow->agentDevice = my_strdup(adaptor->deviceName);
-	    break;
-	  }
-	}
-      }
-
       if(sp->sFlow->agentIP.type == 0) {
         // still no agentIP.  That's a showstopper.
 	myLog(LOG_ERR, "parse error in %s : agentIP not defined", sp->configFile);
