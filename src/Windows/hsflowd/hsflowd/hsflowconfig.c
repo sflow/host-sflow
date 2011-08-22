@@ -69,7 +69,7 @@ extern int debug;
 	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
 	    u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
 	    EnumIPSelectionPriority ipPriority = IPSP_OK;
-	    if(adaptorNIO->loopback) {
+	    if(/*adaptorNIO->loopback*/ ipbytes[0] == 127) {
 	      ipPriority = IPSP_LOOPBACK;
 	    }
 	    else if (ipbytes[0] == 169 &&
