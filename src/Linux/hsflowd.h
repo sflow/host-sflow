@@ -38,6 +38,7 @@ extern "C" {
 #include <signal.h>
 #include <ucontext.h>
 
+#include <stdarg.h> // for va_start()
 #include "util.h"
 #include "sflow_api.h"
 
@@ -187,6 +188,7 @@ extern "C" {
     uint32_t domId;
     SFLAdaptorList *interfaces;
     UTStringArray *volumes;
+    UTStringArray *disks;
   } HSPVMState;
 
   // cache nio counters per adaptor

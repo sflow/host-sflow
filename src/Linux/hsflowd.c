@@ -588,7 +588,15 @@ extern "C" {
 	      dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
 	      dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
 	      dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
-	      // reads, writes and errors $$$ ?
+	      /* we get reads, writes and errors from a different call */
+	      virDomainBlockStatsStruct blkStats;
+	      if(virDomainBlockStats(domainPtr, strArrayAt(state->disks, i), &blkStats, sizeof(blkStats)) != -1) {
+		if(blkStats.rd_req != -1) dskElem.counterBlock.host_vrt_dsk.rd_req += blkStats.rd_req;
+		if(blkStats.rd_bytes != -1) dskElem.counterBlock.host_vrt_dsk.rd_bytes += blkStats.rd_bytes;
+		if(blkStats.wr_req != -1) dskElem.counterBlock.host_vrt_dsk.wr_req += blkStats.wr_req;
+		if(blkStats.wr_bytes != -1) dskElem.counterBlock.host_vrt_dsk.wr_bytes += blkStats.wr_bytes;
+		if(blkStats.errs != -1) dskElem.counterBlock.host_vrt_dsk.errs += blkStats.errs;
+	      }
 	    }
 	  }
 	}
@@ -690,6 +698,32 @@ extern "C" {
   */
 
 #ifdef HSF_VRT
+
+  static int domain_xml_path_equal(xmlNode *node, char *nodeName, ...) {
+    if(node == NULL
+       || node->name == NULL
+       || node->type != XML_ELEMENT_NODE
+       || !my_strequal(nodeName, (char *)node->name)) {
+      return NO;
+    }
+    int match = YES;
+    va_list names;
+    va_start(names, nodeName);
+    xmlNode *parentNode = node->parent;
+    char *parentName;
+    while((parentName = va_arg(names, char *)) != NULL) {
+      if(parentNode == NULL
+	 || parentNode->name == NULL
+	 || !my_strequal(parentName, (char *)parentNode->name)) {
+	match = NO;
+	break;
+      }
+      parentNode = parentNode->parent;
+    }
+    va_end(names);
+    return match;
+  }
+
   static char *get_xml_attr(xmlNode *node, char *attrName) {
     for(xmlAttr *attr = node->properties; attr; attr = attr->next) {
       if(attr->name) {
@@ -702,37 +736,54 @@ extern "C" {
     return NULL;
   }
     
-  void domain_xml_interface(xmlNode *node, HSPVMState *state, char **ifname, char **ifmac) {
+  void domain_xml_interface(xmlNode *node, char **ifname, char **ifmac) {
     for(xmlNode *n = node; n; n = n->next) {
-      if(n->type ==XML_ELEMENT_NODE) {
-	if(n->name && n->parent && n->parent->name) {
-	  if(!strcmp((char *)n->parent->name, "interface")) {
-	    if(!strcmp((char *)n->name, "target")) {
-	      char *dev = get_xml_attr(n, "dev");
-	      if(dev) {
-		if(debug) myLog(LOG_INFO, "interface.dev=%s", dev);
-		if(ifname) *ifname = dev;
-	      }
-	    }
-	    if(!strcmp((char *)n->name, "mac")) {
-	      char *addr = get_xml_attr(n, "address");
-	      if(debug) myLog(LOG_INFO, "interface.mac=%s", addr);
-	      if(ifmac) *ifmac = addr;
-	    }
-	  }
+      if(domain_xml_path_equal(n, "target", "interface", "devices", NULL)) {
+	char *dev = get_xml_attr(n, "dev");
+	if(dev) {
+	  if(debug) myLog(LOG_INFO, "interface.dev=%s", dev);
+	  if(ifname) *ifname = dev;
 	}
       }
-      if(n->children) domain_xml_interface(n->children, state, ifname, ifmac);
+      else if(domain_xml_path_equal(n, "mac", "interface", "devices", NULL)) {
+	char *addr = get_xml_attr(n, "address");
+	if(debug) myLog(LOG_INFO, "interface.mac=%s", addr);
+	if(ifmac) *ifmac = addr;
+      }
     }
+    if(node->children) domain_xml_interface(node->children, ifname, ifmac);
   }
     
+  void domain_xml_disk(xmlNode *node, char **disk_path, char **disk_dev) {
+    for(xmlNode *n = node; n; n = n->next) {
+      if(domain_xml_path_equal(n, "source", "disk", "devices", NULL)) {
+	char *path = get_xml_attr(n, "file");
+	if(path) {
+	  if(debug) myLog(LOG_INFO, "disk.file=%s", path);
+	  if(disk_path) *disk_path = path;
+	}
+      }
+      else if(domain_xml_path_equal(n, "target", "disk", "devices", NULL)) {
+	char *dev = get_xml_attr(n, "dev");
+	if(debug) myLog(LOG_INFO, "disk.dev=%s", dev);
+	if(disk_dev) *disk_dev = dev;
+      }
+      else if(domain_xml_path_equal(n, "readonly", "disk", "devices", NULL)) {
+	if(debug) myLog(LOG_INFO, "ignoring readonly device");
+	*disk_path = NULL;
+	*disk_dev = NULL;
+	return;
+      }
+    }
+    if(node->children) domain_xml_disk(node->children, disk_path, disk_dev);
+  }
+  
   void domain_xml_node(xmlNode *node, HSPVMState *state) {
     for(xmlNode *n = node; n; n = n->next) {
-      if(n->type == XML_ELEMENT_NODE && n->name &&
-	 !strcmp((char *)n->name, "interface")) {
+      if(domain_xml_path_equal(n, "interface", "devices", "domain", NULL)) {
 	char *ifname=NULL,*ifmac=NULL;
-	domain_xml_interface(n, state, &ifname, &ifmac);
-	if(*ifname && *ifmac) {
+	domain_xml_interface(n, &ifname, &ifmac);
+	if(ifname && ifmac) {
 	  u_char macBytes[6];
 	  if(hexToBinary((u_char *)ifmac, macBytes, 6) == 6) {
 	    SFLAdaptor *ad = adaptorListAdd(state->interfaces, ifname, macBytes, 0);
@@ -741,18 +792,19 @@ extern "C" {
 	  }
 	}
       }
-      else if(n->type == XML_ELEMENT_NODE && n->name && n->parent && n->parent->name &&
-	      !strcmp((char *)n->parent->name, "disk") &&
-	      !strcmp((char *)n->name, "source")) {
-	char *path = get_xml_attr(n, "file");
-	if(path) {
-	  if(debug) myLog(LOG_INFO, "disk.path=%s", path);
-	  strArrayAdd(state->volumes, (char *)path);
+      else if(domain_xml_path_equal(n, "disk", "devices", "domain", NULL)) {
+	// need both a path and a dev before we will accept it
+	char *disk_path=NULL,*disk_dev=NULL;
+	domain_xml_disk(n, &disk_path, &disk_dev);
+	if(disk_path && disk_dev) {
+	  strArrayAdd(state->volumes, (char *)disk_path);
+	  strArrayAdd(state->disks, (char *)disk_dev);
 	}
       }
       else if(n->children) domain_xml_node(n->children, state);
     }
   }
+
 #endif /* HSF_VRT */
   /*_________________---------------------------__________________
     _________________    configVMs              __________________
@@ -888,6 +940,7 @@ extern "C" {
 	    // and reset the information that we are about to refresh
 	    adaptorListMarkAll(state->interfaces);
 	    strArrayReset(state->volumes);
+	    strArrayReset(state->disks);
 	  }
 	  else {
 	    // new one - tell it what to do.
@@ -902,6 +955,7 @@ extern "C" {
 	    vpoller->userData = state;
 	    state->interfaces = adaptorListNew();
 	    state->volumes = strArrayNew();
+	    state->disks = strArrayNew();
 	    sp->refreshAdaptorList = YES;
 	  }
 	  // remember the index so we can access this individually later
@@ -949,6 +1003,7 @@ extern "C" {
 	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
 		  SFL_DS_INDEX(pl->dsi),
 		  state->domId);
+	    if(state->disks) strArrayFree(state->disks);
 	    if(state->volumes) strArrayFree(state->volumes);
 	    if(state->interfaces) adaptorListFree(state->interfaces);
 	    my_free(state);
