@@ -70,7 +70,7 @@ extern "C" {
     uint32_t numCollectors;
     HSPSFlowSettings *sFlowSettings;
     uint32_t subAgentId;
-    SFLAdaptor *agentDevice;
+    char *agentDevice;
     SFLAddress agentIP;
   } HSPSFlow; 
 
