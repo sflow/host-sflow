@@ -286,56 +286,89 @@ extern "C" {
 #define HSP_MAX_PATHLEN 256
 #define XEN_SYSFS_VBD_PATH "/sys/devices/xen-backend"
 
-  static int64_t xen_vbd_counter(char *vbd_type, uint32_t dom_id, uint32_t vbd_dev, char *counter)
+  static int64_t xen_vbd_counter(uint32_t dom_id, char *vbd_dev, char *counter, int usec)
   {
     int64_t ctr64 = 0;
-    char path[HSP_MAX_PATHLEN];
-    snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/%s-%u-%u/statistics/%s",
-	     vbd_type,
+    char ctrspec[HSP_MAX_PATHLEN];
+    snprintf(ctrspec, HSP_MAX_PATHLEN, "%u-%s/statistics/%s",
 	     dom_id,
 	     vbd_dev,
 	     counter);
-    FILE *file = fopen(path, "r");
+    char path[HSP_MAX_PATHLEN];
+    FILE *file = NULL;
+    // try vbd first,  then tap
+    snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/vbd-%s", ctrspec);
+    if((file = fopen(path, "r")) == NULL) {
+      snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/tap-%s", ctrspec);
+      file = fopen(path, "r");
+    }
+    
     if(file) {
-      fscanf(file, "%"SCNi64, &ctr64);
+      if(usec) {
+	uint64_t requests, avg_usecs, max_usecs;
+	if(fscanf(file, "requests: %"SCNi64", avg usecs: %"SCNi64", max usecs: %"SCNi64,
+		  &requests,
+		  &avg_usecs,
+		  &max_usecs) == 3) {
+	  // we want the total time in mS
+	  ctr64 = (requests * avg_usecs) / 1000;
+	}
+      }
+      else {
+	fscanf(file, "%"SCNi64, &ctr64);
+      }
       fclose(file);
     }
+    else {
+      if(debug) myLog(LOG_INFO, "xen_vbd_counter: <%s> not found ", path);
+    }
+    if(debug) myLog(LOG_INFO, "xen_vbd_counter: <%s> = %"PRIu64, path, ctr64);
     return ctr64;
   }
   
-  static int xenstat_dsk(HSP *sp, uint32_t dom_id, SFLHost_vrt_dsk_counters *dsk)
+  static int xen_collect_block_devices(HSP *sp, HSPVMState *state)
   {
-    // [ref xenstat_linux.c]
-#define SYSFS_VBD_PATH "/sys/devices/xen-backend/"
-    DIR *sysfsvbd = opendir(SYSFS_VBD_PATH);
+    DIR *sysfsvbd = opendir(XEN_SYSFS_VBD_PATH);
     if(sysfsvbd == NULL) {
-      myLog(LOG_ERR, "opendir %s failed : %s", SYSFS_VBD_PATH, strerror(errno));
-      return NO;
+      myLog(LOG_ERR, "opendir %s failed : %s", XEN_SYSFS_VBD_PATH, strerror(errno));
+      return 0;
     }
-
+    int found = 0;
     char scratch[sizeof(struct dirent) + _POSIX_PATH_MAX];
     struct dirent *dp = NULL;
     for(;;) {
       readdir_r(sysfsvbd, (struct dirent *)scratch, &dp);
       if(dp == NULL) break;
       uint32_t vbd_dom_id;
-      uint32_t vbd_dev;
       char vbd_type[256];
-      if(sscanf(dp->d_name, "%3s-%u-%u", vbd_type, &vbd_dom_id, &vbd_dev) == 3) {
-	if(vbd_dom_id == dom_id) {
-	  //dsk->capacity $$$
-	  //dsk->allocation $$$
-	  //dsk->available $$$
-	  if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", dp->d_name, dom_id); 
-	  dsk->rd_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_req");
-	  dsk->rd_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_sect") * HSP_SECTOR_BYTES);
-	  dsk->wr_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_req");
-	  dsk->wr_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_sect") * HSP_SECTOR_BYTES);
-	  dsk->errs += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "oo_req");
+      char vbd_dev[256];
+      if(sscanf(dp->d_name, "%3s-%u-%s", vbd_type, &vbd_dom_id, vbd_dev) == 3) {
+	if(vbd_dom_id == state->domId
+	   && (my_strequal(vbd_type, "vbd") || my_strequal(vbd_type, "tap"))) {
+	  strArrayAdd(state->volumes, vbd_dev);
+	  found++;
 	}
       }
     }
     closedir(sysfsvbd);
+    return found;
+  }
+
+  static int xenstat_dsk(HSP *sp, HSPVMState *state, SFLHost_vrt_dsk_counters *dsk)
+  {
+    for(uint32_t i = 0; i < strArrayN(state->volumes); i++) {
+      char *vbd_dev = strArrayAt(state->volumes, i);
+      if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", vbd_dev, state->domId); 
+      dsk->rd_req += xen_vbd_counter(state->domId, vbd_dev, "rd_req", NO);
+      dsk->rd_bytes += (xen_vbd_counter(state->domId, vbd_dev, "rd_sect", NO) * HSP_SECTOR_BYTES);
+      dsk->rd_bytes += (xen_vbd_counter(state->domId, vbd_dev, "rd_sect", NO) * HSP_SECTOR_BYTES);
+      dsk->wr_req += xen_vbd_counter(state->domId, vbd_dev, "wr_req", NO);
+      dsk->wr_bytes += (xen_vbd_counter(state->domId, vbd_dev, "wr_sect", NO) * HSP_SECTOR_BYTES);
+      dsk->errs += xen_vbd_counter(state->domId, vbd_dev, "oo_req", NO);
+      //dsk->capacity $$$
+      //dsk->allocation $$$
+      //dsk->available $$$
+    }
     return YES;
   }
   
@@ -479,7 +512,7 @@ extern "C" {
       // VM disk I/O counters
       SFLCounters_sample_element dskElem = { 0 };
       dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-      if(xenstat_dsk(sp, state->domId, &dskElem.counterBlock.host_vrt_dsk)) {
+      if(xenstat_dsk(sp, state, &dskElem.counterBlock.host_vrt_dsk)) {
 	SFLADD_ELEMENT(cs, &dskElem);
       }
 
@@ -843,62 +876,64 @@ extern "C" {
 	  else {
 	    for(uint32_t i = 0; i < new_domains; i++) {
 	      uint32_t domId = domaininfo[i].domain;
-	      // dom0 is the hypervisor. We used to ignore it, but actually
-              // it should be included. Hope this doesn't break everything.
-	      //if(domId != 0) {
-		if(debug) {
-		  // may need to ignore any that are not marked as "running" here
-		  myLog(LOG_INFO, "ConfigVMs(): domId=%u flags=0x%x tot_pages=%"PRIu64" max_pages=%"PRIu64" shared_info_frame=%"PRIu64" cpu_time=%"PRIu64" nr_online_vcpus=%u max_vcpu_id=%u ssidref=%u handle=%x",
-			domId,
-	 		domaininfo[i].flags,
-	 		domaininfo[i].tot_pages,
-	 		domaininfo[i].max_pages,
-	 		domaininfo[i].shared_info_frame,
-	 		domaininfo[i].cpu_time,
-	 		domaininfo[i].nr_online_vcpus,
-	 		domaininfo[i].max_vcpu_id,
-	 		domaininfo[i].ssidref,
-	 		domaininfo[i].handle);
-		}
-		uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
-		SFLDataSource_instance dsi;
-		// ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
-		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
-		SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-		HSPVMState *state = (HSPVMState *)vpoller->userData;
-		if(state) {
-		  // it was already there, just clear the mark.
-		  state->marked = NO;
-		}
-		else {
-		  // new one - tell it what to do.
-		  myLog(LOG_INFO, "configVMs: new domain=%u", domId);
-		  uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-		  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-		  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-		  // hang a new HSPVMState object on the userData hook
-		  state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
-		  state->network_count = 0;
-		  state->marked = NO;
-		  vpoller->userData = state;
-		  sp->refreshAdaptorList = YES;
-		}
-		// remember the index so we can access this individually later
-		// (actually this was a misunderstanding - the vm_index is not
-		// really needed at all.  Should take it out. Can still detect
-		// duplicates using the 'marked' flag).
-		if(state->vm_index) {
-		  if(debug) {
-		    myLog(LOG_INFO, "duplicate entry for domId=%u vm_index %u repeated at %u (keep first one)", domId, state->vm_index, (num_domains + i));
-		  }
-		}
-                else {
-		  state->vm_index = num_domains + i;
-                }
-		// and the domId, which might have changed (if vm rebooted)
-		state->domId = domId;
+	      // dom0 is the hypervisor. We used to ignore it, but actually it should be included.
+	      if(debug) {
+		// may need to ignore any that are not marked as "running" here
+		myLog(LOG_INFO, "ConfigVMs(): domId=%u flags=0x%x tot_pages=%"PRIu64" max_pages=%"PRIu64" shared_info_frame=%"PRIu64" cpu_time=%"PRIu64" nr_online_vcpus=%u max_vcpu_id=%u ssidref=%u handle=%x",
+		      domId,
+		      domaininfo[i].flags,
+		      domaininfo[i].tot_pages,
+		      domaininfo[i].max_pages,
+		      domaininfo[i].shared_info_frame,
+		      domaininfo[i].cpu_time,
+		      domaininfo[i].nr_online_vcpus,
+		      domaininfo[i].max_vcpu_id,
+		      domaininfo[i].ssidref,
+		      domaininfo[i].handle);
 	      }
-	    // } 
+	      uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
+	      SFLDataSource_instance dsi;
+	      // ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
+	      SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
+	      SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
+	      HSPVMState *state = (HSPVMState *)vpoller->userData;
+	      if(state) {
+		// it was already there, just clear the mark.
+		state->marked = NO;
+		// and reset the information that we are about to refresh
+		strArrayReset(state->volumes);
+	      }
+	      else {
+		// new one - tell it what to do.
+		myLog(LOG_INFO, "configVMs: new domain=%u", domId);
+		uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+		sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
+		sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
+		// hang a new HSPVMState object on the userData hook
+		state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
+		state->network_count = 0;
+		state->marked = NO;
+		vpoller->userData = state;
+		state->volumes = strArrayNew();
+		sp->refreshAdaptorList = YES;
+	      }
+	      // remember the index so we can access this individually later
+	      // (actually this was a misunderstanding - the vm_index is not
+	      // really needed at all.  Should take it out. Can still detect
+	      // duplicates using the 'marked' flag).
+	      if(state->vm_index) {
+		if(debug) {
+		  myLog(LOG_INFO, "duplicate entry for domId=%u vm_index %u repeated at %u (keep first one)", domId, state->vm_index, (num_domains + i));
+		}
+	      }
+	      else {
+		state->vm_index = num_domains + i;
+	      }
+	      // and the domId, which might have changed (if vm rebooted)
+	      state->domId = domId;
+	      // pick up the list of block device numbers
+	      xen_collect_block_devices(sp, state);
+	    }
 	  }
 	  num_domains += new_domains;
 	} while(new_domains > 0);
