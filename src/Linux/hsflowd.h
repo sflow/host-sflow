@@ -75,13 +75,18 @@ extern "C" {
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
 #define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
 #define HSP_DEFAULT_CRASH_FILE "/etc/hsflowd.crash"
-#define HSP_DEFAULT_SUBAGENTID 100
+
+/* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
+#define HSP_DEFAULT_PHYSICAL_DSINDEX 1
+#define HSP_DEFAULT_SUBAGENTID 100000
+#define HSP_MAX_SUBAGENTID 199999
+#define HSP_DEFAULT_LOGICAL_DSINDEX_START 100000
+
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
 #define HSP_DEFAULT_DNSSD_MINDELAY 10
 #define HSP_DNSSD_STACKSIZE 2000000
-#define HSP_MAX_SUBAGENTID 1000000
 #define HSP_REFRESH_VMS 60
 #define HSP_REFRESH_ADAPTORS 180
 

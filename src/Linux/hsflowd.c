@@ -430,7 +430,7 @@ extern "C" {
       SFLCounters_sample_element parElem = { 0 };
       parElem.tag = SFLCOUNTERS_HOST_PAR;
       parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-      parElem.counterBlock.host_par.dsIndex = 1;
+      parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
       SFLADD_ELEMENT(cs, &parElem);
 
       // VM Net I/O
@@ -562,7 +562,7 @@ extern "C" {
 	SFLCounters_sample_element parElem = { 0 };
 	parElem.tag = SFLCOUNTERS_HOST_PAR;
 	parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-	parElem.counterBlock.host_par.dsIndex = 1;
+	parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
 	SFLADD_ELEMENT(cs, &parElem);
 
 	// VM Net I/O
@@ -606,7 +606,17 @@ extern "C" {
 	// VM disk I/O counters
 	SFLCounters_sample_element dskElem = { 0 };
 	dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-	for(int i = strArrayN(state->volumes); --i >= 0; ) {
+	for(int i = strArrayN(state->disks); --i >= 0; ) {
+	  char *dskPath = strArrayAt(state->disks, i);
+	  int gotVolInfo = NO;
+
+#ifndef HSP_VRT_USE_DISKPATH
+	  /* define HSP_VRT_USE_DISKPATH if you want to bypass this virStorageVolGetInfo
+	   *  approach and just use virDomainGetBlockInfo instead.
+	   */
+	  /* state->volumes and state->disks are populated in lockstep
+	   * so they always have the same number of elements
+	   */
 	  char *volPath = strArrayAt(state->volumes, i);
 	  virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
 	  if(volPtr == NULL) {
@@ -618,19 +628,40 @@ extern "C" {
 	      myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
 	    }
 	    else {
+	      gotVolInfo = YES;
 	      dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
 	      dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
 	      dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
-	      /* we get reads, writes and errors from a different call */
-	      virDomainBlockStatsStruct blkStats;
-	      if(virDomainBlockStats(domainPtr, strArrayAt(state->disks, i), &blkStats, sizeof(blkStats)) != -1) {
-		if(blkStats.rd_req != -1) dskElem.counterBlock.host_vrt_dsk.rd_req += blkStats.rd_req;
-		if(blkStats.rd_bytes != -1) dskElem.counterBlock.host_vrt_dsk.rd_bytes += blkStats.rd_bytes;
-		if(blkStats.wr_req != -1) dskElem.counterBlock.host_vrt_dsk.wr_req += blkStats.wr_req;
-		if(blkStats.wr_bytes != -1) dskElem.counterBlock.host_vrt_dsk.wr_bytes += blkStats.wr_bytes;
-		if(blkStats.errs != -1) dskElem.counterBlock.host_vrt_dsk.errs += blkStats.errs;
-	      }
 	    }
+	  }
+#endif
+
+#if (LIBVIR_VERSION_NUMBER >= 8001)
+	  if(gotVolInfo == NO) {
+	    /* try appealing directly to the disk path instead */
+	    /* this call was only added in April 2010 (version 0.8.1).
+	     * See http://markmail.org/message/mjafgt47f5e5zzfc
+	     */
+	    virDomainBlockInfo blkInfo;
+	    if(virDomainGetBlockInfo(domainPtr, dskPath, &blkInfo, 0) == -1) {
+	      myLog(LOG_ERR, "virDomainGetBlockInfo(%s) failed", dskPath);
+	    }
+	    else {
+	      dskElem.counterBlock.host_vrt_dsk.capacity += blkInfo.capacity;
+	      dskElem.counterBlock.host_vrt_dsk.allocation += blkInfo.allocation;
+	      dskElem.counterBlock.host_vrt_dsk.available += (blkInfo.capacity - blkInfo.allocation);
+	      // don't need blkInfo.physical
+	    }
+	  }
+#endif
+	  /* we get reads, writes and errors from a different call */
+	  virDomainBlockStatsStruct blkStats;
+	  if(virDomainBlockStats(domainPtr, dskPath, &blkStats, sizeof(blkStats)) != -1) {
+	    if(blkStats.rd_req != -1) dskElem.counterBlock.host_vrt_dsk.rd_req += blkStats.rd_req;
+	    if(blkStats.rd_bytes != -1) dskElem.counterBlock.host_vrt_dsk.rd_bytes += blkStats.rd_bytes;
+	    if(blkStats.wr_req != -1) dskElem.counterBlock.host_vrt_dsk.wr_req += blkStats.wr_req;
+	    if(blkStats.wr_bytes != -1) dskElem.counterBlock.host_vrt_dsk.wr_bytes += blkStats.wr_bytes;
+	    if(blkStats.errs != -1) dskElem.counterBlock.host_vrt_dsk.errs += blkStats.errs;
 	  }
 	}
 	SFLADD_ELEMENT(cs, &dskElem);
@@ -893,8 +924,8 @@ extern "C" {
 	      }
 	      uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
 	      SFLDataSource_instance dsi;
-	      // ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
-	      SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
+	      // ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+	      SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + dsIndex, 0);
 	      SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
 	      HSPVMState *state = (HSPVMState *)vpoller->userData;
 	      if(state) {
@@ -965,8 +996,8 @@ extern "C" {
 	  virDomainGetUUID(domainPtr, (u_char *)uuid);
 	  uint32_t dsIndex = assignVM_dsIndex(sp, uuid);
 	  SFLDataSource_instance dsi;
-	  // ds_class = <virtualEntity>, ds_index = <assigned>, ds_instance = 0
-	  SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
+	  // ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+	  SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + dsIndex, 0);
 	  SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
 	  HSPVMState *state = (HSPVMState *)vpoller->userData;
 	  if(state) {
@@ -1093,6 +1124,7 @@ extern "C" {
       if(sp->sFlow->agentDevice) {
 	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice);
       }
+      fprintf(sp->f_out, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
       for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
 	// <ip> <port> [<priority>]
 	fprintf(sp->f_out, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
@@ -1256,8 +1288,8 @@ extern "C" {
     
     // add a <physicalEntity> poller to represent the whole physical host
     SFLDataSource_instance dsi;
-  // ds_class = <physicalEntity>, ds_index = 1, ds_instance = 0
-    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, 1, 0);
+  // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
+    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
     sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
     sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
     sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
