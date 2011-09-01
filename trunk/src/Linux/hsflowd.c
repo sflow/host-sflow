@@ -607,6 +607,10 @@ extern "C" {
 	SFLCounters_sample_element dskElem = { 0 };
 	dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
 	for(int i = strArrayN(state->disks); --i >= 0; ) {
+	  /* state->volumes and state->disks are populated in lockstep
+	   * so they always have the same number of elements
+	   */
+	  char *volPath = strArrayAt(state->volumes, i);
 	  char *dskPath = strArrayAt(state->disks, i);
 	  int gotVolInfo = NO;
 
@@ -614,10 +618,6 @@ extern "C" {
 	  /* define HSP_VRT_USE_DISKPATH if you want to bypass this virStorageVolGetInfo
 	   *  approach and just use virDomainGetBlockInfo instead.
 	   */
-	  /* state->volumes and state->disks are populated in lockstep
-	   * so they always have the same number of elements
-	   */
-	  char *volPath = strArrayAt(state->volumes, i);
 	  virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
 	  if(volPtr == NULL) {
 	    myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
