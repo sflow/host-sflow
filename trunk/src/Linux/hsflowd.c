@@ -643,7 +643,7 @@ extern "C" {
 	     * See http://markmail.org/message/mjafgt47f5e5zzfc
 	     */
 	    virDomainBlockInfo blkInfo;
-	    if(virDomainGetBlockInfo(domainPtr, dskPath, &blkInfo, 0) == -1) {
+	    if(virDomainGetBlockInfo(domainPtr, volPath, &blkInfo, 0) == -1) {
 	      myLog(LOG_ERR, "virDomainGetBlockInfo(%s) failed", dskPath);
 	    }
 	    else {
