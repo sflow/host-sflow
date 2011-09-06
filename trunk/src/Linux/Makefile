@@ -38,6 +38,10 @@ else
   endif
 endif
 
+ifeq ($(VRTDSKPATH),yes)
+	CFLAGS += -DHSP_VRT_USE_DISKPATH
+endif
+
 ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
 endif

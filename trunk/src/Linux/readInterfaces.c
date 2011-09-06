@@ -14,6 +14,7 @@ extern "C" {
 #include <linux/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
+#include <linux/if_vlan.h>
 
 extern int debug;
 
@@ -76,7 +77,34 @@ int readInterfaces(HSP *sp)
 	    int bond_master = (ifr.ifr_flags & IFF_MASTER) ? YES : NO;
 	    //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
 	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
-	    if(up && (sp->loopback || !loopback)) {
+
+	    // check in case it is just a sub-interface with a VLAN tag
+	    // that we should ignore to avoid double-counting
+	    int vlan = NO;
+	    // for some reason if_vlan.h has only 24 characters set aside
+	    // for the device name, and no #define to capture that (like
+	    // IFNAMSIZ above)
+#define HSP_VLAN_IFNAMSIZ 24
+	    if(my_strlen(devName) < HSP_VLAN_IFNAMSIZ) {
+	      struct vlan_ioctl_args vlargs;
+	      vlargs.cmd = GET_VLAN_VID_CMD;
+	      strcpy(vlargs.device1, devName);
+	      if(ioctl(fd, SIOCGIFVLAN, &vlargs) != 0) {
+		myLog(LOG_ERR, "device %s Get SIOCGIFVLAN failed : %s",
+		      devName,
+		      strerror(errno));
+	      }
+	      else {
+		vlan = YES;
+		if(debug) {
+		  myLog(LOG_INFO, "device %s is vlan interface for vlan %u",
+			devName,
+			vlargs.u.VID);
+		}
+	      }
+	    }
+	    
+	    if(up && !vlan && (sp->loopback || !loopback)) {
 	      
 	       // Get the MAC Address for this interface
 	      if(ioctl(fd,SIOCGIFHWADDR, &ifr) != 0) {
