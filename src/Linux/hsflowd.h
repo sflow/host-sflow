@@ -200,6 +200,8 @@ extern "C" {
   typedef struct _HSPAdaptorNIO {
     int32_t loopback;
     int32_t bond_master;
+    int32_t vlan;
+#define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
     SFLHost_nio_counters last_nio;
     uint32_t last_bytes_in32;
