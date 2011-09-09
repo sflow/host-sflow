@@ -59,8 +59,9 @@ extern "C" {
 	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(deviceName));
 	  if(adaptor && adaptor->userData) {
 	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-	    // exclude bond_master interfaces here to avoid double-counting
-	    if(!niostate->bond_master) {
+	    // exclude bond_master and vlan interfaces here to avoid double-counting
+	    if(niostate->vlan == HSP_VLAN_ALL &&
+	       !niostate->bond_master) {
 	      // have to detect discontinuities here, so use a full
 	      // set of latched counters and accumulators.
 	      int accumulate = niostate->last_update ? YES : NO;

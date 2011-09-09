@@ -79,8 +79,10 @@ int readInterfaces(HSP *sp)
 	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
 
 	    // check in case it is just a sub-interface with a VLAN tag
-	    // that we should ignore to avoid double-counting
-	    int vlan = NO;
+	    // that we should ignore to avoid double-counting.  We'll still
+	    // allow it through in case we are doing ULOG sampling and we
+	    // want to record flows/counters against this interface.
+	    int32_t vlan = HSP_VLAN_ALL;
 	    // for some reason if_vlan.h has only 24 characters set aside
 	    // for the device name, and no #define to capture that (like
 	    // IFNAMSIZ above)
@@ -90,21 +92,23 @@ int readInterfaces(HSP *sp)
 	      vlargs.cmd = GET_VLAN_VID_CMD;
 	      strcpy(vlargs.device1, devName);
 	      if(ioctl(fd, SIOCGIFVLAN, &vlargs) != 0) {
-		myLog(LOG_ERR, "device %s Get SIOCGIFVLAN failed : %s",
-		      devName,
-		      strerror(errno));
+		if(debug) {
+		  myLog(LOG_ERR, "device %s Get SIOCGIFVLAN failed : %s",
+			devName,
+			strerror(errno));
+		}
 	      }
 	      else {
-		vlan = YES;
+		vlan = vlargs.u.VID;
 		if(debug) {
 		  myLog(LOG_INFO, "device %s is vlan interface for vlan %u",
 			devName,
-			vlargs.u.VID);
+			vlan);
 		}
 	      }
 	    }
 	    
-	    if(up && !vlan && (sp->loopback || !loopback)) {
+	    if(up && (sp->loopback || !loopback)) {
 	      
 	       // Get the MAC Address for this interface
 	      if(ioctl(fd,SIOCGIFHWADDR, &ifr) != 0) {
@@ -128,6 +132,7 @@ int readInterfaces(HSP *sp)
 	      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
 	      adaptorNIO->loopback = loopback;
 	      adaptorNIO->bond_master = bond_master;
+	      adaptorNIO->vlan = vlan;
 
 	      // Try and get the ifIndex for this interface
 	      if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
