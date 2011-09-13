@@ -196,10 +196,11 @@ extern int debug;
       parseError(sp, tok, "expected 'on' or 'off'", "");
       return NULL;
     }
-    // enable or disable the inclusion in loopback interfaces
-    sp->loopback = (strcasecmp(t->str, "on") == 0);
+    // this flag is effectively always-on now. So just consume and ignore it.
+    // enable or disable the inclusion of loopback interfaces
+    // sp->loopback = (strcasecmp(t->str, "on") == 0);
     // have to force another read here, otherwise we have to wait for ever
-    sp->refreshAdaptorList = YES;
+    // sp->refreshAdaptorList = YES;
     return t;
   }
   
@@ -570,11 +571,13 @@ extern int debug;
 	// nae luck - try to automatically choose the first non-loopback IP address
 	// only the non-loopback devices should be listed here, unless the loopback
 	// flag was set specially to include them.  However we want to suppress
-	// self-assigned IP addresses too,  so use a priority scheme...
+	// self-assigned IP addresses too, and we'd rather avoid vlan-specific
+	// interfaces too if we can, so use a priority scheme...
 	
 	typedef enum { IPSP_NONE=0,
 		       IPSP_LOOPBACK,
 		       IPSP_SELFASSIGNED,
+		       IPSP_VLAN,
 		       IPSP_OK } EnumIPSelectionPriority;
 
 	SFLAdaptor *selectedAdaptor = NULL;
@@ -592,6 +595,9 @@ extern int debug;
 	    else if (ipbytes[0] == 169 &&
 		     ipbytes[1] == 254) {
 	      ipPriority = IPSP_SELFASSIGNED;
+	    }
+	    else if(adaptorNIO->vlan != HSP_VLAN_ALL) {
+	      ipPriority = IPSP_VLAN;
 	    }
 	    if(ipPriority > selectedPriority) {
 	      selectedAdaptor = adaptor;

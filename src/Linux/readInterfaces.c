@@ -18,6 +18,91 @@ extern "C" {
 
 extern int debug;
 
+
+#if 0
+
+/*________________---------------------------__________________
+  ________________      readVLAN             __________________
+  ----------------___________________________------------------
+
+Rejected this way of looking up the VLAN because is was not
+portable back to Linux 2.4 kernels,  and because the /proc/net/vlan
+approach seemed more stable and portable.
+*/
+  int32_t readVLAN(char *devName, int fd)
+  {
+    // check in case it is just a sub-interface with a VLAN tag
+    // that we should ignore to avoid double-counting.  We'll still
+    // allow it through in case we are doing ULOG sampling and we
+    // want to record flows/counters against this interface.
+    int32_t vlan = HSP_VLAN_ALL;
+    // for some reason if_vlan.h has only 24 characters set aside
+    // for the device name, and no #define to capture that (like
+    // IFNAMSIZ above)
+#define HSP_VLAN_IFNAMSIZ 24
+    if(my_strlen(devName) < HSP_VLAN_IFNAMSIZ) {
+      struct vlan_ioctl_args vlargs;
+      vlargs.cmd = GET_VLAN_VID_CMD;
+      strcpy(vlargs.device1, devName);
+      if(ioctl(fd, SIOCGIFVLAN, &vlargs) != 0) {
+	if(debug) {
+	  myLog(LOG_ERR, "device %s Get SIOCGIFVLAN failed : %s",
+		devName,
+		strerror(errno));
+	}
+      }
+      else {
+	vlan = vlargs.u.VID;
+	if(debug) {
+	  myLog(LOG_INFO, "device %s is vlan interface for vlan %u",
+		devName,
+		vlan);
+	}
+      }
+    }
+    return vlan;
+  }
+
+#endif
+
+  // limit the number of chars we will read from each line
+  // in /proc/net/dev and /prov/net/vlan/config
+  // (there can be more than this - fgets will chop for us)
+#define MAX_PROC_LINE_CHARS 160
+
+
+/*________________---------------------------__________________
+  ________________      readVLANs            __________________
+  ----------------___________________________------------------
+*/
+
+  void readVLANs(HSP *sp)
+  {
+    // mark interfaces that are specific to a VLAN
+    FILE *procFile = fopen("/proc/net/vlan/config", "r");
+    if(procFile) {
+      char line[MAX_PROC_LINE_CHARS];
+      int lineNo = 0;
+      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+	// expect lines of the form "<device> VID: <vlan> ..."
+	// (with a header line on the first row)
+	char devName[MAX_PROC_LINE_CHARS];
+	int vlan;
+	++lineNo;
+	if(lineNo > 1 && sscanf(line, "%s | %d", devName, &vlan) == 2) {
+	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(devName));
+	  if(adaptor && adaptor->userData &&
+	     vlan >= 0 && vlan < 4096) {
+	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	    niostate->vlan = vlan;
+	    if(debug) myLog(LOG_INFO, "adaptor %s has 802.1Q vlan %d", devName, vlan);
+	  }
+	}
+      }
+      fclose(procFile);
+    }
+  }
+
 /*________________---------------------------__________________
   ________________      readInterfaces       __________________
   ----------------___________________________------------------
@@ -46,12 +131,9 @@ int readInterfaces(HSP *sp)
   if(procFile) {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
-
-    // limit the number of chars we will read from each line
-    // (there can be more than this - fgets will chop for us)
-#define MAX_PROC_LINE_CHARS 80
     char line[MAX_PROC_LINE_CHARS];
     while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      if(debug) myLog(LOG_INFO, "/proc/net/dev line: %s", line);
       // the device name is always the token before the ":"
       char *devName = strtok(line, ":");
       if(devName) {
@@ -78,37 +160,10 @@ int readInterfaces(HSP *sp)
 	    //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
 	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
 
-	    // check in case it is just a sub-interface with a VLAN tag
-	    // that we should ignore to avoid double-counting.  We'll still
-	    // allow it through in case we are doing ULOG sampling and we
-	    // want to record flows/counters against this interface.
-	    int32_t vlan = HSP_VLAN_ALL;
-	    // for some reason if_vlan.h has only 24 characters set aside
-	    // for the device name, and no #define to capture that (like
-	    // IFNAMSIZ above)
-#define HSP_VLAN_IFNAMSIZ 24
-	    if(my_strlen(devName) < HSP_VLAN_IFNAMSIZ) {
-	      struct vlan_ioctl_args vlargs;
-	      vlargs.cmd = GET_VLAN_VID_CMD;
-	      strcpy(vlargs.device1, devName);
-	      if(ioctl(fd, SIOCGIFVLAN, &vlargs) != 0) {
-		if(debug) {
-		  myLog(LOG_ERR, "device %s Get SIOCGIFVLAN failed : %s",
-			devName,
-			strerror(errno));
-		}
-	      }
-	      else {
-		vlan = vlargs.u.VID;
-		if(debug) {
-		  myLog(LOG_INFO, "device %s is vlan interface for vlan %u",
-			devName,
-			vlan);
-		}
-	      }
-	    }
-	    
-	    if(up && (sp->loopback || !loopback)) {
+	    // used to igore loopback interfaces here, but now those
+	    // are filtered at the point where we roll together the
+	    // counters.
+	    if(up) {
 	      
 	       // Get the MAC Address for this interface
 	      if(ioctl(fd,SIOCGIFHWADDR, &ifr) != 0) {
@@ -132,7 +187,7 @@ int readInterfaces(HSP *sp)
 	      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
 	      adaptorNIO->loopback = loopback;
 	      adaptorNIO->bond_master = bond_master;
-	      adaptorNIO->vlan = vlan;
+	      adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
 
 	      // Try and get the ifIndex for this interface
 	      if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
@@ -202,6 +257,10 @@ int readInterfaces(HSP *sp)
 
   // now remove and free any that are still marked
   adaptorListFreeMarked(sp->adaptorList);
+
+  // check in case any of the survivors are specific
+  // to a particular VLAN
+  readVLANs(sp);
 
   return sp->adaptorList->num_adaptors;
 }
