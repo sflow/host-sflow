@@ -1,0 +1,19 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<VisualStudioToolFile
+	Name="Build NSIS"
+	Version="8.00"
+	>
+	<Rules>
+		<CustomBuildRule
+			Name="Build_NSIS"
+			DisplayName="Build NSIS"
+			CommandLine="makensis.exe /DBUILD_DIR=&quot;..\$(ConfigurationName)&quot; /DOUT_FILE=&quot;..\$(ConfigurationName)\Setup.exe&quot; /DPRODUCT_VERSION=1.19 [inputs]"
+			Outputs="$(InputName).exe"
+			FileExtensions="*.nsi"
+			ExecutionDescription="Building NSIS"
+			>
+			<Properties>
+			</Properties>
+		</CustomBuildRule>
+	</Rules>
+</VisualStudioToolFile>
