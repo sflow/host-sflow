@@ -32,6 +32,12 @@ extern "C" {
 		&cpu->proc_total) == 5) {
 	gotData = YES;
       }
+      if(cpu->proc_run > 0) {
+	// subtract myself from the running process count,
+	// otherwise it always shows at least 1.  Thanks to
+	// Dave Mangot for pointing this out.
+	cpu->proc_run--;
+      }
       fclose(procFile);
     }
 
