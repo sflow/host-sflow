@@ -2,7 +2,7 @@
 SPEC := ../hsflowd.spec
 VENDOR_CODE := hostsflow
 VENDOR_NAME := Host sFlow
-LABEL = xenserver-hsflowd
+LABEL = hsflowd-xenserver
 TEXT := Host sFlow agent
 
 # versioning of pack
