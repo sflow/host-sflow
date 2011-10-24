@@ -361,7 +361,6 @@ extern "C" {
       if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", vbd_dev, state->domId); 
       dsk->rd_req += xen_vbd_counter(state->domId, vbd_dev, "rd_req", NO);
       dsk->rd_bytes += (xen_vbd_counter(state->domId, vbd_dev, "rd_sect", NO) * HSP_SECTOR_BYTES);
-      dsk->rd_bytes += (xen_vbd_counter(state->domId, vbd_dev, "rd_sect", NO) * HSP_SECTOR_BYTES);
       dsk->wr_req += xen_vbd_counter(state->domId, vbd_dev, "wr_req", NO);
       dsk->wr_bytes += (xen_vbd_counter(state->domId, vbd_dev, "wr_sect", NO) * HSP_SECTOR_BYTES);
       dsk->errs += xen_vbd_counter(state->domId, vbd_dev, "oo_req", NO);
