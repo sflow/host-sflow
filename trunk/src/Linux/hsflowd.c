@@ -167,7 +167,10 @@ extern "C" {
 
   static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
   {
-    if(debug > 3) myLog(LOG_INFO, "xenstat_adaptors(): looking for vif%"PRIu32".<netid>", dom_id);
+    if(debug > 3) {
+      if(dom_id == XEN_DOMID_PHYSICAL) myLog(LOG_INFO, "xenstat_adaptors(): looking for physical host interfaces");
+      else myLog(LOG_INFO, "xenstat_adaptors(): looking for vif%"PRIu32".<netid>", dom_id);
+    }
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       uint32_t vif_domid=0;
