@@ -162,6 +162,9 @@ extern "C" {
     return NO;
   }
 
+/* For convenience, define a domId to mean "the physical host" */
+#define XEN_DOMID_PHYSICAL (uint32_t)-1
+
   static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
   {
     if(debug > 3) myLog(LOG_INFO, "xenstat_adaptors(): looking for vif%"PRIu32".<netid>", dom_id);
@@ -169,14 +172,20 @@ extern "C" {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       uint32_t vif_domid=0;
       uint32_t vif_netid=0;
+      uint32_t xapi_index=0;
       int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
-      if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32")",
-			  adaptor->deviceName,
-			  isVirtual ? "YES" : "NO",
-			  vif_domid,
-			  vif_netid);
+      int isXapi = (sscanf(adaptor->deviceName, "xapi%"SCNu32, &xapi_index) == 1);
+      if(debug > 3) {
+	myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32") (xapi=%s, index=%"PRIu32")",
+	      adaptor->deviceName,
+	      isVirtual ? "YES" : "NO",
+	      vif_domid,
+	      vif_netid,
+	      isXapi ? "YES" : "NO",
+	      xapi_index);
+      }
       if((isVirtual && dom_id == vif_domid) ||
-	 (!isVirtual && dom_id == 0)) {
+	 (!isVirtual && !isXapi && dom_id == XEN_DOMID_PHYSICAL)) {
 	// include this one (if we have room)
 	if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
 	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
@@ -268,7 +277,7 @@ extern "C" {
       myAdaptors.adaptors = adaptors;
       myAdaptors.capacity = HSP_MAX_VIFS;
       myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, 0, &myAdaptors);
+      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, XEN_DOMID_PHYSICAL, &myAdaptors);
 
     // hypervisor node stats
     SFLCounters_sample_element vnodeElem = { 0 };
