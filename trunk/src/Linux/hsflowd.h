@@ -104,7 +104,11 @@ extern "C" {
 #define HSP_SECTOR_BYTES 512
 
 // upper limit on number of VIFs per VM
-#define HSP_MAX_VIFS 64
+// constrain this to make sure we can't overflow the sFlow datagram
+// if we include lots of interfaces that should be left out. Each
+// adaptor takes 16 bytes, so this sets the limit for the adaptorList
+// structure to 516 bytes (see sflow_receiver.c)
+#define HSP_MAX_VIFS 32
 
   // forward declarations
   struct _HSPSFlow;
