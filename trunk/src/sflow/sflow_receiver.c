@@ -640,7 +640,7 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
 	  - receiver->sampleCollector.pktlen)  == (uint32_t)packedSize);
 
   // update the pktlen
-  receiver->sampleCollector.pktlen = (u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data;
+  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
   return packedSize;
 }
 
@@ -916,7 +916,7 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
 	  - receiver->sampleCollector.pktlen)  == (uint32_t)packedSize);
 
   // update the pktlen
-  receiver->sampleCollector.pktlen = (u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data;
+  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
   return packedSize;
 }
 
@@ -1006,7 +1006,7 @@ static void resetSampleCollector(SFLReceiver *receiver)
     (receiver->sampleCollector.data + 7);
 
   /* start pktlen with the right value */
-  receiver->sampleCollector.pktlen = (u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data;
+  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
 }
 
 /*_________________---------------------------__________________
