@@ -698,6 +698,8 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+#if defined(HSF_XEN) || defined(HSF_VRT)
+
   static HSPVMStore *newVMStore(HSP *sp, char *uuid, uint32_t dsIndex) {
     HSPVMStore *vmStore = (HSPVMStore *)my_calloc(sizeof(HSPVMStore));
     memcpy(vmStore->uuid, uuid, 16);
@@ -769,6 +771,8 @@ extern "C" {
     sp->vmStoreInvalid = YES;
     return sp->maxDsIndex;
   }
+
+#endif /* HSF_XEN || HSF_VRT */
 
 
   /*_________________---------------------------__________________
@@ -1905,20 +1909,29 @@ extern "C" {
       // exit(EXIT_FAILURE);
     }
 #endif
-
-    // load the persistent state from last time
-    readVMStore(sp);
     
 #if defined(HSF_XEN) || defined(HSF_VRT)
+    // load the persistent state from last time
+    readVMStore(sp);
     // open the vmStore file for writing while we still have root priviliges
     // use mode "w+" because we intend to write it and rewrite it.
     // (It might have worked to open it using mode "a+" and then read the previous
-    // vm-state,  but in the end it seemed clearer to just separate out the
-    // initial readVMStore(sp) part completely.
+    // vm-state and append new entries to the end,  but in the end it seemed
+    // clearer to just separate out the initial readVMStore(sp) part,
+    // and force the whole file to be rewritten on change.  That way we
+    // can change the format knowing that the new format will be imposed for
+    // all entries.
+
     if((sp->f_vmStore = fopen(sp->vmStoreFile, "w+")) == NULL) {
       myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile, strerror(errno));
       exit(EXIT_FAILURE);
     }
+
+    // Could just mark it as invalid but better to just go ahead and write it
+    // again immediately. Otherwise if anything else goes wrong with the config
+    // then we will have truncated the file and lost the persistent state. 
+    writeVMStore(sp);
+
 #endif
 
     myLog(LOG_INFO, "started");
