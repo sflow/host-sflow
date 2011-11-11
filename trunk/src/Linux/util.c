@@ -410,7 +410,9 @@ extern "C" {
   
     if(info->ai_addr) {
       // answer is now in info - a linked list of answers with sockaddr values.
-      // extract the address we want from the first one.
+      // extract the address we want from the first one. $$$ should perhaps
+      // traverse the list and look for an IPv4 address since that is more
+      // likely to work?
       switch(info->ai_family) {
       case PF_INET:
 	{

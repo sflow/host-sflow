@@ -707,11 +707,14 @@ extern "C" {
   }
 
   static void readVMStore(HSP *sp) {
-    if(sp->f_vmStore == NULL) return;
+    FILE *f_vms;
+    if((f_vms = fopen(sp->vmStoreFile, "r")) == NULL) {
+      myLog(LOG_INFO, "cannot open vmStore file %s : %s", sp->vmStoreFile, strerror(errno));
+      return;
+    }
     char line[HSP_MAX_VMSTORE_LINELEN+1];
-    rewind(sp->f_vmStore);
     uint32_t lineNo = 0;
-    while(fgets(line, HSP_MAX_VMSTORE_LINELEN, sp->f_vmStore)) {
+    while(fgets(line, HSP_MAX_VMSTORE_LINELEN, f_vms)) {
       lineNo++;
       char *p = line;
       // comments start with '#'
@@ -739,6 +742,7 @@ extern "C" {
 	}
       }
     }
+    fclose(f_vms);
   }
 
   static void writeVMStore(HSP *sp) {
@@ -1119,29 +1123,7 @@ extern "C" {
 
     // revision appears both at the beginning and at the end
     fprintf(sp->f_out, "rev_start=%u\n", sp->sFlow->revisionNo);
-
-    HSPSFlowSettings *settings = sp->sFlow->sFlowSettings;
-    if(settings) {
-      fprintf(sp->f_out, "sampling=%u\n", settings->samplingRate);
-      fprintf(sp->f_out, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
-      fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
-      // make sure the application specific ones always come after the general ones - to simplify the override logic there
-      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
-	if(appSettings->got_sampling_n) fprintf(sp->f_out, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
-	if(appSettings->got_polling_secs) fprintf(sp->f_out, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
-      }
-      char ipbuf[51];
-      fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
-      if(sp->sFlow->agentDevice) {
-	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice);
-      }
-      fprintf(sp->f_out, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
-      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
-	// <ip> <port> [<priority>]
-	fprintf(sp->f_out, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
-      }
-    }
-
+    if(sp->sFlow && sp->sFlow->sFlowSettings_str) fputs(sp->sFlow->sFlowSettings_str, sp->f_out);
     // repeat the revision number. The reader knows that if the revison number
     // has not changed under his feet then he has a consistent config.
     fprintf(sp->f_out, "rev_end=%u\n", sp->sFlow->revisionNo);
@@ -1280,7 +1262,6 @@ extern "C" {
 		   agentCB_error,
 		   agentCB_sendPkt);
     // just one receiver - we are serious about making this lightweight for now
-    HSPCollector *collector = sf->sFlowSettings->collectors;
     SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
     
     // claim the receiver slot
@@ -1289,12 +1270,6 @@ extern "C" {
     // set the timeout to infinity
     sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
 
-    // receiver address/port - set it for the first collector,  but
-    // actually we'll send the same feed to all collectors.  This step
-    // may not be necessary at all when we are using the sendPkt callback.
-    sfl_receiver_set_sFlowRcvrAddress(receiver, &collector->ipAddr);
-    sfl_receiver_set_sFlowRcvrPort(receiver, collector->udpPort);
-    
     uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
     
     // add a <physicalEntity> poller to represent the whole physical host
@@ -1460,6 +1435,62 @@ extern "C" {
     }
   }
 
+
+  /*_________________---------------------------__________________
+    _________________   sFlowSettingsString     __________________
+    -----------------___________________________------------------
+  */
+
+  char *sFlowSettingsString(HSPSFlow *sf, HSPSFlowSettings *settings)
+  {
+    size_t strbufLen = 1024;
+    char *strbuf = NULL;
+    FILE *f_strbuf;
+    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
+      myLog(LOG_ERR, "error in open_memstream : %s", strerror(errno));
+      return NULL;
+    }
+
+    if(settings) {
+      fprintf(f_strbuf, "sampling=%u\n", settings->samplingRate);
+      fprintf(f_strbuf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
+      fprintf(f_strbuf, "polling=%u\n", settings->pollingInterval);
+      // make sure the application specific ones always come after the general ones - to simplify the override logic there
+      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+	if(appSettings->got_sampling_n) fprintf(f_strbuf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	if(appSettings->got_polling_secs) fprintf(f_strbuf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+      }
+      char ipbuf[51];
+      fprintf(f_strbuf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
+      if(sf->agentDevice) {
+	fprintf(f_strbuf, "agent=%s\n", sf->agentDevice);
+      }
+      fprintf(f_strbuf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+
+      // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
+      // another step here to make sure they are sorted.  Otherwise we think the config has changed
+      // every time(!)
+      UTStringArray *iplist = strArrayNew();
+      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
+	// make sure we ignore any where the foward lookup failed
+	// this might mean we write a .auto file with no collectors in it,
+	// so let's hope the slave agents all do the right thing with that(!)
+	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
+	  char collectorStr[128];
+	  // <ip> <port> [<priority>]
+	  sprintf(collectorStr, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
+	  strArrayAdd(iplist, collectorStr);
+	}
+      }
+      strArraySort(iplist);
+      fprintf(f_strbuf, "%s", strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/));
+      strArrayFree(iplist);
+    }
+    fclose(f_strbuf);
+    // this string will be allocated on the heap with malloc (outside of my_calloc etc.)
+    return strbuf;
+  }
+
   /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
     -----------------___________________________------------------
@@ -1487,9 +1518,18 @@ extern "C" {
     }
     
     sf->sFlowSettings = settings;
-    sf->revisionNo++;
-
-    
+    char *settingsStr = sFlowSettingsString(sf, settings);
+    if(my_strequal(sf->sFlowSettings_str, settingsStr)) {
+      // no change - don't increment the revision number
+      // (which will mean that the file is not rewritten either)
+      if(settingsStr) free(settingsStr);
+    }
+    else {
+      // new config
+      if(sf->sFlowSettings_str) free(sf->sFlowSettings_str);
+      sf->sFlowSettings_str = settingsStr;
+      sf->revisionNo++;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -1604,23 +1644,32 @@ extern "C" {
 	  // B) if(num_servers == 0) then stop monitoring
 	  // C) if(num_servers > 0) then install the new config
 	  if(debug) myLog(LOG_INFO, "num_servers == %d", num_servers);
-	  if(num_servers >= 0) {
-	    // remove the current config
-	    if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) freeSFlowSettings(sf->sFlowSettings);
-	    installSFlowSettings(sf, NULL);
-	  }
+
 	  if(num_servers <= 0) {
-	    // clean up, and go into 'retry' mode
+	    // A or B: clean up - we don't need this object
 	    freeSFlowSettings(sf->sFlowSettings_dnsSD);
 	    sf->sFlowSettings_dnsSD = NULL;
-	    // we might still learn a TTL (e.g. from the TXT record query)
-	    sp->DNSSD_countdown = sp->DNSSD_ttl == 0 ? sp->DNSSD_retryDelay : sp->DNSSD_ttl;
+	  }
+
+	  if(num_servers >= 0) {
+	    // B or C: delete the current config too,  if it was dynamically allocated
+	    if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) {
+	      freeSFlowSettings(sf->sFlowSettings);
+	    }
+	  }
+
+	  if(num_servers == 0) {
+	    // B: turn off monitoring
+	    installSFlowSettings(sf, NULL);
 	  }
 	  else {
-	    // make this the running config
+	    // C: make this the running config
 	    installSFlowSettings(sf, sf->sFlowSettings_dnsSD);
-	    sp->DNSSD_countdown = sp->DNSSD_ttl;
 	  }
+
+	  // whatever happens we might still learn a TTL (e.g. from the TXT record query)
+	  sp->DNSSD_countdown = sp->DNSSD_ttl ?: sp->DNSSD_retryDelay;
+	  // but make sure it's sane
 	  if(sp->DNSSD_countdown < HSP_DEFAULT_DNSSD_MINDELAY) {
 	    if(debug) myLog(LOG_INFO, "forcing minimum DNS polling delay");
 	    sp->DNSSD_countdown = HSP_DEFAULT_DNSSD_MINDELAY;
@@ -1856,10 +1905,16 @@ extern "C" {
       // exit(EXIT_FAILURE);
     }
 #endif
+
+    // load the persistent state from last time
+    readVMStore(sp);
     
 #if defined(HSF_XEN) || defined(HSF_VRT)
-    // open the vmStore file while we still have root priviliges
+    // open the vmStore file for writing while we still have root priviliges
     // use mode "w+" because we intend to write it and rewrite it.
+    // (It might have worked to open it using mode "a+" and then read the previous
+    // vm-state,  but in the end it seemed clearer to just separate out the
+    // initial readVMStore(sp) part completely.
     if((sp->f_vmStore = fopen(sp->vmStoreFile, "w+")) == NULL) {
       myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile, strerror(errno));
       exit(EXIT_FAILURE);
@@ -1894,10 +1949,6 @@ extern "C" {
 	  if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
 	  else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
 	  sfl_random_init(seed);
-
-	
-	  // load the persistent state from last time
-	  readVMStore(sp);
 
 	  // initialize the faster polling of NIO counters
 	  // to avoid undetected 32-bit wraps
