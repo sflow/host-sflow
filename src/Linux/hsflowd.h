@@ -156,6 +156,8 @@ extern "C" {
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;
     HSPSFlowSettings *sFlowSettings;
+    char *sFlowSettings_str;
+
     uint32_t revisionNo;
 
     uint32_t subAgentId;
