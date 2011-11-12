@@ -1158,11 +1158,13 @@ extern "C" {
       configVMs(sp);
     }
 
+#if defined(HSF_XEN) || defined(HSF_VRT)
     // write the persistent state if requested
     if(sp->vmStoreInvalid) {
       writeVMStore(sp);
       sp->vmStoreInvalid = NO;
     }
+#endif
 
     // refresh the interface list perioducally or on request
     if(sp->refreshAdaptorList || (sp->clk % HSP_REFRESH_ADAPTORS) == 0) {
