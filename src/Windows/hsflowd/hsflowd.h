@@ -34,7 +34,8 @@ extern "C" {
 
 #define HSP_VERSION VER_PRODUCT_VERSION_STR
 #define HSP_SERVICE_NAME "hsflowd"
-#define HSP_DEFAULT_DIR L"hsflowd"
+#define HSP_PUBLISHER L"Host sFlow Project"
+#define HSP_PRODUCT_NAME L"Host sFlow Agent"
 #define HSP_DEFAULT_LOGFILE "hsflowd.log"
 #define HSP_DEFAULT_VMSTORE L"vms.txt"
 #define HSP_DEFAULT_PORTSTORE L"ports.txt"
