@@ -396,36 +396,41 @@ static void freeSFlow(HSPSFlow *sf)
 	my_free(sf);
 }
 
+static bool initialiseDir(wchar_t *path, wchar_t *dirName)
+{
+	PathAppendW(path, dirName);
+	DWORD attributes = GetFileAttributesW(path);
+	if (INVALID_FILE_ATTRIBUTES == attributes) {
+		DWORD error = GetLastError();
+		if (ERROR_FILE_NOT_FOUND == error ||
+			ERROR_PATH_NOT_FOUND == error) {
+			error = CreateDirectoryW(path, NULL);
+			if (!SUCCEEDED(error)) {
+				myLog(LOG_ERR, "initialiseDir: cannot create directory %S", path);
+				return false;
+			}
+		} else {
+			myLog(LOG_ERR, "initialiseDir: invalid directory %S error=0x%x", path, error);
+			return false;
+		}
+	} else if ((FILE_ATTRIBUTE_DIRECTORY & attributes) != FILE_ATTRIBUTE_DIRECTORY) {
+		myLog(LOG_ERR, "initialiseDir: invalid directory %S attributes=0x%x", path, attributes);
+		return false;
+	}
+	return true;
+}
+
 static bool initialiseProgramDataDir(wchar_t *path, size_t pathLen)
 {
 	PWSTR programData;
 	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramData, 0, NULL, &programData))) {
 		wcscpy_s(path, pathLen, programData);
 		CoTaskMemFree(programData);
-		PathAppendW(path, HSP_DEFAULT_DIR);
-		DWORD attributes = GetFileAttributesW(path);
-		if (INVALID_FILE_ATTRIBUTES == attributes) {
-			DWORD error = GetLastError();
-			if (ERROR_FILE_NOT_FOUND == error ||
-				ERROR_PATH_NOT_FOUND == error) {
-				//This is OK as long as HSP_DEFAULT_DIR does not include intermediate directories.
-				error = CreateDirectoryW(path, NULL);
-				if (!SUCCEEDED(error)) {
-					myLog(LOG_ERR, "initialiseProgramDataFiles: cannot create program data directory %S", path);
-					return false;
-				}
-			} else {
-				myLog(LOG_ERR, "initialiseProgramDataFiles: invalid program data directory %S error=0x%x", path, error);
-				return false;
-			}
-		} else if ((FILE_ATTRIBUTE_DIRECTORY & attributes) != FILE_ATTRIBUTE_DIRECTORY) {
-			myLog(LOG_ERR, "initialiseProgramDataFiles: invalid program data directory %S attributes=0x%x", path, attributes);
-			return false;
+		if (initialiseDir(path, HSP_PUBLISHER)) {
+			return initialiseDir(path, HSP_PRODUCT_NAME);
 		}
-		return true;
-	} else {
-		return false;
 	}
+	return false;
 }
 
 static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
