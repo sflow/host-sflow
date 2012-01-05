@@ -35,7 +35,7 @@ Configuration:
 	hsflowd must be restarted for any changes in these parameters to take effect.
 
 Debug:
-	When hsflowd is run as a Windows service, error messages are logged to hsflowd.log in the hsflowd directory under the Program Data directory (Default Path: %ALLUSERSPROFILE% (%ProgramData%, %SystemDrive%\ProgramData)).
+	When hsflowd is run as a Windows service, error messages are logged to %SystemDrive%\ProgramData\Host sFlow Project\Host sFlow Agent\hsflowd.log
 	hsflowd can also be invoked from the command line, with the following command line options: [-v[v]] [-l logFile]. When a log file is not specified, messages are logged to stderr.
 
 Supported Windows versions:
