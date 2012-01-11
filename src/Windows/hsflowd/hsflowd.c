@@ -132,6 +132,7 @@ void getCounters_host(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *
 	SFLCounters_sample_element memElem = { 0 };
 	SFLCounters_sample_element dskElem = { 0 };
 	SFLCounters_sample_element adaptorsElem = { 0 };
+	SFLCounters_sample_element vNodeElem = { 0 };
 
 	HSP *sp = (HSP *)poller->magic;
 
@@ -167,7 +168,6 @@ void getCounters_host(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *
 	//Since the root partition sees all the memory and CPUs we can just use the
 	//physical counters for the host.
 	if (sp->hyperV) {
-		SFLCounters_sample_element vNodeElem = { 0 };
 		vNodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
 		SFLHost_vrt_node_counters vNode = vNodeElem.counterBlock.host_vrt_node;
 		vNode.mhz = cpuElem.counterBlock.host_cpu.cpu_speed;
