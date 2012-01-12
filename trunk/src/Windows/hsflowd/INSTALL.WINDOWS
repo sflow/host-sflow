@@ -1,5 +1,10 @@
-hsflowd has been developed using Visual Studio 11. To build open the solution file in Visual Studio 11.  
-It may also build in Visual Studio 2010 if Properties>Configuration Properties>General: Platform Toolset is changed.
+Build: 
+	hsflowd has been developed using Visual Studio 11. To build open the solution file in Visual Studio 11.  
+	It may also build in Visual Studio 2010 if Properties>Configuration Properties>General: Platform Toolset is changed.
+	Two installers are included - one using NSIS, which generates a .exe installer, and the other using WiX, which creates an MSI. To build the installers, the NSIS and WiX applications must first be installed:
+	   - NSIS: install from http://nsis.sourceforge.net. The version used is 2.46. The NsSCM and Version plugins are also required.
+	   - WiX: install from http://wix.sourceforge.net. The version used is 3.5.
+
 
 Install:
 	Preferred method for installation is to use the installer.
