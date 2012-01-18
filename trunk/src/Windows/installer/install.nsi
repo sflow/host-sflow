@@ -127,8 +127,8 @@ FunctionEnd
 # necessary. The macro works round the NSIS limitation that
 # a function cannot be shared between installer and uninstaller.
 
-!macro stopAndDeleteService un
-    Function ${un}stopAndDeleteService
+!macro stopService un
+    Function ${un}stopService
         DetailPrint "Stopping sFlow service"
         nsSCM::Stop /NOUNLOAD "${SERVICE_NAME}"
         StrCpy $R1 0
@@ -146,12 +146,11 @@ FunctionEnd
             MessageBox MB_OK "Cannot stop service. Please ensure that all instances of hsflowd are stopped, and try again."
             Quit
         waitdone:
-            nsSCM::Remove /NOUNLOAD "${SERVICE_NAME}"
     FunctionEnd
 !macroend
 
-!insertmacro stopAndDeleteService ""
-!insertmacro stopAndDeleteService "un."
+!insertmacro stopService ""
+!insertmacro stopService "un."
 
 Name "${PRODUCT_NAME} v${VERSION}"
 OutFile "${OUTPUT_ROOT}-${VERSION}-${PLATFORM}.exe"
@@ -176,7 +175,7 @@ Section "Install host sFlow" SEC01
     Push "{74FFB15C-03C1-4B7D-809F-939A5C57F659}"
     call CallMsiDeinstaller
     # Stop an existing service
-    call stopAndDeleteService
+    call stopService
     # Perform the installation
     SetOutPath "$INSTDIR"
     SetOverwrite on
@@ -239,7 +238,8 @@ FunctionEnd
 
 Section Uninstall
     # Stop and remove the service
-    call un.stopAndDeleteService
+    call un.stopService
+    nsSCM::Remove /NOUNLOAD "${SERVICE_NAME}"
     !ifdef EXTENSION
         # Uninstall the switch extension
         DetailPrint "Uninstalling sFlow virtual switch Extension"
