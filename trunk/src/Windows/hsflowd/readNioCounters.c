@@ -55,14 +55,15 @@ static SFLHost_nio_counters *getNewNIO(HSP *sp, wchar_t *instanceName) {
 	if (adList == NULL) {
 		return NULL;
 	}
-	//myLog(LOG_INFO, "getNewNIO: looking up device %S...", instanceName);
+	if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: looking up device %S...", instanceName);
 	for (uint32_t i = 0; i < adList->num_adaptors; i++) {
 		SFLAdaptor *adaptor = adList->adaptors[i];
 		if (adaptor != NULL && adaptor->userData != NULL) {
 			HSPAdaptorNIO *nio = (HSPAdaptorNIO *)sp->adaptorList->adaptors[i]->userData;
 			if (nio != NULL && nio->countersInstance != NULL) {
-				if (wcscmp(instanceName, nio->countersInstance) == 0) {
-					//myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
+				//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: comparing <%S> with <%S>", instanceName, nio->countersInstance);
+				if (cleanCounterNameEqual(instanceName, nio->countersInstance)) {
+					if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
 					return &nio->new_nio;
 				}
 			}
@@ -87,6 +88,8 @@ void updateNioCounters(HSP *sp) {
 	if (sp->nio_last_update == sp->clk) {
 		return;
 	}
+	
+
 	sp->nio_last_update = sp->clk;
 	// first read all the counters into new_nio
 	if (query == NULL) {
@@ -102,11 +105,14 @@ void updateNioCounters(HSP *sp) {
 	PPDH_RAW_COUNTER_ITEM_W values;
 	uint32_t icount = 0;
 	icount = getRawCounterValues(&bytesIn, &values);
+
 	if (icount > 0) {
 		for (uint32_t i = 0; i < icount; i++) {
 			SFLHost_nio_counters *newctrs = getNewNIO(sp, values[i].szName);
 			if (newctrs != NULL) {
 				newctrs->bytes_in = values[i].RawValue.FirstValue;
+				if(debug) myLog(LOG_INFO, "updateNioCounters: adaptor %lu has name <%S> bytesIn=%lu",
+					i, values[i].szName, newctrs->bytes_in);
 			}
 		}
 		my_free(values);
@@ -290,8 +296,15 @@ BOOL readNioCounters(HSP *sp, SFLHost_nio_counters *nio) {
 		SFLAdaptor *ad = sp->adaptorList->adaptors[i];
 		if (ad != NULL) {
 			HSPAdaptorNIO *ctrs = (HSPAdaptorNIO *)ad->userData;
+			if(ctrs) {
+				if(debug) myLog(LOG_INFO, "readNioCounters: accumulating1: pkts_in=%lu (device=%s virtual=%d)",
+					ctrs->nio.pkts_in,ad->deviceName,ctrs->isVirtual);
+			}
+
 			if (ctrs != NULL && !ctrs->isVirtual) {
 				gotData = TRUE;
+				if(debug) myLog(LOG_INFO, "readNioCounters: accumulating2: pkts_in=%lu (device=%s virtual=%d)",
+					ctrs->nio.pkts_in,ad->deviceName,ctrs->isVirtual);
 				nio->bytes_in += ctrs->nio.bytes_in;
 				nio->pkts_in += ctrs->nio.pkts_in;
 				nio->errs_in += ctrs->nio.errs_in;
@@ -303,8 +316,8 @@ BOOL readNioCounters(HSP *sp, SFLHost_nio_counters *nio) {
 			}
 		}
 	}
-	myLog(LOG_INFO,"readNioCounters:\n\trbytes:\t%llu\n\trpkts:\t%lu\n\trdrops:\t%lu\n\trerrs:\t%lu\n\ttbytes:\t%llu\n\ttpkts:\t%lu\n\ttdrops:\t%lu\n\tterrs:\t%lu\n",
-		  nio->bytes_in,nio->pkts_in,nio->drops_in,nio->errs_in,nio->bytes_out,nio->pkts_out,nio->drops_out,nio->errs_out);
+	myLog(LOG_INFO,"readNioCounters: %lu adaptors\n\trbytes:\t%llu\n\trpkts:\t%lu\n\trdrops:\t%lu\n\trerrs:\t%lu\n\ttbytes:\t%llu\n\ttpkts:\t%lu\n\ttdrops:\t%lu\n\tterrs:\t%lu\n",
+		  sp->adaptorList->num_adaptors,nio->bytes_in,nio->pkts_in,nio->drops_in,nio->errs_in,nio->bytes_out,nio->pkts_out,nio->drops_out,nio->errs_out);
 	return gotData;
 }
 

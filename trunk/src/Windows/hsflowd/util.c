@@ -582,21 +582,45 @@ HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj,
  * Replaces (in place) reservered characters to generate a counter
  * instance name.
  */
+
+static wchar_t cleanCounterNameChar(wchar_t ch_in)
+{
+	wchar_t ch_out = ch_in;
+	switch(ch_in) {
+		case L'\\': ch_out = L'-'; break;
+		case L'(': ch_out = L'['; break;
+		case L')': ch_out = L']'; break;
+		case L'#': ch_out = L'_'; break;
+		case L'*': ch_out = L'_'; break;
+		case L'/': ch_out = L'_'; break;
+		default: break;
+	}
+	return ch_out;
+}
+
 void cleanCounterName(wchar_t *name) 
 {
 	// replace reserved characters to generate counter instance name
 	size_t len = wcsnlen_s(name, UT_DEFAULT_MAX_STRLEN);
 	for (uint32_t i = 0; i <= len; i++ ) {
-		switch(name[i]) {
-		case L'\\': name[i] = L'-'; break;
-		case L'(': name[i] = L'['; break;
-		case L')': name[i] = L']'; break;
-		case L'#': name[i] = L'_'; break;
-		case L'*': name[i] = L'_'; break;
-		default: break;
-		}
+		name[i] = cleanCounterNameChar(name[i]);
 	}
 }
+
+ BOOL cleanCounterNameEqual(wchar_t *name1, wchar_t *name2) 
+{
+	// ignore reserved characters that get substituted by the OS
+	size_t len1 = wcsnlen_s(name1, UT_DEFAULT_MAX_STRLEN);
+	size_t len2 = wcsnlen_s(name2, UT_DEFAULT_MAX_STRLEN);
+	if(len1 != len2) return FALSE;
+	for (uint32_t i = 0; i <= len1; i++ ) {
+		wchar_t ch1 = cleanCounterNameChar(name1[i]);
+		wchar_t ch2 = cleanCounterNameChar(name2[i]);
+		if(ch1 != ch2) return FALSE;
+	}
+	return TRUE;
+}
+ 
  
 /*________________---------------------------__________________
   ________________      adaptorList          __________________
