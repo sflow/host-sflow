@@ -21,6 +21,8 @@ extern "C" {
 			case '\\': aname[i] = '_'; break;
 			case '(': aname[i] = '['; break;
 			case ')': aname[i] = ']'; break;
+			case '#': aname[i] = '_'; break;
+			case '*': aname[i] = '_'; break;
 			default: break;
 			}
 		}
