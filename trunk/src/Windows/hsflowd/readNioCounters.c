@@ -55,7 +55,7 @@ static SFLHost_nio_counters *getNewNIO(HSP *sp, wchar_t *instanceName) {
 	if (adList == NULL) {
 		return NULL;
 	}
-	if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: looking up device %S...", instanceName);
+	//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: looking up device %S...", instanceName);
 	for (uint32_t i = 0; i < adList->num_adaptors; i++) {
 		SFLAdaptor *adaptor = adList->adaptors[i];
 		if (adaptor != NULL && adaptor->userData != NULL) {
@@ -63,7 +63,7 @@ static SFLHost_nio_counters *getNewNIO(HSP *sp, wchar_t *instanceName) {
 			if (nio != NULL && nio->countersInstance != NULL) {
 				//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: comparing <%S> with <%S>", instanceName, nio->countersInstance);
 				if (cleanCounterNameEqual(instanceName, nio->countersInstance)) {
-					if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
+					//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
 					return &nio->new_nio;
 				}
 			}
