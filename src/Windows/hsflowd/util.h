@@ -106,6 +106,7 @@ HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj,
 					   wchar_t *assocClass, wchar_t *endClass, wchar_t *resultRole,
 					   IEnumWbemClassObject **resultEnum);
 void cleanCounterName(wchar_t *name);
+BOOL cleanCounterNameEqual(wchar_t *name1, wchar_t *name2);
 
 /**
  * Call back function to free userData. Frees any allocated memory
