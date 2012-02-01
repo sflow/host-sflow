@@ -27,7 +27,7 @@ extern int debug;
 static void setPortCountersInstance(SFLAdaptor *switchPort)
 {
 	HVSVPortInfo *portInfo = (HVSVPortInfo *)switchPort->userData;
-	if (portInfo->switchName == NULL || portInfo->portFriendlyName == NULL) {
+	if (portInfo->switchName == NULL) {
 		if (portInfo->portCountersInstance != NULL) {
 			my_free(portInfo->portCountersInstance);
 			portInfo->portCountersInstance = NULL;
@@ -50,6 +50,7 @@ static void setPortCountersInstance(SFLAdaptor *switchPort)
  */
 void readWMISwitchPorts(HSP *sp)
 {
+	myLog(LOG_INFO, "entering readWMISwitchPorts");
 	BSTR path = SysAllocString(WMI_VIRTUALIZATION_NS_V2);
 	HRESULT hr = S_FALSE;
 	IWbemServices *pNamespace = NULL;
@@ -60,6 +61,7 @@ void readWMISwitchPorts(HSP *sp)
 		//with the extensible switch that supports sampling.
 	    //don't try to get counters if there is no sampling.
 		SysFreeString(path);
+		myLog(LOG_INFO, "readWMISwitchPorts: virtualization namespace v2 not found");
 		return;
 	} else {
 		SysFreeString(path);
@@ -104,6 +106,7 @@ void readWMISwitchPorts(HSP *sp)
 		portHr = switchPortObj->Get(propName, 0, &nameVal, 0, 0);
 		char portGuid[FORMATTED_GUID_LEN+1];
 		guidToString(nameVal.bstrVal, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
+		myLog(LOG_INFO, "readWMISwitchPorts: portGuid=%s", portGuid);
 		VariantClear(&nameVal);
 		vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
 		if (vAdaptor != NULL) {
@@ -136,6 +139,8 @@ void readWMISwitchPorts(HSP *sp)
 				  "readWMISwitchPorts: updated switch port %s %S portId=%u ifIndex=%u ifSpeed=%llu counterName=%S", 
 				  vAdaptor->deviceName, portInfo->portFriendlyName, portInfo->portId, vAdaptor->ifIndex, 
 				  vAdaptor->ifSpeed, portInfo->portCountersInstance);
+		} else {
+			myLog(LOG_INFO, "readWMISwitchPorts: vAdapter not found");
 		}
 		switchPortObj->Release();
 	}
