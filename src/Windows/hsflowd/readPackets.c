@@ -181,12 +181,13 @@ void readPackets(HSP *sp, PUCHAR buffer)
 			fs.drops = sample->drops;
 
 			PSFlowRecord currRecord = &sample->firstRecord;
+			SFLFlow_sample_element hdrElem = { 0 };
+			SFLFlow_sample_element extSwElem = { 0 };
 			while (currRecord->recordType != NULL_RECORD_TYPE) {
 				switch(currRecord->recordType) {
 				case SAMPLED_HEADER_RECORD_TYPE: {
 					PSFlowSampledHeader sampledHeader = 
 						GET_OPAQUE_DATA_ADDR(currRecord, PSFlowSampledHeader);
-					SFLFlow_sample_element hdrElem = { 0 };
 					hdrElem.tag = SFLFLOW_HEADER;
 					hdrElem.flowType.header.frame_length = 
 						sampledHeader->frameLength;
@@ -211,7 +212,6 @@ void readPackets(HSP *sp, PUCHAR buffer)
 				case EXTENDED_SWITCH_RECORD_TYPE: {
 					PSFlowExtendedSwitch extendedSwitch =
 						GET_OPAQUE_DATA_ADDR(currRecord, PSFlowExtendedSwitch);
-					SFLFlow_sample_element extSwElem = { 0 };
 					extSwElem.tag = SFLFLOW_EX_SWITCH;
 					extSwElem.flowType.sw.src_vlan = extendedSwitch->sourceVLAN;
 					extSwElem.flowType.sw.src_priority = extendedSwitch->sourcePriority;
