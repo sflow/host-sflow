@@ -607,21 +607,6 @@ void cleanCounterName(wchar_t *name)
 	}
 }
 
- BOOL cleanCounterNameEqual(wchar_t *name1, wchar_t *name2) 
-{
-	// ignore reserved characters that get substituted by the OS
-	size_t len1 = wcsnlen_s(name1, UT_DEFAULT_MAX_STRLEN);
-	size_t len2 = wcsnlen_s(name2, UT_DEFAULT_MAX_STRLEN);
-	if(len1 != len2) return FALSE;
-	for (uint32_t i = 0; i <= len1; i++ ) {
-		wchar_t ch1 = cleanCounterNameChar(name1[i]);
-		wchar_t ch2 = cleanCounterNameChar(name2[i]);
-		if(ch1 != ch2) return FALSE;
-	}
-	return TRUE;
-}
- 
- 
 /*________________---------------------------__________________
   ________________      adaptorList          __________________
   ----------------___________________________------------------
