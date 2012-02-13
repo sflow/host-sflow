@@ -62,7 +62,7 @@ static SFLHost_nio_counters *getNewNIO(HSP *sp, wchar_t *instanceName) {
 			HSPAdaptorNIO *nio = (HSPAdaptorNIO *)sp->adaptorList->adaptors[i]->userData;
 			if (nio != NULL && nio->countersInstance != NULL) {
 				//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: comparing <%S> with <%S>", instanceName, nio->countersInstance);
-				if (cleanCounterNameEqual(instanceName, nio->countersInstance)) {
+				if (wcscmp(instanceName, nio->countersInstance) == 0) {
 					//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
 					return &nio->new_nio;
 				}
