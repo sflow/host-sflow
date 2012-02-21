@@ -55,15 +55,15 @@ static SFLHost_nio_counters *getNewNIO(HSP *sp, wchar_t *instanceName) {
 	if (adList == NULL) {
 		return NULL;
 	}
-	//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: looking up device %S...", instanceName);
+	//myLog(LOG_INFO, "getNewNIO: looking up device %S...", instanceName);
 	for (uint32_t i = 0; i < adList->num_adaptors; i++) {
 		SFLAdaptor *adaptor = adList->adaptors[i];
 		if (adaptor != NULL && adaptor->userData != NULL) {
 			HSPAdaptorNIO *nio = (HSPAdaptorNIO *)sp->adaptorList->adaptors[i]->userData;
 			if (nio != NULL && nio->countersInstance != NULL) {
-				//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: comparing <%S> with <%S>", instanceName, nio->countersInstance);
+				//myLog(LOG_INFO, "getNewNIO: comparing <%S> with <%S>", instanceName, nio->countersInstance);
 				if (wcscmp(instanceName, nio->countersInstance) == 0) {
-					//if(LOG_INFO <= debug) myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
+					//myLog(LOG_INFO, "getNewNIO: found device %S userData=%p", nio->countersInstance, adaptor->userData);
 					return &nio->new_nio;
 				}
 			}
@@ -111,8 +111,8 @@ void updateNioCounters(HSP *sp) {
 			SFLHost_nio_counters *newctrs = getNewNIO(sp, values[i].szName);
 			if (newctrs != NULL) {
 				newctrs->bytes_in = values[i].RawValue.FirstValue;
-				if(debug) myLog(LOG_INFO, "updateNioCounters: adaptor %lu has name <%S> bytesIn=%lu",
-					i, values[i].szName, newctrs->bytes_in);
+				//myLog(LOG_INFO, "updateNioCounters: adapter=%S bytesIn=%lu",
+				//	  values[i].szName, newctrs->bytes_in);
 			}
 		}
 		my_free(values);
@@ -296,15 +296,10 @@ BOOL readNioCounters(HSP *sp, SFLHost_nio_counters *nio) {
 		SFLAdaptor *ad = sp->adaptorList->adaptors[i];
 		if (ad != NULL) {
 			HSPAdaptorNIO *ctrs = (HSPAdaptorNIO *)ad->userData;
-			if(ctrs) {
-				if(debug) myLog(LOG_INFO, "readNioCounters: accumulating1: pkts_in=%lu (device=%s virtual=%d)",
-					ctrs->nio.pkts_in,ad->deviceName,ctrs->isVirtual);
-			}
-
 			if (ctrs != NULL && !ctrs->isVirtual) {
 				gotData = TRUE;
-				if(debug) myLog(LOG_INFO, "readNioCounters: accumulating2: pkts_in=%lu (device=%s virtual=%d)",
-					ctrs->nio.pkts_in,ad->deviceName,ctrs->isVirtual);
+				myLog(LOG_INFO, "readNioCounters: accumulating: pkts_in=%lu (device=%S virtual=%d)",
+					  ctrs->nio.pkts_in, ctrs->countersInstance, ctrs->isVirtual);
 				nio->bytes_in += ctrs->nio.bytes_in;
 				nio->pkts_in += ctrs->nio.pkts_in;
 				nio->errs_in += ctrs->nio.errs_in;

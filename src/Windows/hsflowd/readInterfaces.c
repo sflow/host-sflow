@@ -156,7 +156,7 @@ void readInterfaces(HSP *sp, BOOL getIpAddr)
 		size_t length = SysStringLen(nameVal.bstrVal)+1;
 		wchar_t *counterName = (wchar_t *)my_calloc(length*sizeof(wchar_t));
 		wcscpy_s(counterName, length, nameVal.bstrVal);
-		cleanCounterName(counterName);
+		cleanCounterName(counterName, UTNETWORK_INTERFACE);
 		userData->countersInstance = counterName;
 		userData->isVirtual = (_wcsicmp(VMSMP, svcNameVal.bstrVal) == 0);
 		if (getIpAddr) {

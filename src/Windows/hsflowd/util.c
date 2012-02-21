@@ -579,31 +579,65 @@ HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj,
 }
 
 /**
- * Replaces (in place) reservered characters to generate a counter
- * instance name.
+ * Returns the substitution character for a reserved character
+ * when using "names" discovered via enumerating WMI objects
+ * to access performance counters.
  */
-
-static wchar_t cleanCounterNameChar(wchar_t ch_in)
+static wchar_t cleanCounterNameChar(wchar_t ch_in, UTWmiCharSubstitutions subs)
 {
 	wchar_t ch_out = ch_in;
-	switch(ch_in) {
-		case L'\\': ch_out = L'-'; break;
-		case L'(': ch_out = L'['; break;
-		case L')': ch_out = L']'; break;
-		case L'#': ch_out = L'_'; break;
-		case L'*': ch_out = L'_'; break;
-		case L'/': ch_out = L'_'; break;
-		default: break;
+	switch(subs) {
+		case UTHYPERV_VIRT_STORAGE_DEV:
+		case UTHYPERV_DYN_MEM_VM:
+		case UTHYPERV_VIRT_PROC:
+		case UTHYPERV_LEGACY_NW_ADAPTER:
+			switch(ch_in) {
+				case L'(': ch_out = L'['; break;
+				case L')': ch_out = L']'; break;
+				case L'#': ch_out = L'_'; break;
+				case L'*': ch_out = L'_'; break;
+				case L'/': ch_out = L'-'; break;
+				case L'\\': ch_out = L'-'; break;
+				default: break;
+			}
+			break;
+		case UTHYPERV_VIRT_SWITCH:
+		case UTHYPERV_VIRT_NW_ADAPTER:
+			switch(ch_in) {
+				case L'(': ch_out = L'['; break;
+				case L')': ch_out = L']'; break;
+				case L'#': ch_out = L'_'; break;
+				case L'*': ch_out = L'_'; break;
+				case L'/': ch_out = L'_'; break;
+				case L'\\': ch_out = L'_'; break;
+				default: break;
+			}
+		case UTNETWORK_INTERFACE:
+			switch(ch_in) {
+				case L'(': ch_out = L'['; break;
+				case L')': ch_out = L']'; break;
+				case L'#': ch_out = L'_'; break;
+				//* is not reserved in this case
+				case L'/': ch_out = L'_'; break;
+				case L'\\': ch_out = L'_'; break;
+				default: break;
+			}
+		break;
 	}
 	return ch_out;
 }
 
-void cleanCounterName(wchar_t *name) 
+/**
+ * Replaces (in place) reserved characters to generate a counter 
+ * instance name. Uses the enum to indicate which counter type the
+ * name will refer to so that the correct set of character
+ * substitutions can be used.
+ */
+void cleanCounterName(wchar_t *name, UTWmiCharSubstitutions subs) 
 {
-	// replace reserved characters to generate counter instance name
 	size_t len = wcsnlen_s(name, UT_DEFAULT_MAX_STRLEN);
 	for (uint32_t i = 0; i <= len; i++ ) {
-		name[i] = cleanCounterNameChar(name[i]);
+		name[i] = cleanCounterNameChar(name[i], subs);
 	}
 }
 
