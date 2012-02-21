@@ -105,7 +105,15 @@ HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace);
 HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj, 
 					   wchar_t *assocClass, wchar_t *endClass, wchar_t *resultRole,
 					   IEnumWbemClassObject **resultEnum);
-void cleanCounterName(wchar_t *name);
+enum UTWmiCharSubstitutions {
+	UTHYPERV_VIRT_STORAGE_DEV = 0,
+	UTHYPERV_DYN_MEM_VM,
+	UTHYPERV_VIRT_PROC,
+	UTHYPERV_LEGACY_NW_ADAPTER,
+	UTHYPERV_VIRT_SWITCH,
+	UTHYPERV_VIRT_NW_ADAPTER,
+	UTNETWORK_INTERFACE};
+void cleanCounterName(wchar_t *name, UTWmiCharSubstitutions subs);
 
 /**
  * Call back function to free userData. Frees any allocated memory

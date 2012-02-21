@@ -345,7 +345,7 @@ static void readVmCpuCounters(HVSVmState *state, SFLHost_vrt_cpu_counters *cpu)
 			size_t length = wcslen(state->vmFriendlyName)+2;
 			wchar_t *counterPrefix = (wchar_t *)my_calloc(length*sizeof(wchar_t));
 			swprintf(counterPrefix, length, formatString, state->vmFriendlyName);
-			cleanCounterName(counterPrefix);
+			cleanCounterName(counterPrefix, UTHYPERV_VIRT_PROC);
 			for (uint32_t i = 0; i < count; i++) {
 				if (StrStrIW(values[i].szName, counterPrefix) != NULL) {
 					//Time in 100ns units, divide by 10000 for ms
@@ -384,7 +384,7 @@ static void readVmCpuCounters(HVSVmState *state, SFLHost_vrt_cpu_counters *cpu)
 static void readVmMemCounters(HVSVmState *state, SFLHost_vrt_mem_counters *mem)
 {
 	wchar_t *counterName = my_wcsdup(state->vmFriendlyName);
-	cleanCounterName(counterName);
+	cleanCounterName(counterName, UTHYPERV_DYN_MEM_VM);
 	PDH_HQUERY query;
 	if (PdhOpenQuery(NULL, 0, &query) == ERROR_SUCCESS) {
 		PDH_HCOUNTER physical, pressure, max;
@@ -419,7 +419,7 @@ static uint64_t getVmDioCounterVal(HVSVmState *state, PDH_HCOUNTER *counter)
 	if (count > 0) {
 		for (uint32_t i = 0; i < state->disks->n; i++) {
 			wchar_t *disk = my_wcsdup(state->disks->strings[i]);
-			cleanCounterName(disk);
+			cleanCounterName(disk, UTHYPERV_VIRT_STORAGE_DEV);
 			for (uint32_t j = 0; j < count; j++) {	
 				if (wcscmp(values[j].szName, disk) == 0) {
 					counterVal += values[j].RawValue.FirstValue;
