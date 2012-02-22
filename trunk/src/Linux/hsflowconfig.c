@@ -416,6 +416,64 @@ extern int debug;
     return tokens;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________  agentAddressPriority     __________________
+    -----------------___________________________------------------
+  */
+
+  EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback, int v6scope)
+  {
+    EnumIPSelectionPriority ipPriority = IPSP_NONE;
+
+    switch(addr->type) {
+    case SFLADDRESSTYPE_IP_V4:
+      // start assuming it's a global ip
+      ipPriority = IPSP_IP4;
+      // then check for other possibilities
+      if(loopback) {
+	ipPriority = IPSP_LOOPBACK4;
+      }
+      else if (SFLAddress_isSelfAssigned(addr)) {
+	ipPriority = IPSP_SELFASSIGNED4;
+      }
+      else if(vlan != HSP_VLAN_ALL) {
+	ipPriority = IPSP_VLAN4;
+      }
+      break;
+
+    case SFLADDRESSTYPE_IP_V6:
+      // start by interpreting the scope
+      // http://en.wikipedia.org/wiki/IPv6_address#IPv6_address_scopes
+      switch(v6scope) {
+      case 0x1: ipPriority = IPSP_IP6_SCOPE_INTERFACE; break;
+      case 0x2: ipPriority = IPSP_IP6_SCOPE_LINK; break;
+      case 0x4: ipPriority = IPSP_IP6_SCOPE_ADMIN; break;
+      case 0x5: ipPriority = IPSP_IP6_SCOPE_SITE; break;
+      case 0x8: ipPriority = IPSP_IP6_SCOPE_ORG; break;
+      case 0xe: ipPriority = IPSP_IP6_SCOPE_GLOBAL; break;
+      default: /* leave as IPSP_NONE */ break;
+      }
+      
+      // now allow the other parameters to override
+      if(loopback) {
+	ipPriority = IPSP_LOOPBACK6;
+      }
+      else if (SFLAddress_isSelfAssigned(addr)) {
+	ipPriority = IPSP_SELFASSIGNED6;
+      }
+      else if(vlan != HSP_VLAN_ALL) {
+	ipPriority = IPSP_VLAN6;
+      }
+      break;
+    default:
+      // not a v4 or v6 ip address at all
+      break;
+    }
+	    
+    return ipPriority;
+  }
+
   /*_________________---------------------------__________________
     _________________      readConfigFile       __________________
     -----------------___________________________------------------
@@ -447,103 +505,103 @@ extern int debug;
 	}
       }
       else switch(level[depth]) {
-      case HSPOBJ_HSP:
-	// must start by opening an sFlow object
-	if((tok = expectToken(sp, tok, HSPTOKEN_SFLOW)) == NULL) return NO;
-	if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	newSFlow(sp);
-	level[++depth] = HSPOBJ_SFLOW;
-	break;
-
-      case HSPOBJ_SFLOW:
-
-	switch(tok->stok) {
-	case HSPTOKEN_LOOPBACK:
-	  if((tok = expectLoopback(sp, tok)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_DNSSD:
-	  if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_DNSSD_DOMAIN:
-	  if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_COLLECTOR:
+	case HSPOBJ_HSP:
+	  // must start by opening an sFlow object
+	  if((tok = expectToken(sp, tok, HSPTOKEN_SFLOW)) == NULL) return NO;
 	  if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	  newCollector(sp->sFlow->sFlowSettings_file);
-	  level[++depth] = HSPOBJ_COLLECTOR;
+	  newSFlow(sp);
+	  level[++depth] = HSPOBJ_SFLOW;
 	  break;
-	case HSPTOKEN_SAMPLING:
-	case HSPTOKEN_PACKETSAMPLINGRATE:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_POLLING:
-	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_AGENTIP:
-	  if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_AGENT:
-	  if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_SUBAGENTID:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_UUID:
-	  if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_HEADERBYTES:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_ULOGGROUP:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_ULOGPROBABILITY:
-	  if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
-	  break;
-	default:
-	  // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
-	  if(tok->str && strncasecmp(tok->str, "sampling.", 9) == 0) {
-	    char *app = tok->str + 9;
-	    uint32_t sampling_n=0;
-	    if((tok = expectInteger32(sp, tok, &sampling_n, 0, 65535)) == NULL) return NO;
-	    setApplicationSampling(sp->sFlow->sFlowSettings_file, app, sampling_n);
-	  }
-	  else if(tok->str && strncasecmp(tok->str, "polling.", 8) == 0) {
-	    char *app = tok->str + 8;
-	    uint32_t polling_secs=0;
-	    if((tok = expectInteger32(sp, tok, &polling_secs, 0, 300)) == NULL) return NO;
-	    setApplicationPolling(sp->sFlow->sFlowSettings_file, app, polling_secs);
-	  }
-	  else {
-	    parseError(sp, tok, "unexpected sFlow setting", "");
-	    return NO;
-	  }
-	  break;
-	}
-	break;
-	
-      case HSPOBJ_COLLECTOR:
-	{
-	  HSPCollector *col = sp->sFlow->sFlowSettings_file->collectors;
+
+	case HSPOBJ_SFLOW:
+
 	  switch(tok->stok) {
-	  case HSPTOKEN_IP:
-	    if((tok = expectIP(sp, tok, &col->ipAddr, (struct sockaddr *)&col->sendSocketAddr)) == NULL) return NO;
+	  case HSPTOKEN_LOOPBACK:
+	    if((tok = expectLoopback(sp, tok)) == NULL) return NO;
 	    break;
-	  case HSPTOKEN_UDPPORT:
-	    if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
+	  case HSPTOKEN_DNSSD:
+	    if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_DNSSD_DOMAIN:
+	    if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_COLLECTOR:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    newCollector(sp->sFlow->sFlowSettings_file);
+	    level[++depth] = HSPOBJ_COLLECTOR;
+	    break;
+	  case HSPTOKEN_SAMPLING:
+	  case HSPTOKEN_PACKETSAMPLINGRATE:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_POLLING:
+	  case HSPTOKEN_COUNTERPOLLINGINTERVAL:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_AGENTIP:
+	    if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_AGENT:
+	    if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_SUBAGENTID:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_UUID:
+	    if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_HEADERBYTES:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_ULOGGROUP:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_ULOGPROBABILITY:
+	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
 	    break;
 	  default:
-	    parseError(sp, tok, "unexpected collector setting", "");
-	    return NO;
+	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
+	    if(tok->str && strncasecmp(tok->str, "sampling.", 9) == 0) {
+	      char *app = tok->str + 9;
+	      uint32_t sampling_n=0;
+	      if((tok = expectInteger32(sp, tok, &sampling_n, 0, 65535)) == NULL) return NO;
+	      setApplicationSampling(sp->sFlow->sFlowSettings_file, app, sampling_n);
+	    }
+	    else if(tok->str && strncasecmp(tok->str, "polling.", 8) == 0) {
+	      char *app = tok->str + 8;
+	      uint32_t polling_secs=0;
+	      if((tok = expectInteger32(sp, tok, &polling_secs, 0, 300)) == NULL) return NO;
+	      setApplicationPolling(sp->sFlow->sFlowSettings_file, app, polling_secs);
+	    }
+	    else {
+	      parseError(sp, tok, "unexpected sFlow setting", "");
+	      return NO;
+	    }
 	    break;
 	  }
-	}
-	break;
+	  break;
 	
-      default:
-	parseError(sp, tok, "unexpected state", "");
-      }
+	case HSPOBJ_COLLECTOR:
+	  {
+	    HSPCollector *col = sp->sFlow->sFlowSettings_file->collectors;
+	    switch(tok->stok) {
+	    case HSPTOKEN_IP:
+	      if((tok = expectIP(sp, tok, &col->ipAddr, (struct sockaddr *)&col->sendSocketAddr)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_UDPPORT:
+	      if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
+	      break;
+	    default:
+	      parseError(sp, tok, "unexpected collector setting", "");
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	
+	default:
+	  parseError(sp, tok, "unexpected state", "");
+	}
     }
 
     // OK we consumed all the tokens, but we still need to run some sanity checks to make sure
@@ -558,85 +616,68 @@ extern int debug;
     else {
       //////////////////////// sFlow /////////////////////////
       if(sp->sFlow->agentIP.type == 0) {
-	 // it may have been defined as agent=<device>
+	// it may have been defined as agent=<device>
 	if(sp->sFlow->agentDevice) {
 	  SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
-	  if(ad && ad->ipAddr.addr) {
-	    sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	    sp->sFlow->agentIP.address.ip_v4 = ad->ipAddr;
+	  if(ad && ad->userData) {
+	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
+	    sp->sFlow->agentIP = adaptorNIO->ipAddr;
 	  }
 	}
       }
-      if(sp->sFlow->agentIP.type == 0) {
-	// nae luck - try to automatically choose the first non-loopback IP address
-	// only the non-loopback devices should be listed here, unless the loopback
-	// flag was set specially to include them.  However we want to suppress
-	// self-assigned IP addresses too, and we'd rather avoid vlan-specific
-	// interfaces too if we can, so use a priority scheme...
-	
-	typedef enum { IPSP_NONE=0,
-		       IPSP_LOOPBACK,
-		       IPSP_SELFASSIGNED,
-		       IPSP_VLAN,
-		       IPSP_OK } EnumIPSelectionPriority;
+    }
+    if(sp->sFlow->agentIP.type == 0) {
+      // try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
+      // We already used this ranking to prioritize L3 addresses per adaptor (in the case where
+      // there are more than one) so now we are applying the same ranking globally to pick
+      // the best candidate to represent the whole agent:
+      SFLAdaptor *selectedAdaptor = NULL;
+      EnumIPSelectionPriority ipPriority = IPSP_NONE;
 
-	SFLAdaptor *selectedAdaptor = NULL;
-	EnumIPSelectionPriority selectedPriority = IPSP_NONE;
-
-	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	  if(adaptor && adaptor->ipAddr.addr) {
-	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	    u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
-	    EnumIPSelectionPriority ipPriority = IPSP_OK;
-	    if(adaptorNIO->loopback) {
-	      ipPriority = IPSP_LOOPBACK;
-	    }
-	    else if (ipbytes[0] == 169 &&
-		     ipbytes[1] == 254) {
-	      ipPriority = IPSP_SELFASSIGNED;
-	    }
-	    else if(adaptorNIO->vlan != HSP_VLAN_ALL) {
-	      ipPriority = IPSP_VLAN;
-	    }
-	    if(ipPriority > selectedPriority) {
-	      selectedAdaptor = adaptor;
-	      selectedPriority = ipPriority;
-	    }
+      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+	if(adaptor && adaptor->userData) {
+	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	  if(adaptorNIO->ipPriority > ipPriority) {
+	    selectedAdaptor = adaptor;
+	    ipPriority = adaptorNIO->ipPriority;
 	  }
-	}
-	if(selectedAdaptor) {
-	  sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	  sp->sFlow->agentIP.address.ip_v4 = selectedAdaptor->ipAddr;
-	  sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
-	}
+	}	    
       }
-
-      if(sp->sFlow->agentIP.type == 0) {
-        // still no agentIP.  That's a showstopper.
-	myLog(LOG_ERR, "parse error in %s : agentIP not defined", sp->configFile);
-	parseOK = NO;
+      if(selectedAdaptor && selectedAdaptor->userData) {
+	// crown the winner
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
+	sp->sFlow->agentIP = adaptorNIO->ipAddr;
+	sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
       }
-      if(sp->sFlow->sFlowSettings_file->numCollectors == 0 && sp->DNSSD == NO) {
-	myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
-	parseOK = NO;
-      }
-      for(HSPCollector *coll = sp->sFlow->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
-	//////////////////////// collector /////////////////////////
-	if(coll->ipAddr.type == 0) {
-	  myLog(LOG_ERR, "parse error in %s : collector  has no IP", sp->configFile);
-	  parseOK = NO;
-	}
-      }
-
-      if(sp->sFlow->sFlowSettings_file->ulogProbability > 0) {
-	sp->sFlow->sFlowSettings_file->ulogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->ulogProbability);
-      }
-
+    }
+    
+    if(sp->sFlow->agentIP.type == 0) {
+      // still no agentIP.  That's a showstopper.
+      myLog(LOG_ERR, "parse error in %s : agentIP not defined", sp->configFile);
+      parseOK = NO;
     }
 
+    if(sp->sFlow->sFlowSettings_file->numCollectors == 0 && sp->DNSSD == NO) {
+      myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
+      parseOK = NO;
+    }
+
+    for(HSPCollector *coll = sp->sFlow->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
+      //////////////////////// collector /////////////////////////
+      if(coll->ipAddr.type == 0) {
+	myLog(LOG_ERR, "parse error in %s : collector  has no IP", sp->configFile);
+	parseOK = NO;
+      }
+    }
+    
+    if(sp->sFlow->sFlowSettings_file->ulogProbability > 0) {
+      sp->sFlow->sFlowSettings_file->ulogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->ulogProbability);
+    }
+    
     return parseOK;
   }
+  
 
 #if defined(__cplusplus)
 } /* extern "C" */

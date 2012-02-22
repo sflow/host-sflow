@@ -24,6 +24,11 @@ extern int debug;
  int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback)
   {
     u_char buf[PACKETSZ];
+
+    // We could have a config option to set the DNS servers that we will ask. If so
+    // they should be written into this array of sockaddrs...
+    // if(debug) myLog(LOG_INFO,"_res_nsaddr=%p", &_res.nsaddr);
+
     if(debug) myLog(LOG_INFO,"=== res_search(%s, C_IN, %u) ===", dname, rtype);
     int anslen = res_search(dname, C_IN, rtype, buf, PACKETSZ);
     if(anslen == -1) {

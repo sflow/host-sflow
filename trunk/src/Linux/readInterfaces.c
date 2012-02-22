@@ -104,6 +104,102 @@ approach seemed more stable and portable.
   }
 
 /*________________---------------------------__________________
+  ________________  setAddressPriorities     __________________
+  ----------------___________________________------------------
+  Ideally we would do this as we go along,  but since the vlan
+  info is spliced in separately we have to wait for that and
+  then set the priorities for the whole list.
+*/
+  void setAddressPriorities(HSP *sp)
+  {
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      if(adaptor && adaptor->userData) {
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	adaptorNIO->ipPriority = agentAddressPriority(&adaptorNIO->ipAddr,
+						      adaptorNIO->vlan,
+						      adaptorNIO->loopback,
+						      0);
+      }
+    }
+  }
+
+/*________________---------------------------__________________
+  ________________  readIPv6Addresses        __________________
+  ----------------___________________________------------------
+*/
+
+  static u_int remap_proc_net_if_inet6_scope(u_int scope)
+  {
+    // for reasons not yet understood, the scope field in /proc/net/if_inet6
+    // does not correspond to the values we expected to see.  (I think it
+    // might actually be the sin6_scope that you would write into a v6 socket
+    // to talk to that address,  but I don't know for sure,  or why that
+    // would need to be different anyway).
+    // This function tries to map the scope field back into familiar
+    // territory again.
+    switch(scope) {
+    case 0x40: return 0x5; // site
+    case 0x20: return 0x2; // link
+    case 0x10: return 0x1; // interface
+    case 0x00: return 0xe; // global
+    }
+    // if it's something else,  then just leave it unchanged.  Not sure
+    // what you get here for scope = admin or org.
+    return scope;
+  }
+
+  void readIPv6Addresses(HSP *sp)
+  {
+    FILE *procFile = fopen("/proc/net/if_inet6", "r");
+    if(procFile) {
+      char line[MAX_PROC_LINE_CHARS];
+      int lineNo = 0;
+      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+	// expect lines of the form "<address> <netlink_no> <prefix_len(HEX)> <scope(HEX)> <flags(HEX)> <deviceName>
+	// (with a header line on the first row)
+	char devName[MAX_PROC_LINE_CHARS];
+	u_char addr[MAX_PROC_LINE_CHARS];
+	u_int devNo, maskBits, scope, flags;
+	++lineNo;
+	if(sscanf(line, "%s %x %x %x %x %s",
+		  addr,
+		  &devNo,
+		  &maskBits,
+		  &scope,
+		  &flags,
+		  devName) == 6) {
+	  if(debug) {
+	    myLog(LOG_INFO, "adaptor %s has v6 address %s with scope 0x%x",
+		  devName,
+		  addr,
+		  scope);
+	  }
+	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(devName));
+	  if(adaptor && adaptor->userData) {
+	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	    SFLAddress v6addr;
+	    v6addr.type = SFLADDRESSTYPE_IP_V6;
+	    if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
+	      scope = remap_proc_net_if_inet6_scope(scope);
+	      EnumIPSelectionPriority ipPriority = agentAddressPriority(&v6addr,
+									niostate->vlan,
+									niostate->loopback,
+									scope);
+	      if(ipPriority > niostate->ipPriority) {
+		// write this in as the preferred sflow-agent-address for this adaptor
+		niostate->ipAddr = v6addr;
+		niostate->ipPriority = ipPriority;
+	      }
+	    }
+	  }
+	}
+      }
+      fclose(procFile);
+    }
+  }
+
+/*________________---------------------------__________________
   ________________      readInterfaces       __________________
   ----------------___________________________------------------
 */
@@ -215,7 +311,8 @@ int readInterfaces(HSP *sp)
 		if (ifr.ifr_addr.sa_family == AF_INET) {
 		  struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
 		  // IP addr is now s->sin_addr
-		  adaptor->ipAddr.addr = s->sin_addr.s_addr;
+		  adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+		  adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
 		}
 		//else if (ifr.ifr_addr.sa_family == AF_INET6) {
 		// not sure this ever happens - on a linux system IPv6 addresses
@@ -262,9 +359,20 @@ int readInterfaces(HSP *sp)
   // to a particular VLAN
   readVLANs(sp);
 
+  // now that we have the evidence gathered together, we can
+  // set the L3 address priorities (used for auto-selecting
+  // the sFlow-agent-address if requrired to by the config.
+  setAddressPriorities(sp);
+
+  // now we can read IPv6 addresses too - they come from a
+  // different place. Depending on the address priorities this
+  // may cause the adaptor's best-choice ipAddress to be
+  // overwritten.
+  readIPv6Addresses(sp);
+
   return sp->adaptorList->num_adaptors;
 }
-  
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
