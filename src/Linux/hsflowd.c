@@ -1166,7 +1166,7 @@ extern "C" {
     }
 #endif
 
-    // refresh the interface list perioducally or on request
+    // refresh the interface list periodically or on request
     if(sp->refreshAdaptorList || (sp->clk % HSP_REFRESH_ADAPTORS) == 0) {
       sp->refreshAdaptorList = NO;
       readInterfaces(sp);
@@ -1962,7 +1962,7 @@ extern "C" {
 	  SFLAddress *agentIP = &sp->sFlow->agentIP;
 	  uint32_t seed = 0;
 	  if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
-	  else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
+	  else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
 	  sfl_random_init(seed);
 
 	  // initialize the faster polling of NIO counters
