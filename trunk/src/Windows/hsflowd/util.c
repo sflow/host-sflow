@@ -769,6 +769,46 @@ SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, 
 	return ad;
 }
 
+/*________________---------------------------__________________
+  ________________      SFLAddress utils     __________________
+  ----------------___________________________------------------
+*/
+
+BOOL SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2) 
+{
+	if (addr1 == addr2) {
+		return TRUE;
+	}
+	if (addr1 == NULL ||addr2 == NULL) {
+		return FALSE;
+	}
+	if (addr1->type != addr2->type) {
+		return FALSE;
+	}
+	if (addr1->type == SFLADDRESSTYPE_IP_V6) {
+		return (memcmp(addr1->address.ip_v6.addr, addr2->address.ip_v6.addr, 16) == 0);
+	} else {
+		return (addr1->address.ip_v4.addr == addr2->address.ip_v4.addr);
+	}
+}
+
+BOOL SFLAddress_isLoopback(SFLAddress *addr) 
+{
+	if (addr->type == SFLADDRESSTYPE_IP_V6) {
+		// for IPv6, loopback is always ::1
+		uint32_t *x = (uint32_t *)addr->address.ip_v6.addr;
+		return 
+			(x[0] == 0 &&
+			 x[1] == 0 &&
+			 x[2] == 0 &&
+			 ntohl(x[3]) == 1);
+	} else {
+		// for IPv4, it's 127.0.0.0/8
+		char *a = (char *)&(addr->address.ip_v4.addr);
+		return a[0] == 127;
+	}
+}
+
 #if defined(__cplusplus)
 }  /* extern "C" */
 #endif

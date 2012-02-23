@@ -132,6 +132,10 @@ SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, 
 
 BOOL truncateOpenFile(FILE *fptr);
 
+// SFLAddress utils
+BOOL SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2);
+BOOL SFLAddress_isLoopback(SFLAddress *addr);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

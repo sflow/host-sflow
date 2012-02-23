@@ -107,6 +107,62 @@ static HSPCollector *newCollector(HSPSFlow *sf)
 }
 
 /**
+ * Returns the EnumIPSelectionPriority associated with the given
+ * SFLAddress.
+ */
+EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr)
+{
+	 EnumIPSelectionPriority ipPriority = IPSP_NONE;
+	 switch(addr->type) {
+		 case  SFLADDRESSTYPE_IP_V4:
+			 // start assuming it is a global ip
+			 ipPriority = IPSP_IP4;
+			 // then check for other possibilities
+			 if (SFLAddress_isLoopback(addr)) {
+				ipPriority = IPSP_LOOPBACK4;
+			 } else {
+				u_char *a = (u_char *)&(addr->address.ip_v4.addr);
+				if (a[0] == 169 && a[1] == 254) {
+					// for IPv4, it's 169.254.*
+					ipPriority = IPSP_SELFASSIGNED4;
+				}
+			 }
+			 break;
+		 case SFLADDRESSTYPE_IP_V6:
+			 // start assuming it is a global ip
+			 ipPriority = IPSP_IP6_SCOPE_GLOBAL;
+			 if (SFLAddress_isLoopback(addr)) {
+				 ipPriority = IPSP_LOOPBACK6;
+			 } else {
+				 SFLIPv6 addrv6 = addr->address.ip_v6;
+				 if (addrv6.addr[0] == 0xFE && ((addrv6.addr[1] & 0xC0) == 0x80)) {
+					//0xFE80::/10 link local
+					ipPriority = IPSP_IP6_SCOPE_LINK;
+				} else if ((addrv6.addr[0] & 0xFE) == 0xFC) {
+					//0xFC00::/7 unique local
+					ipPriority = IPSP_IP6_SCOPE_UNIQUE;
+				} else if (addrv6.addr[0] = 0xFF) { 
+					//should not have a multicast as an adapter address but we'll test anyway
+					//0xFF00::/8 multicast
+					ipPriority = IPSP_NONE;
+				} else {
+					//should not really have to do this either
+					uint32_t *x = (uint32_t *)addr->address.ip_v6.addr;
+					if (x[0] == 0 && x[1] == 0 && x[2] == 0 && x[3] == 0) {
+						//::/128 unspecified
+						ipPriority = IPSP_NONE;
+					}
+				}
+			}
+		 default:
+			// not v4 or v6 leave as IPSP_NONE
+			break;
+	 }
+	 return ipPriority;
+}
+
+
+/**
  * Reads the saved sFlow configuration from the registry settings.
  * Returns TRUE if all settings are valid, FALSE if the agent address
  * cannot be determined or there is no collector address
@@ -136,9 +192,8 @@ BOOL readConfig(HSP *sp)
 	//set the agent address
 	//If the agent address is set in the registry, just go with that
 	//even if it is not an address associated with an adapter.
-	//Otherwise choose the best IPv4 address from the adapters -
-	//Note that in this case we are limited to IPv4 because the
-	//SFLAdaptor struct only supports IPv4.
+	//Otherwise choose the best IPv4 or IPv6 address from the adapters
+	//Using the priorities defined in EnumIpSelectionPriority
 	char agentStr[MAX_IPV6_STRLEN];
 	memset(agentStr, 0, MAX_IPV6_STRLEN);
 	cbData = MAX_IPV6_STRLEN;;
@@ -153,34 +208,23 @@ BOOL readConfig(HSP *sp)
 	}
 
 	if (sp->sFlow->agentIP.type == 0) {
-		typedef enum { 
-			IPSP_NONE=0,
-			IPSP_LOOPBACK,
-			IPSP_SELFASSIGNED,
-			IPSP_OK} EnumIPSelectionPriority;
-
 		SFLAdaptor *selectedAdaptor = NULL;
 		EnumIPSelectionPriority selectedPriority = IPSP_NONE;
 	
 		for (uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 			SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-			if (adaptor && adaptor->ipAddr.addr) {
-				u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
-				EnumIPSelectionPriority ipPriority = IPSP_OK;
-				if (ipbytes[0] == 127) {
-					ipPriority = IPSP_LOOPBACK;
-				} else if (ipbytes[0] == 169 && ipbytes[1] == 254) {
-					ipPriority = IPSP_SELFASSIGNED;
-				}
-				if (ipPriority > selectedPriority) {
+			if (adaptor && adaptor->userData) {
+				EnumIPSelectionPriority ipPriority = 
+					((HSPAdaptorNIO *)adaptor->userData)->ipPriority;
+				if (ipPriority && ipPriority > selectedPriority) {
 					selectedAdaptor = adaptor;
 					selectedPriority = ipPriority;
 				}
 			}
 		}
-		if (selectedAdaptor) {
-			sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-			sp->sFlow->agentIP.address.ip_v4 = selectedAdaptor->ipAddr;
+		if (selectedAdaptor) { //we know it has userData from above
+			HSPAdaptorNIO *adapterState = (HSPAdaptorNIO *)selectedAdaptor->userData;
+			sp->sFlow->agentIP = adapterState->ipAddr;
 			sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
 		}
 	}
