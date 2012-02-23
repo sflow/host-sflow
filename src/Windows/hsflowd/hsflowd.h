@@ -110,9 +110,22 @@ extern "C" {
     SFLAddress agentIP;
   } HSPSFlow; 
 
+  typedef enum { 
+	  IPSP_NONE=0,
+	  IPSP_LOOPBACK6, //::1/128
+	  IPSP_LOOPBACK4,
+	  IPSP_SELFASSIGNED4,
+	  IPSP_IP6_SCOPE_LINK, //FE80::/10
+	  IPSP_IP6_SCOPE_UNIQUE, //FC00::/7
+	  IPSP_IP6_SCOPE_GLOBAL,
+	  IPSP_IP4,
+  } EnumIPSelectionPriority;
+
    // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     wchar_t *countersInstance; //Win32_NetworkAdapter.Name with reserved chars replaced
+	SFLAddress ipAddr;
+	EnumIPSelectionPriority ipPriority;
 	BOOL isVirtual;
     int32_t bond_master;
 	SFLHost_nio_counters new_nio;
@@ -206,6 +219,8 @@ void updateNioCounters(HSP *sp);
 void readHidCounters(HSP *sp, SFLHost_hid_counters *hid);
 BOOL readSystemUUID(u_char *uuidbuf);
 void readVms(HSP *sp);
+
+EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr);
 
 #if defined(__cplusplus)
 } /* extern "C" */
