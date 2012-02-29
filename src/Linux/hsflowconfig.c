@@ -422,7 +422,7 @@ extern int debug;
     -----------------___________________________------------------
   */
 
-  EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback, int v6scope)
+  EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback)
   {
     EnumIPSelectionPriority ipPriority = IPSP_NONE;
 
@@ -443,24 +443,19 @@ extern int debug;
       break;
 
     case SFLADDRESSTYPE_IP_V6:
-      // start by interpreting the scope
-      // http://en.wikipedia.org/wiki/IPv6_address#IPv6_address_scopes
-      switch(v6scope) {
-      case 0x1: ipPriority = IPSP_IP6_SCOPE_INTERFACE; break;
-      case 0x2: ipPriority = IPSP_IP6_SCOPE_LINK; break;
-      case 0x4: ipPriority = IPSP_IP6_SCOPE_ADMIN; break;
-      case 0x5: ipPriority = IPSP_IP6_SCOPE_SITE; break;
-      case 0x8: ipPriority = IPSP_IP6_SCOPE_ORG; break;
-      case 0xe: ipPriority = IPSP_IP6_SCOPE_GLOBAL; break;
-      default: /* leave as IPSP_NONE */ break;
-      }
+      // start by assuming it's a global IP
+      ipPriority = IPSP_IP6_SCOPE_GLOBAL;
+      // then check for other possibilities
       
       // now allow the other parameters to override
-      if(loopback) {
+      if(loopback || SFLAddress_isLoopback(addr)) {
 	ipPriority = IPSP_LOOPBACK6;
       }
-      else if (SFLAddress_isSelfAssigned(addr)) {
-	ipPriority = IPSP_SELFASSIGNED6;
+      else if (SFLAddress_isLinkLocal(addr)) {
+	ipPriority = IPSP_IP6_SCOPE_LINK;
+      }
+      else if (SFLAddress_isUniqueLocal(addr)) {
+	ipPriority = IPSP_IP6_SCOPE_UNIQUE;
       }
       else if(vlan != HSP_VLAN_ALL) {
 	ipPriority = IPSP_VLAN6;
@@ -470,7 +465,12 @@ extern int debug;
       // not a v4 or v6 ip address at all
       break;
     }
-	    
+
+    // just make sure we can't get a multicast in here (somehow)
+    if(SFLAddress_isMulticast(addr)) {
+      ipPriority = IPSP_NONE;
+    }
+
     return ipPriority;
   }
 

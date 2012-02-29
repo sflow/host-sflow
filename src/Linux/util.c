@@ -816,19 +816,45 @@ extern "C" {
   }
   
   int SFLAddress_isSelfAssigned(SFLAddress *addr) {
-    if(addr->type == SFLADDRESSTYPE_IP_V6) {
-      // for IPv6, it start with FE80:
-      return(addr->address.ip_v6.addr[0] == 0xFE &&
-	     addr->address.ip_v6.addr[1] == 0x80);
-    }
-    else {
+    if(addr->type == SFLADDRESSTYPE_IP_V4) {
       // for IPv4, it's 169.254.*
       u_char *a = (u_char *)&(addr->address.ip_v4.addr);
       return (a[0] == 169 &&
 	      a[1] == 254);
     }
+    return NO;
   }
   
+  int SFLAddress_isLinkLocal(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // FE80::/10
+      return(addr->address.ip_v6.addr[0] == 0xFE &&
+	     (addr->address.ip_v6.addr[1] & 0xC0) == 0x80);
+    }
+    return NO;
+  }
+
+  int SFLAddress_isUniqueLocal(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // FC00::/7                                                                                                                 
+      return((addr->address.ip_v6.addr[0] & 0xFE) == 0xFC);
+    }
+    return NO;
+  }
+
+  int SFLAddress_isMulticast(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // FF00::/8                                                                                                                 
+      return(addr->address.ip_v6.addr[0] == 0xFF);
+    }
+    else {
+      // 224.0.0.0/4
+      u_char *a = (u_char *)&(addr->address.ip_v4.addr);
+      return ((a[0] & 0xF0) == 224);
+    }
+    return NO;
+  }
+
 #if defined(__cplusplus)
 }  /* extern "C" */
 #endif
