@@ -118,8 +118,7 @@ approach seemed more stable and portable.
 	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
 	adaptorNIO->ipPriority = agentAddressPriority(&adaptorNIO->ipAddr,
 						      adaptorNIO->vlan,
-						      adaptorNIO->loopback,
-						      0);
+						      adaptorNIO->loopback);
       }
     }
   }
@@ -129,6 +128,7 @@ approach seemed more stable and portable.
   ----------------___________________________------------------
 */
 
+#if 0
   static u_int remap_proc_net_if_inet6_scope(u_int scope)
   {
     // for reasons not yet understood, the scope field in /proc/net/if_inet6
@@ -148,6 +148,7 @@ approach seemed more stable and portable.
     // what you get here for scope = admin or org.
     return scope;
   }
+#endif
 
   void readIPv6Addresses(HSP *sp)
   {
@@ -181,11 +182,11 @@ approach seemed more stable and portable.
 	    SFLAddress v6addr;
 	    v6addr.type = SFLADDRESSTYPE_IP_V6;
 	    if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
-	      scope = remap_proc_net_if_inet6_scope(scope);
+	      // we interpret the scope from the address now
+	      // scope = remap_proc_net_if_inet6_scope(scope);
 	      EnumIPSelectionPriority ipPriority = agentAddressPriority(&v6addr,
 									niostate->vlan,
-									niostate->loopback,
-									scope);
+									niostate->loopback);
 	      if(ipPriority > niostate->ipPriority) {
 		// write this in as the preferred sflow-agent-address for this adaptor
 		niostate->ipAddr = v6addr;

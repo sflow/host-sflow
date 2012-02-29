@@ -153,6 +153,9 @@ extern "C" {
   int SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2);
   int SFLAddress_isLoopback(SFLAddress *addr);
   int SFLAddress_isSelfAssigned(SFLAddress *addr);
+  int SFLAddress_isLinkLocal(SFLAddress *addr);
+  int SFLAddress_isUniqueLocal(SFLAddress *addr);
+  int SFLAddress_isMulticast(SFLAddress *addr);
 
 #if defined(__cplusplus)
 } /* extern "C" */
