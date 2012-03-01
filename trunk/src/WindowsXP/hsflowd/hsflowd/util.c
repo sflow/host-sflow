@@ -715,8 +715,44 @@ void readAddresses()
         FREE(pAddresses);
     }
 }
-    
 #endif /* HSP_USE_GETADAPTERSADDRESSES */
+
+  /*________________---------------------------__________________
+    ________________      SFLAddress utils     __________________
+    ----------------___________________________------------------
+  */
+
+int SFLAddress_isLoopback(SFLAddress *addr) {
+	if(addr->type == SFLADDRESSTYPE_IP_V6) {
+		// for IPv6, loopback is always ::1
+		uint32_t *x = (uint32_t *)addr->address.ip_v6.addr;
+		return (x[0] == 0 &&
+			x[1] == 0 &&
+			x[2] == 0 &&
+			ntohl(x[3]) == 1);
+	}
+	else {
+		// for IPv4, it's 127.0.0.0/8
+		char *a = (char *)&(addr->address.ip_v4.addr);
+		return a[0] == 127;
+	}
+}
+
+int SFLAddress_isSelfAssigned(SFLAddress *addr) {
+	if(addr->type == SFLADDRESSTYPE_IP_V6) {
+		// for IPv6, it start with FE80:
+		return(addr->address.ip_v6.addr[0] == 0xFE &&
+			addr->address.ip_v6.addr[1] == 0x80);
+	}
+	else {
+		// for IPv4, it's 169.254.*
+		char *a = (char *)&(addr->address.ip_v4.addr);
+		return (a[0] == 169 &&
+			    a[1] == 254);
+	}
+}
+
+
 #if defined(__cplusplus)
 }  /* extern "C" */
 #endif

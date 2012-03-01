@@ -32,7 +32,7 @@ extern "C" {
 #define YES 1
 #define NO 0
 
-#define HSP_VERSION "1.13"
+#define HSP_VERSION "1.20"
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
@@ -62,16 +62,25 @@ extern "C" {
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
 
+  typedef enum { IPSP_NONE=0,
+	  IPSP_LOOPBACK6,
+	  IPSP_LOOPBACK4,
+	  IPSP_SELFASSIGNED,
+	  IPSP_IP6,
+	  IPSP_IP4,
+  } EnumIPSelectionPriority;
+
   typedef struct _HSPSFlow {
-    struct _HSP *myHSP;
-    SFLAgent *agent;
-    SFLPoller *poller;
-    HSPCollector *collectors;
-    uint32_t numCollectors;
-    HSPSFlowSettings *sFlowSettings;
-    uint32_t subAgentId;
-    char *agentDevice;
-    SFLAddress agentIP;
+	  struct _HSP *myHSP;
+	  SFLAgent *agent;
+	  SFLPoller *poller;
+	  HSPCollector *collectors;
+	  uint32_t numCollectors;
+	  HSPSFlowSettings *sFlowSettings;
+	  uint32_t subAgentId;
+	  char *agentDevice;
+	  SFLAddress agentIP;
+	  EnumIPSelectionPriority ipPriority;
   } HSPSFlow; 
 
    // cache nio counters per adaptor
@@ -102,6 +111,12 @@ extern "C" {
     int socket4;
     int socket6;
 	SFLHost_hid_counters host_hid;
+
+	// decide on the agent IP Address while we
+	// are reading the interfaces
+	char *agentDevice;
+	SFLAddress agentIP;
+	EnumIPSelectionPriority ipPriority;
   } HSP;
 
   // config parser

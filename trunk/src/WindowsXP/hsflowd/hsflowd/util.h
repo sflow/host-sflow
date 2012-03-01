@@ -128,6 +128,10 @@ extern "C" {
   // file utils
   int truncateOpenFile(FILE *fptr);
 
+  // SFLAddress utils
+  int SFLAddress_isLoopback(SFLAddress *addr);
+  int SFLAddress_isSelfAssigned(SFLAddress *addr);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

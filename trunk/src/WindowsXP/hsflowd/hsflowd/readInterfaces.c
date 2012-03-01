@@ -22,7 +22,7 @@ extern "C" {
 			case '(': aname[i] = '['; break;
 			case ')': aname[i] = ']'; break;
 			case '#': aname[i] = '_'; break;
-			case '*': aname[i] = '_'; break;
+			// case '*': aname[i] = '_'; break;  // this one does *not* get changed for interface names!
 			default: break;
 			}
 		}
@@ -65,7 +65,22 @@ extern "C" {
 				// clear the mark so we don't free it below
 				adaptor->marked = NO;
 				adaptor->ifIndex = pAdapter->Index;
-				adaptor->ipAddr.addr = inet_addr(pAdapter->IpAddressList.IpAddress.String);
+				// TODO: do we get IPv6 addresses here?
+				uint32_t ip4Addr = inet_addr(pAdapter->IpAddressList.IpAddress.String);
+				if(ip4Addr) {
+					SFLAddress ipAddr;
+					ipAddr.type = SFLADDRESSTYPE_IP_V4;
+					ipAddr.address.ip_v4.addr = ip4Addr;
+					EnumIPSelectionPriority pri = IPSP_IP4;
+					if(SFLAddress_isLoopback(&ipAddr)) pri = IPSP_LOOPBACK4;
+					else if(SFLAddress_isSelfAssigned(&ipAddr)) pri = IPSP_SELFASSIGNED;
+					if(pri > sp->ipPriority) {
+						sp->agentIP = ipAddr;
+						setStr(&sp->agentDevice, aname);
+						sp->ipPriority = pri;
+						myLog(LOG_INFO,"adaptor %s has agent-address priority=%d\n", aname, pri);
+					}
+				}
 				myLog(LOG_INFO,"AdapterInfo:\n\tAdapterName:\t%s\n\tDescription:\t%s\n\tWMI_deviceId:\t<%s>\n",pAdapter->AdapterName, pAdapter->Description, aname);
 				my_free(aname); 
 				pAdapter = pAdapter->Next;
