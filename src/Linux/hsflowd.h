@@ -254,7 +254,6 @@ extern "C" {
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
-    // HSPAdaptorNIOList adaptorNIOList;
 
     // have to poll the NIO counters fast enough to avoid 32-bit rollover
     // of the bytes counters.  On a 10Gbps interface they can wrap in
