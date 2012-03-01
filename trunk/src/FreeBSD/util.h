@@ -53,6 +53,13 @@ extern "C" {
   void *my_realloc(void *ptr, size_t bytes);
   void my_free(void *ptr);
 
+  // safer string fns
+  uint32_t my_strnlen(const char *s, uint32_t max);
+  uint32_t my_strlen(const char *s);
+  char *my_strdup(char *str);
+  int my_strnequal(char *s1, char *s2, uint32_t max);
+  int my_strequal(char *s1, char *s2);
+
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {
     if(sem && pthread_mutex_lock(sem) != 0) {
@@ -76,6 +83,31 @@ extern "C" {
 #define DYNAMIC_LOCAL(VAR) VAR
 #define SEMLOCK_DO(_sem) for(int DYNAMIC_LOCAL(_ctrl)=1; DYNAMIC_LOCAL(_ctrl) && lockOrDie(_sem); DYNAMIC_LOCAL(_ctrl)=0, releaseOrDie(_sem))
 
+#define MEMSTREAM 1
+#ifdef MEMSTREAM
+  FILE *open_memstream(char **cp, size_t *lenp);
+#endif
+
+  // string array
+  typedef struct _UTStringArray {
+    char **strs;
+    uint32_t n;
+    uint32_t capacity;
+    int8_t sorted;
+  } UTStringArray;
+
+  UTStringArray *strArrayNew();
+  void strArrayAdd(UTStringArray *ar, char *str);
+  void strArrayReset(UTStringArray *ar);
+  void strArrayFree(UTStringArray *ar);
+  char **strArray(UTStringArray *ar);
+  uint32_t strArrayN(UTStringArray *ar);
+  char *strArrayAt(UTStringArray *ar, int i);
+  void strArraySort(UTStringArray *ar);
+  char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end);
+  int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
+  int strArrayIndexOf(UTStringArray *ar, char *str);
+
   // string utils
   char *trimWhitespace(char *str);
   void setStr(char **fieldp, char *str);
@@ -87,12 +119,22 @@ extern "C" {
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew();
   void adaptorListReset(SFLAdaptorList *adList);
-  void adaptorListFree(SFLAdaptorList *adlist);
+  void adaptorListFree(SFLAdaptorList *adList);
+  void adaptorListMarkAll(SFLAdaptorList *adList);
+  void adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
-  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes);
+  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
 
   // file utils
   int truncateOpenFile(FILE *fptr);
+
+  // SFLAddress utils                                                                                  
+  int SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2);
+  int SFLAddress_isLoopback(SFLAddress *addr);
+  int SFLAddress_isSelfAssigned(SFLAddress *addr);
+  int SFLAddress_isLinkLocal(SFLAddress *addr);
+  int SFLAddress_isUniqueLocal(SFLAddress *addr);
+  int SFLAddress_isMulticast(SFLAddress *addr);
 
 #if defined(__cplusplus)
 } /* extern "C" */

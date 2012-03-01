@@ -49,13 +49,18 @@ extern "C" {
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
 #define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
 #define HSP_DEFAULT_CRASH_FILE "/etc/hsflowd.crash"
-#define HSP_DEFAULT_SUBAGENTID 100
+
+/* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
+#define HSP_DEFAULT_PHYSICAL_DSINDEX 1
+#define HSP_DEFAULT_SUBAGENTID 100000
+#define HSP_MAX_SUBAGENTID 199999
+#define HSP_DEFAULT_LOGICAL_DSINDEX_START 100000
+
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
 #define HSP_DEFAULT_DNSSD_MINDELAY 10
 #define HSP_DNSSD_STACKSIZE 2000000
-#define HSP_MAX_SUBAGENTID 1000000
 #define HSP_REFRESH_VMS 60
 
 // the limit we will request before calling mlockall()
@@ -87,6 +92,16 @@ extern "C" {
 
 #define HSP_SETTING_UNDEFINED -1
 
+  typedef struct _HSPApplicationSettings {
+    struct _HSPApplicationSettings *nxt;
+    char *application;
+    int got_sampling_n;
+    uint32_t sampling_n;
+    int got_polling_secs;
+    uint32_t polling_secs;
+  } HSPApplicationSettings;
+
+
   typedef struct _HSPSFlowSettings {
     HSPCollector *collectors;
     uint32_t numCollectors;
@@ -98,6 +113,7 @@ extern "C" {
     uint32_t pollingInterval_memcache;
     uint32_t headerBytes;
 #define HSP_MAX_HEADER_BYTES 256
+    HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
 #define HSP_DEFAULT_ULOG_GROUP 1
     double ulogProbability;
@@ -112,6 +128,8 @@ extern "C" {
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;
     HSPSFlowSettings *sFlowSettings;
+    char *sFlowSettings_str;
+
     uint32_t revisionNo;
 
     uint32_t subAgentId;
@@ -144,10 +162,27 @@ extern "C" {
     uint32_t dsIndex;
   } HSPVMStore;
   
+  typedef enum { IPSP_NONE=0,
+		 IPSP_LOOPBACK6,
+		 IPSP_LOOPBACK4,
+		 IPSP_SELFASSIGNED4,
+		 IPSP_IP6_SCOPE_LINK,
+		 IPSP_VLAN6,
+		 IPSP_VLAN4,
+		 IPSP_IP6_SCOPE_UNIQUE,
+		 IPSP_IP6_SCOPE_GLOBAL,
+		 IPSP_IP4,
+  } EnumIPSelectionPriority;
+
 
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
-    char *deviceName;
+    SFLAddress ipAddr;
+    EnumIPSelectionPriority ipPriority;
+    int32_t loopback;
+    int32_t bond_master;
+    int32_t vlan;
+#define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
     SFLHost_nio_counters last_nio;
     uint32_t last_bytes_in32;
@@ -157,6 +192,7 @@ extern "C" {
     time_t last_update;
   } HSPAdaptorNIO;
 
+#if 0
   typedef struct _HSPAdaptorNIOList {
     HSPAdaptorNIO **adaptors;
     uint32_t num_adaptors;
@@ -170,6 +206,7 @@ extern "C" {
     time_t polling_secs;
 #define HSP_NIO_POLLING_SECS_32BIT 3
   } HSPAdaptorNIOList;
+#endif
 
   typedef struct _HSPDiskIO {
     uint64_t last_sectors_read;
@@ -194,7 +231,16 @@ extern "C" {
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
-    HSPAdaptorNIOList adaptorNIOList;
+    // have to poll the NIO counters fast enough to avoid 32-bit rollover
+    // of the bytes counters.  On a 10Gbps interface they can wrap in
+    // less than 5 seconds.  On a virtual interface the data rate could be
+    // higher still. The program may decide to turn this off. For example,
+    // if it finds evidence that the counters are already 64-bit in the OS,
+    // or if it decides that all interface speeds are limited to 1Gbps or less.
+    time_t nio_last_update;
+    time_t nio_polling_secs;
+#define HSP_NIO_POLLING_SECS_32BIT 3
+
     int refreshAdaptorList;
     int refreshVMList;
     // 64-bit diskIO accumulators
@@ -230,7 +276,11 @@ extern "C" {
   HSPSFlowSettings *newSFlowSettings(void);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
+  void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
+  void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
+  void clearApplicationSettings(HSPSFlowSettings *settings);
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
+  EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback);
   
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"
@@ -244,7 +294,6 @@ extern "C" {
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
-  HSPAdaptorNIO *getAdaptorNIO(HSPAdaptorNIOList *nioList, char *deviceName);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 

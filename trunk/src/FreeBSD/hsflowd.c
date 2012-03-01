@@ -242,35 +242,7 @@ extern "C" {
 
     // revision appears both at the beginning and at the end
     fprintf(sp->f_out, "rev_start=%u\n", sp->sFlow->revisionNo);
-
-    HSPSFlowSettings *settings = sp->sFlow->sFlowSettings;
-    if(settings) {
-      fprintf(sp->f_out, "sampling=%u\n", settings->samplingRate);
-      if(settings->samplingRate_http != HSP_SETTING_UNDEFINED) {
-	fprintf(sp->f_out, "sampling.http=%u\n", settings->samplingRate_http);
-      }
-      if(settings->samplingRate_memcache != HSP_SETTING_UNDEFINED) {
-	fprintf(sp->f_out, "sampling.memcache=%u\n", settings->samplingRate_memcache);
-      }
-      fprintf(sp->f_out, "header=128\n");
-      fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
-      if(settings->pollingInterval_http != HSP_SETTING_UNDEFINED) {
-	fprintf(sp->f_out, "polling.http=%u\n", settings->pollingInterval_http);
-      }
-      if(settings->pollingInterval_memcache != HSP_SETTING_UNDEFINED) {
-	fprintf(sp->f_out, "polling.memcache=%u\n", settings->pollingInterval_memcache);
-      }
-      char ipbuf[51];
-      fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
-      if(sp->sFlow->agentDevice) {
-	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice);
-      }
-      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
-	// <ip> <port> [<priority>]
-	fprintf(sp->f_out, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
-      }
-    }
-
+    if(sp->sFlow && sp->sFlow->sFlowSettings_str) fputs(sp->sFlow->sFlowSettings_str, sp->f_out);
     // repeat the revision number. The reader knows that if the revison number
     // has not changed under his feet then he has a consistent config.
     fprintf(sp->f_out, "rev_end=%u\n", sp->sFlow->revisionNo);
@@ -290,8 +262,8 @@ extern "C" {
     sfl_agent_tick(sp->sFlow->agent, sp->clk);
     
     // possibly poll the nio counters to avoid 32-bit rollover
-    if(sp->adaptorNIOList.polling_secs &&
-       ((sp->clk % sp->adaptorNIOList.polling_secs) == 0)) {
+    if(sp->nio_polling_secs &&
+       ((sp->clk % sp->nio_polling_secs) == 0)) {
       updateNioCounters(sp);
     }
     
@@ -546,6 +518,61 @@ signal_handler(int sig, siginfo_t *info, void *secret)
 }
 
   /*_________________---------------------------__________________
+    _________________   sFlowSettingsString     __________________
+    -----------------___________________________------------------
+  */
+
+  char *sFlowSettingsString(HSPSFlow *sf, HSPSFlowSettings *settings)
+  {
+    size_t strbufLen = 1024;
+    char *strbuf = NULL;
+    FILE *f_strbuf;
+    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
+      myLog(LOG_ERR, "error in open_memstream : %s", strerror(errno));
+      return NULL;
+    }
+
+    if(settings) {
+      fprintf(f_strbuf, "sampling=%u\n", settings->samplingRate);
+      fprintf(f_strbuf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
+      fprintf(f_strbuf, "polling=%u\n", settings->pollingInterval);
+      // make sure the application specific ones always come after the general ones - to simplify the override logic there
+      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+	if(appSettings->got_sampling_n) fprintf(f_strbuf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	if(appSettings->got_polling_secs) fprintf(f_strbuf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+      }
+      char ipbuf[51];
+      fprintf(f_strbuf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
+      if(sf->agentDevice) {
+	fprintf(f_strbuf, "agent=%s\n", sf->agentDevice);
+      }
+      fprintf(f_strbuf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+
+      // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
+      // another step here to make sure they are sorted.  Otherwise we think the config has changed
+      // every time(!)
+      UTStringArray *iplist = strArrayNew();
+      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
+	// make sure we ignore any where the foward lookup failed
+	// this might mean we write a .auto file with no collectors in it,
+	// so let's hope the slave agents all do the right thing with that(!)
+	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
+	  char collectorStr[128];
+	  // <ip> <port> [<priority>]
+	  sprintf(collectorStr, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
+	  strArrayAdd(iplist, collectorStr);
+	}
+      }
+      strArraySort(iplist);
+      fprintf(f_strbuf, "%s", strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/));
+      strArrayFree(iplist);
+    }
+    fclose(f_strbuf);
+    // this string will be allocated on the heap with malloc (outside of my_calloc etc.)
+    return strbuf;
+  }
+
+  /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
     -----------------___________________________------------------
 
@@ -555,7 +582,18 @@ signal_handler(int sig, siginfo_t *info, void *secret)
   static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
     sf->sFlowSettings = settings;
-    sf->revisionNo++;
+    char *settingsStr = sFlowSettingsString(sf, settings);
+    if(my_strequal(sf->sFlowSettings_str, settingsStr)) {
+      // no change - don't increment the revision number
+      // (which will mean that the file is not rewritten either)
+      if(settingsStr) free(settingsStr);
+    }
+    else {
+      // new config
+      if(sf->sFlowSettings_str) free(sf->sFlowSettings_str);
+      sf->sFlowSettings_str = settingsStr;
+      sf->revisionNo++;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -609,22 +647,16 @@ signal_handler(int sig, siginfo_t *info, void *secret)
     else if(strcmp(keyBuf, "sampling") == 0) {
       st->samplingRate = strtol(valBuf, NULL, 0);
     }
-    else if(strcmp(keyBuf, "sampling.http") == 0) {
-      st->samplingRate_http = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "sampling.memcache") == 0) {
-      st->samplingRate_memcache = strtol(valBuf, NULL, 0);
+    else if(my_strnequal(keyBuf, "sampling.", 9)) {
+      setApplicationSampling(st, keyBuf+9, strtol(valBuf, NULL, 0));
     }
     else if(strcmp(keyBuf, "txtvers") == 0) {
     }
     else if(strcmp(keyBuf, "polling") == 0) {
       st->pollingInterval = strtol(valBuf, NULL, 0);
     }
-    else if(strcmp(keyBuf, "polling.http") == 0) {
-      st->pollingInterval_http = strtol(valBuf, NULL, 0);
-    }
-    else if(strcmp(keyBuf, "polling.memcache") == 0) {
-      st->pollingInterval_memcache = strtol(valBuf, NULL, 0);
+    else if(my_strnequal(keyBuf, "polling.", 8)) {
+      setApplicationPolling(st, keyBuf+8, strtol(valBuf, NULL, 0));
     }
     else {
       myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
@@ -940,7 +972,7 @@ signal_handler(int sig, siginfo_t *info, void *secret)
 
 	  // initialize the faster polling of NIO counters
 	  // to avoid undetected 32-bit wraps
-	  sp->adaptorNIOList.polling_secs = HSP_NIO_POLLING_SECS_32BIT;
+	  sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
 	  
 	  if(sp->DNSSD) {
 	    // launch dnsSD thread.  It will now be responsible for
