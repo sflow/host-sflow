@@ -245,6 +245,7 @@ extern int debug;
   }
 
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
+    clearApplicationSettings(sFlowSettings);
     for(HSPCollector *coll = sFlowSettings->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
       free(coll);
@@ -273,6 +274,64 @@ extern int debug;
       }
     }
     return token;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   getApplicationSettings  __________________
+    -----------------___________________________------------------
+  */
+  
+  static HSPApplicationSettings *getApplicationSettings(HSPSFlowSettings *settings, char *app, int create)
+  {
+    HSPApplicationSettings *appSettings = settings->applicationSettings;
+    for(; appSettings; appSettings = appSettings->nxt) if(my_strequal(app, appSettings->application)) break;
+    if(appSettings == NULL && create) {
+      appSettings = (HSPApplicationSettings *)my_calloc(sizeof(HSPApplicationSettings));
+      appSettings->application = my_strdup(app);
+      appSettings->nxt = settings->applicationSettings;
+      settings->applicationSettings = appSettings;
+    }
+    return appSettings;
+  }
+
+  /*_________________----------------------------__________________
+    _________________   clearApplicationSettings __________________
+    -----------------____________________________------------------
+  */
+  
+  void clearApplicationSettings(HSPSFlowSettings *settings)
+  {
+    for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; ) {
+      HSPApplicationSettings *nextAppSettings = appSettings->nxt;
+      my_free(appSettings->application);
+      my_free(appSettings);
+      appSettings = nextAppSettings;
+    }
+  }
+
+
+  /*_________________----------------------------__________________
+    _________________   setApplicationSampling   __________________
+    -----------------____________________________------------------
+  */
+  
+  void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n)
+  {
+    HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
+    appSettings->sampling_n = n;
+    appSettings->got_sampling_n = YES;
+  }
+
+  /*_________________----------------------------__________________
+    _________________   setApplicationPolling    __________________
+    -----------------____________________________------------------
+  */
+  
+  void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs)
+  {
+    HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
+    appSettings->polling_secs = secs;
+    appSettings->got_polling_secs = YES;
   }
 
   /*_________________---------------------------__________________
@@ -341,6 +400,63 @@ extern int debug;
     tokens = reverseTokens(tokens);
 
     return tokens;
+  }
+
+  /*_________________---------------------------__________________
+    _________________  agentAddressPriority     __________________
+    -----------------___________________________------------------
+  */
+
+  EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback)
+  {
+    EnumIPSelectionPriority ipPriority = IPSP_NONE;
+
+    switch(addr->type) {
+    case SFLADDRESSTYPE_IP_V4:
+      // start assuming it's a global ip
+      ipPriority = IPSP_IP4;
+      // then check for other possibilities
+      if(loopback) {
+	ipPriority = IPSP_LOOPBACK4;
+      }
+      else if (SFLAddress_isSelfAssigned(addr)) {
+	ipPriority = IPSP_SELFASSIGNED4;
+      }
+      else if(vlan != HSP_VLAN_ALL) {
+	ipPriority = IPSP_VLAN4;
+      }
+      break;
+
+    case SFLADDRESSTYPE_IP_V6:
+      // start by assuming it's a global IP
+      ipPriority = IPSP_IP6_SCOPE_GLOBAL;
+      // then check for other possibilities
+      
+      // now allow the other parameters to override
+      if(loopback || SFLAddress_isLoopback(addr)) {
+	ipPriority = IPSP_LOOPBACK6;
+      }
+      else if (SFLAddress_isLinkLocal(addr)) {
+	ipPriority = IPSP_IP6_SCOPE_LINK;
+      }
+      else if (SFLAddress_isUniqueLocal(addr)) {
+	ipPriority = IPSP_IP6_SCOPE_UNIQUE;
+      }
+      else if(vlan != HSP_VLAN_ALL) {
+	ipPriority = IPSP_VLAN6;
+      }
+      break;
+    default:
+      // not a v4 or v6 ip address at all
+      break;
+    }
+
+    // just make sure we can't get a multicast in here (somehow)
+    if(SFLAddress_isMulticast(addr)) {
+      ipPriority = IPSP_NONE;
+    }
+
+    return ipPriority;
   }
 
   /*_________________---------------------------__________________
@@ -482,38 +598,35 @@ extern int debug;
 	 // it may have been defined as agent=<device>
 	if(sp->sFlow->agentDevice) {
 	  SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
-	  if(ad && ad->ipAddr.addr) {
-	    sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	    sp->sFlow->agentIP.address.ip_v4 = ad->ipAddr;
+	  if(ad && ad->userData) {
+	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
+	    sp->sFlow->agentIP = adaptorNIO->ipAddr;
 	  }
 	}
       }
       if(sp->sFlow->agentIP.type == 0) {
-	 // nae luck - try to automatically choose the first non-loopback IP address
-	 for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	    SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	    // only the non-loopback devices should be listed here, so just take the first
-printf("Number adaptors %d\n",sp->adaptorList->num_adaptors);
-printf("Pulling adaptor %x\n",adaptor->ipAddr.addr);
-printf("Pulling agent %x\n",sp->sFlow->agentIP.type);
-	    if(adaptor && adaptor->ipAddr.addr) {
-	       sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	       sp->sFlow->agentIP.address.ip_v4 = adaptor->ipAddr;
-	       // fill in the device that we picked too
-	       sp->sFlow->agentDevice = strdup(adaptor->deviceName);
-	       break;
-	    }
-	 }
-      }
-
-      if(sp->sFlow->agentIP.type == SFLADDRESSTYPE_IP_V4 && sp->sFlow->agentDevice == NULL) {
-	// try to fill in the device field too (because we need to give that one to open vswitch).
+	// try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
+	// We already used this ranking to prioritize L3 addresses per adaptor (in the case where
+	// there are more than one) so now we are applying the same ranking globally to pick
+	// the best candidate to represent the whole agent:
+	SFLAdaptor *selectedAdaptor = NULL;
+	EnumIPSelectionPriority ipPriority = IPSP_NONE;
+	
 	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	  if(adaptor && (adaptor->ipAddr.addr == sp->sFlow->agentIP.address.ip_v4.addr)) {
-	    sp->sFlow->agentDevice = strdup(adaptor->deviceName);
-	    break;
-	  }
+	  if(adaptor && adaptor->userData) {
+	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	    if(adaptorNIO->ipPriority > ipPriority) {
+	      selectedAdaptor = adaptor;
+	      ipPriority = adaptorNIO->ipPriority;
+	    }
+	  }	    
+	}
+	if(selectedAdaptor && selectedAdaptor->userData) {
+	  // crown the winner
+	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
+	  sp->sFlow->agentIP = adaptorNIO->ipAddr;
+	  sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
 	}
       }
 

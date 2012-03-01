@@ -46,6 +46,8 @@ extern "C" {
 
     my_free(buf);
   }
+
+#if 0
   /*________________---------------------------__________________
     ________________    updateAdaptorNIO       __________________
     ----------------___________________________------------------
@@ -99,6 +101,27 @@ extern "C" {
     sp->adaptorNIOList.last_update = 0;
     return;
   }
+#endif
+
+/*________________---------------------------__________________
+  ________________  setAddressPriorities     __________________
+  ----------------___________________________------------------
+  Ideally we would do this as we go along,  but since the vlan
+  info is spliced in separately we have to wait for that and
+  then set the priorities for the whole list.
+*/
+  void setAddressPriorities(HSP *sp)
+  {
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      if(adaptor && adaptor->userData) {
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	adaptorNIO->ipPriority = agentAddressPriority(&adaptorNIO->ipAddr,
+						      adaptorNIO->vlan,
+						      adaptorNIO->loopback);
+      }
+    }
+  }
 
   /*________________---------------------------__________________
     ________________      readInterfaces       __________________
@@ -112,7 +135,7 @@ extern "C" {
     u_char dest_mac[6];
     struct sockaddr_in *foo;
     if(sp->adaptorList == NULL) sp->adaptorList = adaptorListNew();
-    else adaptorListReset(sp->adaptorList);
+    else adaptorListMarkAll(sp->adaptorList);
     
     // Walk the interfaces and collect the non-loopback interfaces so that we
     // have a list of MAC addresses for each interface (usually only 1).
@@ -150,12 +173,20 @@ extern "C" {
 	  
 	  find_mac(devName,&dest_mac[0]);
 	  SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, 
-					       (u_char *)&dest_mac); 
-	  /*
-	    SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, 
-	    (u_char *)&(ifp->ifa_addr->sa_data)); 
-	  */
+					       (u_char *)&dest_mac,
+					       sizeof(HSPAdaptorNIO)); 
+
+	  // clear the mark so we don't free it below
+	  adaptor->marked = NO;
+	  
+	  // this flag might belong in the adaptorNIO struct
 	  adaptor->promiscuous = promisc;
+
+	  // remember some useful flags in the userData structure
+	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	  adaptorNIO->loopback = loopback;
+	  // adaptorNIO->bond_master = bond_master;
+	  adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
 	  
 	  address_family = ifp->ifa_addr->sa_family;
 	  
@@ -170,7 +201,8 @@ extern "C" {
 	    a=(char *)&(ifp->ifa_addr->sa_data);
 	    a++; a++; // Yep... it really is 2 bytes over 
 	    // Only IPV4 below ....
-	    memcpy(&adaptor->ipAddr.addr, a, 4);
+	    adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+	    memcpy(&adaptorNIO->ipAddr.address.ip_v4.addr, a, 4);
 	    if(debug > 1) {
 	      myLog(LOG_INFO, "My IP address = %d.%d.%d.%d", a[0], a[1], a[2], a[3]);
 	    }
@@ -178,8 +210,17 @@ extern "C" {
 	}	  
       }
     }
-    updateAdaptorNIO(sp);
+
+    // now remove and free any that are still marked
+    adaptorListFreeMarked(sp->adaptorList);
+
+  // now that we have the evidence gathered together, we can
+  // set the L3 address priorities (used for auto-selecting
+  // the sFlow-agent-address if requrired to by the config.
+  setAddressPriorities(sp);
+
     freeifaddrs(ifap);
+
     return sp->adaptorList->num_adaptors;
     
   }
