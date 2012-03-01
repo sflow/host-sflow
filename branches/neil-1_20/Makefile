@@ -11,6 +11,7 @@ all: $(PROG)
 
 $(PROG):
 	cd src/sflow; $(MAKE)
+	cd src/json; $(MAKE)
 	PLATFORM=`uname`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
@@ -18,6 +19,7 @@ $(PROG):
 
 clean:
 	cd src/sflow; $(MAKE) clean
+	cd src/json; $(MAKE) clean
 	PLATFORM=`uname`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \

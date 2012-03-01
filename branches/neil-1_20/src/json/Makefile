@@ -14,7 +14,7 @@ LDFLAGS=
 #CC= gcc -std=c99
 CC= gcc
 
-OBJS= cJSON.c
+OBJS= cJSON.o
 LIB=libjson.a
 
 $(LIB): $(OBJS)
@@ -23,14 +23,17 @@ $(LIB): $(OBJS)
 
 all: $(LIB)
 
+test: $(OBJS) test.o
+	$(CC) -o $@ test.o $(OBJS) -lm
+
 install:
 
 .c.o: $(HEADERS)
 	$(CC) $(CFLAGS) -I. -c $*.c
 
 clean:
-	rm -f $(OBJS) $(LIB)
+	rm -f $(OBJS) $(LIB) test.o
 
 # dependencies
 cJSON.o: cJSON.c $(HEADERS)
-
+test.o: test.c $(HEADERS)
