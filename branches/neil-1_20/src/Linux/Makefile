@@ -72,6 +72,7 @@ endif
 HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 
 SFLOWDIR=../sflow
+JSONDIR=../json
 
 #CC= g++
 CC= gcc -std=gnu99
@@ -97,8 +98,8 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 SFLOWOVS_OBJS=sflowovsd.o util.o
 
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+CFLAGS+= -I. -I$(SFLOWDIR) -I$(JSONDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+LIBS+= $(SFLOWDIR)/libsflow.a $(JSONDIR)/libjson.a -lresolv -lpthread
 
 #### BUILD ####
 
