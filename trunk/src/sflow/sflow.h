@@ -559,8 +559,6 @@ typedef struct _SFLMacAddress {
 
 typedef struct _SFLAdaptor {
   uint32_t ifIndex;
-  SFLIPv4 ipAddr;
-  /* SFLIPv6 ip6Addr; */
   char *deviceName;
   uint32_t ifDirection;
   uint64_t ifSpeed;
