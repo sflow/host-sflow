@@ -54,44 +54,16 @@ extern int debug;
 	struct sockaddr_in *sendSocketAddr;
 
 	newSFlow(sp);
-
-	typedef enum { IPSP_NONE=0,
-		       IPSP_LOOPBACK,
-		       IPSP_SELFASSIGNED,
-		       IPSP_OK } EnumIPSelectionPriority;
-
-	SFLAdaptor *selectedAdaptor = NULL;
-	EnumIPSelectionPriority selectedPriority = IPSP_NONE;
 	
-	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	  if(adaptor && adaptor->ipAddr.addr) {
-	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	    u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
-	    EnumIPSelectionPriority ipPriority = IPSP_OK;
-	    if(/*adaptorNIO->loopback*/ ipbytes[0] == 127) {
-	      ipPriority = IPSP_LOOPBACK;
-	    }
-	    else if (ipbytes[0] == 169 &&
-		     ipbytes[1] == 254) {
-	      ipPriority = IPSP_SELFASSIGNED;
-	    }
-	    if(ipPriority > selectedPriority) {
-	      selectedAdaptor = adaptor;
-	      selectedPriority = ipPriority;
-	    }
-	  }
-	}
-	if(selectedAdaptor) {
-	  sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	  sp->sFlow->agentIP.address.ip_v4 = selectedAdaptor->ipAddr;
-	  sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
-	}
+	// just take the winning agent-address
+	sp->sFlow->agentIP = sp->agentIP;
+	sp->sFlow->agentDevice = my_strdup(sp->agentDevice);
+	sp->sFlow->ipPriority = sp->ipPriority;
 
 	newCollector(sp->sFlow);
 	col = sp->sFlow->collectors;
-	
-	
+
+
 	dwRet = RegOpenKeyEx(HKEY_LOCAL_MACHINE,
 						"system\\currentcontrolset\\services\\hsflowd\\Parameters",
 						0,
