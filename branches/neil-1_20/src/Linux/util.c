@@ -233,6 +233,16 @@ extern "C" {
   int my_strequal(char *s1, char *s2) {
     return my_strnequal(s1, s2, UT_DEFAULT_MAX_STRLEN);
   }
+  
+  uint32_t my_strhash(char *str)
+  {
+    /* hash function from the great Dan Bernstein */
+    uint32_t hash = 5381;
+    if(str == NULL) return hash;
+    int c;
+    while ((c = *str++) != '\0') hash = hash * 33 ^ c;
+    return hash;
+  }
     
   /*_________________---------------------------__________________
     _________________     setStr                __________________
@@ -563,33 +573,7 @@ extern "C" {
     }
   }
 
-  /*_________________---------------------------__________________
-    _________________     my_usleep_fd          __________________
-    -----------------___________________________------------------
-    variant that returns early if there is activity on the supplied file descriptor
-  */
-  
-  void my_usleep_fd(uint32_t microseconds, int fd) {
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = microseconds;
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(fd, &readfds);
-    int max_fd = fd;
-    int nfds = select(max_fd + 1,
-		      &readfds,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      &timeout);
-    // may return prematurely if a signal was caught, in which case nfds will be
-    // -1 and errno will be set to EINTR.  If we get any other error, abort.
-    if(nfds < 0 && errno != EINTR) {
-      myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-  }
-      
+    
   /*_________________---------------------------__________________
     _________________     myExec                __________________
     -----------------___________________________------------------

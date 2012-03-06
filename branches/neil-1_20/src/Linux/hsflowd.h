@@ -60,8 +60,25 @@ extern "C" {
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
 #define HSP_MAX_MSG_BYTES 10000
 #define HSP_READPACKET_BATCH 100
-#endif
+#endif /* HSF_ULOG */
 
+#ifdef HSF_JSON
+#include "cJSON.h"
+
+#define HSP_READJSON_BATCH 100
+  typedef struct _HSPApplication {
+    struct _HSPApplication *ht_nxt;
+    char *application;
+    uint32_t hash;
+    uint32_t dsIndex;
+    uint16_t servicePort;
+    SFLSampler *sampler;
+    SFLPoller *poller;
+    int json_counters;
+    SFLCounters_sample_element counters;
+  } HSPApplication;
+
+#endif /* HSF_JSON */
 
 #define ADD_TO_LIST(linkedlist, obj) \
   do { \
@@ -81,7 +98,7 @@ extern "C" {
 #define HSP_DEFAULT_SUBAGENTID 100000
 #define HSP_MAX_SUBAGENTID 199999
 #define HSP_DEFAULT_LOGICAL_DSINDEX_START 100000
-
+#define HSP_DEFAULT_APP_DSINDEX_START 150000
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
@@ -146,6 +163,8 @@ extern "C" {
     uint32_t ulogSamplingRate;
     uint32_t ulogSubSamplingRate;
     uint32_t ulogActualSamplingRate;
+    uint32_t jsonPort;
+#define HSP_DEFAULT_JSON_PORT 0
   } HSPSFlowSettings;
 
   typedef struct _HSPSFlow {
@@ -237,7 +256,7 @@ extern "C" {
     uint64_t bytes_read;
     uint64_t bytes_written;
   } HSPDiskIO;
-
+    
   typedef struct _HSP {
     EnumHSPState state;
     time_t clk;
@@ -308,6 +327,14 @@ extern "C" {
     struct sockaddr_nl ulog_bind;
     struct sockaddr_nl ulog_peer;
 #endif
+#ifdef HSF_JSON
+    int json_soc;
+    struct sockaddr_in json_peer;
+    HSPApplication **applicationHT;
+    uint32_t applicationHT_size;
+#define HSP_INITIAL_JSON_APP_HT_SIZE 16
+    uint32_t applicationHT_entries;
+#endif
   } HSP;
 
   // expose some config parser fns
@@ -336,6 +363,7 @@ extern "C" {
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int readPackets(HSP *sp);
+  int readJSON(HSP *sp);
 
 #if defined(__cplusplus)
 } /* extern "C" */

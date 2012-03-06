@@ -458,6 +458,72 @@ static void putGenericCounters(SFLReceiver *receiver, SFLIf_counters *counters)
 }
 
 
+static void putAPPContext(SFLReceiver *receiver, SFLSampled_APP_CTXT *ctxt)
+{
+  putString(receiver, &ctxt->application);
+  putString(receiver, &ctxt->operation);
+  putString(receiver, &ctxt->attributes);
+}
+
+static uint32_t appContextLength(SFLSampled_APP_CTXT *ctxt) {
+  uint32_t elemSiz = 0;
+  elemSiz += stringEncodingLength(&ctxt->application);
+  elemSiz += stringEncodingLength(&ctxt->operation);
+  elemSiz += stringEncodingLength(&ctxt->attributes);
+  return elemSiz;
+}
+
+static void putAPP(SFLReceiver *receiver, SFLSampled_APP *app)
+{
+  putAPPContext(receiver, &app->context);
+  putString(receiver, &app->status_descr);
+  putNet64(receiver, app->req_bytes);
+  putNet64(receiver, app->resp_bytes);
+  putNet32(receiver, app->status);
+  putNet32(receiver, app->duration_uS);
+}
+
+static uint32_t appEncodingLength(SFLSampled_APP *app) {
+  uint32_t elemSiz = 0;
+  elemSiz += appContextLength(&app->context);
+  elemSiz += stringEncodingLength(&app->status_descr);
+  elemSiz += 16; // req/resp bytes
+  elemSiz += 4; // status
+  elemSiz += 4; // duration_uS
+  return elemSiz;
+}
+
+static void putSocket4(SFLReceiver *receiver, SFLExtended_socket_ipv4 *socket4) {
+    putNet32(receiver, socket4->protocol);
+    put32(receiver, socket4->local_ip.addr);
+    put32(receiver, socket4->remote_ip.addr);
+    putNet32(receiver, socket4->local_port);
+    putNet32(receiver, socket4->remote_port);
+}
+
+static void putSocket6(SFLReceiver *receiver, SFLExtended_socket_ipv6 *socket6) {
+    putNet32(receiver, socket6->protocol);
+    put128(receiver, socket6->local_ip.addr);
+    put128(receiver, socket6->remote_ip.addr);
+    putNet32(receiver, socket6->local_port);
+    putNet32(receiver, socket6->remote_port);
+}
+
+static uint32_t appCountersEncodingLength(SFLAPPCounters *appctrs) {
+  uint32_t elemSiz = 0;
+  elemSiz += stringEncodingLength(&appctrs->application);
+  elemSiz += 11 * 4; // success and 10 error counters
+  return elemSiz;
+}
+
+static uint32_t appResourcesEncodingLength(SFLAPPResources *appresource) {
+  uint32_t elemSiz = 0;
+  elemSiz += stringEncodingLength(&appresource->application);
+  elemSiz += 9 * 4; // 9x32-bit gauges
+  elemSiz += 2 * 8; // 2x64-bit (mem) gauges
+  return elemSiz;
+}
+
 /*_________________-----------------------------__________________
   _________________      computeFlowSampleSize  __________________
   -----------------_____________________________------------------
@@ -500,6 +566,14 @@ static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_MPLS_FTN: elemSiz = mplsFtnEncodingLength(&elem->flowType.mpls_ftn); break;
     case SFLFLOW_EX_MPLS_LDP_FEC: elemSiz = mplsLdpFecEncodingLength(&elem->flowType.mpls_ldp_fec); break;
     case SFLFLOW_EX_VLAN_TUNNEL: elemSiz = vlanTunnelEncodingLength(&elem->flowType.vlan_tunnel); break;
+    case SFLFLOW_APP: elemSiz = appEncodingLength(&elem->flowType.app); break;
+    case SFLFLOW_APP_CTXT: elemSiz = appContextLength(&elem->flowType.context); break;
+    case SFLFLOW_APP_ACTOR_INIT:
+    case SFLFLOW_APP_ACTOR_TGT: elemSiz = stringEncodingLength(&elem->flowType.actor.actor); break;
+    case SFLFLOW_EX_PROXY_SOCKET4:
+    case SFLFLOW_EX_SOCKET4: elemSiz = XDRSIZ_SFLEXTENDED_SOCKET4;  break;
+    case SFLFLOW_EX_PROXY_SOCKET6:
+    case SFLFLOW_EX_SOCKET6: elemSiz = XDRSIZ_SFLEXTENDED_SOCKET6;  break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -627,6 +701,14 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_MPLS_FTN: putMplsFtn(receiver, &elem->flowType.mpls_ftn); break;
     case SFLFLOW_EX_MPLS_LDP_FEC: putMplsLdpFec(receiver, &elem->flowType.mpls_ldp_fec); break;
     case SFLFLOW_EX_VLAN_TUNNEL: putVlanTunnel(receiver, &elem->flowType.vlan_tunnel); break;
+    case SFLFLOW_APP: putAPP(receiver, &elem->flowType.app); break;
+    case SFLFLOW_APP_CTXT: putAPPContext(receiver, &elem->flowType.context); break;
+    case SFLFLOW_APP_ACTOR_INIT:
+    case SFLFLOW_APP_ACTOR_TGT: putString(receiver, &elem->flowType.actor.actor); break;
+    case SFLFLOW_EX_PROXY_SOCKET4:
+    case SFLFLOW_EX_SOCKET4: putSocket4(receiver, &elem->flowType.socket4); break;
+    case SFLFLOW_EX_PROXY_SOCKET6:
+    case SFLFLOW_EX_SOCKET6: putSocket6(receiver, &elem->flowType.socket6); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -687,6 +769,8 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_mem)*/;  break;
     case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
     case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_vrt_nio)*/;  break;
+    case SFLCOUNTERS_APP:  elemSiz = appCountersEncodingLength(&elem->counterBlock.app); break;
+    case SFLCOUNTERS_APP_RESOURCE:  elemSiz = appResourcesEncodingLength(&elem->counterBlock.appResource); break;
     default:
       {
 	char errm[128];
@@ -899,6 +983,34 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_vrt_nio.pkts_out);
       putNet32(receiver, elem->counterBlock.host_vrt_nio.errs_out);
       putNet32(receiver, elem->counterBlock.host_vrt_nio.drops_out);
+      break;
+    case SFLCOUNTERS_APP:
+      putString(receiver, &elem->counterBlock.app.application);
+      putNet32(receiver, elem->counterBlock.app.status_OK);
+      putNet32(receiver, elem->counterBlock.app.errors_OTHER);
+      putNet32(receiver, elem->counterBlock.app.errors_TIMEOUT);
+      putNet32(receiver, elem->counterBlock.app.errors_INTERNAL_ERROR);
+      putNet32(receiver, elem->counterBlock.app.errors_BAD_REQUEST);
+      putNet32(receiver, elem->counterBlock.app.errors_FORBIDDEN);
+      putNet32(receiver, elem->counterBlock.app.errors_TOO_LARGE);
+      putNet32(receiver, elem->counterBlock.app.errors_NOT_IMPLEMENTED);
+      putNet32(receiver, elem->counterBlock.app.errors_NOT_FOUND);
+      putNet32(receiver, elem->counterBlock.app.errors_UNAVAILABLE);
+      putNet32(receiver, elem->counterBlock.app.errors_UNAUTHORIZED);
+      break;
+    case SFLCOUNTERS_APP_RESOURCE:
+      putString(receiver, &elem->counterBlock.appResource.application);
+      putNet32(receiver, elem->counterBlock.appResource.rusage_user);
+      putNet32(receiver, elem->counterBlock.appResource.rusage_system);
+      putNet64(receiver, elem->counterBlock.appResource.mem_used);
+      putNet64(receiver, elem->counterBlock.appResource.mem_max);
+      putNet32(receiver, elem->counterBlock.appResource.fds_used);
+      putNet32(receiver, elem->counterBlock.appResource.fds_max);
+      putNet32(receiver, elem->counterBlock.appResource.conns_used);
+      putNet32(receiver, elem->counterBlock.appResource.conns_max);
+      putNet32(receiver, elem->counterBlock.appResource.workers_active);
+      putNet32(receiver, elem->counterBlock.appResource.workers_idle);
+      putNet32(receiver, elem->counterBlock.appResource.workers_max);
       break;
     default:
       {

@@ -255,6 +255,7 @@ extern int debug;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
+    st->jsonPort = HSP_DEFAULT_JSON_PORT;
     return st;
   }
 
@@ -558,6 +559,9 @@ extern int debug;
 	    break;
 	  case HSPTOKEN_ULOGPROBABILITY:
 	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_JSONPORT:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
 	    break;
 	  default:
 	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
