@@ -349,6 +349,47 @@ extern int debug;
     appSettings->got_polling_secs = YES;
   }
 
+  /*_________________----------------------------__________________
+    _________________  lookupApplicationSettings __________________
+    -----------------____________________________------------------
+    return a deepest match lookup, so that
+    a setting of sampling.app.xyz.pqr = 100 will apply to
+    an application named "app.xyz.pqr.abc" and take precendence
+    over a setting of sampling.app.xyz = 200
+  */
+  
+  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling)
+  {
+    // in the config, the sFlow-APPLICATION settings should always start with sampling.app.<name> or polling.app.<name>
+    // so add the .app prefix here before we start searching...
+    char search[SFLAPP_MAX_APPLICATION_LEN+100];
+    snprintf(search, SFLAPP_MAX_APPLICATION_LEN+100, "app.%s", app);
+    int search_len = my_strlen(search);
+    // the top level settings are the defaults
+    if(p_polling) *p_polling = settings->pollingInterval;
+    if(p_sampling) *p_sampling = settings->samplingRate;
+    // now search for the deepest match
+    HSPApplicationSettings *deepest = NULL;
+    uint32_t deepest_len = 0;
+    for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+      int len = my_strlen(appSettings->application);
+      if(len > deepest_len
+	 && len <= search_len
+	 && my_strnequal(search, appSettings->application, len)) {
+	// has to be an exact match, or one that matches up to a '.'
+	if(len == search_len || search[len] == '.') {
+	  deepest = appSettings;
+	  deepest_len = len;
+	}
+      }
+    }
+
+    if(deepest) {
+      if(p_polling && deepest->got_polling_secs) *p_sampling = deepest->polling_secs;
+      if(p_sampling && deepest->got_sampling_n) *p_sampling = deepest->sampling_n;
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________      readTokens           __________________
     -----------------___________________________------------------

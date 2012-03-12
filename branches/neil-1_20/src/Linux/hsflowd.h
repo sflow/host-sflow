@@ -75,7 +75,9 @@ extern "C" {
     SFLSampler *sampler;
     SFLPoller *poller;
     int json_counters;
+    int service_port_clash;
     SFLCounters_sample_element counters;
+    uint32_t settings_revisionNo;
   } HSPApplication;
 
 #endif /* HSF_JSON */
@@ -345,6 +347,7 @@ extern "C" {
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
   void clearApplicationSettings(HSPSFlowSettings *settings);
+  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling);
   EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback);
     
   // using DNS SRV+TXT records

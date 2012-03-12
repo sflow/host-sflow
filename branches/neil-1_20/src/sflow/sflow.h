@@ -826,19 +826,26 @@ typedef struct {
 /* Enterprise resource counters */
 /* opaque = counter_data; enterprise = 0; format = 2203 */
 typedef struct {
-  SFLString application;
-  uint32_t rusage_user;   /* in milliseconds */
-  uint32_t rusage_system; /* in milliseconds */
+  uint32_t user_time;   /* in milliseconds */
+  uint32_t system_time; /* in milliseconds */
   uint64_t mem_used;
   uint64_t mem_max;
-  uint32_t fds_used;
-  uint32_t fds_max;
-  uint32_t conns_used;
-  uint32_t conns_max;
+  uint32_t fd_open;
+  uint32_t fd_max;
+  uint32_t conn_open;
+  uint32_t conn_max;
+} SFLAPPResources;
+
+/* Enterprise application workers */
+/* opaque = counter_data; enterprise = 0; format = 2206 */
+
+typedef struct {
   uint32_t workers_active;
   uint32_t workers_idle;
   uint32_t workers_max;
-} SFLAPPResources;
+  uint32_t req_delayed;
+  uint32_t req_dropped;
+} SFLAPPWorkers;
 
 /* Counters data */
 
@@ -865,7 +872,8 @@ enum SFLCounters_type_tag {
   SFLCOUNTERS_HOST_VRT_DSK  = 2103, /* host virt storage */
   SFLCOUNTERS_HOST_VRT_NIO  = 2104, /* host virt network I/O */
   SFLCOUNTERS_APP           = 2202,
-  SFLCOUNTERS_APP_RESOURCE  = 2203,
+  SFLCOUNTERS_APP_RESOURCES = 2203,
+  SFLCOUNTERS_APP_WORKERS   = 2206,
 };
 
 typedef union _SFLCounters_type {
@@ -888,7 +896,8 @@ typedef union _SFLCounters_type {
   SFLHost_vrt_dsk_counters host_vrt_dsk;
   SFLHost_vrt_nio_counters host_vrt_nio;
   SFLAPPCounters app;
-  SFLAPPResources appResource;
+  SFLAPPResources appResources;
+  SFLAPPWorkers appWorkers;
 } SFLCounters_type;
 
 typedef struct _SFLCounters_sample_element {

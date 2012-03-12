@@ -518,9 +518,14 @@ static uint32_t appCountersEncodingLength(SFLAPPCounters *appctrs) {
 
 static uint32_t appResourcesEncodingLength(SFLAPPResources *appresource) {
   uint32_t elemSiz = 0;
-  elemSiz += stringEncodingLength(&appresource->application);
-  elemSiz += 9 * 4; // 9x32-bit gauges
+  elemSiz += 6 * 4; // 6x32-bit
   elemSiz += 2 * 8; // 2x64-bit (mem) gauges
+  return elemSiz;
+}
+
+static uint32_t appWorkersEncodingLength(SFLAPPWorkers *appworkers) {
+  uint32_t elemSiz = 0;
+  elemSiz += 5 * 4; // 5x32-bit
   return elemSiz;
 }
 
@@ -770,7 +775,8 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
     case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_vrt_nio)*/;  break;
     case SFLCOUNTERS_APP:  elemSiz = appCountersEncodingLength(&elem->counterBlock.app); break;
-    case SFLCOUNTERS_APP_RESOURCE:  elemSiz = appResourcesEncodingLength(&elem->counterBlock.appResource); break;
+    case SFLCOUNTERS_APP_RESOURCES:  elemSiz = appResourcesEncodingLength(&elem->counterBlock.appResources); break;
+    case SFLCOUNTERS_APP_WORKERS:  elemSiz = appWorkersEncodingLength(&elem->counterBlock.appWorkers); break;
     default:
       {
 	char errm[128];
@@ -997,22 +1003,25 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.app.errors_NOT_FOUND);
       putNet32(receiver, elem->counterBlock.app.errors_UNAVAILABLE);
       putNet32(receiver, elem->counterBlock.app.errors_UNAUTHORIZED);
+      break; 
+    case SFLCOUNTERS_APP_RESOURCES:
+      putNet32(receiver, elem->counterBlock.appResources.user_time);
+      putNet32(receiver, elem->counterBlock.appResources.system_time);
+      putNet64(receiver, elem->counterBlock.appResources.mem_used);
+      putNet64(receiver, elem->counterBlock.appResources.mem_max);
+      putNet32(receiver, elem->counterBlock.appResources.fd_open);
+      putNet32(receiver, elem->counterBlock.appResources.fd_max);
+      putNet32(receiver, elem->counterBlock.appResources.conn_open);
+      putNet32(receiver, elem->counterBlock.appResources.conn_max);
       break;
-    case SFLCOUNTERS_APP_RESOURCE:
-      putString(receiver, &elem->counterBlock.appResource.application);
-      putNet32(receiver, elem->counterBlock.appResource.rusage_user);
-      putNet32(receiver, elem->counterBlock.appResource.rusage_system);
-      putNet64(receiver, elem->counterBlock.appResource.mem_used);
-      putNet64(receiver, elem->counterBlock.appResource.mem_max);
-      putNet32(receiver, elem->counterBlock.appResource.fds_used);
-      putNet32(receiver, elem->counterBlock.appResource.fds_max);
-      putNet32(receiver, elem->counterBlock.appResource.conns_used);
-      putNet32(receiver, elem->counterBlock.appResource.conns_max);
-      putNet32(receiver, elem->counterBlock.appResource.workers_active);
-      putNet32(receiver, elem->counterBlock.appResource.workers_idle);
-      putNet32(receiver, elem->counterBlock.appResource.workers_max);
+    case SFLCOUNTERS_APP_WORKERS:
+      putNet32(receiver, elem->counterBlock.appWorkers.workers_active);
+      putNet32(receiver, elem->counterBlock.appWorkers.workers_idle);
+      putNet32(receiver, elem->counterBlock.appWorkers.workers_max);
+      putNet32(receiver, elem->counterBlock.appWorkers.req_delayed);
+      putNet32(receiver, elem->counterBlock.appWorkers.req_dropped);
       break;
-    default:
+   default:
       {
 	char errm[128];
 	sprintf(errm, "unexpected counters tag (%u)", elem->tag);
