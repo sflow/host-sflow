@@ -22,6 +22,7 @@ extern "C" {
   static void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     HSP *sp = (HSP *)magic;
+
     // we stashed a pointer to the application in the userData field
     HSPApplication *application = (HSPApplication *)poller->userData;
     int json_ctrs = ((sp->clk - application->json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
@@ -174,6 +175,43 @@ extern "C" {
 
     return aa;
   }      
+
+
+  /*_________________---------------------------__________________
+    _________________   json_app_timeout_check  __________________
+    -----------------___________________________------------------
+    called every HSP_JSON_APP_TIMEOUT seconds.  Use it to check if we should
+    free an idle application that has stopped sending. This allows applications
+    to be fairly numerous and transient without causing this program to grow
+    too large.
+  */
+
+  void json_app_timeout_check(HSP *sp)
+  {
+    if(sp->applicationHT_entries) {
+      for(uint32_t bkt = 0; bkt < sp->applicationHT_size; bkt++) {
+	for(HSPApplication *prev = NULL, *aa = sp->applicationHT[bkt]; aa; ) {
+	  HSPApplication *next_aa = aa->ht_nxt;
+	  if((sp->clk - aa->last_json) > HSP_JSON_APP_TIMEOUT) {
+	    if(debug) myLog(LOG_INFO, "removing idle application: %s\n", aa->application);
+	    // unlink
+	    if(prev) prev->ht_nxt = next_aa;
+	    else sp->applicationHT[bkt] = next_aa;
+	    // remove sampler and poller
+	    sfl_agent_removeSampler(sp->sFlow->agent, &aa->sampler->dsi);
+	    sfl_agent_removePoller(sp->sFlow->agent, &aa->poller->dsi);
+	    // free
+	    my_free(aa->application);
+	    my_free(aa);
+	    // update the count
+	    sp->applicationHT_entries--;
+	  }
+	  else prev = aa;
+	  aa = next_aa;
+	}
+      }
+    }
+  }
   
 
   /*_________________---------------------------__________________
@@ -294,150 +332,155 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
       HSPApplication *application = getApplication(sp,
 						   app->valuestring,
 						   (uint16_t)(service_port ? service_port->valueint : 0));
-      cJSON *opn = cJSON_GetObjectItem(fs, "app_operation");
-      if(opn) {
-	cJSON *sts = cJSON_GetObjectItem(opn, "status");
+      if(application) {
+	// remember that we heard from this application
+	application->last_json = sp->clk;
 
-	EnumSFLAPPStatus status = sts ? (EnumSFLAPPStatus)sts->valueint : SFLAPP_SUCCESS;
-	if((u_int)status > (u_int)SFLAPP_UNAUTHORIZED) {
-	  status = SFLAPP_OTHER;
-	}
-	
-	// update my version of the counters - even if we are not going to send them
-	// because the application is sending them anyway.  It will be a good cross-check
-	int ii = (uint)status;
-	uint32_t *errorCounterArray = &application->counters.counterBlock.app.status_OK;
-	errorCounterArray[ii] += sampling_n;
-	
-	// decide if we are going to sample this transaction, based
-	// on the ratio of sampling_n to the configured sampling rate
-	// in the sampler.
-	uint32_t config_sampling_n = sfl_sampler_get_sFlowFsPacketSamplingRate(application->sampler);
-	uint32_t sub_sampling_n = config_sampling_n / sampling_n;
-	if(sub_sampling_n == 0) sub_sampling_n = 1;
-	uint32_t effective_sampling_n = sampling_n * sub_sampling_n;
-	if(sub_sampling_n == 1
-	   || sfl_random(sub_sampling_n * 16) <= 16) {
-	  // sample this one
+	cJSON *opn = cJSON_GetObjectItem(fs, "app_operation");
+	if(opn) {
+	  cJSON *sts = cJSON_GetObjectItem(opn, "status");
 
-	  // extract operation fields
-	  cJSON *operation = cJSON_GetObjectItem(opn, "operation");
-	  cJSON *attributes = cJSON_GetObjectItem(opn, "attributes");
-	  cJSON *status_descr = cJSON_GetObjectItem(opn, "status_descr");
-	  cJSON *req_bytes = cJSON_GetObjectItem(opn, "req_bytes");
-	  cJSON *resp_bytes = cJSON_GetObjectItem(opn, "resp_bytes");
-	  cJSON *uS = cJSON_GetObjectItem(opn, "uS");
-
-	  // optional fields: parent context
-	  char *parent_app = NULL;
-	  char *parent_operation = NULL;
-	  char *parent_attributes = NULL;
-	  cJSON *parent_context = cJSON_GetObjectItem(fs, "app_parent_context");
-	  if(parent_context) {
-	    cJSON *p_app = cJSON_GetObjectItem(parent_context, "application");
-	    if(p_app) parent_app = p_app->valuestring;
-	    cJSON *p_op = cJSON_GetObjectItem(parent_context, "operation");
-	    if(p_op) parent_operation = p_app->valuestring;
-	    cJSON *p_attrib = cJSON_GetObjectItem(parent_context, "attributes");
-	    if(p_attrib) parent_attributes = p_app->valuestring;
+	  EnumSFLAPPStatus status = sts ? (EnumSFLAPPStatus)sts->valueint : SFLAPP_SUCCESS;
+	  if((u_int)status > (u_int)SFLAPP_UNAUTHORIZED) {
+	    status = SFLAPP_OTHER;
 	  }
+	
+	  // update my version of the counters - even if we are not going to send them
+	  // because the application is sending them anyway.  It will be a good cross-check
+	  int ii = (uint)status;
+	  uint32_t *errorCounterArray = &application->counters.counterBlock.app.status_OK;
+	  errorCounterArray[ii] += sampling_n;
+	
+	  // decide if we are going to sample this transaction, based
+	  // on the ratio of sampling_n to the configured sampling rate
+	  // in the sampler.
+	  uint32_t config_sampling_n = sfl_sampler_get_sFlowFsPacketSamplingRate(application->sampler);
+	  uint32_t sub_sampling_n = config_sampling_n / sampling_n;
+	  if(sub_sampling_n == 0) sub_sampling_n = 1;
+	  uint32_t effective_sampling_n = sampling_n * sub_sampling_n;
+	  if(sub_sampling_n == 1
+	     || sfl_random(sub_sampling_n * 16) <= 16) {
+	    // sample this one
+
+	    // extract operation fields
+	    cJSON *operation = cJSON_GetObjectItem(opn, "operation");
+	    cJSON *attributes = cJSON_GetObjectItem(opn, "attributes");
+	    cJSON *status_descr = cJSON_GetObjectItem(opn, "status_descr");
+	    cJSON *req_bytes = cJSON_GetObjectItem(opn, "req_bytes");
+	    cJSON *resp_bytes = cJSON_GetObjectItem(opn, "resp_bytes");
+	    cJSON *uS = cJSON_GetObjectItem(opn, "uS");
+
+	    // optional fields: parent context
+	    char *parent_app = NULL;
+	    char *parent_operation = NULL;
+	    char *parent_attributes = NULL;
+	    cJSON *parent_context = cJSON_GetObjectItem(fs, "app_parent_context");
+	    if(parent_context) {
+	      cJSON *p_app = cJSON_GetObjectItem(parent_context, "application");
+	      if(p_app) parent_app = p_app->valuestring;
+	      cJSON *p_op = cJSON_GetObjectItem(parent_context, "operation");
+	      if(p_op) parent_operation = p_app->valuestring;
+	      cJSON *p_attrib = cJSON_GetObjectItem(parent_context, "attributes");
+	      if(p_attrib) parent_attributes = p_app->valuestring;
+	    }
 	  
-	  // optional fields: actors
-	  char *actor_initiator = NULL;
-	  char *actor_target = NULL;
-	  cJSON *app_initiator = cJSON_GetObjectItem(fs, "app_initiator");
-	  if(app_initiator) {
-	    cJSON *ai = cJSON_GetObjectItem(app_initiator, "actor");
-	    if(ai) actor_initiator = ai->valuestring;
-	  }
-	  cJSON *app_target = cJSON_GetObjectItem(fs, "app_target");
-	  if(app_target) {
-	    cJSON *at = cJSON_GetObjectItem(app_target, "actor");
-	    if(at) actor_target = at->valuestring;
-	  }
+	    // optional fields: actors
+	    char *actor_initiator = NULL;
+	    char *actor_target = NULL;
+	    cJSON *app_initiator = cJSON_GetObjectItem(fs, "app_initiator");
+	    if(app_initiator) {
+	      cJSON *ai = cJSON_GetObjectItem(app_initiator, "actor");
+	      if(ai) actor_initiator = ai->valuestring;
+	    }
+	    cJSON *app_target = cJSON_GetObjectItem(fs, "app_target");
+	    if(app_target) {
+	      cJSON *at = cJSON_GetObjectItem(app_target, "actor");
+	      if(at) actor_target = at->valuestring;
+	    }
 
-	  // optional fields: sockets
-	  SFLExtended_socket_ipv4 soc4 = {  0 };
-	  cJSON *extended_socket_ipv4 = cJSON_GetObjectItem(fs, "extended_socket_ipv4");
-	  if(extended_socket_ipv4) {
-	    cJSON *protocol = cJSON_GetObjectItem(extended_socket_ipv4, "protocol");
-	    if(protocol) {
-	      soc4.protocol = protocol->valueint;
-	    }
-	    cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv4, "local_ip");
-	    if(local_ip) {
-	      SFLAddress addr = { 0 };
-	      if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET)) {
-		soc4.local_ip = addr.address.ip_v4;
+	    // optional fields: sockets
+	    SFLExtended_socket_ipv4 soc4 = {  0 };
+	    cJSON *extended_socket_ipv4 = cJSON_GetObjectItem(fs, "extended_socket_ipv4");
+	    if(extended_socket_ipv4) {
+	      cJSON *protocol = cJSON_GetObjectItem(extended_socket_ipv4, "protocol");
+	      if(protocol) {
+		soc4.protocol = protocol->valueint;
+	      }
+	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv4, "local_ip");
+	      if(local_ip) {
+		SFLAddress addr = { 0 };
+		if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET)) {
+		  soc4.local_ip = addr.address.ip_v4;
+		}
+	      }
+	      cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv4, "remote_ip");
+	      if(remote_ip) {
+		SFLAddress addr = { 0 };
+		if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET)) {
+		  soc4.remote_ip = addr.address.ip_v4;
+		}
+	      }
+	      cJSON *local_port = cJSON_GetObjectItem(extended_socket_ipv4, "local_port");
+	      if(local_port) {
+		soc4.local_port = local_port->valueint;
+	      }
+	      cJSON *remote_port = cJSON_GetObjectItem(extended_socket_ipv4, "remote_port");
+	      if(remote_port) {
+		soc4.remote_port = remote_port->valueint;
 	      }
 	    }
-	    cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv4, "remote_ip");
-	    if(remote_ip) {
-	      SFLAddress addr = { 0 };
-	      if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET)) {
-		soc4.remote_ip = addr.address.ip_v4;
-	      }
-	    }
-	    cJSON *local_port = cJSON_GetObjectItem(extended_socket_ipv4, "local_port");
-	    if(local_port) {
-	      soc4.local_port = local_port->valueint;
-	    }
-	    cJSON *remote_port = cJSON_GetObjectItem(extended_socket_ipv4, "remote_port");
-	    if(remote_port) {
-	      soc4.remote_port = remote_port->valueint;
-	    }
-	  }
 
-	  SFLExtended_socket_ipv6 soc6 = {  0 };
-	  cJSON *extended_socket_ipv6 = cJSON_GetObjectItem(fs, "extended_socket_ipv6");
-	  if(extended_socket_ipv6) {
-	    cJSON *protocol = cJSON_GetObjectItem(extended_socket_ipv6, "protocol");
-	    if(protocol) {
-	      soc6.protocol = protocol->valueint;
-	    }
-	    cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv6, "local_ip");
-	    if(local_ip) {
-	      SFLAddress addr = { 0 };
-	      if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET6)) {
-		soc6.local_ip = addr.address.ip_v6;
+	    SFLExtended_socket_ipv6 soc6 = {  0 };
+	    cJSON *extended_socket_ipv6 = cJSON_GetObjectItem(fs, "extended_socket_ipv6");
+	    if(extended_socket_ipv6) {
+	      cJSON *protocol = cJSON_GetObjectItem(extended_socket_ipv6, "protocol");
+	      if(protocol) {
+		soc6.protocol = protocol->valueint;
+	      }
+	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv6, "local_ip");
+	      if(local_ip) {
+		SFLAddress addr = { 0 };
+		if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET6)) {
+		  soc6.local_ip = addr.address.ip_v6;
+		}
+	      }
+	      cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv6, "remote_ip");
+	      if(remote_ip) {
+		SFLAddress addr = { 0 };
+		if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET6)) {
+		  soc6.remote_ip = addr.address.ip_v6;
+		}
+	      }
+	      cJSON *local_port = cJSON_GetObjectItem(extended_socket_ipv6, "local_port");
+	      if(local_port) {
+		soc6.local_port = local_port->valueint;
+	      }
+	      cJSON *remote_port = cJSON_GetObjectItem(extended_socket_ipv6, "remote_port");
+	      if(remote_port) {
+		soc6.remote_port = remote_port->valueint;
 	      }
 	    }
-	    cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv6, "remote_ip");
-	    if(remote_ip) {
-	      SFLAddress addr = { 0 };
-	      if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET6)) {
-		soc6.remote_ip = addr.address.ip_v6;
-	      }
-	    }
-	    cJSON *local_port = cJSON_GetObjectItem(extended_socket_ipv6, "local_port");
-	    if(local_port) {
-	      soc6.local_port = local_port->valueint;
-	    }
-	    cJSON *remote_port = cJSON_GetObjectItem(extended_socket_ipv6, "remote_port");
-	    if(remote_port) {
-	      soc6.remote_port = remote_port->valueint;
-	    }
-	  }
 
-	  // submit the flow sample
-	  sendAppSample(sp,
-			application,
-			effective_sampling_n,
-			as_client ? (as_client->valueint == cJSON_True) : NO,
-			operation->valuestring,
-			attributes->valuestring,
-			status_descr->valuestring,
-			status,
-			req_bytes->valueint, // valuedouble?
-			resp_bytes->valueint, // valuedouble?
-			uS->valueint,
-			parent_app,       // any of the following may be NULL
-			parent_operation,
-			parent_attributes,
-			actor_initiator,
-			actor_target,
-			extended_socket_ipv4 ? &soc4 : NULL,
-			extended_socket_ipv6 ? &soc6 : NULL);
+	    // submit the flow sample
+	    sendAppSample(sp,
+			  application,
+			  effective_sampling_n,
+			  as_client ? (as_client->valueint == cJSON_True) : NO,
+			  operation->valuestring,
+			  attributes->valuestring,
+			  status_descr->valuestring,
+			  status,
+			  req_bytes->valueint, // valuedouble?
+			  resp_bytes->valueint, // valuedouble?
+			  uS->valueint,
+			  parent_app,       // any of the following may be NULL
+			  parent_operation,
+			  parent_attributes,
+			  actor_initiator,
+			  actor_target,
+			  extended_socket_ipv4 ? &soc4 : NULL,
+			  extended_socket_ipv6 ? &soc6 : NULL);
+	  }
 	}
       }
     }
@@ -458,7 +501,9 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 						   app_name->valuestring,
 						   (uint16_t)(service_port ? service_port->valueint : 0));
       if(application) {
-	// remember that the application sent these counters.
+	// remember that we heard from this application
+	application->last_json = sp->clk;
+	// and remember that the application sent these counters
 	application->last_json_counters = sp->clk;
 
 	SFL_COUNTERS_SAMPLE_TYPE csample = { 0 };

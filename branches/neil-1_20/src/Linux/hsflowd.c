@@ -1177,6 +1177,10 @@ extern "C" {
       readInterfaces(sp);
     }
 
+    // give the JSON module a chance to remove idle apps
+    if(sp->clk % HSP_JSON_APP_TIMEOUT) {
+      json_app_timeout_check(sp);
+    }
 
     // rewrite the output if the config has changed
     if(sp->outputRevisionNo != sp->sFlow->revisionNo) {
