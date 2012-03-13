@@ -78,6 +78,7 @@ extern "C" {
   char *my_strdup(char *str);
   int my_strnequal(char *s1, char *s2, uint32_t max);
   int my_strequal(char *s1, char *s2);
+  uint32_t my_strhash(char *str);
 
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {
@@ -131,7 +132,6 @@ extern "C" {
 
   // sleep
   void my_usleep(uint32_t microseconds);
-  void my_usleep_fd(uint32_t microseconds, int fd);
 
   // calling execve()
   typedef int (*UTExecCB)(void *magic, char *line);

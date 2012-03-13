@@ -297,6 +297,87 @@ typedef struct _SFLExtended_vlan_tunnel {
 			  innermost. */ 
 } SFLExtended_vlan_tunnel;
 
+/* Extended socket information,
+   Must be filled in for all application transactions associated with a network socket
+   Omit if transaction associated with non-network IPC  */
+
+/* IPv4 Socket */
+/* opaque = flow_data; enterprise = 0; format = 2100 */
+typedef struct _SFLExtended_socket_ipv4 {
+  uint32_t protocol;         /* IP Protocol (e.g. TCP = 6, UDP = 17) */
+  SFLIPv4 local_ip;          /* local IP address */
+  SFLIPv4 remote_ip;         /* remote IP address */
+  uint32_t local_port;       /* TCP/UDP local port number or equivalent */
+  uint32_t remote_port;      /* TCP/UDP remote port number of equivalent */
+} SFLExtended_socket_ipv4;
+
+#define XDRSIZ_SFLEXTENDED_SOCKET4 20 
+
+/* IPv6 Socket */
+/* opaque = flow_data; enterprise = 0; format = 2101 */
+typedef struct _SFLExtended_socket_ipv6 {
+  uint32_t protocol;         /* IP Protocol (e.g. TCP = 6, UDP = 17) */
+  SFLIPv6 local_ip;          /* local IP address */
+  SFLIPv6 remote_ip;         /* remote IP address */
+  uint32_t local_port;       /* TCP/UDP local port number or equivalent */
+  uint32_t remote_port;      /* TCP/UDP remote port number of equivalent */
+} SFLExtended_socket_ipv6;
+
+#define XDRSIZ_SFLEXTENDED_SOCKET6 44
+
+/* Enterprise Status codes */
+
+/* The status enumeration may be expanded over time.
+   Applications receiving sFlow must be prepared to receive
+   enterprise_operation structures with unknown status values.
+
+   The authoritative list of machine types will be maintained
+   at www.sflow.org */
+
+typedef enum {
+  SFLAPP_SUCCESS         = 0,
+  SFLAPP_OTHER           = 1,
+  SFLAPP_TIMEOUT         = 2,
+  SFLAPP_INTERNAL_ERROR  = 3,
+  SFLAPP_BAD_REQUEST     = 4,
+  SFLAPP_FORBIDDEN       = 5,
+  SFLAPP_TOO_LARGE       = 6,
+  SFLAPP_NOT_IMPLEMENTED = 7,
+  SFLAPP_NOT_FOUND       = 8,
+  SFLAPP_UNAVAILABLE     = 9,
+  SFLAPP_UNAUTHORIZED    = 10,
+} EnumSFLAPPStatus;
+
+/* Operation context */
+typedef struct {
+  SFLString application;
+  SFLString operation;    /* type of operation (e.g. authorization, payment) */
+  SFLString attributes;   /* specific attributes associated operation */
+} SFLSampled_APP_CTXT;
+
+#define SFLAPP_MAX_APPLICATION_LEN 32
+#define SFLAPP_MAX_OPERATION_LEN 32
+#define SFLAPP_MAX_ATTRIBUTES_LEN 64
+
+/* Sampled Enterprise Operation */
+/* opaque = flow_data; enterprise = 0; format = 2202 */
+typedef struct {
+  SFLSampled_APP_CTXT context; /* attributes describing the operation */
+  SFLString status_descr;      /* additional text describing status (e.g. "unknown client") */
+  uint64_t req_bytes;          /* size of request body (exclude headers) */
+  uint64_t resp_bytes;         /* size of response body (exclude headers) */
+  uint32_t duration_uS;        /* duration of the operation (microseconds) */
+  EnumSFLAPPStatus status;     /* status code */
+} SFLSampled_APP;
+
+#define SFLAPP_MAX_STATUS_LEN 32
+
+typedef struct {
+  SFLString actor;
+} SFLSampled_APP_ACTOR;
+
+#define SFLAPP_MAX_ACTOR_LEN 64
+
 enum SFLFlow_type_tag {
   /* enterprise = 0, format = ... */
   SFLFLOW_HEADER    = 1,      /* Packet headers are sampled */
@@ -315,6 +396,14 @@ enum SFLFlow_type_tag {
   SFLFLOW_EX_MPLS_FTN     = 1010,
   SFLFLOW_EX_MPLS_LDP_FEC = 1011,
   SFLFLOW_EX_VLAN_TUNNEL  = 1012,   /* VLAN stack */
+  SFLFLOW_EX_SOCKET4        = 2100, /* server socket */
+  SFLFLOW_EX_SOCKET6        = 2101, /* server socket */
+  SFLFLOW_EX_PROXY_SOCKET4  = 2102, /* back-end (client) socket */
+  SFLFLOW_EX_PROXY_SOCKET6  = 2103, /* back-end (client) socket */
+  SFLFLOW_APP               = 2202, /* transaction sample */
+  SFLFLOW_APP_CTXT          = 2203, /* enclosing server context */
+  SFLFLOW_APP_ACTOR_INIT    = 2204, /* initiator */
+  SFLFLOW_APP_ACTOR_TGT     = 2205, /* target */
 };
 
 typedef union _SFLFlow_type {
@@ -334,6 +423,11 @@ typedef union _SFLFlow_type {
   SFLExtended_mpls_FTN mpls_ftn;
   SFLExtended_mpls_LDP_FEC mpls_ldp_fec;
   SFLExtended_vlan_tunnel vlan_tunnel;
+  SFLSampled_APP app;
+  SFLSampled_APP_CTXT context;
+  SFLSampled_APP_ACTOR actor;
+  SFLExtended_socket_ipv4 socket4;
+  SFLExtended_socket_ipv6 socket6;
 } SFLFlow_type;
 
 typedef struct _SFLFlow_sample_element {
@@ -712,6 +806,47 @@ typedef struct _SFLHost_vrt_dsk_counters {
    so just use a #define for the type */
 #define SFLHost_vrt_nio_counters SFLHost_nio_counters
 
+/* Enterprise counters */
+/* opaque = counter_data; enterprise = 0; format = 2202 */
+typedef struct {
+  SFLString application;
+  uint32_t status_OK;
+  uint32_t errors_OTHER;
+  uint32_t errors_TIMEOUT;
+  uint32_t errors_INTERNAL_ERROR;
+  uint32_t errors_BAD_REQUEST;
+  uint32_t errors_FORBIDDEN;
+  uint32_t errors_TOO_LARGE;
+  uint32_t errors_NOT_IMPLEMENTED;
+  uint32_t errors_NOT_FOUND;
+  uint32_t errors_UNAVAILABLE;
+  uint32_t errors_UNAUTHORIZED;
+} SFLAPPCounters;
+
+/* Enterprise resource counters */
+/* opaque = counter_data; enterprise = 0; format = 2203 */
+typedef struct {
+  uint32_t user_time;   /* in milliseconds */
+  uint32_t system_time; /* in milliseconds */
+  uint64_t mem_used;
+  uint64_t mem_max;
+  uint32_t fd_open;
+  uint32_t fd_max;
+  uint32_t conn_open;
+  uint32_t conn_max;
+} SFLAPPResources;
+
+/* Enterprise application workers */
+/* opaque = counter_data; enterprise = 0; format = 2206 */
+
+typedef struct {
+  uint32_t workers_active;
+  uint32_t workers_idle;
+  uint32_t workers_max;
+  uint32_t req_delayed;
+  uint32_t req_dropped;
+} SFLAPPWorkers;
+
 /* Counters data */
 
 enum SFLCounters_type_tag {
@@ -736,6 +871,9 @@ enum SFLCounters_type_tag {
   SFLCOUNTERS_HOST_VRT_MEM  = 2102, /* host virt mem */
   SFLCOUNTERS_HOST_VRT_DSK  = 2103, /* host virt storage */
   SFLCOUNTERS_HOST_VRT_NIO  = 2104, /* host virt network I/O */
+  SFLCOUNTERS_APP           = 2202,
+  SFLCOUNTERS_APP_RESOURCES = 2203,
+  SFLCOUNTERS_APP_WORKERS   = 2206,
 };
 
 typedef union _SFLCounters_type {
@@ -757,6 +895,9 @@ typedef union _SFLCounters_type {
   SFLHost_vrt_mem_counters host_vrt_mem;
   SFLHost_vrt_dsk_counters host_vrt_dsk;
   SFLHost_vrt_nio_counters host_vrt_nio;
+  SFLAPPCounters app;
+  SFLAPPResources appResources;
+  SFLAPPWorkers appWorkers;
 } SFLCounters_type;
 
 typedef struct _SFLCounters_sample_element {

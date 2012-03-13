@@ -766,7 +766,7 @@ extern "C" {
       if(memcmp(uuid, vmStore->uuid, 16) == 0) return vmStore->dsIndex;
     }
     // allocate a new one
-    vmStore = newVMStore(sp, uuid, ++sp->maxDsIndex);
+    vmStore = newVMStore(sp, uuid, ++sp->maxDsIndex); // $$$ circle back and find a free one if we reach the end of the range
     // ask it to be written to disk
     sp->vmStoreInvalid = YES;
     return sp->maxDsIndex;
@@ -901,13 +901,16 @@ extern "C" {
       // mark and sweep
       // 1. mark all the current virtual pollers
       for(SFLPoller *pl = sf->agent->pollers; pl; pl = pl->nxt) {
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
-	  HSPVMState *state = (HSPVMState *)pl->userData;
-	  state->marked = YES;
-	  state->vm_index = 0;
-	}
+	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY
+	   && SFL_DS_INDEX(pl->dsi) >= HSP_DEFAULT_LOGICAL_DSINDEX_START
+	   && SFL_DS_INDEX(pl->dsi) < HSP_DEFAULT_APP_DSINDEX_START)
+	  {
+	    HSPVMState *state = (HSPVMState *)pl->userData;
+	    state->marked = YES;
+	    state->vm_index = 0;
+	  }
       }
-
+      
       // 2. create new VM pollers, or clear the mark on existing ones
 #ifdef HSF_XEN
       
@@ -1082,7 +1085,9 @@ extern "C" {
       // 3. remove any that don't exist any more
       for(SFLPoller *pl = sf->agent->pollers; pl; ) {
 	SFLPoller *nextPl = pl->nxt;
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
+	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY
+	   && SFL_DS_INDEX(pl->dsi) >= HSP_DEFAULT_LOGICAL_DSINDEX_START
+	   && SFL_DS_INDEX(pl->dsi) < HSP_DEFAULT_APP_DSINDEX_START) {
 	  HSPVMState *state = (HSPVMState *)pl->userData;
 	  if(state->marked) {
 	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
@@ -1172,6 +1177,10 @@ extern "C" {
       readInterfaces(sp);
     }
 
+    // give the JSON module a chance to remove idle apps
+    if(sp->clk % HSP_JSON_APP_TIMEOUT) {
+      json_app_timeout_check(sp);
+    }
 
     // rewrite the output if the config has changed
     if(sp->outputRevisionNo != sp->sFlow->revisionNo) {
@@ -1218,6 +1227,50 @@ extern "C" {
       myLog(LOG_ERR, "error opening ULOG socket: %s", strerror(errno));
       // just disable it
       sp->ulog_soc = 0;
+    }
+  }
+#endif
+
+#ifdef HSF_JSON
+  /*_________________---------------------------__________________
+    _________________     openJSON              __________________
+    -----------------___________________________------------------
+    Have to do this before we relinquish root privileges.  
+  */
+
+  static void openJSON(HSP *sp)
+  {
+    struct sockaddr_in myaddr_in;
+
+    // open the UDP socket to JSON
+    sp->json_soc = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if(sp->json_soc > 0) {
+      if(debug) myLog(LOG_INFO, "JSON socket fd=%d", sp->json_soc);
+      
+      // set the socket to non-blocking
+      int fdFlags = fcntl(sp->json_soc, F_GETFL);
+      fdFlags |= O_NONBLOCK;
+      if(fcntl(sp->json_soc, F_SETFL, fdFlags) < 0) {
+	myLog(LOG_ERR, "JSON fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+      }
+
+      // Note that the jsonPort setting is only ever retrieved from the config file (i.e. not settable by DNSSD)
+      uint16_t json_port = (uint16_t)(sp->sFlow->sFlowSettings_file->jsonPort);
+      
+      // bind
+      memset((char *)&myaddr_in, 0, sizeof(struct sockaddr_in));
+      myaddr_in.sin_family = AF_INET;
+      myaddr_in.sin_addr.s_addr = INADDR_ANY;
+      myaddr_in.sin_port = htons(json_port);
+
+      if(bind(sp->json_soc, (struct sockaddr *)&myaddr_in, sizeof(struct sockaddr_in)) == -1) {
+	myLog(LOG_ERR, "JSON bind() failed: %s", strerror(errno));
+      }
+    }
+    else {
+      myLog(LOG_ERR, "error opening JSON socket: %s", strerror(errno));
+      // just disable it
+      sp->json_soc = 0;
     }
   }
 #endif
@@ -1294,6 +1347,16 @@ extern "C" {
       // ULOG group is set, so open the netfilter
       // socket to ULOG while we are still root
       openULOG(sp);
+    }
+#endif
+
+#ifdef HSF_JSON
+    if(sp->sFlow->sFlowSettings_file->jsonPort != 0) {
+      openJSON(sp);
+      cJSON_Hooks hooks;
+      hooks.malloc_fn = my_calloc;
+      hooks.free_fn = my_free;
+      cJSON_InitHooks(&hooks);
     }
 #endif
     return YES;
@@ -1797,6 +1860,11 @@ extern "C" {
   int main(int argc, char *argv[])
   {
     HSP *sp = &HSPSamplingProbe;
+    
+#if (HSF_ULOG || HSF_JSON)
+    fd_set readfds;
+    FD_ZERO(&readfds);
+#endif
 
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
@@ -2074,15 +2142,48 @@ extern "C" {
       case HSPSTATE_END:
 	break;
       }
+      // set the timeout so that if all is quiet we will still loop
+      // around and check for ticks/signals several times per second
+#define HSP_SELECT_TIMEOUT_uS 200000
 
-      // set the timeout so that if all is quiet we will
-      // still loop around and check for ticks/signals
-      // several times per second
+#if (HSF_ULOG || HSF_JSON)
+      int max_fd = 0;
 #ifdef HSF_ULOG
-      if(sp->ulog_soc) my_usleep_fd(200000, sp->ulog_soc);
-      else my_usleep(200000);
+      if(sp->ulog_soc) {
+	if(sp->ulog_soc > max_fd) max_fd = sp->ulog_soc;
+	FD_SET(sp->ulog_soc, &readfds);
+      }
+#endif
+#ifdef HSF_JSON
+      if(sp->json_soc) {
+	if(sp->json_soc > max_fd) max_fd = sp->json_soc;
+	FD_SET(sp->json_soc, &readfds);
+      }
+#endif
+      struct timeval timeout;
+      timeout.tv_sec = 0;
+      timeout.tv_usec = HSP_SELECT_TIMEOUT_uS;
+      int nfds = select(max_fd + 1,
+			&readfds,
+			(fd_set *)NULL,
+			(fd_set *)NULL,
+			&timeout);
+      // may return prematurely if a signal was caught, in which case nfds will be
+      // -1 and errno will be set to EINTR.  If we get any other error, abort.
+      if(nfds < 0 && errno != EINTR) {
+	myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      if(debug && nfds > 0) {
+	myLog(LOG_INFO, "select returned %d (json soc=%d)", nfds, sp->json_soc);
+      }
+      // may get here just because a signal was caught so these
+      // callbacks need to be non-blocking when they read from the socket
+      if(FD_ISSET(sp->ulog_soc, &readfds)) readPackets(sp);
+      if(FD_ISSET(sp->json_soc, &readfds)) readJSON(sp);
+
 #else
-      my_usleep(200000);
+      my_usleep(HSP_SELECT_TIMEOUT_uS);
 #endif
     }
 
