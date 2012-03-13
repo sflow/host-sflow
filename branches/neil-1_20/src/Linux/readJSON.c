@@ -304,8 +304,8 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	uint32_t sub_sampling_n = config_sampling_n / sampling_n;
 	if(sub_sampling_n == 0) sub_sampling_n = 1;
 	uint32_t effective_sampling_n = sampling_n * sub_sampling_n;
-	if(effective_sampling_n == 1
-	   || sfl_random(effective_sampling_n * 16) <= 16) {
+	if(sub_sampling_n == 1
+	   || sfl_random(sub_sampling_n * 16) <= 16) {
 	  // sample this one
 
 	  // extract operation fields
@@ -419,13 +419,13 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 			req_bytes->valueint, // valuedouble?
 			resp_bytes->valueint, // valuedouble?
 			uS->valueint,
-			parent_app,       // may be NULL
-			parent_operation, // may be NULL
-			parent_attributes,// may be NULL
-			actor_initiator,  // may be NULL
-			actor_target,     // may be NULL
-			&soc4,            // may be NULL
-			&soc6);           // may be NULL
+			parent_app,       // any of the following may be NULL
+			parent_operation,
+			parent_attributes,
+			actor_initiator,
+			actor_target,
+			extended_socket_ipv4 ? &soc4 : NULL,
+			extended_socket_ipv6 ? &soc6 : NULL);
 	}
       }
     }
