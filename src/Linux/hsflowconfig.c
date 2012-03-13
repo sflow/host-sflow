@@ -255,6 +255,7 @@ extern int debug;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
+    st->jsonPort = HSP_DEFAULT_JSON_PORT;
     return st;
   }
 
@@ -346,6 +347,47 @@ extern int debug;
     HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
     appSettings->polling_secs = secs;
     appSettings->got_polling_secs = YES;
+  }
+
+  /*_________________----------------------------__________________
+    _________________  lookupApplicationSettings __________________
+    -----------------____________________________------------------
+    return a deepest match lookup, so that
+    a setting of sampling.app.xyz.pqr = 100 will apply to
+    an application named "app.xyz.pqr.abc" and take precendence
+    over a setting of sampling.app.xyz = 200
+  */
+  
+  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling)
+  {
+    // in the config, the sFlow-APPLICATION settings should always start with sampling.app.<name> or polling.app.<name>
+    // so add the .app prefix here before we start searching...
+    char search[SFLAPP_MAX_APPLICATION_LEN+100];
+    snprintf(search, SFLAPP_MAX_APPLICATION_LEN+100, "app.%s", app);
+    int search_len = my_strlen(search);
+    // the top level settings are the defaults
+    if(p_polling) *p_polling = settings->pollingInterval;
+    if(p_sampling) *p_sampling = settings->samplingRate;
+    // now search for the deepest match
+    HSPApplicationSettings *deepest = NULL;
+    uint32_t deepest_len = 0;
+    for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+      int len = my_strlen(appSettings->application);
+      if(len > deepest_len
+	 && len <= search_len
+	 && my_strnequal(search, appSettings->application, len)) {
+	// has to be an exact match, or one that matches up to a '.'
+	if(len == search_len || search[len] == '.') {
+	  deepest = appSettings;
+	  deepest_len = len;
+	}
+      }
+    }
+
+    if(deepest) {
+      if(p_polling && deepest->got_polling_secs) *p_sampling = deepest->polling_secs;
+      if(p_sampling && deepest->got_sampling_n) *p_sampling = deepest->sampling_n;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -558,6 +600,9 @@ extern int debug;
 	    break;
 	  case HSPTOKEN_ULOGPROBABILITY:
 	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_JSONPORT:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
 	    break;
 	  default:
 	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>

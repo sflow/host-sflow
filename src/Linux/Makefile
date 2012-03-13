@@ -10,6 +10,16 @@ ifeq ($(ULOG),yes)
 	CFLAGS+=-DHSF_ULOG
 endif
 
+# if JSON is not set, assume it should be "yes".
+# (So you can use "make JSON=no" to compile without this feature)
+ifeq ($(JSON),)
+	JSON=yes
+endif
+ifeq ($(JSON),yes)
+	CFLAGS+=-DHSF_JSON
+	LIBS+= -lm
+endif
+
 # if LVRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe
 # it would be stronger to test for the libvirt-devel rpm? or look for /usr/include/libvirt/libvirt.h?
 ifeq ($(LIBVIRT),)
@@ -72,6 +82,7 @@ endif
 HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 
 SFLOWDIR=../sflow
+JSONDIR=../json
 
 #CC= g++
 CC= gcc -std=gnu99
@@ -88,7 +99,8 @@ READ_OBJS=readInterfaces.o \
           readDiskCounters.o \
           readHidCounters.o \
           readNioCounters.o \
-	  readPackets.o
+	  readPackets.o \
+	  readJSON.o
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
@@ -97,8 +109,8 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 SFLOWOVS_OBJS=sflowovsd.o util.o
 
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+CFLAGS+= -I. -I$(SFLOWDIR) -I$(JSONDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+LIBS+= $(SFLOWDIR)/libsflow.a $(JSONDIR)/libjson.a -lresolv -lpthread
 
 #### BUILD ####
 
@@ -172,5 +184,6 @@ readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
 readPackets.o: readPackets.c $(HEADERS)
+readJSON.o: readJSON.c $(HEADERS)
 sflowovsd.o: sflowovsd.c $(HEADERS)
 
