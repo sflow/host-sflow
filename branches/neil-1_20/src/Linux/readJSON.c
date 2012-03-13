@@ -74,7 +74,7 @@ extern "C" {
     sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
     sfl_poller_set_sFlowCpReceiver(aa->poller, HSP_SFLOW_RECEIVER_INDEX); 
     // point to the application with the userData ptr
-    aa->poller->userData = &aa;
+    aa->poller->userData = aa;
     // more counter-block initialization
     aa->counters.tag = SFLCOUNTERS_APP;
     aa->counters.counterBlock.app.application.str = application; // just point
