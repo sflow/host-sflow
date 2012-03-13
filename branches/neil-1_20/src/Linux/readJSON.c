@@ -320,7 +320,7 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	  char *parent_app = NULL;
 	  char *parent_operation = NULL;
 	  char *parent_attributes = NULL;
-	  cJSON *parent_context = cJSON_GetObjectItem(opn, "app_parent_context");
+	  cJSON *parent_context = cJSON_GetObjectItem(fs, "app_parent_context");
 	  if(parent_context) {
 	    cJSON *p_app = cJSON_GetObjectItem(parent_context, "application");
 	    if(p_app) parent_app = p_app->valuestring;
