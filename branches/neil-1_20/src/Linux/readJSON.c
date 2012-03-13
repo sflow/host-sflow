@@ -21,11 +21,20 @@ extern "C" {
   
   static void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
+    HSP *sp = (HSP *)magic;
     // we stashed a pointer to the application in the userData field
     HSPApplication *application = (HSPApplication *)poller->userData;
-    // only do this if we are syntheszing the counters ourselves.  If the application
-    // is already sending counters then there is nothing to do here.
-    if(! application->json_counters) {
+    int json_ctrs = ((sp->clk - application->json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
+
+    if(json_ctrs != application->json_counters) {
+      // state transition - reset seq no
+      sfl_poller_resetCountersSeqNo(application->poller);
+      application->json_counters = json_ctrs;
+    }
+    
+    if(!json_ctrs) {
+      // The application is not sending counters, so send the synthesized
+      // app_operations counter block that we have been maintaining.
       SFLADD_ELEMENT(cs, &application->counters);
       sfl_poller_writeCountersSample(poller, cs);
     }
@@ -70,7 +79,7 @@ extern "C" {
     aa->settings_revisionNo = sp->sFlow->revisionNo;
     lookupApplicationSettings(sp->sFlow->sFlowSettings, application, &sampling_n, &polling_secs);
     // poller
-    aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, aa, agentCB_getCounters);
+    aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, agentCB_getCounters);
     sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
     sfl_poller_set_sFlowCpReceiver(aa->poller, HSP_SFLOW_RECEIVER_INDEX); 
     // point to the application with the userData ptr
@@ -79,6 +88,9 @@ extern "C" {
     aa->counters.tag = SFLCOUNTERS_APP;
     aa->counters.counterBlock.app.application.str = application; // just point
     aa->counters.counterBlock.app.application.len = my_strlen(application);
+    // start off assuming that the application is going to send it's own counters
+    aa->json_counters = YES;
+    aa->last_json_counters = sp->clk;
     // sampler
     aa->sampler = sfl_agent_addSampler(sp->sFlow->agent, &dsi);
     sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
@@ -439,26 +451,31 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 static void readJSON_counterSample(HSP *sp, cJSON *cs)
   {
     if(debug > 1) logJSON(cs, "got counter sample");
-    cJSON *app = cJSON_GetObjectItem(cs, "app_name");
+    cJSON *app_name = cJSON_GetObjectItem(cs, "app_name");
     cJSON *service_port = cJSON_GetObjectItem(cs, "service_port");
-    if(app) {
+    if(app_name) {
       HSPApplication *application = getApplication(sp,
-						   app->valuestring,
+						   app_name->valuestring,
 						   (uint16_t)(service_port ? service_port->valueint : 0));
       if(application) {
+	// remember that the application sent these counters.
+	application->last_json_counters = sp->clk;
+
 	SFL_COUNTERS_SAMPLE_TYPE csample = { 0 };
 	// app_operations
 	SFLCounters_sample_element c_ops = { 0 };
 	cJSON *ops = cJSON_GetObjectItem(cs, "app_operations");
-	if(ops) {
-	  // remember that the application sent these counters
-	  // so that we don't try to synthesize and estimate them
-	  // from the transactions.
-	  application->json_counters = YES;
-
+	int json_ops = (ops != NULL);
+	if(json_ops != application->json_ops_counters) {
+	  // policy transisition - reset seq nos
+	  sfl_poller_resetCountersSeqNo(application->poller);
+	  application->json_ops_counters = json_ops;
+	}
+	  
+	if(json_ops) {
 	  c_ops.tag = SFLCOUNTERS_APP;
-	  c_ops.counterBlock.app.application.str = app->valuestring;
-	  c_ops.counterBlock.app.application.len = my_strlen(app->valuestring);
+	  c_ops.counterBlock.app.application.str = app_name->valuestring;
+	  c_ops.counterBlock.app.application.len = my_strlen(app_name->valuestring);
 	  cJSON *cnt;
 	  cnt = cJSON_GetObjectItem(ops, "success");
 	  if(cnt) c_ops.counterBlock.app.status_OK = cnt->valueint;
@@ -483,6 +500,10 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  cnt = cJSON_GetObjectItem(ops, "unauthorized");
 	  if(cnt) c_ops.counterBlock.app.errors_UNAUTHORIZED = cnt->valueint;
 	  SFLADD_ELEMENT(&csample, &c_ops);
+	}
+	else {
+	  // the synthesized ones
+	  SFLADD_ELEMENT(&csample, &application->counters);
 	}
 
 	// app_resources

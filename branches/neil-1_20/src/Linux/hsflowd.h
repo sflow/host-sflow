@@ -72,12 +72,15 @@ extern "C" {
     uint32_t hash;
     uint32_t dsIndex;
     uint16_t servicePort;
+    uint32_t service_port_clash;
+    uint32_t settings_revisionNo;
+    int json_counters;
+    int json_ops_counters;
+    time_t last_json_counters;
+#define HSP_COUNTER_SYNTH_TIMEOUT 120
     SFLSampler *sampler;
     SFLPoller *poller;
-    int json_counters;
-    int service_port_clash;
     SFLCounters_sample_element counters;
-    uint32_t settings_revisionNo;
   } HSPApplication;
 
 #endif /* HSF_JSON */
