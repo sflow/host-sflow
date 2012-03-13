@@ -53,7 +53,7 @@ extern "C" {
   static HSPApplication *addApplication(HSP *sp, char *application, uint16_t servicePort)
   {
     // assigning dsIndex:
-    // 1: need to make it persistent on a restart - perhaps using hsflowd.c:assignVM_dsIndex()
+    // 1: $$$ need to make it persistent on a restart - perhaps using hsflowd.c:assignVM_dsIndex()
     // 2: $$$ circle back and find a free one if we reach end of range
     uint32_t dsIndex = servicePort ? servicePort : (HSP_DEFAULT_APP_DSINDEX_START + nextApplicationDSIndex++);
     SFLDataSource_instance dsi;
