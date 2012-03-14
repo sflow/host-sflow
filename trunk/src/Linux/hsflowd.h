@@ -372,6 +372,7 @@ extern "C" {
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int readPackets(HSP *sp);
   int readJSON(HSP *sp);
+  void json_app_timeout_check(HSP *sp);
 
 #if defined(__cplusplus)
 } /* extern "C" */
