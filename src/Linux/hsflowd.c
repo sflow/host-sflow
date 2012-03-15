@@ -1238,7 +1238,7 @@ extern "C" {
     Have to do this before we relinquish root privileges.  
   */
 
-  static void openJSON(HSP *sp)
+  static void openJSON(HSP *sp, u_int16_t json_port)
   {
     struct sockaddr_in myaddr_in;
 
@@ -1253,16 +1253,13 @@ extern "C" {
       if(fcntl(sp->json_soc, F_SETFL, fdFlags) < 0) {
 	myLog(LOG_ERR, "JSON fcntl(O_NONBLOCK) failed: %s", strerror(errno));
       }
-
-      // Note that the jsonPort setting is only ever retrieved from the config file (i.e. not settable by DNSSD)
-      uint16_t json_port = (uint16_t)(sp->sFlow->sFlowSettings_file->jsonPort);
       
       // bind
       memset((char *)&myaddr_in, 0, sizeof(struct sockaddr_in));
       myaddr_in.sin_family = AF_INET;
-      myaddr_in.sin_addr.s_addr = INADDR_ANY;
+      myaddr_in.sin_addr.s_addr = INADDR_ANY; // $$$ 127.0.0.1 or ::1 $$$
       myaddr_in.sin_port = htons(json_port);
-
+      
       if(bind(sp->json_soc, (struct sockaddr *)&myaddr_in, sizeof(struct sockaddr_in)) == -1) {
 	myLog(LOG_ERR, "JSON bind() failed: %s", strerror(errno));
       }
@@ -1352,7 +1349,7 @@ extern "C" {
 
 #ifdef HSF_JSON
     if(sp->sFlow->sFlowSettings_file->jsonPort != 0) {
-      openJSON(sp);
+      openJSON(sp, sp->sFlow->sFlowSettings_file->jsonPort);
       cJSON_Hooks hooks;
       hooks.malloc_fn = my_calloc;
       hooks.free_fn = my_free;
@@ -1535,6 +1532,11 @@ extern "C" {
 	fprintf(f_strbuf, "agent=%s\n", sf->agentDevice);
       }
       fprintf(f_strbuf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+
+      // jsonPort always comes from local config file
+      if(sf->sFlowSettings_file && sf->sFlowSettings_file->jsonPort != 0) {
+	fprintf(f_strbuf, "jsonPort=%u\n", sf->sFlowSettings_file->jsonPort);
+      }
 
       // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
       // another step here to make sure they are sorted.  Otherwise we think the config has changed
