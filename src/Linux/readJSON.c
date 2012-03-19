@@ -606,19 +606,18 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     -----------------___________________________------------------
   */
 
-  int readJSON(HSP *sp)
+  int readJSON(HSP *sp, int soc)
   {
     int batch = 0;
-    if(sp->json_soc) {
+    if(soc) {
       for( ; batch < HSP_READJSON_BATCH; batch++) {
 	char buf[HSP_MAX_MSG_BYTES];
-	socklen_t peerlen = sizeof(sp->json_peer);
-	int len = recvfrom(sp->json_soc,
+	int len = recvfrom(soc,
 			   buf,
 			   HSP_MAX_MSG_BYTES,
 			   0,
-			   (struct sockaddr *)&sp->json_peer,
-			   &peerlen);
+			   NULL, /* peer */
+			   0 /* peerlen */);
 	if(len <= 0) break;
 	if(debug > 1) myLog(LOG_INFO, "got JSON msg: %u bytes", len);
 	cJSON *top = cJSON_Parse(buf);

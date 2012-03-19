@@ -17,6 +17,7 @@ extern "C" {
 #include <time.h>
 #include <errno.h>
 #include <netdb.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <syslog.h>
@@ -26,7 +27,6 @@ extern "C" {
 #include <ctype.h>
 #include <pthread.h>
 
-#include <sys/types.h>
 #include <sys/mman.h> // for mlockall()
 #include <pwd.h> // for getpwnam()
 #include <grp.h>
@@ -336,7 +336,7 @@ extern "C" {
 #endif
 #ifdef HSF_JSON
     int json_soc;
-    struct sockaddr_in json_peer;
+    int json_soc6;
     HSPApplication **applicationHT;
     uint32_t applicationHT_size;
 #define HSP_INITIAL_JSON_APP_HT_SIZE 16
@@ -371,7 +371,7 @@ extern "C" {
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int readPackets(HSP *sp);
-  int readJSON(HSP *sp);
+  int readJSON(HSP *sp, int soc);
   void json_app_timeout_check(HSP *sp);
 
 #if defined(__cplusplus)

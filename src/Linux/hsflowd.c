@@ -1235,41 +1235,56 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________     openJSON              __________________
     -----------------___________________________------------------
-    Have to do this before we relinquish root privileges.  
   */
 
-  static void openJSON(HSP *sp, u_int16_t json_port)
-  {
-    struct sockaddr_in myaddr_in;
 
-    // open the UDP socket to JSON
-    sp->json_soc = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if(sp->json_soc > 0) {
-      if(debug) myLog(LOG_INFO, "JSON socket fd=%d", sp->json_soc);
-      
-      // set the socket to non-blocking
-      int fdFlags = fcntl(sp->json_soc, F_GETFL);
-      fdFlags |= O_NONBLOCK;
-      if(fcntl(sp->json_soc, F_SETFL, fdFlags) < 0) {
-	myLog(LOG_ERR, "JSON fcntl(O_NONBLOCK) failed: %s", strerror(errno));
-      }
-      
-      // bind
-      memset((char *)&myaddr_in, 0, sizeof(struct sockaddr_in));
-      myaddr_in.sin_family = AF_INET;
-      myaddr_in.sin_addr.s_addr = INADDR_ANY; // $$$ 127.0.0.1 or ::1 $$$
-      myaddr_in.sin_port = htons(json_port);
-      
-      if(bind(sp->json_soc, (struct sockaddr *)&myaddr_in, sizeof(struct sockaddr_in)) == -1) {
-	myLog(LOG_ERR, "JSON bind() failed: %s", strerror(errno));
-      }
+  static int openUDPListenSocket(char *bindaddr, int family, uint16_t port)
+  {
+    struct sockaddr_in myaddr_in = { 0 };
+    struct sockaddr_in6 myaddr_in6 = { 0 };
+    SFLAddress loopbackAddress = { 0 };
+    int soc = 0;
+
+    // create socket
+    if((soc = socket(family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+      myLog(LOG_ERR, "error opening socket: %s", strerror(errno));
+      return 0;
     }
-    else {
-      myLog(LOG_ERR, "error opening JSON socket: %s", strerror(errno));
-      // just disable it
-      sp->json_soc = 0;
+      
+    // set the socket to non-blocking
+    int fdFlags = fcntl(soc, F_GETFL);
+    fdFlags |= O_NONBLOCK;
+    if(fcntl(soc, F_SETFL, fdFlags) < 0) {
+      myLog(LOG_ERR, "fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+      close(soc);
+      return 0;
     }
+      
+    // lookup bind address
+    struct sockaddr *psockaddr = (family == PF_INET6) ?
+      (struct sockaddr *)&myaddr_in6 :
+      (struct sockaddr *)&myaddr_in;
+    if(lookupAddress(bindaddr, psockaddr, &loopbackAddress, family) == NO) {
+      myLog(LOG_ERR, "error resolving <%s> : %s", bindaddr, strerror(errno));
+      close(soc);
+      return 0;
+    }
+
+    // bind
+    if(family == PF_INET6) myaddr_in6.sin6_port = htons(port);
+    else myaddr_in.sin_port = htons(port);
+    if(bind(soc,
+	    psockaddr,
+	    (family == PF_INET6) ?
+	    sizeof(myaddr_in6) :
+	    sizeof(myaddr_in)) == -1) {
+      myLog(LOG_ERR, "bind(%s) failed: %s", bindaddr, strerror(errno));
+      close(soc); 
+      return 0;
+    }
+    return soc;
   }
+
 #endif
 
   /*_________________---------------------------__________________
@@ -1348,8 +1363,10 @@ extern "C" {
 #endif
 
 #ifdef HSF_JSON
-    if(sp->sFlow->sFlowSettings_file->jsonPort != 0) {
-      openJSON(sp, sp->sFlow->sFlowSettings_file->jsonPort);
+    uint16_t jsonPort = sp->sFlow->sFlowSettings_file->jsonPort;
+    if(jsonPort != 0) {
+      sp->json_soc = openUDPListenSocket("127.0.0.1", PF_INET, jsonPort);
+      sp->json_soc6 = openUDPListenSocket("::1", PF_INET6, jsonPort);
       cJSON_Hooks hooks;
       hooks.malloc_fn = my_calloc;
       hooks.free_fn = my_free;
@@ -2161,6 +2178,10 @@ extern "C" {
 	if(sp->json_soc > max_fd) max_fd = sp->json_soc;
 	FD_SET(sp->json_soc, &readfds);
       }
+      if(sp->json_soc6) {
+	if(sp->json_soc6 > max_fd) max_fd = sp->json_soc6;
+	FD_SET(sp->json_soc6, &readfds);
+      }
 #endif
       struct timeval timeout;
       timeout.tv_sec = 0;
@@ -2181,8 +2202,9 @@ extern "C" {
       }
       // may get here just because a signal was caught so these
       // callbacks need to be non-blocking when they read from the socket
-      if(FD_ISSET(sp->ulog_soc, &readfds)) readPackets(sp);
-      if(FD_ISSET(sp->json_soc, &readfds)) readJSON(sp);
+      if(sp->ulog_soc && FD_ISSET(sp->ulog_soc, &readfds)) readPackets(sp);
+      if(sp->json_soc && FD_ISSET(sp->json_soc, &readfds)) readJSON(sp, sp->json_soc);
+      if(sp->json_soc6 && FD_ISSET(sp->json_soc6, &readfds)) readJSON(sp, sp->json_soc6);
 
 #else
       my_usleep(HSP_SELECT_TIMEOUT_uS);
