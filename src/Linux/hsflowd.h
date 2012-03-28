@@ -117,9 +117,9 @@ extern "C" {
 // the limit we will request before calling mlockall()
 // calling res_search() seems to allocate about 11MB
 // (not sure why), so set the limit accordingly.
-#define HSP_RLIMIT_MEMLOCK (1024 * 1024 * 15)
+// #define HSP_RLIMIT_MEMLOCK (1024 * 1024 * 15)
 // set to 0 to disable the memlock feature
-// #define HSP_RLIMIT_MEMLOCK 0
+#define HSP_RLIMIT_MEMLOCK 0
 
   // only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
