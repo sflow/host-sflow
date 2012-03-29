@@ -228,13 +228,11 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
-    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     if(readHidCounters(sp,
 		       &hidElem.counterBlock.host_hid,
-		       hnamebuf,
+		       sp->hostname,
 		       SFL_MAX_HOSTNAME_CHARS,
-		       osrelbuf,
+		       sp->os_release,
 		       SFL_MAX_OSRELEASE_CHARS)) {
       SFLADD_ELEMENT(cs, &hidElem);
     }
@@ -1535,6 +1533,7 @@ extern "C" {
     }
 
     if(settings) {
+      fprintf(f_strbuf, "hostname=%s\n", sf->myHSP->hostname);
       fprintf(f_strbuf, "sampling=%u\n", settings->samplingRate);
       fprintf(f_strbuf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
       fprintf(f_strbuf, "polling=%u\n", settings->pollingInterval);
@@ -2039,6 +2038,20 @@ extern "C" {
       switch(sp->state) {
 	
       case HSPSTATE_READCONFIG:
+
+	{ // read the host-id info up front, so we can include it in hsflowd.auto
+	  // (we'll read it again each time we send the counters)
+	  SFLCounters_sample_element hidElem = { 0 };
+	  hidElem.tag = SFLCOUNTERS_HOST_HID;
+	  readHidCounters(sp,
+			  &hidElem.counterBlock.host_hid,
+			  sp->hostname,
+			  SFL_MAX_HOSTNAME_CHARS,
+			  sp->os_release,
+			  SFL_MAX_OSRELEASE_CHARS);
+	}
+
+	// a sucessful read of the interfaces and the config file is required
 	if(readInterfaces(sp) == 0 || HSPReadConfigFile(sp) == NO) {
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
