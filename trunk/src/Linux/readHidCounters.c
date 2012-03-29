@@ -6,6 +6,7 @@
 extern "C" {
 #endif
 
+#include "sys/utsname.h"
 #include "hsflowd.h"
 
   /*_________________---------------------------__________________
@@ -13,20 +14,20 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen) {
-    int gotData = NO;
-    FILE *procFile;
-    procFile= fopen("/proc/sys/kernel/hostname", "r");
-    if(procFile) {
-      if(fgets(hbuf, hbufLen, procFile)) {
-	gotData = YES;
-	int len = strlen(hbuf);
-	// fgets may include a newline
-	if(hbuf[len-1] == '\n') --len;
-	hid->hostname.str = hbuf;
-	hid->hostname.len = len;
-      }
-      fclose(procFile);
+  int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen)
+  {
+    struct utsname uu;
+    if(uname(&uu) == -1) {
+      myLog(LOG_ERR, "uname() failed: %s", strerror(errno));
+      return NO;
+    }
+
+    if(uu.nodename) {
+      int len = my_strlen(uu.nodename);
+      if(len > hbufLen) len = hbufLen;
+      memcpy(hbuf, uu.nodename, len);
+      hid->hostname.str = hbuf;
+      hid->hostname.len = len;
     }
 
     // UUID
@@ -72,20 +73,15 @@ extern "C" {
     hid->os_name = SFLOS_linux;
 
     // os release
-    procFile= fopen("/proc/sys/kernel/osrelease", "r");
-    if(procFile) {
-      if(fgets(rbuf, rbufLen, procFile)) {
-	gotData = YES;
-	int len = strlen(rbuf);
-	// fgets may include a newline
-	if(rbuf[len-1] == '\n') --len;
-	hid->os_release.str = rbuf;
-	hid->os_release.len = len;
-      }
-      fclose(procFile);
+    if(uu.release) {
+      int len = my_strlen(uu.release);
+      if(len > rbufLen) len = rbufLen;
+      memcpy(rbuf, uu.release, len);
+      hid->os_release.str = rbuf;
+      hid->os_release.len = len;
     }
     
-    return gotData;
+    return YES;
   }
 
 #if defined(__cplusplus)
