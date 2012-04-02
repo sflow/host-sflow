@@ -1173,6 +1173,10 @@ extern "C" {
     if(sp->refreshAdaptorList || (sp->clk % HSP_REFRESH_ADAPTORS) == 0) {
       sp->refreshAdaptorList = NO;
       readInterfaces(sp);
+      // this may be the right place to check that the agent-address
+      // selection has not changed -- we really should be willing
+      // to adapt to a new agent-address selection without requiring
+      // a restart. $$$
     }
 
     // give the JSON module a chance to remove idle apps
@@ -1650,11 +1654,7 @@ extern "C" {
     }
 
     if(key == NULL) {
-      // no key => SRV response.  We always ask for SRV first,  then TXT, so we can take
-      // this opportunity to clear out the TXT state from last time
-      clearApplicationSettings(st);
-
-      // now see if we got a collector
+      // no key => SRV response. See if we got a collector:
       if(val && valLen > 3) {
 	uint32_t delim = strcspn(valBuf, "/");
 	if(delim > 0 && delim < valLen) {
@@ -1690,6 +1690,20 @@ extern "C" {
       else if(my_strnequal(keyBuf, "polling.", 8)) {
 	setApplicationPolling(st, keyBuf+8, strtol(valBuf, NULL, 0));
       }
+#if HSF_DNSSD_AGENTCIDR
+      else if(strcmp(keyBuf, "agent.cidr") == 0) {
+	HSPCIDR cidr = { 0 };
+	if(SFLAddress_parseCIDR(valBuf,
+				&cidr.ipAddr,
+				&cidr.mask,
+				&cidr.maskBits)) {
+	  addAgentCIDR(st, &cidr);
+	}
+	else {
+	  myLog(LOG_ERR, "CIDR parse error in dnsSD record <%s>=<%s>", keyBuf, valBuf);
+	}
+      }
+#endif /* HSF_DNSSD_AGENTCIDR */
       else {
 	myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
       }
@@ -2051,24 +2065,12 @@ extern "C" {
 			  SFL_MAX_OSRELEASE_CHARS);
 	}
 
-	// a sucessful read of the interfaces and the config file is required
-	if(readInterfaces(sp) == 0 || HSPReadConfigFile(sp) == NO) {
+	// a sucessful read of the config file is required
+	if(HSPReadConfigFile(sp) == NO) {
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
 	}
 	else {
-	  // we must have an agentIP, so we can use
-	  // it to seed the random number generator
-	  SFLAddress *agentIP = &sp->sFlow->agentIP;
-	  uint32_t seed = 0;
-	  if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
-	  else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
-	  sfl_random_init(seed);
-
-	  // initialize the faster polling of NIO counters
-	  // to avoid undetected 32-bit wraps
-	  sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
-	  
 	  if(sp->DNSSD) {
 	    // launch dnsSD thread.  It will now be responsible for
 	    // the sFlowSettings,  and the current thread will loop
@@ -2100,7 +2102,33 @@ extern "C" {
       case HSPSTATE_WAITCONFIG:
 	SEMLOCK_DO(sp->config_mut) {
 	  if(sp->sFlow->sFlowSettings) {
-	    // we have a config - proceed
+	    // we have a config - proceed. The next step
+	    // is agent-address selection,  which requires
+	    // a successful read of the interfaces first. Delaying
+	    // this to run here allows the agent-address selection
+	    // to be influenced by settings such as agent.cidr.
+	    if(readInterfaces(sp) == 0 || selectAgentAddress(sp) == NO) {
+	      myLog(LOG_ERR, "failed to select agent address\n");
+	      exit(EXIT_FAILURE);
+	    }
+	    // since the choice of agentIP affects the content of the
+	    // .auto file, we call the installsFlowSettings() function again here.
+	    // Note that the .auto file will not actually be written out
+	    // yet.  That only happens when we get to the main loop.
+	    installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings);
+
+	    // we must have an agentIP now, so we can use
+	    // it to seed the random number generator
+	    SFLAddress *agentIP = &sp->sFlow->agentIP;
+	    uint32_t seed = 0;
+	    if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
+	    else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
+	    sfl_random_init(seed);
+
+	    // initialize the faster polling of NIO counters
+	    // to avoid undetected 32-bit wraps
+	    sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
+	      
 	    if(initAgent(sp)) {
 	      if(debug) {
 		myLog(LOG_INFO, "initAgent suceeded");

@@ -835,6 +835,133 @@ extern "C" {
     }
     return NO;
   }
+  
+  void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask) {
+    if((mask->type = addr->type) == SFLADDRESSTYPE_IP_V6) {
+      for(int ii = 0; ii < 16; ii++) {
+	addr->address.ip_v6.addr[ii] &= mask->address.ip_v6.addr[ii];
+      }
+    }
+    else {
+      addr->address.ip_v4.addr &= mask->address.ip_v4.addr;
+    }
+  }
+  
+  int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare) {
+    
+    if(addr->type != compare->type) {
+      return NO;
+    }
+    
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      for(int ii = 0; ii < 16; ii++) {
+	if((addr->address.ip_v6.addr[ii] & mask->address.ip_v6.addr[ii]) != (compare->address.ip_v6.addr[ii] & mask->address.ip_v6.addr[ii])) return NO;
+      }
+      return YES;
+    }
+    else {
+      return ((addr->address.ip_v4.addr & mask->address.ip_v4.addr) == (compare->address.ip_v4.addr & mask->address.ip_v4.addr));
+    }
+  }
+
+  static int maskToMaskBits(u_int32_t maskaddr)
+  {
+    int mbits = 0;
+    u_int32_t mask = ntohl(maskaddr);
+    if(mask > 0) {
+      mbits = 32;
+      while((mask & 1) == 0) {
+	mbits--;
+	mask >>= 1;
+      }
+    }
+    return mbits;
+  }
+
+  static uint32_t maskBitsToMask(uint32_t mbits)
+  {
+    if(mbits == 0) return 0;
+    return ~((1 << (32 - (mbits))) - 1);
+  }
+
+  static uint32_t SFLAddress_maskToMaskBits(SFLAddress *mask) {
+    if(mask->type == SFLADDRESSTYPE_IP_V6) {
+      uint32_t *ii = (uint32_t *)mask->address.ip_v6.addr;
+    return (maskToMaskBits(ii[0]) +
+	    maskToMaskBits(ii[1]) +
+	    maskToMaskBits(ii[2]) +
+	    maskToMaskBits(ii[3]));
+    }
+    else {
+      return maskToMaskBits(mask->address.ip_v4.addr);
+    }
+  }
+
+  static void SFLAddress_maskBitsToMask(uint32_t bits, SFLAddress *mask) {
+    if(mask->type == SFLADDRESSTYPE_IP_V4) {
+      mask->address.ip_v4.addr = htonl(maskBitsToMask(bits));
+    }
+    else {
+      memset(mask->address.ip_v6.addr, 0, 16);
+      uint32_t *ii = (uint32_t *)mask->address.ip_v6.addr;
+      int quad = 0;
+      while(bits >= 32) {
+	ii[quad++] = 0xFFFFFFFF;
+	bits -= 32;
+      }
+      if(bits) ii[quad] = htonl(maskBitsToMask(bits));
+    }
+  }
+    
+  int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits) {
+    if(str == NULL) return NO;
+    int len = my_strlen(str);
+    int slash = strcspn(str, "/");
+    if(len == 0 || slash == 0 || slash >= len) {
+      return NO;
+    }
+    // temporarily blat in a '\0'
+    str[slash] = '\0';
+    int ok = lookupAddress(str, NULL, addr, 0);
+    str[slash] = '/';
+    if(ok == NO) return NO;
+
+    // after the slash we can find a mask address or just mask-bits
+    int maskAsAddress = NO;
+    for(int ii = slash + 1; ii < len; ii++) {
+      if(str[ii] == '.' || str[ii] == ':') {
+	maskAsAddress = YES;
+	break;
+      }
+    }
+    if(maskAsAddress) {
+      if(lookupAddress(str + slash + 1, NULL, mask, 0) == NO) {
+	return NO;
+      }
+      *maskBits = SFLAddress_maskToMaskBits(mask);
+    }
+    else {
+      *maskBits = strtol(str + slash + 1, NULL, 0);
+      mask->type = addr->type;
+      SFLAddress_maskBitsToMask(*maskBits, mask);
+    }
+    
+    // more checks
+    if(addr->type != mask->type) {
+      return NO;
+    }
+    if(addr->type == SFLADDRESSTYPE_IP_V4 && *maskBits > 32) {
+      return NO;
+    }
+    if(addr->type == SFLADDRESSTYPE_IP_V6 && *maskBits > 128) {
+      return NO;
+    }
+    
+    // apply mask to myself
+    SFLAddress_mask(addr, mask);
+
+    return YES;
+  }
 
 #if defined(__cplusplus)
 }  /* extern "C" */
