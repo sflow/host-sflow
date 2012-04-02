@@ -156,6 +156,9 @@ extern "C" {
   int SFLAddress_isLinkLocal(SFLAddress *addr);
   int SFLAddress_isUniqueLocal(SFLAddress *addr);
   int SFLAddress_isMulticast(SFLAddress *addr);
+  void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask);  
+  int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare);
+  int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits);
 
 #if defined(__cplusplus)
 } /* extern "C" */

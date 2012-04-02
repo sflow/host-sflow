@@ -114,6 +114,11 @@ extern "C" {
 #define HSP_REFRESH_VMS 60
 #define HSP_REFRESH_ADAPTORS 180
 
+// set to 1 to allow agent.cidr setting in DNSSD TXT record.
+// This is currently considered out-of-scope for the DNSSD config,
+// so for now the agent.cidr setting is only allowed in hsflowd.conf.
+#define HSP_DNSSD_AGENTCIDR 0
+
 // the limit we will request before calling mlockall()
 // calling res_search() seems to allocate about 11MB
 // (not sure why), so set the limit accordingly.
@@ -145,6 +150,13 @@ extern "C" {
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
 
+  typedef struct _HSPCIDR {
+    struct _HSPCIDR *nxt;
+    SFLAddress ipAddr;
+    SFLAddress mask;
+    uint32_t maskBits;
+  } HSPCIDR;
+
 #define HSP_SETTING_UNDEFINED -1
 
   typedef struct _HSPApplicationSettings {
@@ -172,6 +184,7 @@ extern "C" {
     uint32_t ulogActualSamplingRate;
     uint32_t jsonPort;
 #define HSP_DEFAULT_JSON_PORT 0
+    HSPCIDR *agentCIDRs;
   } HSPSFlowSettings;
 
   typedef struct _HSPSFlow {
@@ -189,6 +202,8 @@ extern "C" {
     uint32_t subAgentId;
     char *agentDevice;
     SFLAddress agentIP;
+    int explicitAgentDevice;
+    int explicitAgentIP;
   } HSPSFlow; 
 
   typedef enum { HSPSTATE_READCONFIG=0,
@@ -238,12 +253,13 @@ extern "C" {
 		 IPSP_IP6_SCOPE_UNIQUE,
 		 IPSP_IP6_SCOPE_GLOBAL,
 		 IPSP_IP4,
+		 IPSP_NUM_PRIORITIES,
   } EnumIPSelectionPriority;
 
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
-    EnumIPSelectionPriority ipPriority;
+    uint32_t /*EnumIPSelectionPriority*/ ipPriority;
     int32_t loopback;
     int32_t bond_master;
     int32_t vlan;
@@ -350,12 +366,16 @@ extern "C" {
   int HSPReadConfigFile(HSP *sp);
   HSPSFlowSettings *newSFlowSettings(void);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
+  void clearCollectors(HSPSFlowSettings *settings);
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
   void clearApplicationSettings(HSPSFlowSettings *settings);
   void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling);
-  EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr, int vlan, int loopback);
+  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
+  int selectAgentAddress(HSP *sp);
+  void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
+  void clearAgentCIDRs(HSPSFlowSettings *settings);
     
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"

@@ -116,7 +116,8 @@ approach seemed more stable and portable.
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       if(adaptor && adaptor->userData) {
 	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	adaptorNIO->ipPriority = agentAddressPriority(&adaptorNIO->ipAddr,
+	adaptorNIO->ipPriority = agentAddressPriority(sp,
+						      &adaptorNIO->ipAddr,
 						      adaptorNIO->vlan,
 						      adaptorNIO->loopback);
       }
@@ -184,7 +185,8 @@ approach seemed more stable and portable.
 	    if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
 	      // we interpret the scope from the address now
 	      // scope = remap_proc_net_if_inet6_scope(scope);
-	      EnumIPSelectionPriority ipPriority = agentAddressPriority(&v6addr,
+	      EnumIPSelectionPriority ipPriority = agentAddressPriority(sp,
+									&v6addr,
 									niostate->vlan,
 									niostate->loopback);
 	      if(ipPriority > niostate->ipPriority) {
