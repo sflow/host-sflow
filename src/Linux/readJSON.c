@@ -87,8 +87,8 @@ extern "C" {
     aa->poller->userData = aa;
     // more counter-block initialization
     aa->counters.tag = SFLCOUNTERS_APP;
-    aa->counters.counterBlock.app.application.str = application; // just point
-    aa->counters.counterBlock.app.application.len = my_strlen(application);
+    aa->counters.counterBlock.app.application.str = aa->application; // just point
+    aa->counters.counterBlock.app.application.len = my_strlen(aa->application);
     // start off assuming that the application is going to send it's own counters
     aa->json_counters = YES;
     aa->last_json_counters = sp->clk;
@@ -379,9 +379,9 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	      cJSON *p_app = cJSON_GetObjectItem(parent_context, "application");
 	      if(p_app) parent_app = p_app->valuestring;
 	      cJSON *p_op = cJSON_GetObjectItem(parent_context, "operation");
-	      if(p_op) parent_operation = p_app->valuestring;
+	      if(p_op) parent_operation = p_op->valuestring;
 	      cJSON *p_attrib = cJSON_GetObjectItem(parent_context, "attributes");
-	      if(p_attrib) parent_attributes = p_app->valuestring;
+	      if(p_attrib) parent_attributes = p_attrib->valuestring;
 	    }
 	  
 	    // optional fields: actors
