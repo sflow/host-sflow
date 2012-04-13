@@ -46,6 +46,20 @@ rpm:
 	cp -r . $$MYSRCDIR; \
 	tar cz -C $(RPM_SOURCES_DIR) -f $$MYSRCDIR.tar.gz $(PROG)-$$MYVER; \
 	rpmbuild -ba $(PROG).spec
+pkg:
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+	MYREL=`./getRelease`; \
+	MYSRCDIR=src/$$PLATFORM/scripts/$(PROG)-$$MYVER; \
+	rm -rf $$MYSRCDIR; \
+	mkdir -p $$MYSRCDIR; \
+	mkdir -p $$MYSRCDIR/etc; cp src/$$PLATFORM/scripts/hsflowd.conf $$MYSRCDIR/etc; \
+	mkdir -p $$MYSRCDIR/usr/sbin; cp src/$$PLATFORM/hsflowd $$MYSRCDIR/usr/sbin; \
+	mkdir -p $$MYSRCDIR/lib/svc/method; cp src/$$PLATFORM/scripts/svc-hsflowd $$MYSRCDIR/lib/svc/method; \
+	mkdir -p $$MYSRCDIR/var/svc/manifest/site; cp src/$$PLATFORM/scripts/hsflowd.xml $$MYSRCDIR/var/svc/manifest/site; \
+	pkgmk -o -r $$MYSRCDIR -f src/$$PLATFORM/scripts/Prototype ; \
+	pkgtrans /var/spool/pkg /tmp/$(PROG)-$$MYVER-$$MYREL hsflowd; \
+	mv /tmp/$(PROG)-$$MYVER-$$MYREL .
 
 deb: $(PROG)
 	PLATFORM=`uname`; \

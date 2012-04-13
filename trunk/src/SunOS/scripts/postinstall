@@ -1,0 +1,13 @@
+#!/bin/bash
+
+CONF_D=/etc
+MANI_D=/var/svc/manifest/site
+
+if [ -e $CONF_D/hsflowd.conf.pkg.old ]; then
+	mv $CONF_D/hsflowd.conf.pkg.old $CONF_D/hsflowd.conf
+fi 
+
+/usr/sbin/svccfg import $MANI_D/hsflowd.xml
+/usr/sbin/svcadm enable hsflowd
+
+exit 0

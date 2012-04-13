@@ -99,7 +99,7 @@ typedef struct _SFLSampled_header {
   uint32_t frame_length;               /* Original length of packet before sampling */
   uint32_t stripped;                   /* header/trailer bytes stripped by sender */
   uint32_t header_length;              /* length of sampled header bytes to follow */
-  u_int8_t *header_bytes;               /* Header bytes */
+  uint8_t *header_bytes;               /* Header bytes */
 } SFLSampled_header;
 
 /* decoded ethernet header */
@@ -107,8 +107,8 @@ typedef struct _SFLSampled_header {
 typedef struct _SFLSampled_ethernet {
   uint32_t eth_len;       /* The length of the MAC packet excluding 
                              lower layer encapsulations */
-  u_int8_t src_mac[8];    /* 6 bytes + 2 pad */
-  u_int8_t dst_mac[8];
+  uint8_t src_mac[8];    /* 6 bytes + 2 pad */
+  uint8_t dst_mac[8];
   uint32_t eth_type;
 } SFLSampled_ethernet;
 
@@ -648,7 +648,7 @@ enum SFLOS_name {
 };
 
 typedef struct _SFLMacAddress {
-  u_int8_t mac[8];
+  uint8_t mac[8];
 } SFLMacAddress;
 
 typedef struct _SFLAdaptor {
