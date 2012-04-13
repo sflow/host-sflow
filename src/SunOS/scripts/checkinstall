@@ -1,0 +1,11 @@
+#!/bin/bash
+
+CONF_D=/etc
+
+/usr/sbin/svcadm disable hsflowd
+
+if [ -e $CONF_D/hsflowd.conf ]; then
+	cp $CONF_D/hsflowd.conf $CONF_D/hsflowd.conf.pkg.old 
+fi
+
+exit 0

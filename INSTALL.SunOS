@@ -1,0 +1,26 @@
+This software is distributed under the following license:
+http://host-sflow-sourceforge.net/license.html
+
+To compile and install, try this:
+
+root> gmake
+root> gmake install
+
+Edit /etc/hsflowd.conf for configuration.  The options are
+described in the comments there.
+
+To start the daemon, run:
+
+root> /usr/sbin/svcadm enable hsflowd
+
+and check the syslog (e.g. /var/log/messages) for errors.
+
+To schedule the daemon to start automatically on a reboot, try:
+
+root> gmake schedule
+
+To builda package, try:
+
+root> gmake pkg
+
+The package will be written to thi
