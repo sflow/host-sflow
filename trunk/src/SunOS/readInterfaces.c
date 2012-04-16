@@ -27,6 +27,27 @@ void readVLANs(HSP *sp)
 }
 
 /*________________---------------------------__________________
+  ________________  setAddressPriorities     __________________
+  ----------------___________________________------------------
+  Ideally we would do this as we go along,  but since the vlan
+  info is spliced in separately we have to wait for that and
+  then set the priorities for the whole list.
+*/
+  void setAddressPriorities(HSP *sp)
+  {
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      if(adaptor && adaptor->userData) {
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	adaptorNIO->ipPriority = agentAddressPriority(sp,
+						      &adaptorNIO->ipAddr,
+						      adaptorNIO->vlan,
+						      adaptorNIO->loopback);
+      }
+    }
+  }
+
+/*________________---------------------------__________________
   ________________      readInterfaces       __________________
   ----------------___________________________------------------
 */
@@ -34,7 +55,7 @@ void readVLANs(HSP *sp)
 int readInterfaces(HSP *sp)
 {
 	int noErr = 1;
-	kstat_ctl_t *kc;
+	kstat_ctl_t *kc = NULL;
 	kstat_t *ksp, *ksp_tmp;
 	kstat_named_t *knp;
 #ifndef KSNAME_BUFFER_SIZE
@@ -131,7 +152,8 @@ int readInterfaces(HSP *sp)
 							} else {
 								if (AF_INET == ifr.ifr_addr.sa_family) {
 									struct sockaddr_in *s = (struct sockaddr_in*)&ifr.ifr_addr;
-									adaptor->ipAddr.addr = s->sin_addr.s_addr;
+									adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+									adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
 								}
 							}
 							
@@ -167,7 +189,9 @@ int readInterfaces(HSP *sp)
 		}
 	}
 
-	kstat_close(kc);
+	// clean up
+	if(kc) kstat_close(kc);
+	if(fd > 0) close(fd);
 
 	// now remove and free any that are still marked
 	adaptorListFreeMarked(sp->adaptorList);
@@ -175,6 +199,11 @@ int readInterfaces(HSP *sp)
 	// check in case any of the survivors are specific
 	// to a particular VLAN
 	readVLANs(sp);
+
+	// now that we have the evidence gathered together, we can
+	// set the L3 address priorities (used for auto-selecting
+	// the sFlow-agent-address if requrired to by the config.
+	setAddressPriorities(sp);
 
 	return sp->adaptorList->num_adaptors;
 }

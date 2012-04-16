@@ -11,6 +11,53 @@ extern "C" {
 
   int debug = 0;
 
+  /*________________---------------------------__________________
+    ________________       UTStrBuf            __________________
+    ----------------___________________________------------------
+  */
+
+  UTStrBuf *UTStrBuf_new(size_t cap) {
+    UTStrBuf *buf = (UTStrBuf *)my_calloc(sizeof(UTStrBuf));
+    buf->buf = my_calloc(cap);
+    buf->cap = cap;
+    return buf;
+  }
+
+  void UTStrBuf_grow(UTStrBuf *buf) {
+    buf->cap <<= 2;
+    char *newbuf = (char *)my_calloc(buf->cap);
+    memcpy(newbuf, buf->buf, buf->len);
+    my_free(buf->buf);
+    buf->buf = newbuf;
+  }
+
+  static void UTStrBuf_need(UTStrBuf *buf, size_t len) {
+    while((buf->len + len + 1) >= buf->cap) UTStrBuf_grow(buf);
+  }
+
+  void UTStrBuf_append(UTStrBuf *buf, char *str) {
+    int len = my_strlen(str);
+    UTStrBuf_need(buf, len);
+    memcpy(buf->buf + buf->len, str, len);
+    buf->len += len;
+  }
+
+  int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    // vsnprintf will tell you what space it *would* need
+    int needed = vsnprintf(NULL, 0, fmt, args);
+    UTStrBuf_need(buf, needed);
+    va_start(args, fmt);
+    return vsnprintf(buf->buf + buf->len, needed, fmt, args);
+  }
+
+  char *UTStrBuf_unwrap(UTStrBuf *buf) {
+    char *ans = buf->buf;
+    my_free(buf);
+    return ans;
+  }
+
   /*_________________---------------------------__________________
     _________________        logging            __________________
     -----------------___________________________------------------
@@ -335,28 +382,20 @@ extern "C" {
     ar->sorted = YES;
   }
 
-   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end) {
-    size_t strbufLen = 256;
-    char *strbuf = NULL;
-    FILE *f_strbuf;
-//TODO: open_memstream is Linux only
-//    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
-//      myLog(LOG_ERR, "error in open_memstream: %s", strerror(errno));
-//      exit(EXIT_FAILURE);
-//    }
-    if(start) fputs(start, f_strbuf);
+  char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end) {
+    UTStrBuf *buf = UTStrBuf_new(256);
+    if(start) UTStrBuf_append(buf, start);
     for(uint32_t i = 0; i < ar->n; i++) {
-      if(i && delim) fputs(delim, f_strbuf);
+      if(i && delim) UTStrBuf_append(buf, delim);
       char *str = ar->strs[i];
       if(str) {
-	if(quote) fputs(quote, f_strbuf);
-	fputs(str, f_strbuf);
-	if(quote) fputs(quote, f_strbuf);
+	if(quote) UTStrBuf_append(buf, quote);
+	UTStrBuf_append(buf, str);
+	if(quote) UTStrBuf_append(buf, quote);
       }
     }
-    if(end) fputs(end, f_strbuf);
-    fclose(f_strbuf);
-    return strbuf;
+    if(end) UTStrBuf_append(buf, end);
+    return UTStrBuf_unwrap(buf);
   }
 
    int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2) {
@@ -778,6 +817,205 @@ extern "C" {
       myLog(LOG_ERR, "truncateOpenFile(): ftruncate() failed : %s", strerror(errno));
       return NO;
     }
+    return YES;
+  }
+  /*________________---------------------------__________________
+    ________________      SFLAddress utils     __________________
+    ----------------___________________________------------------
+  */
+
+  int SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2) {
+    if(addr1 == addr2) return YES;
+    if(addr1 ==NULL ||addr2 == NULL) return NO;
+    if(addr1->type != addr2->type) return NO;
+    if(addr1->type == SFLADDRESSTYPE_IP_V6) {
+      return (memcmp(addr1->address.ip_v6.addr, addr2->address.ip_v6.addr, 16) == 0);
+    }
+    else {
+      return (addr1->address.ip_v4.addr == addr2->address.ip_v4.addr);
+    }
+  }
+
+  int SFLAddress_isLoopback(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // for IPv6, loopback is always ::1
+      uint32_t *x = (uint32_t *)addr->address.ip_v6.addr;
+      return (x[0] == 0 &&
+	      x[1] == 0 &&
+	      x[2] == 0 &&
+	      ntohl(x[3]) == 1);
+    }
+    else {
+      // for IPv4, it's 127.0.0.0/8
+      char *a = (char *)&(addr->address.ip_v4.addr);
+      return a[0] == 127;
+    }
+  }
+  
+  int SFLAddress_isSelfAssigned(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V4) {
+      // for IPv4, it's 169.254.*
+      u_char *a = (u_char *)&(addr->address.ip_v4.addr);
+      return (a[0] == 169 &&
+	      a[1] == 254);
+    }
+    return NO;
+  }
+  
+  int SFLAddress_isLinkLocal(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // FE80::/10
+      return(addr->address.ip_v6.addr[0] == 0xFE &&
+	     (addr->address.ip_v6.addr[1] & 0xC0) == 0x80);
+    }
+    return NO;
+  }
+
+  int SFLAddress_isUniqueLocal(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // FC00::/7                                                                                                                 
+      return((addr->address.ip_v6.addr[0] & 0xFE) == 0xFC);
+    }
+    return NO;
+  }
+
+  int SFLAddress_isMulticast(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // FF00::/8                                                                                                                 
+      return(addr->address.ip_v6.addr[0] == 0xFF);
+    }
+    else {
+      // 224.0.0.0/4
+      u_char *a = (u_char *)&(addr->address.ip_v4.addr);
+      return ((a[0] & 0xF0) == 224);
+    }
+    return NO;
+  }
+  
+  void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask) {
+    if((mask->type = addr->type) == SFLADDRESSTYPE_IP_V6) {
+      for(int ii = 0; ii < 16; ii++) {
+	addr->address.ip_v6.addr[ii] &= mask->address.ip_v6.addr[ii];
+      }
+    }
+    else {
+      addr->address.ip_v4.addr &= mask->address.ip_v4.addr;
+    }
+  }
+  
+  int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare) {
+    
+    if(addr->type != compare->type) {
+      return NO;
+    }
+    
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      for(int ii = 0; ii < 16; ii++) {
+	if((addr->address.ip_v6.addr[ii] & mask->address.ip_v6.addr[ii]) != (compare->address.ip_v6.addr[ii] & mask->address.ip_v6.addr[ii])) return NO;
+      }
+      return YES;
+    }
+    else {
+      return ((addr->address.ip_v4.addr & mask->address.ip_v4.addr) == (compare->address.ip_v4.addr & mask->address.ip_v4.addr));
+    }
+  }
+
+  static int maskToMaskBits(uint32_t maskaddr)
+  {
+    int mbits = 0;
+    uint32_t mask = ntohl(maskaddr);
+    if(mask > 0) {
+      mbits = 32;
+      while((mask & 1) == 0) {
+	mbits--;
+	mask >>= 1;
+      }
+    }
+    return mbits;
+  }
+
+  static uint32_t maskBitsToMask(uint32_t mbits)
+  {
+    if(mbits == 0) return 0;
+    return ~((1 << (32 - (mbits))) - 1);
+  }
+
+  static uint32_t SFLAddress_maskToMaskBits(SFLAddress *mask) {
+    if(mask->type == SFLADDRESSTYPE_IP_V6) {
+      uint32_t *ii = (uint32_t *)mask->address.ip_v6.addr;
+    return (maskToMaskBits(ii[0]) +
+	    maskToMaskBits(ii[1]) +
+	    maskToMaskBits(ii[2]) +
+	    maskToMaskBits(ii[3]));
+    }
+    else {
+      return maskToMaskBits(mask->address.ip_v4.addr);
+    }
+  }
+
+  static void SFLAddress_maskBitsToMask(uint32_t bits, SFLAddress *mask) {
+    if(mask->type == SFLADDRESSTYPE_IP_V4) {
+      mask->address.ip_v4.addr = htonl(maskBitsToMask(bits));
+    }
+    else {
+      memset(mask->address.ip_v6.addr, 0, 16);
+      uint32_t *ii = (uint32_t *)mask->address.ip_v6.addr;
+      int quad = 0;
+      while(bits >= 32) {
+	ii[quad++] = 0xFFFFFFFF;
+	bits -= 32;
+      }
+      if(bits) ii[quad] = htonl(maskBitsToMask(bits));
+    }
+  }
+    
+  int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits) {
+    if(str == NULL) return NO;
+    int len = my_strlen(str);
+    int slash = strcspn(str, "/");
+    if(len == 0 || slash == 0 || slash >= len) {
+      return NO;
+    }
+    // temporarily blat in a '\0'
+    str[slash] = '\0';
+    int ok = lookupAddress(str, NULL, addr, 0);
+    str[slash] = '/';
+    if(ok == NO) return NO;
+
+    // after the slash we can find a mask address or just mask-bits
+    int maskAsAddress = NO;
+    for(int ii = slash + 1; ii < len; ii++) {
+      if(str[ii] == '.' || str[ii] == ':') {
+	maskAsAddress = YES;
+	break;
+      }
+    }
+    if(maskAsAddress) {
+      if(lookupAddress(str + slash + 1, NULL, mask, 0) == NO) {
+	return NO;
+      }
+      *maskBits = SFLAddress_maskToMaskBits(mask);
+    }
+    else {
+      *maskBits = strtol(str + slash + 1, NULL, 0);
+      mask->type = addr->type;
+      SFLAddress_maskBitsToMask(*maskBits, mask);
+    }
+    
+    // more checks
+    if(addr->type != mask->type) {
+      return NO;
+    }
+    if(addr->type == SFLADDRESSTYPE_IP_V4 && *maskBits > 32) {
+      return NO;
+    }
+    if(addr->type == SFLADDRESSTYPE_IP_V6 && *maskBits > 128) {
+      return NO;
+    }
+    
+    // apply mask to myself
+    SFLAddress_mask(addr, mask);
+
     return YES;
   }
     

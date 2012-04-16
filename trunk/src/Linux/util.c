@@ -864,10 +864,10 @@ extern "C" {
     }
   }
 
-  static int maskToMaskBits(u_int32_t maskaddr)
+  static int maskToMaskBits(uint32_t maskaddr)
   {
     int mbits = 0;
-    u_int32_t mask = ntohl(maskaddr);
+    uint32_t mask = ntohl(maskaddr);
     if(mask > 0) {
       mbits = 32;
       while((mask & 1) == 0) {

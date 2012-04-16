@@ -576,6 +576,57 @@ extern "C" {
       break;
     }
   }
+  /*_________________---------------------------__________________
+    _________________   sFlowSettingsString     __________________
+    -----------------___________________________------------------
+  */
+
+  char *sFlowSettingsString(HSPSFlow *sf, HSPSFlowSettings *settings)
+  {
+    UTStrBuf *buf = UTStrBuf_new(1024);
+
+    if(settings) {
+      UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
+      UTStrBuf_printf(buf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
+      UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
+      // make sure the application specific ones always come after the general ones - to simplify the override logic there
+      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+	if(appSettings->got_sampling_n) {
+	  UTStrBuf_printf(buf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	}
+	if(appSettings->got_polling_secs) {
+	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+	}
+      }
+      char ipbuf[51];
+      UTStrBuf_printf(buf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
+      if(sf->agentDevice) {
+	UTStrBuf_printf(buf, "agent=%s\n", sf->agentDevice);
+      }
+      UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+
+      // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
+      // another step here to make sure they are sorted.  Otherwise we think the config has changed
+      // every time(!)
+      UTStringArray *iplist = strArrayNew();
+      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
+	// make sure we ignore any where the foward lookup failed
+	// this might mean we write a .auto file with no collectors in it,
+	// so let's hope the slave agents all do the right thing with that(!)
+	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
+	  char collectorStr[128];
+	  // <ip> <port> [<priority>]
+	  sprintf(collectorStr, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
+	  strArrayAdd(iplist, collectorStr);
+	}
+      }
+      strArraySort(iplist);
+      char *arrayStr = strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/);
+      UTStrBuf_append(buf, arrayStr);
+      strArrayFree(iplist);
+    }
+    return UTStrBuf_unwrap(buf);
+  }
 
   /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
@@ -604,8 +655,18 @@ extern "C" {
     }
     
     sf->sFlowSettings = settings;
-    sf->revisionNo++;
-    
+    char *settingsStr = sFlowSettingsString(sf, settings);
+    if(my_strequal(sf->sFlowSettings_str, settingsStr)) {
+      // no change - don't increment the revision number
+      // (which will mean that the file is not rewritten either)
+      if(settingsStr) free(settingsStr);
+    }
+    else {
+      // new config
+      if(sf->sFlowSettings_str) free(sf->sFlowSettings_str);
+      sf->sFlowSettings_str = settingsStr;
+      sf->revisionNo++;
+    }
   }
 
   /*_________________---------------------------__________________
