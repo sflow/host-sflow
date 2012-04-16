@@ -417,6 +417,63 @@ extern int debug;
   }
 
   /*_________________---------------------------__________________
+    _________________  agentAddressPriority     __________________
+    -----------------___________________________------------------
+  */
+
+  EnumIPSelectionPriority agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback)
+  {
+    EnumIPSelectionPriority ipPriority = IPSP_NONE;
+
+    switch(addr->type) {
+    case SFLADDRESSTYPE_IP_V4:
+      // start assuming it's a global ip
+      ipPriority = IPSP_IP4;
+      // then check for other possibilities
+      if(loopback) {
+	ipPriority = IPSP_LOOPBACK4;
+      }
+      else if (SFLAddress_isSelfAssigned(addr)) {
+	ipPriority = IPSP_SELFASSIGNED4;
+      }
+      else if(vlan != HSP_VLAN_ALL) {
+	ipPriority = IPSP_VLAN4;
+      }
+      break;
+
+    case SFLADDRESSTYPE_IP_V6:
+      // start by assuming it's a global IP
+      ipPriority = IPSP_IP6_SCOPE_GLOBAL;
+      // then check for other possibilities
+      
+      // now allow the other parameters to override
+      if(loopback || SFLAddress_isLoopback(addr)) {
+	ipPriority = IPSP_LOOPBACK6;
+      }
+      else if (SFLAddress_isLinkLocal(addr)) {
+	ipPriority = IPSP_IP6_SCOPE_LINK;
+      }
+      else if (SFLAddress_isUniqueLocal(addr)) {
+	ipPriority = IPSP_IP6_SCOPE_UNIQUE;
+      }
+      else if(vlan != HSP_VLAN_ALL) {
+	ipPriority = IPSP_VLAN6;
+      }
+      break;
+    default:
+      // not a v4 or v6 ip address at all
+      break;
+    }
+
+    // just make sure we can't get a multicast in here (somehow)
+    if(SFLAddress_isMulticast(addr)) {
+      ipPriority = IPSP_NONE;
+    }
+
+    return ipPriority;
+  }
+
+  /*_________________---------------------------__________________
     _________________      readConfigFile       __________________
     -----------------___________________________------------------
   */
@@ -561,53 +618,34 @@ extern int debug;
 	 // it may have been defined as agent=<device>
 	if(sp->sFlow->agentDevice) {
 	  SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
-	  if(ad && ad->ipAddr.addr) {
-	    sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	    sp->sFlow->agentIP.address.ip_v4 = ad->ipAddr;
+	  if(ad && ad->userData) {
+	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
+	    sp->sFlow->agentIP = adaptorNIO->ipAddr;
 	  }
 	}
       }
       if(sp->sFlow->agentIP.type == 0) {
-	// nae luck - try to automatically choose the first non-loopback IP address
-	// only the non-loopback devices should be listed here, unless the loopback
-	// flag was set specially to include them.  However we want to suppress
-	// self-assigned IP addresses too, and we'd rather avoid vlan-specific
-	// interfaces too if we can, so use a priority scheme...
-	
-	typedef enum { IPSP_NONE=0,
-		       IPSP_LOOPBACK,
-		       IPSP_SELFASSIGNED,
-		       IPSP_VLAN,
-		       IPSP_OK } EnumIPSelectionPriority;
-
+	// try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
+	// We already used this ranking to prioritize L3 addresses per adaptor (in the case where
+	// there are more than one) so now we are applying the same ranking globally to pick
+	// the best candidate to represent the whole agent:
 	SFLAdaptor *selectedAdaptor = NULL;
-	EnumIPSelectionPriority selectedPriority = IPSP_NONE;
-
+	EnumIPSelectionPriority ipPriority = IPSP_NONE;
+	
 	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
 	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	  if(adaptor && adaptor->ipAddr.addr) {
+	  if(adaptor && adaptor->userData) {
 	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	    u_char *ipbytes = (u_char *)&(adaptor->ipAddr.addr);
-	    EnumIPSelectionPriority ipPriority = IPSP_OK;
-	    if(adaptorNIO->loopback) {
-	      ipPriority = IPSP_LOOPBACK;
-	    }
-	    else if (ipbytes[0] == 169 &&
-		     ipbytes[1] == 254) {
-	      ipPriority = IPSP_SELFASSIGNED;
-	    }
-	    else if(adaptorNIO->vlan != HSP_VLAN_ALL) {
-	      ipPriority = IPSP_VLAN;
-	    }
-	    if(ipPriority > selectedPriority) {
+	    if(adaptorNIO->ipPriority > ipPriority) {
 	      selectedAdaptor = adaptor;
-	      selectedPriority = ipPriority;
+	      ipPriority = adaptorNIO->ipPriority;
 	    }
-	  }
+	  }	    
 	}
-	if(selectedAdaptor) {
-	  sp->sFlow->agentIP.type = SFLADDRESSTYPE_IP_V4;
-	  sp->sFlow->agentIP.address.ip_v4 = selectedAdaptor->ipAddr;
+	if(selectedAdaptor && selectedAdaptor->userData) {
+	  // crown the winner
+	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
+	  sp->sFlow->agentIP = adaptorNIO->ipAddr;
 	  sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
 	}
       }

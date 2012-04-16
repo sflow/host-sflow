@@ -130,6 +130,7 @@ extern "C" {
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;
     HSPSFlowSettings *sFlowSettings;
+    char *sFlowSettings_str;
     uint32_t revisionNo;
 
     uint32_t subAgentId;
@@ -173,9 +174,24 @@ extern "C" {
     UTStringArray *volumes;
     UTStringArray *disks;
   } HSPVMState;
+    
+  typedef enum { IPSP_NONE=0,
+		 IPSP_LOOPBACK6,
+		 IPSP_LOOPBACK4,
+		 IPSP_SELFASSIGNED4,
+		 IPSP_IP6_SCOPE_LINK,
+		 IPSP_VLAN6,
+		 IPSP_VLAN4,
+		 IPSP_IP6_SCOPE_UNIQUE,
+		 IPSP_IP6_SCOPE_GLOBAL,
+		 IPSP_IP4,
+		 IPSP_NUM_PRIORITIES,
+  } EnumIPSelectionPriority;
 
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
+    SFLAddress ipAddr;
+    uint32_t /*EnumIPSelectionPriority*/ ipPriority;
     int32_t loopback;
     int32_t bond_master;
     int32_t vlan;
@@ -277,6 +293,7 @@ extern "C" {
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
   void clearApplicationSettings(HSPSFlowSettings *settings);
+  EnumIPSelectionPriority agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
     
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"

@@ -22,7 +22,7 @@ int readMemoryCounters(SFLHost_mem_counters *mem) {
 	int gotData = NO;
 
 	kstat_ctl_t *kc;
-	kstat_t *ksp;
+	kstat_t *ksp = NULL;
 	kstat_named_t *knp;
 
 	kc = kstat_open();
