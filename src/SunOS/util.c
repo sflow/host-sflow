@@ -43,13 +43,16 @@ extern "C" {
   }
 
   int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...) {
+    int ans;
     va_list args;
     va_start(args, fmt);
     // vsnprintf will tell you what space it *would* need
     int needed = vsnprintf(NULL, 0, fmt, args);
-    UTStrBuf_need(buf, needed);
+    UTStrBuf_need(buf, needed+1);
     va_start(args, fmt);
-    return vsnprintf(buf->buf + buf->len, needed, fmt, args);
+    ans =vsnprintf(buf->buf + buf->len, needed+1, fmt, args);
+    buf->len += needed;
+    return ans;
   }
 
   char *UTStrBuf_unwrap(UTStrBuf *buf) {
