@@ -291,37 +291,10 @@ extern "C" {
 
     // revision appears both at the beginning and at the end
     fprintf(sp->f_out, "rev_start=%u\n", sp->sFlow->revisionNo);
-
-    HSPSFlowSettings *settings = sp->sFlow->sFlowSettings;
-    if(settings) {
-      fprintf(sp->f_out, "sampling=%u\n", settings->samplingRate);
-      fprintf(sp->f_out, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
-      fprintf(sp->f_out, "polling=%u\n", settings->pollingInterval);
-      // make sure the application specific ones always come after the general ones - to simplify the override logic there
-      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
-	if(appSettings->got_sampling_n) fprintf(sp->f_out, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
-	if(appSettings->got_polling_secs) fprintf(sp->f_out, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
-      }
-      char ipbuf[51];
-      fprintf(sp->f_out, "agentIP=%s\n", printIP(&sp->sFlow->agentIP, ipbuf, 50));
-      if(sp->sFlow->agentDevice) {
-	fprintf(sp->f_out, "agent=%s\n", sp->sFlow->agentDevice);
-      }
-      fprintf(sp->f_out, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
-      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
-	// <ip> <port> [<priority>]
-	fprintf(sp->f_out, "collector=%s %u\n", printIP(&collector->ipAddr, ipbuf, 50), collector->udpPort);
-      }
-    }
-
+    if(sp->sFlow && sp->sFlow->sFlowSettings_str) fputs(sp->sFlow->sFlowSettings_str, sp->f_out);
     // repeat the revision number. The reader knows that if the revison number
     // has not changed under his feet then he has a consistent config.
     fprintf(sp->f_out, "rev_end=%u\n", sp->sFlow->revisionNo);
-
-   char uuidStr[51];
-   printUUID((u_char *)sp->uuid, (u_char *)uuidStr, 50);
-   fprintf(sp->f_out, "uuid=%s\n", uuidStr); 
-
     fflush(sp->f_out);
     // chop off anything that may be lingering from before
     truncateOpenFile(sp->f_out);
