@@ -11,6 +11,56 @@ extern "C" {
 
   int debug = 0;
 
+  /*________________---------------------------__________________
+    ________________       UTStrBuf            __________________
+    ----------------___________________________------------------
+  */
+
+  UTStrBuf *UTStrBuf_new(size_t cap) {
+    UTStrBuf *buf = (UTStrBuf *)my_calloc(sizeof(UTStrBuf));
+    buf->buf = my_calloc(cap);
+    buf->cap = cap;
+    return buf;
+  }
+
+  void UTStrBuf_grow(UTStrBuf *buf) {
+    buf->cap <<= 2;
+    char *newbuf = (char *)my_calloc(buf->cap);
+    memcpy(newbuf, buf->buf, buf->len);
+    my_free(buf->buf);
+    buf->buf = newbuf;
+  }
+
+  static void UTStrBuf_need(UTStrBuf *buf, size_t len) {
+    while((buf->len + len + 1) >= buf->cap) UTStrBuf_grow(buf);
+  }
+
+  void UTStrBuf_append(UTStrBuf *buf, char *str) {
+    int len = my_strlen(str);
+    UTStrBuf_need(buf, len);
+    memcpy(buf->buf + buf->len, str, len);
+    buf->len += len;
+  }
+
+  int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...) {
+    int ans;
+    va_list args;
+    va_start(args, fmt);
+    // vsnprintf will tell you what space it *would* need
+    int needed = vsnprintf(NULL, 0, fmt, args);
+    UTStrBuf_need(buf, needed+1);
+    va_start(args, fmt);
+    ans =vsnprintf(buf->buf + buf->len, needed+1, fmt, args);
+    buf->len += needed;
+    return ans;
+  }
+
+  char *UTStrBuf_unwrap(UTStrBuf *buf) {
+    char *ans = buf->buf;
+    my_free(buf);
+    return ans;
+  }
+
   /*_________________---------------------------__________________
     _________________        logging            __________________
     -----------------___________________________------------------
@@ -345,27 +395,20 @@ extern "C" {
     ar->sorted = YES;
   }
 
-   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end) {
-    size_t strbufLen = 256;
-    char *strbuf = NULL;
-    FILE *f_strbuf;
-    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
-      myLog(LOG_ERR, "error in open_memstream: %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if(start) fputs(start, f_strbuf);
+  char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end) {
+    UTStrBuf *buf = UTStrBuf_new(256);
+    if(start) UTStrBuf_append(buf, start);
     for(uint32_t i = 0; i < ar->n; i++) {
-      if(i && delim) fputs(delim, f_strbuf);
+      if(i && delim) UTStrBuf_append(buf, delim);
       char *str = ar->strs[i];
       if(str) {
-	if(quote) fputs(quote, f_strbuf);
-	fputs(str, f_strbuf);
-	if(quote) fputs(quote, f_strbuf);
+	if(quote) UTStrBuf_append(buf, quote);
+	UTStrBuf_append(buf, str);
+	if(quote) UTStrBuf_append(buf, quote);
       }
     }
-    if(end) fputs(end, f_strbuf);
-    fclose(f_strbuf);
-    return strbuf;
+    if(end) UTStrBuf_append(buf, end);
+    return UTStrBuf_unwrap(buf);
   }
 
    int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2) {

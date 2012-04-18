@@ -157,7 +157,8 @@ extern "C" {
     uint32_t maskBits;
   } HSPCIDR;
 
-#define HSP_SETTING_UNDEFINED -1
+#define SFL_UNDEF_COUNTER(c) c=(typeof(c))-1
+#define SFL_UNDEF_GAUGE(c) c=0
 
   typedef struct _HSPApplicationSettings {
     struct _HSPApplicationSettings *nxt;
