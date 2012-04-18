@@ -10,7 +10,7 @@ extern "C" {
 #include "arpa/nameser.h"
 #include "resolv.h"
 
-extern int debug;
+  extern int debug;
 
 #define HSF_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
 #define HSF_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
@@ -21,7 +21,7 @@ extern int debug;
   */
 
   static
- int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback)
+  int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback)
   {
     u_char buf[PACKETSZ];
     if(debug) myLog(LOG_INFO,"=== res_search(%s, C_IN, %u) ===", dname, rtype);

@@ -12,7 +12,7 @@ extern "C" {
 #define HSP_MAX_CONFIG_DEPTH 3
 #define HSP_SEPARATORS " \t\r\n=;"
 
-extern int debug;
+  extern int debug;
   
   typedef enum { HSPTOKENTYPE_UNDEFINED=0,
 		 HSPTOKENTYPE_SYNTAX,
@@ -504,103 +504,103 @@ extern int debug;
 	}
       }
       else switch(level[depth]) {
-      case HSPOBJ_HSP:
-	// must start by opening an sFlow object
-	if((tok = expectToken(sp, tok, HSPTOKEN_SFLOW)) == NULL) return NO;
-	if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	newSFlow(sp);
-	level[++depth] = HSPOBJ_SFLOW;
-	break;
-
-      case HSPOBJ_SFLOW:
-
-	switch(tok->stok) {
-	case HSPTOKEN_LOOPBACK:
-	  if((tok = expectLoopback(sp, tok)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_DNSSD:
-	  if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_DNSSD_DOMAIN:
-	  if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_COLLECTOR:
+	case HSPOBJ_HSP:
+	  // must start by opening an sFlow object
+	  if((tok = expectToken(sp, tok, HSPTOKEN_SFLOW)) == NULL) return NO;
 	  if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	  newCollector(sp->sFlow->sFlowSettings_file);
-	  level[++depth] = HSPOBJ_COLLECTOR;
+	  newSFlow(sp);
+	  level[++depth] = HSPOBJ_SFLOW;
 	  break;
-	case HSPTOKEN_SAMPLING:
-	case HSPTOKEN_PACKETSAMPLINGRATE:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_POLLING:
-	case HSPTOKEN_COUNTERPOLLINGINTERVAL:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_AGENTIP:
-	  if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_AGENT:
-	  if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_SUBAGENTID:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_UUID:
-	  if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_HEADERBYTES:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_ULOGGROUP:
-	  if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
-	  break;
-	case HSPTOKEN_ULOGPROBABILITY:
-	  if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
-	  break;
-	default:
-	  // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
-	  if(tok->str && strncasecmp(tok->str, "sampling.", 9) == 0) {
-	    char *app = tok->str + 9;
-	    uint32_t sampling_n=0;
-	    if((tok = expectInteger32(sp, tok, &sampling_n, 0, 65535)) == NULL) return NO;
-	    setApplicationSampling(sp->sFlow->sFlowSettings_file, app, sampling_n);
-	  }
-	  else if(tok->str && strncasecmp(tok->str, "polling.", 8) == 0) {
-	    char *app = tok->str + 8;
-	    uint32_t polling_secs=0;
-	    if((tok = expectInteger32(sp, tok, &polling_secs, 0, 300)) == NULL) return NO;
-	    setApplicationPolling(sp->sFlow->sFlowSettings_file, app, polling_secs);
-	  }
-	  else {
-	    parseError(sp, tok, "unexpected sFlow setting", "");
-	    return NO;
-	  }
-	  break;
-	}
-	break;
-	
-      case HSPOBJ_COLLECTOR:
-	{
-	  HSPCollector *col = sp->sFlow->sFlowSettings_file->collectors;
+
+	case HSPOBJ_SFLOW:
+
 	  switch(tok->stok) {
-	  case HSPTOKEN_IP:
-	    if((tok = expectIP(sp, tok, &col->ipAddr, (struct sockaddr *)&col->sendSocketAddr)) == NULL) return NO;
+	  case HSPTOKEN_LOOPBACK:
+	    if((tok = expectLoopback(sp, tok)) == NULL) return NO;
 	    break;
-	  case HSPTOKEN_UDPPORT:
-	    if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
+	  case HSPTOKEN_DNSSD:
+	    if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_DNSSD_DOMAIN:
+	    if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_COLLECTOR:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    newCollector(sp->sFlow->sFlowSettings_file);
+	    level[++depth] = HSPOBJ_COLLECTOR;
+	    break;
+	  case HSPTOKEN_SAMPLING:
+	  case HSPTOKEN_PACKETSAMPLINGRATE:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_POLLING:
+	  case HSPTOKEN_COUNTERPOLLINGINTERVAL:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_AGENTIP:
+	    if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_AGENT:
+	    if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_SUBAGENTID:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_UUID:
+	    if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_HEADERBYTES:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_ULOGGROUP:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_ULOGPROBABILITY:
+	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
 	    break;
 	  default:
-	    parseError(sp, tok, "unexpected collector setting", "");
-	    return NO;
+	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
+	    if(tok->str && strncasecmp(tok->str, "sampling.", 9) == 0) {
+	      char *app = tok->str + 9;
+	      uint32_t sampling_n=0;
+	      if((tok = expectInteger32(sp, tok, &sampling_n, 0, 65535)) == NULL) return NO;
+	      setApplicationSampling(sp->sFlow->sFlowSettings_file, app, sampling_n);
+	    }
+	    else if(tok->str && strncasecmp(tok->str, "polling.", 8) == 0) {
+	      char *app = tok->str + 8;
+	      uint32_t polling_secs=0;
+	      if((tok = expectInteger32(sp, tok, &polling_secs, 0, 300)) == NULL) return NO;
+	      setApplicationPolling(sp->sFlow->sFlowSettings_file, app, polling_secs);
+	    }
+	    else {
+	      parseError(sp, tok, "unexpected sFlow setting", "");
+	      return NO;
+	    }
 	    break;
 	  }
-	}
-	break;
+	  break;
 	
-      default:
-	parseError(sp, tok, "unexpected state", "");
-      }
+	case HSPOBJ_COLLECTOR:
+	  {
+	    HSPCollector *col = sp->sFlow->sFlowSettings_file->collectors;
+	    switch(tok->stok) {
+	    case HSPTOKEN_IP:
+	      if((tok = expectIP(sp, tok, &col->ipAddr, (struct sockaddr *)&col->sendSocketAddr)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_UDPPORT:
+	      if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
+	      break;
+	    default:
+	      parseError(sp, tok, "unexpected collector setting", "");
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	
+	default:
+	  parseError(sp, tok, "unexpected state", "");
+	}
     }
 
     // OK we consumed all the tokens, but we still need to run some sanity checks to make sure
@@ -615,7 +615,7 @@ extern int debug;
     else {
       //////////////////////// sFlow /////////////////////////
       if(sp->sFlow->agentIP.type == 0) {
-	 // it may have been defined as agent=<device>
+	// it may have been defined as agent=<device>
 	if(sp->sFlow->agentDevice) {
 	  SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
 	  if(ad && ad->userData) {
@@ -679,4 +679,3 @@ extern int debug;
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

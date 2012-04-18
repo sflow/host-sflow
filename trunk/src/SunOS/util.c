@@ -406,8 +406,7 @@ extern "C" {
     for(int i = 0; i < ar1->n; i++) {
       char *s1 = ar1->strs[i];
       char *s2 = ar2->strs[i];
-      if((s1 != s2)
-	 && (s1 == NULL || s2 == NULL || strcmp(s1, s2))) return NO;
+      if(!my_strequal(s1, s2)) return NO;
     }
     return YES;
   }
@@ -419,9 +418,7 @@ extern "C" {
     //}
     //else
     for(int i = 0; i < ar->n; i++) {
-      char *instr = ar->strs[i];
-      if(str == instr) return i;
-      if(str && instr && !strcmp(str, instr)) return i;
+      if(my_strequal(str, ar->strs[i])) return i;
     }
     return -1;
   } 
@@ -582,6 +579,11 @@ extern "C" {
     buf[b] = '\0';
 
     return b;
+  }
+
+  int uuid_empty(const u_char *uuid) {
+    for(int ii = 0; ii < 16; ii++) if(uuid[ii]) return NO;
+    return YES;
   }
 
   /*_________________---------------------------__________________
@@ -774,7 +776,7 @@ extern "C" {
   {
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
       SFLAdaptor *ad = adList->adaptors[i];
-      if(ad && ad->deviceName && !strcmp(ad->deviceName, dev)) {
+      if(ad && my_strequal(ad->deviceName, dev)) {
 	// return the one that was already there
 	return ad;
       }
@@ -822,6 +824,7 @@ extern "C" {
     }
     return YES;
   }
+
   /*________________---------------------------__________________
     ________________      SFLAddress utils     __________________
     ----------------___________________________------------------
@@ -1021,7 +1024,7 @@ extern "C" {
 
     return YES;
   }
-    
+
 #if defined(__cplusplus)
 }  /* extern "C" */
 #endif
