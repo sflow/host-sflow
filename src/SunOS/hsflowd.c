@@ -16,6 +16,7 @@ extern "C" {
   int exitStatus = EXIT_SUCCESS;
   extern int debug;
   FILE *f_crash;
+  FILE *f_uuid;
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -96,13 +97,11 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
-    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     if(readHidCounters(sp,
 		       &hidElem.counterBlock.host_hid,
-		       hnamebuf,
+		       sp->hostname,
 		       SFL_MAX_HOSTNAME_CHARS,
-		       osrelbuf,
+		       sp->os_release,
 		       SFL_MAX_OSRELEASE_CHARS)) {
       SFLADD_ELEMENT(cs, &hidElem);
     }
@@ -407,7 +406,7 @@ extern "C" {
     
     // add a <physicalEntity> poller to represent the whole physical host
     SFLDataSource_instance dsi;
-  // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
+    // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
     SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
     sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
     sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
@@ -433,6 +432,7 @@ extern "C" {
     sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
     sp->vmStoreFile = HSP_DEFAULT_VMSTORE_FILE;
     sp->crashFile = HSP_DEFAULT_CRASH_FILE;
+    sp->uuidFile = HSP_DEFAULT_UUID_FILE;
     sp->dropPriv = YES;
   }
 
@@ -451,10 +451,10 @@ extern "C" {
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
         -u UUID:  specify UUID as unique ID for this host\n\
   -f CONFIGFile:  specify config file (default is "HSP_DEFAULT_CONFIGFILE")\n\n");
-  fprintf(stderr, "=============== More Information ============================================\n");
-  fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
-  fprintf(stderr, "| sFlowTrend (FREE)     - http://www.inmon.com/products/sFlowTrend.php      |\n");
-  fprintf(stderr, "=============================================================================\n");
+    fprintf(stderr, "=============== More Information ============================================\n");
+    fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
+    fprintf(stderr, "| sFlowTrend (FREE)     - http://www.inmon.com/products/sFlowTrend.php      |\n");
+    fprintf(stderr, "=============================================================================\n");
 
     exit(EXIT_FAILURE);
   }
@@ -559,6 +559,9 @@ extern "C" {
     UTStrBuf *buf = UTStrBuf_new(1024);
 
     if(settings) {
+      if(sf->myHSP && my_strlen(sf->myHSP->hostname)) {
+	UTStrBuf_printf(buf, "hostname=%s\n", sf->myHSP->hostname);
+      }
       UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
       UTStrBuf_printf(buf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
       UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
@@ -596,6 +599,7 @@ extern "C" {
       strArraySort(iplist);
       char *arrayStr = strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/);
       UTStrBuf_append(buf, arrayStr);
+      my_free(arrayStr);
       strArrayFree(iplist);
     }
     return UTStrBuf_unwrap(buf);
@@ -632,11 +636,11 @@ extern "C" {
     if(my_strequal(sf->sFlowSettings_str, settingsStr)) {
       // no change - don't increment the revision number
       // (which will mean that the file is not rewritten either)
-      if(settingsStr) free(settingsStr);
+      if(settingsStr) my_free(settingsStr);
     }
     else {
       // new config
-      if(sf->sFlowSettings_str) free(sf->sFlowSettings_str);
+      if(sf->sFlowSettings_str) my_free(sf->sFlowSettings_str);
       sf->sFlowSettings_str = settingsStr;
       sf->revisionNo++;
     }
@@ -985,6 +989,25 @@ extern "C" {
 	exit(EXIT_FAILURE);
       }
     }
+
+    // open a file we can use to store a persistent UUID (if we have one)
+    if(uuid_empty(sp->uuid)==NO && sp->uuidFile) {
+      if((f_uuid = fopen(sp->uuidFile, "w")) == NULL) {
+        myLog(LOG_ERR, "cannot open output file %s : %s", sp->uuidFile, strerror(errno));
+        exit(EXIT_FAILURE);
+      }
+      else {
+        char uuidStr[51];
+        printUUID((u_char *)sp->uuid, (u_char *)uuidStr, 50);
+	fprintf(f_uuid, "uuid=%s\n", uuidStr);
+	
+        fflush(f_uuid);
+	if(fclose(f_uuid) == -1) {
+	  myLog(LOG_ERR,"Could not close uuid file %s : %s", f_uuid, strerror(errno));
+	  exit(EXIT_FAILURE);
+	}
+      }
+    }
     
     myLog(LOG_INFO, "started");
     
@@ -1002,6 +1025,10 @@ extern "C" {
       switch(sp->state) {
 	
       case HSPSTATE_READCONFIG:
+	// On Solaris it is important to readInterfaces at least once before
+	// we drop root prviileges (so we can use dlpi to get the MAC addresses),
+	// We are still root at this point, but be careful if making changes here,
+	// e.g. to support the agent.cidr option.
 	if(readInterfaces(sp) == 0 || HSPReadConfigFile(sp) == NO) {
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
@@ -1154,4 +1181,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

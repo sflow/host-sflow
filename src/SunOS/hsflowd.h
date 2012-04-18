@@ -41,10 +41,10 @@ extern "C" {
 #include "sflow_api.h"
 
 
-#define ADD_TO_LIST(linkedlist, obj) \
-  do { \
-    obj->nxt = linkedlist; \
-    linkedlist = obj; \
+#define ADD_TO_LIST(linkedlist, obj)		\
+  do {						\
+    obj->nxt = linkedlist;			\
+    linkedlist = obj;				\
   } while(0)
 
 #define HSP_DAEMON_NAME "hsflowd"
@@ -53,8 +53,9 @@ extern "C" {
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
 #define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
 #define HSP_DEFAULT_CRASH_FILE "/etc/hsflowd.crash"
+#define HSP_DEFAULT_UUID_FILE "/etc/hsflowd.uuid"
 
-/* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
+  /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
 #define HSP_DEFAULT_SUBAGENTID 100000
 #define HSP_MAX_SUBAGENTID 199999
@@ -68,20 +69,20 @@ extern "C" {
 #define HSP_REFRESH_VMS 60
 #define HSP_REFRESH_ADAPTORS 180
 
-// the limit we will request before calling mlockall()
-// calling res_search() seems to allocate about 11MB
-// (not sure why), so set the limit accordingly.
+  // the limit we will request before calling mlockall()
+  // calling res_search() seems to allocate about 11MB
+  // (not sure why), so set the limit accordingly.
 #define HSP_RLIMIT_MEMLOCK (1024 * 1024 * 15)
-// set to 0 to disable the memlock feature
-// #define HSP_RLIMIT_MEMLOCK 0
+  // set to 0 to disable the memlock feature
+  // #define HSP_RLIMIT_MEMLOCK 0
 
   // only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
 
-// just assume the sector size is 512 bytes
+  // just assume the sector size is 512 bytes
 #define HSP_SECTOR_BYTES 512
 
-// upper limit on number of VIFs per VM
+  // upper limit on number of VIFs per VM
 #define HSP_MAX_VIFS 64
 
   // forward declarations
@@ -95,7 +96,8 @@ extern "C" {
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
 
-#define HSP_SETTING_UNDEFINED -1
+#define SFL_UNDEF_COUNTER(c) c=(typeof(c))-1
+#define SFL_UNDEF_GAUGE(c) c=0
 
   typedef struct _HSPApplicationSettings {
     struct _HSPApplicationSettings *nxt;
@@ -225,7 +227,10 @@ extern "C" {
     // crashdump
     char *crashFile;
     // Identity
+    char hostname[SFL_MAX_HOSTNAME_CHARS+1];
+    char os_release[SFL_MAX_OSRELEASE_CHARS+1];
     char uuid[16];
+    char *uuidFile;
     // interfaces and MACs
     SFLAdaptorList *adaptorList;
     // HSPAdaptorNIOList adaptorNIOList;
@@ -317,4 +322,3 @@ extern "C" {
 #endif
 
 #endif /* HSFLOWD_H */
-
