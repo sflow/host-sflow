@@ -1528,34 +1528,32 @@ extern "C" {
 
   char *sFlowSettingsString(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
-    size_t strbufLen = 1024;
-    char *strbuf = NULL;
-    FILE *f_strbuf;
-    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
-      myLog(LOG_ERR, "error in open_memstream : %s", strerror(errno));
-      return NULL;
-    }
+    UTStrBuf *buf = UTStrBuf_new(1024);
 
     if(settings) {
-      fprintf(f_strbuf, "hostname=%s\n", sf->myHSP->hostname);
-      fprintf(f_strbuf, "sampling=%u\n", settings->samplingRate);
-      fprintf(f_strbuf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
-      fprintf(f_strbuf, "polling=%u\n", settings->pollingInterval);
+      UTStrBuf_printf(buf, "hostname=%s\n", sf->myHSP->hostname);
+      UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
+      UTStrBuf_printf(buf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
+      UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
       // make sure the application specific ones always come after the general ones - to simplify the override logic there
       for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
-	if(appSettings->got_sampling_n) fprintf(f_strbuf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
-	if(appSettings->got_polling_secs) fprintf(f_strbuf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+	if(appSettings->got_sampling_n) {
+	  UTStrBuf_printf(buf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	}
+	if(appSettings->got_polling_secs) {
+	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+	}
       }
       char ipbuf[51];
-      fprintf(f_strbuf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
+      UTStrBuf_printf(buf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
       if(sf->agentDevice) {
-	fprintf(f_strbuf, "agent=%s\n", sf->agentDevice);
+	UTStrBuf_printf(buf, "agent=%s\n", sf->agentDevice);
       }
-      fprintf(f_strbuf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+      UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
 
       // jsonPort always comes from local config file
       if(sf->sFlowSettings_file && sf->sFlowSettings_file->jsonPort != 0) {
-	fprintf(f_strbuf, "jsonPort=%u\n", sf->sFlowSettings_file->jsonPort);
+	UTStrBuf_printf(buf, "jsonPort=%u\n", sf->sFlowSettings_file->jsonPort);
       }
 
       // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
@@ -1574,12 +1572,13 @@ extern "C" {
 	}
       }
       strArraySort(iplist);
-      fprintf(f_strbuf, "%s", strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/));
+      char *arrayStr = strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/);
+      UTStrBuf_printf(buf, "%s", arrayStr);
+      my_free(arrayStr);
       strArrayFree(iplist);
     }
-    fclose(f_strbuf);
-    // this string will be allocated on the heap with malloc (outside of my_calloc etc.)
-    return strbuf;
+
+    return UTStrBuf_unwrap(buf);
   }
 
   /*_________________---------------------------__________________
@@ -1613,11 +1612,11 @@ extern "C" {
     if(my_strequal(sf->sFlowSettings_str, settingsStr)) {
       // no change - don't increment the revision number
       // (which will mean that the file is not rewritten either)
-      if(settingsStr) free(settingsStr);
+      if(settingsStr) my_free(settingsStr);
     }
     else {
       // new config
-      if(sf->sFlowSettings_str) free(sf->sFlowSettings_str);
+      if(sf->sFlowSettings_str) my_free(sf->sFlowSettings_str);
       sf->sFlowSettings_str = settingsStr;
       sf->revisionNo++;
     }

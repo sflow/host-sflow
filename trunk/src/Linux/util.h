@@ -107,6 +107,19 @@ extern "C" {
   char *trimWhitespace(char *str);
   void setStr(char **fieldp, char *str);
 
+  // string buffer
+  typedef struct _UTStrBuf {
+    char *buf;
+    size_t len;
+    size_t cap;
+  } UTStrBuf;
+
+  UTStrBuf *UTStrBuf_new(size_t cap);
+  void UTStrBuf_grow(UTStrBuf *buf);
+  void UTStrBuf_append(UTStrBuf *buf, char *str);
+  int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...);
+  char *UTStrBuf_unwrap(UTStrBuf *buf);
+
   // string array
   typedef struct _UTStringArray {
     char **strs;
@@ -126,9 +139,6 @@ extern "C" {
   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end);
   int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
   int strArrayIndexOf(UTStringArray *ar, char *str);
-
-  // string utils
-  char *trimWhitespace(char *str);
 
   // sleep
   void my_usleep(uint32_t microseconds);
