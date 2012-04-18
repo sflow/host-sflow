@@ -228,6 +228,8 @@ extern "C" {
     // crashdump
     char *crashFile;
     // Identity
+    char hostname[SFL_MAX_HOSTNAME_CHARS+1];
+    char os_release[SFL_MAX_OSRELEASE_CHARS+1];
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;

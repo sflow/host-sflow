@@ -29,7 +29,7 @@ extern "C" {
 
   static int agentCB_free(void *magic, SFLAgent *agent, void *obj)
   {
-    free(obj);
+    my_free(obj);
     return 0;
   }
 
@@ -97,13 +97,11 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
-    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     if(readHidCounters(sp,
 		       &hidElem.counterBlock.host_hid,
-		       hnamebuf,
+		       sp->hostname,
 		       SFL_MAX_HOSTNAME_CHARS,
-		       osrelbuf,
+		       sp->os_release,
 		       SFL_MAX_OSRELEASE_CHARS)) {
       SFLADD_ELEMENT(cs, &hidElem);
     }
@@ -524,29 +522,30 @@ signal_handler(int sig, siginfo_t *info, void *secret)
 
   char *sFlowSettingsString(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
-    size_t strbufLen = 1024;
-    char *strbuf = NULL;
-    FILE *f_strbuf;
-    if((f_strbuf = open_memstream(&strbuf, &strbufLen)) == NULL) {
-      myLog(LOG_ERR, "error in open_memstream : %s", strerror(errno));
-      return NULL;
-    }
-
+    UTStrBuf *buf = UTStrBuf_new(1024);
+    
     if(settings) {
-      fprintf(f_strbuf, "sampling=%u\n", settings->samplingRate);
-      fprintf(f_strbuf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
-      fprintf(f_strbuf, "polling=%u\n", settings->pollingInterval);
+      if(sf->myHSP && my_strlen(sf->myHSP->hostname)) {
+	UTStrBuf_printf(buf, "hostname=%s\n", sf->myHSP->hostname);
+      }
+      UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
+      UTStrBuf_printf(buf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
+      UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
       // make sure the application specific ones always come after the general ones - to simplify the override logic there
       for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
-	if(appSettings->got_sampling_n) fprintf(f_strbuf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
-	if(appSettings->got_polling_secs) fprintf(f_strbuf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+	if(appSettings->got_sampling_n) {
+	  UTStrBuf_printf(buf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	}
+	if(appSettings->got_polling_secs) {
+	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+	}
       }
       char ipbuf[51];
-      fprintf(f_strbuf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
+      UTStrBuf_printf(buf, "agentIP=%s\n", printIP(&sf->agentIP, ipbuf, 50));
       if(sf->agentDevice) {
-	fprintf(f_strbuf, "agent=%s\n", sf->agentDevice);
+	UTStrBuf_printf(buf, "agent=%s\n", sf->agentDevice);
       }
-      fprintf(f_strbuf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+      UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
 
       // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
       // another step here to make sure they are sorted.  Otherwise we think the config has changed
@@ -564,12 +563,12 @@ signal_handler(int sig, siginfo_t *info, void *secret)
 	}
       }
       strArraySort(iplist);
-      fprintf(f_strbuf, "%s", strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/));
+      char *arrayStr = strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/);
+      UTStrBuf_printf(buf, "%s", arrayStr);
+      my_free(arrayStr);
       strArrayFree(iplist);
     }
-    fclose(f_strbuf);
-    // this string will be allocated on the heap with malloc (outside of my_calloc etc.)
-    return strbuf;
+    return UTStrBuf_unwrap(buf);
   }
 
   /*_________________---------------------------__________________
