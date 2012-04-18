@@ -83,10 +83,22 @@ extern "C" {
 #define DYNAMIC_LOCAL(VAR) VAR
 #define SEMLOCK_DO(_sem) for(int DYNAMIC_LOCAL(_ctrl)=1; DYNAMIC_LOCAL(_ctrl) && lockOrDie(_sem); DYNAMIC_LOCAL(_ctrl)=0, releaseOrDie(_sem))
 
-#define MEMSTREAM 1
-#ifdef MEMSTREAM
-  FILE *open_memstream(char **cp, size_t *lenp);
-#endif
+  // string utils
+  char *trimWhitespace(char *str);
+  void setStr(char **fieldp, char *str);
+
+  // string buffer
+  typedef struct _UTStrBuf {
+    char *buf;
+    size_t len;
+    size_t cap;
+  } UTStrBuf;
+
+  UTStrBuf *UTStrBuf_new(size_t cap);
+  void UTStrBuf_grow(UTStrBuf *buf);
+  void UTStrBuf_append(UTStrBuf *buf, char *str);
+  int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...);
+  char *UTStrBuf_unwrap(UTStrBuf *buf);
 
   // string array
   typedef struct _UTStringArray {
