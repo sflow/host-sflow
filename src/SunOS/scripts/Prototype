@@ -1,5 +1,5 @@
 i pkginfo
-i checkinstall
+i preinstall
 i postinstall
 f none /etc/hsflowd.conf 0644 root root
 f none /usr/sbin/hsflowd 0755 root root

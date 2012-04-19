@@ -1,0 +1,13 @@
+#!/bin/bash
+
+CHROOTDIR="$BASEDIR"
+DAEMON="hsflowd"
+CONF_F="${BASEDIR}/etc/${DAEMON}.conf"
+
+${BASEDIR}/usr/sbin/chroot ${CHROOTDIR} /usr/sbin/svcadm disable "$DAEMON"
+
+if [ -f "$CONF_F" ]; then
+	$BASEDIR/bin/mv -f "$CONF_F" "${CONF_F}.old";
+fi
+
+exit 0
