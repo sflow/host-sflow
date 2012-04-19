@@ -103,7 +103,9 @@ extern "C" {
 	  if (!strncmp(ksp->ks_name, devName, KSNAME_BUFFER_SIZE) && strcmp(ksp->ks_name, "lo0")) {
 	    strncpy(ifr.ifr_name, devName, strlen(devName));
 	    if (0 != ioctl(fd, SIOCGIFFLAGS, &ifr)) {
-	      myLog(LOG_ERR, "device %s Get SIOCGIFFLAGS failed : %s", devName, strerror(errno));
+	      // this might happen every time - e.g. for fcip1 - so only log it in debug mode.
+	      // We'll just skip this device.
+	      if(debug) myLog(LOG_INFO, "device %s Get SIOCGIFFLAGS failed : %s", devName, strerror(errno));
 	    } else {
 	      up = (ifr.ifr_flags & IFF_UP) ? 1 : 0;
 	      loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? 1: 0;
