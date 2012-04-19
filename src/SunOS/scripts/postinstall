@@ -1,15 +1,17 @@
 #!/usr/bin/sh
 
-CHROOTDIR="$BASEDIR"
+BASE_D="${BASEDIR}"
+if [ -z "${BASE_D}" ] ; then BASE_D="/"; fi
+CHROOT_D="${BASE_D}"
 DAEMON="hsflowd"
-CONF_F="${BASEDIR}/etc/${DAEMON}.conf"
-MANI_F="${BASEDIR}/var/svc/manifest/site/${DAEMON}.xml"
+CONF_F="${BASE_D}/etc/${DAEMON}.conf"
+MANI_F="${BASE_D}/var/svc/manifest/site/${DAEMON}.xml"
 
 if [ -f "${CONF_F}.old" ]; then
-	$BASEDIR/bin/mv "${CONF_F}.old" "$CONF_F";
+	$BASE_D/bin/mv "${CONF_F}.old" "${CONF_F}";
 fi 
 
-${BASEDIR}/usr/sbin/chroot ${CHROOTDIR} /usr/sbin/svccfg import "$MANI_F"
-${BASEDIR}/usr/sbin/chroot ${CHROOTDIR} /usr/sbin/svcadm enable "$DAEMON"
+${BASE_D}/usr/sbin/chroot ${CHROOT_D} /usr/sbin/svccfg import "${MANI_F}"
+${BASE_D}/usr/sbin/chroot ${CHROOT_D} /usr/sbin/svcadm enable "${DAEMON}"
 
 exit 0
