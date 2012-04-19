@@ -9,7 +9,7 @@ root> gmake install
 You may find you have to add /usr/ccs/bin and /usr/sfw/bin to
 your $PATH before gmake will run,  and you may have to run:
 
-root> cd /lib; ln -s libdlpi.so.1 libdlpi.so
+root> ln -s /lib/libdlpi.so.1 /usr/lib/libdlpi.so
 
 before it will link the dlpi library sucessfully.
 
