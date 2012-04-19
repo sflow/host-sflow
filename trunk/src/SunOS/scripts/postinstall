@@ -1,13 +1,15 @@
 #!/bin/bash
 
-CONF_D=/etc
-MANI_D=/var/svc/manifest/site
+CHROOTDIR="$BASEDIR"
+DAEMON="hsflowd"
+CONF_F="${BASEDIR}/etc/${DAEMON}.conf"
+MANI_F="${BASEDIR}/var/svc/manifest/site/${DAEMON}.xml"
 
-if [ -e $CONF_D/hsflowd.conf.pkg.old ]; then
-	mv $CONF_D/hsflowd.conf.pkg.old $CONF_D/hsflowd.conf
+if [ -f "${CONF_F}.old" ]; then
+	$BASEDIR/bin/mv "${CONF_F}.old" "$CONF_F";
 fi 
 
-/usr/sbin/svccfg import $MANI_D/hsflowd.xml
-/usr/sbin/svcadm enable hsflowd
+${BASEDIR}/usr/sbin/chroot ${CHROOTDIR} /usr/sbin/svccfg import "$MANI_F"
+${BASEDIR}/usr/sbin/chroot ${CHROOTDIR} /usr/sbin/svcadm enable "$DAEMON"
 
 exit 0
