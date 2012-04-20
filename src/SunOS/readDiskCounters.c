@@ -156,6 +156,8 @@ extern "C" {
       dsk->bytes_read = sp->diskIO.bytes_read;
       // bytes_written
       dsk->bytes_written = sp->diskIO.bytes_written;
+
+      fclose(mounts);
     }	
 
     kstat_close(kc);
