@@ -1,0 +1,9 @@
+#!/bin/bash
+while [ 1 == 1 ]; do
+    sleep 0.1;
+    echo '{"flow_sample":{"app_name":"example.service","client":true,"sampling_rate":100,"app_operation":{"operation":"task.start","attributes":"id=123&user=root","status_descr":"OK","status":0,"req_bytes":43,"resp_bytes":234,"uS":2000},"app_initiator":{"actor":"123"},"app_target":{"actor":"231"},"app_parent_context":{"application":"my_parent_app","operation":"my_parent_op", "attributes":"my_parent_attrib=1"}, "extended_socket_ipv6":{"protocol":6,"local_ip":"fec0::1:c:2908:3350","remote_ip":"fec0::1:20c:29ff:fe44:9bad","local_port":123,"remote_port":43032}}}' | nc -u -w1 localhost 36343;
+    sleep 0.1;
+    echo "{\"counter_sample\":{\"app_name\":\"rocks.mgr\",\"app_operations\":{\"success\":$N,\"timeout\":$N,\"unauthorized\":$N},\"app_resources\":{\"user_time\":$N,\"mem_used\":600000,\"mem_max\":1200000},\"app_workers\":{\"workers_active\":1,\"workers_idle\":2,\"workers_max\":8}}}" | nc -u -w1 localhost 36343;
+    let N=N+1;
+    echo "N=$N";
+done
