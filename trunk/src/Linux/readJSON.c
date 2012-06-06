@@ -466,13 +466,13 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 			  application,
 			  effective_sampling_n,
 			  as_client ? (as_client->valueint == cJSON_True) : NO,
-			  operation->valuestring,
-			  attributes->valuestring,
-			  status_descr->valuestring,
+			  operation ? operation->valuestring : NULL,
+			  attributes ? attributes->valuestring : NULL,
+			  status_descr ? status_descr->valuestring : NULL,
 			  status,
-			  req_bytes->valueint, // valuedouble?
-			  resp_bytes->valueint, // valuedouble?
-			  uS->valueint,
+			  req_bytes ? req_bytes->valueint : 0, // valuedouble?
+			  resp_bytes ? resp_bytes->valueint : 0, // valuedouble?
+			  uS ? uS->valueint : 0,
 			  parent_app,       // any of the following may be NULL
 			  parent_operation,
 			  parent_attributes,

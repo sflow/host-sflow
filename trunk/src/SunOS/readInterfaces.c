@@ -47,10 +47,172 @@ extern "C" {
     }
   }
 
+
   /*________________---------------------------__________________
-    ________________      readInterfaces       __________________
+    ________________     readInterfaces        __________________
     ----------------___________________________------------------
   */
+
+#ifdef SUNOS_USE_LIFREC
+
+  int readInterfaces(HSP *sp)
+  {
+
+    if(sp->adaptorList == NULL)
+      sp->adaptorList = adaptorListNew();
+    else
+      adaptorListMarkAll(sp->adaptorList);
+
+    struct lifnum ln;
+    struct lifconf lc;
+    struct lifreq rq;
+    int i, nFd;
+    long nRet = 0;
+    nFd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (nFd >= 0)
+      {
+        ln.lifn_family = AF_INET;
+        ln.lifn_flags = 0;
+        if (ioctl(nFd, SIOCGLIFNUM, &ln) == 0) {
+	  lc.lifc_family = AF_INET;
+	  lc.lifc_flags = 0;
+	  lc.lifc_len = sizeof(struct lifreq) * ln.lifn_count;
+	  lc.lifc_buf = (caddr_t)my_calloc(lc.lifc_len);
+	  if (ioctl(nFd, SIOCGLIFCONF, &lc) == 0) {
+	    for (i = 0; i < ln.lifn_count; i++) {
+	      strcpy(rq.lifr_name, lc.lifc_req[i].lifr_name);
+	      myLog(LOG_INFO, "interface: %s", rq.lifr_name);
+	      if (ioctl(nFd, SIOCGLIFFLAGS, &rq) == 0) {
+		if(debug) myLog(LOG_INFO, "interface:%s flags=%x",
+				rq.lifr_name,
+				rq.lifr_index);
+		up = (ifr.ifr_flags & IFF_UP) ? 1 : 0;
+		loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? 1: 0;
+		promisc = (ifr.ifr_flags & IFF_PROMISC) ? 1 : 0;
+		// TODO: No IFF_MASTER so set to 0
+		bond_master = 0;
+		      
+		if (up) {
+		  // we can only call dlpi_open() with root privileges.  So only try to get
+		  // the MAC address if we are still root.  We could cache the dlpi handle
+		  // for each interface as another field in the adaptorNIO structure, but in
+		  // practice it seems unlikely that the MAC address will change without
+		  // a reboot of the host,  so it's OK to only read it at the start.  If a
+		  // new interface somehow appears then it will just be instantiated without
+		  // a MAC.
+		  u_char *macptr = NULL;
+		  if(getuid() == 0) {
+		    int macaddrlen = DLPI_PHYSADDR_MAX;
+		    char macaddr[DLPI_PHYSADDR_MAX];
+		    dlpi_handle_t dh;
+		    if (DLPI_SUCCESS != dlpi_open(rq.lifr_name, &dh, 0)) {
+		      myLog(LOG_ERR, "device %s dlpi_open failed : %s", rq.lifr_name, strerror(errno));
+		    } else {
+		      // opened OK
+		      if (DLPI_SUCCESS != dlpi_get_physaddr(dh, DL_CURR_PHYS_ADDR, macaddr, &macaddrlen)) {
+			myLog(LOG_ERR, "device %s dlpi_get_physaddr failed :%s", rq.lifr_name, strerror(errno));
+		      } 
+		      else {
+			// got mac OK
+			macptr = (u_char *)macaddr;
+		      }
+		      dlpi_close(dh);
+		    }
+		  }						    
+
+		  if (ioctl(nFd, SIOCGENADDR, &rq) == 0) {
+		    if(debug) myLog(LOG_INFO, "interface:%s ethernet=%02X%02X%02X-%02X%02X%02X",
+				    rq.lifr_name,
+				    rq.lifr_enaddr[0],
+				    rq.lifr_enaddr[1],
+				    rq.lifr_enaddr[2],
+				    rq.lifr_enaddr[3],
+				    rq.lifr_enaddr[4],
+				    rq.lifr_enaddr[5]);
+
+		    // for now just assume that each interface has only one MAC.  It's not clear how we can
+		    // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
+		    // find or create the "adaptor" entry for this dev
+		    SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, macptr, sizeof(HSPAdaptorNIO));
+			
+		    // clear the mark so we don't free it below
+		    adaptor->marked = NO; 
+			
+		    // this flag might belong in the adaptorNIO struct
+		    adaptor->promiscuous = promisc;
+			
+		    // remember some useful flags in the userData structure
+		    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+		    adaptorNIO->loopback = loopback;
+		    adaptorNIO->bond_master = bond_master;
+		    adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
+
+		    if (ioctl(nFd, SIOCGLIFINDEX, &rq) == 0) {
+		      if(debug) myLog(LOG_INFO, "interface: %s ifIndex=%d",
+				      rq.lifr_name,
+				      rq.lifr_index);
+		      adaptor->ifIndex = rq.lifr_index;
+		    }
+
+		    if (ioctl(nFd, SIOCGLIFADDR, &rq) == 0) {
+		      char buf[51];
+			  
+		      if (AF_INET == rq.lifr_addr.ss_family) {
+			struct sockaddr_in *s = (struct sockaddr_in *)&rq.lifr_addr;
+			adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+			adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+		      }
+		      else if(AF_INET6 == rq.lifr_addr.ss_family) {
+			struct sockaddr_in6 *s = (struct sockaddr_in6 *)&rq.lifr_addr;
+			adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V6;
+			memcpy(&adaptorNIO->ipAddr.address.ip_v6.addr, s->sin6_addr, 16);
+		      }
+		      if(debug) {
+			myLog(LOG_INFO, "interface: %s family: %d IP: %s",
+			      rq.lifr_name,
+			      rq.lifr_addr.ss_family,
+			      inet_ntop(rq.lifr_addr.ss_family, &adaptorNIO->ipAddr.address, buf, 51));
+		      }
+		    }
+
+		    /* ksp_tmp = kstat_lookup(kc, ksp->ks_module, ksp->ks_instance, "mac"); */
+		    /* if (NULL == ksp_tmp) { */
+		    /*   myLog(LOG_ERR, "kstat_lookup error (module: %s, inst: %d, name: mac): %s", */
+		    /* 	ksp->ks_module, ksp->ks_instance, strerror(errno)); */
+		    /* } else { */
+		    /*   if (-1 == kstat_read(kc, ksp_tmp, NULL)) { */
+		    /*     myLog(LOG_ERR, "kstat_read error (module: %s, name: %s, class: %s): %s", */
+		    /* 	  ksp->ks_module, ksp->ks_name, ksp->ks_class, strerror(errno)); */
+		    /*   } else { */
+			    
+		    /*     knp = kstat_data_lookup(ksp_tmp, "ifspeed"); */
+		    /*     adaptor->ifSpeed = knp->value.ui64; */
+			    
+		    /*     uint32_t direction = 0; */
+		    /*     knp = kstat_data_lookup(ksp_tmp, "link_duplex"); */
+		    /*     // The full-duplex and half-duplex values are reversed between the */
+		    /*     // comment in sflow.h and link_duplex man page. */
+		    /*     if (knp->value.ui32 == 1) */
+		    /*       direction = 2; */
+		    /*     else if (knp->value.ui32 == 2) */
+		    /*       direction = 1; */
+		    /*     adaptor->ifDirection = direction; */
+		    /*   } */
+		  } 
+		}
+	      }
+	    }
+	  }
+	  
+	  my_free(lc.lifc_buf);
+	}
+        close(nFd);
+      }
+    
+    return nRet;
+  }
+
+#else  /* SUNOS_USE_LIFREQ */
 
   int readInterfaces(HSP *sp)
   {
@@ -73,7 +235,7 @@ extern "C" {
   
     int fd = socket (PF_INET, SOCK_DGRAM, 0);
     if (fd < 0) {
-      fprintf (stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
+      myLog(LOG_ERR, "error opening socket: %d (%s)\n", errno, strerror(errno));
       noErr = 0;
     }
 
@@ -223,6 +385,8 @@ extern "C" {
 
     return sp->adaptorList->num_adaptors;
   }
+
+#endif  /* SUNOS_USE_LIFREQ */
   
 #if defined(__cplusplus)
 } /* extern "C" */

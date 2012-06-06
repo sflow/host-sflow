@@ -108,6 +108,7 @@ uint32_t sfl_receiver_get_sFlowRcvrMaximumDatagramSize(SFLReceiver *receiver) {
 void sfl_receiver_set_sFlowRcvrMaximumDatagramSize(SFLReceiver *receiver, uint32_t sFlowRcvrMaximumDatagramSize) {
   uint32_t mdz = sFlowRcvrMaximumDatagramSize;
   if(mdz < SFL_MIN_DATAGRAM_SIZE) mdz = SFL_MIN_DATAGRAM_SIZE;
+  if(mdz > SFL_MAX_DATAGRAM_SIZE) mdz = SFL_MAX_DATAGRAM_SIZE;
   receiver->sFlowRcvrMaximumDatagramSize = mdz;
 }
 SFLAddress *sfl_receiver_get_sFlowRcvrAddress(SFLReceiver *receiver) {

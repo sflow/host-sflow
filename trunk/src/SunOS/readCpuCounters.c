@@ -12,6 +12,92 @@ extern "C" {
 #include <procfs.h>
 #include <sys/sysinfo.h> 
 
+  extern int debug;
+
+  /*_________________------------------------------__________________
+    _________________     runningProcesses_prstat  __________________
+    -----------------______________________________------------------
+  */
+  int read_prstat_line(void *magic, char *line) {
+    if(line) {
+      int total=0;
+      // This might break in non-english locales
+      if(sscanf(line, "Total: %d", &total) == 1) {
+	*(uint32_t *)magic = (uint32_t)total;
+      }
+    }
+    return YES; // keep going
+  }
+
+  int runningProcesses_prstat(void) {
+#define MAX_PS_LINELEN 256
+    char line[MAX_PS_LINELEN];
+    char *ps_cmd[] = { "/usr/bin/prstat", "-n1", "0", "1", NULL};
+    uint32_t proc_run = 0;
+    if(myExec(&proc_run, ps_cmd, read_prstat_line, line, MAX_PS_LINELEN)) {
+      return (int)proc_run;
+    }
+    return -1;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   runningProcesses_proc   __________________
+    -----------------___________________________------------------
+  */
+
+  int runningProcesses_proc(void) {
+#define FILENAME_BUFFER_SIZE 64	
+    DIR *procdir;
+    char filename_buf[FILENAME_BUFFER_SIZE];
+    int fd, proc_no;
+    struct dirent *direntp;
+    psinfo_t psinfo;
+    
+    uint32_t proc_run = 0;
+    if (!(procdir = opendir("/proc"))) {
+      return -1;
+    }
+
+    strncpy(filename_buf, "/proc/", 6);
+    for (proc_no = 0; (direntp = readdir(procdir)); ) {
+      if (direntp->d_name[0] == '.')
+	continue;
+      
+      snprintf(&filename_buf[6], FILENAME_BUFFER_SIZE - 6, "%s/psinfo", direntp->d_name);
+      if ((fd = open(filename_buf, O_RDONLY)) < 0)
+	continue;
+      
+      if (read(fd, &psinfo, sizeof(psinfo_t)) != sizeof(psinfo_t)) {
+	(void) close(fd);
+	continue;
+      }
+      (void) close(fd);
+      
+      if ('O' == psinfo.pr_lwp.pr_sname) {
+	proc_run++;
+      }
+    }
+    closedir(procdir);
+    
+    return (int)proc_run;
+  }
+
+
+  /*_________________---------------------------__________________
+    _________________     runningProcesses      __________________
+    -----------------___________________________------------------
+  */
+
+  int runningProcesses(void) {
+    int running = runningProcesses_proc();
+    // may be allowed to read just one psinfo file: our own, so test for <= 1
+    if(running <= 1) {
+      // fall back on an exec of prstat(1)
+      running = runningProcesses_prstat();
+    }
+    return running;
+  }
+
   /*_________________---------------------------__________________
     _________________     readCpuCounters       __________________
     -----------------___________________________------------------
@@ -88,44 +174,12 @@ extern "C" {
       }
     }
 
-
-#define FILENAME_BUFFER_SIZE 64	
-    DIR *procdir;
-    char filename_buf[FILENAME_BUFFER_SIZE];
-    int fd, proc_no;
-    struct dirent *direntp;
-    psinfo_t psinfo;
-
-    uint32_t proc_run = 0;
-    if (!(procdir = opendir("/proc"))) {
-      myLog(LOG_ERR, "Couldn't open /proc");
-    } else {
-      strncpy(filename_buf, "/proc/", 6);
-      for (proc_no = 0; (direntp = readdir(procdir)); ) {
-	if (direntp->d_name[0] == '.')
-	  continue;
-
-	snprintf(&filename_buf[6], FILENAME_BUFFER_SIZE - 6, "%s/psinfo", direntp->d_name);
-	if ((fd = open(filename_buf, O_RDONLY)) < 0)
-	  continue;
-
-	if (read(fd, &psinfo, sizeof(psinfo_t)) != sizeof(psinfo_t)) {
-	  (void) close(fd);
-	  continue;
-	}
-	(void) close(fd);
-
-	if ('O' == psinfo.pr_lwp.pr_sname) {
-	  proc_run++;
-	}
-      }
-      closedir(procdir);
-
-      // proc_run
-      cpu->proc_run = proc_run;
+    // running processes
+    int running = runningProcesses();
+    if(running > 0) {
+      cpu->proc_run = running;
       gotData = YES;
     }
-
 
     // From Ganglia's libmetrics
 #define CPUSTATES	5
@@ -137,13 +191,15 @@ extern "C" {
 
     cpu_stat_t cpu_stat;
     int cpu_id = sysconf(_SC_NPROCESSORS_ONLN);
-    uint32_t cpu_info[CPUSTATES] = { 0 };
-    uint32_t interrupts = 0;
-    uint32_t contexts = 0;
+    uint64_t cpu_info[CPUSTATES] = { 0 };
+    long stathz = sysconf(_SC_CLK_TCK);
+    uint64_t interrupts = 0;
+    uint64_t contexts = 0;
 #ifndef KSNAME_BUFFER_SIZE
 #define KSNAME_BUFFER_SIZE 32
 #endif
-#define NANO_TO_MILLI(i) ((i) / 1000000.0)
+
+#define STATHZ_TO_MS(t) (((t) * 1000) / stathz)
 
     char ks_name[KSNAME_BUFFER_SIZE];
     int i, n;
@@ -168,6 +224,17 @@ extern "C" {
 	continue;
       }
 
+      if(debug>1) {
+	myLog(LOG_INFO, "adding cpu stats for cpu=%d (idle=%u user=%u wait=%u swap=%u kernel=%u)",
+	      cpu_id,
+	      cpu_stat.cpu_sysinfo.cpu[CPU_IDLE],
+	      cpu_stat.cpu_sysinfo.cpu[CPU_USER],
+	      cpu_stat.cpu_sysinfo.wait[W_IO] + cpu_stat.cpu_sysinfo.wait[W_PIO],
+	      cpu_stat.cpu_sysinfo.wait[W_SWAP],
+	      cpu_stat.cpu_sysinfo.cpu[CPU_KERNEL]);
+      }
+	      
+
       cpu_info[CPUSTATE_IDLE] += cpu_stat.cpu_sysinfo.cpu[CPU_IDLE];
       cpu_info[CPUSTATE_USER] += cpu_stat.cpu_sysinfo.cpu[CPU_USER];
       cpu_info[CPUSTATE_IOWAIT] += cpu_stat.cpu_sysinfo.wait[W_IO] + cpu_stat.cpu_sysinfo.wait[W_PIO];
@@ -179,28 +246,25 @@ extern "C" {
     }
 
     // cpu_user
-    cpu->cpu_user = (uint32_t)NANO_TO_MILLI(cpu_info[CPUSTATE_USER]);
+    cpu->cpu_user = (uint32_t)STATHZ_TO_MS(cpu_info[CPUSTATE_USER]);
 
     // cpu_nice
-    // Ganglia libmetric sets this to 0
-    cpu->cpu_nice = 0;
+    SFL_UNDEF_COUNTER(cpu->cpu_nice);
 
     // cpu_system
-    cpu->cpu_system = (uint32_t)NANO_TO_MILLI(cpu_info[CPUSTATE_KERNEL]);
+    cpu->cpu_system = (uint32_t)STATHZ_TO_MS(cpu_info[CPUSTATE_KERNEL]);
 
     // cpu_idle
-    cpu->cpu_idle = (uint32_t)NANO_TO_MILLI(cpu_info[CPUSTATE_IDLE]);
+    cpu->cpu_idle = (uint32_t)STATHZ_TO_MS(cpu_info[CPUSTATE_IDLE]);
 
     // cpu_wio
-    cpu->cpu_wio = (uint32_t)NANO_TO_MILLI(cpu_info[CPUSTATE_IOWAIT]);
+    cpu->cpu_wio = (uint32_t)STATHZ_TO_MS(cpu_info[CPUSTATE_IOWAIT]);
 
     // cpu_intr
-    // Ganglia libmetric sets this to 0
-    cpu->cpu_intr = 0;
+    SFL_UNDEF_COUNTER(cpu->cpu_intr);
 
     // cpu_sintr
-    // Ganglia libmetric sets this to 0
-    cpu->cpu_sintr = 0;
+    SFL_UNDEF_COUNTER(cpu->cpu_sintr);
 	
     // interrupts
     cpu->interrupts = interrupts;
@@ -208,7 +272,7 @@ extern "C" {
     // contexts
     cpu->contexts = contexts;
 
-    kstat_close(kc);
+    if(kc) kstat_close(kc);
     return gotData;
   }
 
