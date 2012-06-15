@@ -112,6 +112,7 @@ approach seemed more stable and portable.
 */
   void setAddressPriorities(HSP *sp)
   {
+    if(debug) myLog(LOG_INFO, "setAddressPriorities");
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       if(adaptor && adaptor->userData) {
