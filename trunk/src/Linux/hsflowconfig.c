@@ -515,6 +515,7 @@ extern int debug;
 
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback)
   {
+    if(debug) myLog(LOG_INFO, "agentAddressPriority");
     EnumIPSelectionPriority ipPriority = IPSP_NONE;
 
     switch(addr->type) {
@@ -567,9 +568,15 @@ extern int debug;
     if(sp->sFlow && sp->sFlow->sFlowSettings) {
       // allow the agent.cidr settings to boost the priority
       // of this address.  The cidrs are in reverse order.
+      // Look for them first in the sFlowSettings (just in case they
+      // were allowed to appear in the DNS-SD TXT record,  for example,
+      // but fall back on the sFlowSettings_file, which by default is
+      // the only place they are allowed to show up).
       HSPCIDR *cidr = sp->sFlow->sFlowSettings->agentCIDRs;
+      if(cidr == NULL) cidr = sp->sFlow->sFlowSettings_file->agentCIDRs;
       uint32_t cidrIndex = 1;
       for(; cidr; cidrIndex++, cidr=cidr->nxt) {
+	if(debug) myLog(LOG_INFO, "testing CIDR at index %d", cidrIndex);
 	if(SFLAddress_maskEqual(addr, &cidr->mask, &cidr->ipAddr)) break;
       }
       
@@ -577,6 +584,9 @@ extern int debug;
 	if(debug) myLog(LOG_INFO, "CIDR at index %d matched: boosting priority", cidrIndex);
 	boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES); 
       }
+    }
+    else {
+      if(debug) myLog(LOG_INFO, "agentAddressPriority: no config yet (so no CIDR boost)");
     }
       
     return boosted_priority;
@@ -590,8 +600,11 @@ extern int debug;
   
   int selectAgentAddress(HSP *sp) {
 
+    if(debug) myLog(LOG_INFO, "selectAgentAddress");
+
     if(sp->sFlow->explicitAgentIP && sp->sFlow->agentIP.type) {
       // it was hard-coded in the config file
+      if(debug) myLog(LOG_INFO, "selectAgentAddress hard-coded in config file");
       return YES;
     }
     
@@ -601,6 +614,7 @@ extern int debug;
       if(ad && ad->userData) {
 	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
 	sp->sFlow->agentIP = adaptorNIO->ipAddr;
+	if(debug) myLog(LOG_INFO, "selectAgentAddress pegged to device in config file");
 	return YES;
       }
     }
@@ -627,6 +641,7 @@ extern int debug;
       HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
       sp->sFlow->agentIP = adaptorNIO->ipAddr;
       sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
+      if(debug) myLog(LOG_INFO, "selectAgentAddress selected agentIP with highest priority");
       return YES;
     }
     
