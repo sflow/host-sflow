@@ -56,7 +56,8 @@ static void agentCB_sendPkt(void *magic, SFLAgent *agent, SFLReceiver *receiver,
 {
 	HSP *sp = (HSP *)magic;
 	size_t socklen = 0;
-	SOCKET fd = 0, result = 0;
+	SOCKET fd = 0;
+	int result = 0;
 	HSPCollector *coll;
 
 	for (coll = sp->sFlow->collectors; coll; coll=coll->nxt) {
