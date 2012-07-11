@@ -7,10 +7,6 @@
 !define EXTENSION_DIR "Extension"
 !define SERVICE_NAME "hsflowd"
 !define SFLOW_PARAMS_KEY "SYSTEM\CurrentControlSet\Services\hsflowd\Parameters"
-!searchparse /file "../version.h" 'VERSION_MAJOR ' VERSION_MAJOR
-!searchparse /file "../version.h" 'VERSION_MINOR ' VERSION_MINOR
-!searchparse /file "../version.h" 'VERSION_REVISION ' VERSION_REVISION
-!define VERSION "${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_REVISION}"
 
 !include "MUI2.nsh"
 
@@ -153,7 +149,7 @@ FunctionEnd
 !insertmacro stopService "un."
 
 Name "${PRODUCT_NAME} v${VERSION}"
-OutFile "${OUTPUT_ROOT}-${VERSION}-${PLATFORM}.exe"
+OutFile "${OUTPUT}"
 !if ${PLATFORM} == "x64"
     InstallDir "$PROGRAMFILES64\Host sFlow Project\Host sFlow Agent"
 !else
@@ -185,9 +181,9 @@ Section "Install host sFlow" SEC01
         ${If} $hyperVExtension = 1
             # Install the switch extension
             SetOutPath "$INSTDIR\${EXTENSION_DIR}"
-            File "${BUILD_DIR}\sflowfilter.inf"
-            File "${BUILD_DIR}\sflowfilter.sys"
-            File "${BUILD_DIR}\sflowfilter.cat"
+            File "${DRIVER_BUILD_DIR}\sflowfilter.inf"
+            File "${DRIVER_BUILD_DIR}\sflowfilter.sys"
+            File "${DRIVER_BUILD_DIR}\sflowfilter.cat"
             # Install the extension installer helper app
             File "${BUILD_DIR}\protinst.exe"
             # Try to uninstall an existing switch extension

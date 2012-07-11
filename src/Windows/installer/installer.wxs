@@ -1,8 +1,6 @@
 <?xml version='1.0' encoding='windows-1252'?>
 <Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
 
-  <?define CurrentVersion = "!(bind.FileVersion.hsflowd.exe)" ?>
-  
   <?if $(var.architecture) = "x64" ?>
     <?define programFiles = ProgramFiles64Folder ?>
   <?else ?>
@@ -11,8 +9,8 @@
   
   <Product Name='sFlow agent' Id='74FFB15C-03C1-4B7D-809F-939A5C57F659'
            UpgradeCode='6B6EFCDA-8BB0-4F3A-BEF4-BBA53C3D8990'
-           Language='1033' Codepage='1252' Version='$(var.CurrentVersion)'
-           Manufacturer='Host sFlow project'>
+           Language='1033' Codepage='1252' Version='$(var.version)'
+           Manufacturer='InMon Corp.'>
 
     <Package Keywords='Installer' Description='sFlow agent installer'
       Manufacturer='Host sFlow project'
@@ -23,10 +21,10 @@
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
   
     <Upgrade Id="6B6EFCDA-8BB0-4F3A-BEF4-BBA53C3D8990">
-      <UpgradeVersion Minimum="$(var.CurrentVersion)" IncludeMinimum="no" OnlyDetect="yes"
+      <UpgradeVersion Minimum="$(var.version)" IncludeMinimum="no" OnlyDetect="yes"
                       Language="1033" Property="NEWPRODUCTFOUND" />
       <UpgradeVersion Minimum="0.0.0" IncludeMinimum="yes"
-                      Maximum="$(var.CurrentVersion)" IncludeMaximum="no"
+                      Maximum="$(var.version)" IncludeMaximum="no"
                       Language="1033" Property="UPGRADEFOUND" />
     </Upgrade>
     <Upgrade Id="9A2E85AB-2D5F-4CC1-9EA3-003788A1B2DE">
@@ -41,16 +39,25 @@
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='collector' Type='raw' />
     </Property>
-    <Property Id='POLLING_VALUE'>
+    <Property Id='POLLING_VALUE' Value='20'>
       <RegistrySearch Id='ExistingPollingValue'
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='pollingInterval' Type='raw' />
     </Property>
-    <Property Id='SAMPLING_VALUE'>
+    <Property Id='SAMPLING_VALUE' Value='256'>
       <RegistrySearch Id='ExistingSamplingValue'
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='samplingRate' Type='raw' />
     </Property>
+    
+    <!-- Properties required for SCVMM -->
+    <?ifdef extension ?>
+      <Property Id='Description' Value='sFlow agent for Hyper-V' />
+      <Property Id='DriverID' Value='{AF8CAD53-C7B7-420C-9439-135A87818A64}' />
+      <Property Id='DriverVersion' Value='$(var.version)' />
+      <Property Id='DriverInstallParams' Value='/q' />
+      <Property Id='ExtensionType' Value='Capture' />
+    <?endif ?>
 
     <Directory Id='TARGETDIR' Name='SourceDir'>
       <Directory Id='$(var.programFiles)' Name='PFiles'>
@@ -79,7 +86,7 @@
     </DirectoryRef>
 
     <?ifdef extension ?>
-      <DirectoryRef Id='Extension' FileSource ='$(var.sourceDir)'>
+      <DirectoryRef Id='Extension' FileSource ='$(var.driverSourceDir)'>
         <Component Id='sFlowExtension' Guid='07DE8FE4-ACB3-4AAB-BF16-933559E4953F'>
           <Condition><![CDATA[(VersionNT64 >= 602) AND (HYPERV_PRESENT = "1")]]></Condition>
           <File Id='sflowfilter.sys' Name='sflowfilter.sys' DiskId='1' KeyPath='yes' />
@@ -122,6 +129,9 @@
                   DllEntry='cleanSamplingRate' Execute='firstSequence' />
     <CustomAction Id='ValidateUI' BinaryKey='installHelper.dll'
                   DllEntry='validateUI' />
+    <CustomAction Id="CustomExitDialogText" Property="WIXUI_EXITDIALOGOPTIONALTEXT"
+                  Value="Thank you for installing [ProductName]. To complete the installation, please enable the sFlow extension in your virtual switches, using the Hyper-V virtual switch manager."/>
+
     <?ifdef extension ?>
       <CustomAction Id='UninstallExtension' BinaryKey='protinst.exe'
                     ExeCommand='-u sflowfilter'
@@ -142,6 +152,9 @@
       <?ifdef extension ?>
         <Custom Action='HyperVPresent' After='AppSearch'>
           <![CDATA[VersionNT64 >= 602]]>
+        </Custom>
+        <Custom Action='CustomExitDialogText' After="HyperVPresent">
+          <![CDATA[(NOT Installed) AND (HYPERV_PRESENT = "1")]]>
         </Custom>
       <?endif ?>
     </InstallUISequence>
