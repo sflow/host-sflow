@@ -806,6 +806,21 @@ typedef struct _SFLHost_vrt_dsk_counters {
    so just use a #define for the type */
 #define SFLHost_vrt_nio_counters SFLHost_nio_counters
 
+/* NVML statistics */
+/* opaque = counter_data; enterprise = 5703, format=1 */
+typedef struct _SFLHost_gpu_nvml {
+  uint32_t device_count;  /* see nvmlGetDeviceCount */  
+  uint32_t processes;     /* see nvmlDeviceGetComputeRunningProcesses */
+  uint32_t gpu_time;      /* total milliseconds in which one or more kernels was executing on GPU */
+  uint32_t mem_time;      /* total milliseconds during which global device memory was being read/written */
+  uint64_t mem_total;     /* bytes. see nvmlDeviceGetMemoryInfo */
+  uint64_t mem_free;      /* bytes. see nvmlDeviceGetMemoryInfo */
+  uint32_t ecc_errors;    /* see nvmlDeviceGetTotalEccErrors */
+  uint32_t energy;        /* mJ. see nvmlDeviceGetPowerUsage */
+  uint32_t temperature;   /* C. maximum across devices - see nvmlDeviceGetTemperature */
+  uint32_t fan_speed;     /* %. maximum across devices - see nvmlDeviceGetFanSpeed */
+} SFLHost_gpu_nvml;
+
 /* Enterprise counters */
 /* opaque = counter_data; enterprise = 0; format = 2202 */
 typedef struct {
@@ -847,6 +862,7 @@ typedef struct {
   uint32_t req_dropped;
 } SFLAPPWorkers;
 
+
 /* Counters data */
 
 enum SFLCounters_type_tag {
@@ -874,6 +890,7 @@ enum SFLCounters_type_tag {
   SFLCOUNTERS_APP           = 2202,
   SFLCOUNTERS_APP_RESOURCES = 2203,
   SFLCOUNTERS_APP_WORKERS   = 2206,
+  SFLCOUNTERS_HOST_GPU_NVML = (5703 << 12) + 1, /* = 23359489 */
 };
 
 typedef union _SFLCounters_type {
@@ -895,6 +912,7 @@ typedef union _SFLCounters_type {
   SFLHost_vrt_mem_counters host_vrt_mem;
   SFLHost_vrt_dsk_counters host_vrt_dsk;
   SFLHost_vrt_nio_counters host_vrt_nio;
+  SFLHost_gpu_nvml host_gpu_nvml;
   SFLAPPCounters app;
   SFLAPPResources appResources;
   SFLAPPWorkers appWorkers;

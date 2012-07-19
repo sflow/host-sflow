@@ -775,6 +775,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_mem)*/;  break;
     case SFLCOUNTERS_HOST_VRT_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_vrt_dsk)*/;  break;
     case SFLCOUNTERS_HOST_VRT_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_vrt_nio)*/;  break;
+    case SFLCOUNTERS_HOST_GPU_NVML: elemSiz = 48 /*sizeof(elem->counterBlock.host_gpu_nvml)*/;  break;
     case SFLCOUNTERS_APP:  elemSiz = appCountersEncodingLength(&elem->counterBlock.app); break;
     case SFLCOUNTERS_APP_RESOURCES:  elemSiz = appResourcesEncodingLength(&elem->counterBlock.appResources); break;
     case SFLCOUNTERS_APP_WORKERS:  elemSiz = appWorkersEncodingLength(&elem->counterBlock.appWorkers); break;
@@ -990,6 +991,18 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_vrt_nio.pkts_out);
       putNet32(receiver, elem->counterBlock.host_vrt_nio.errs_out);
       putNet32(receiver, elem->counterBlock.host_vrt_nio.drops_out);
+      break; 
+    case SFLCOUNTERS_HOST_GPU_NVML:
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.device_count);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.processes);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.gpu_time);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.mem_time);
+      putNet64(receiver, elem->counterBlock.host_gpu_nvml.mem_total);
+      putNet64(receiver, elem->counterBlock.host_gpu_nvml.mem_free);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.ecc_errors);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.energy);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.temperature);
+      putNet32(receiver, elem->counterBlock.host_gpu_nvml.fan_speed);
       break;
     case SFLCOUNTERS_APP:
       putString(receiver, &elem->counterBlock.app.application);

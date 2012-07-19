@@ -52,6 +52,14 @@ ifeq ($(VRTDSKPATH),yes)
 	CFLAGS += -DHSP_VRT_USE_DISKPATH
 endif
 
+ifeq ($(NVML),)
+	# set $(NVML) to "yes" if the Nvidia library is present
+endif
+
+ifeq ($(NVML),yes)
+	CFLAGS += -DHSF_NVML
+endif
+
 ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
 endif
@@ -95,6 +103,7 @@ endif
 
 READ_OBJS=readInterfaces.o \
           readCpuCounters.o \
+          readNvmlCounters.o \
           readMemoryCounters.o \
           readDiskCounters.o \
           readHidCounters.o \
@@ -179,6 +188,7 @@ dnsSD.o: dnsSD.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
 readInterfaces.o: readInterfaces.c $(HEADERS)
 readCpuCounters.o: readCpuCounters.c $(HEADERS)
+readNvmlCounters.o: readNvmlCounters.c $(HEADERS)
 readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
