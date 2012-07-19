@@ -361,6 +361,12 @@ extern "C" {
 #define HSP_INITIAL_JSON_APP_HT_SIZE 16
     uint32_t applicationHT_entries;
 #endif
+#ifdef HSF_NVML
+    void *nvml_handle;
+    uint32_t nvml_gpu_time; // mS. accumulator
+    uint32_t nvml_mem_time; // mS. accumulator
+    uint32_t nvml_energy;  // mJ. accumulator
+#endif
   } HSP;
 
   // expose some config parser fns
@@ -396,6 +402,12 @@ extern "C" {
   int readPackets(HSP *sp);
   int readJSON(HSP *sp, int soc);
   void json_app_timeout_check(HSP *sp);
+
+#ifdef HSF_NVML
+  void nvml_init(HSP *sp);
+  void nvml_tick(HSP *sp);
+  int readNvmlCounters(HSP *sp, SFLHost_gpu_nvml *nvml);
+#endif
 
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -251,6 +251,14 @@ extern "C" {
       SFLADD_ELEMENT(cs, &cpuElem);
     }
 
+#ifdef HSF_NVML
+    SFLCounters_sample_element nvmlElem = { 0 };
+    nvmlElem.tag = SFLCOUNTERS_HOST_GPU_NVML;
+    if(readNvmlCounters(sp, &nvmlElem.counterBlock.host_gpu_nvml)) {
+      SFLADD_ELEMENT(cs, &nvmlElem);
+    }
+#endif
+
     // host memory counters
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_MEM;
@@ -1189,6 +1197,12 @@ extern "C" {
       syncOutputFile(sp);
       sp->outputRevisionNo = sp->sFlow->revisionNo;
     }
+
+#ifdef HSF_GPU_NVML
+    // poll the GPU
+    nvml_tick(sp);
+#endif
+
   }
 
 #ifdef HSF_ULOG
@@ -1989,6 +2003,11 @@ extern "C" {
 	exit(EXIT_FAILURE);
       }
     }
+
+#ifdef HSF_NVML
+    // NVIDIA shared library for interrogating GPU
+    nvml_init(sp);
+#endif
     
 #ifdef HSF_XEN
     // open Xen handles while we still have root privileges
