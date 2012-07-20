@@ -405,6 +405,7 @@ extern "C" {
 
 #ifdef HSF_NVML
   void nvml_init(HSP *sp);
+  void nvml_stop(HSP *sp);
   void nvml_tick(HSP *sp);
   int readNvmlCounters(HSP *sp, SFLHost_gpu_nvml *nvml);
 #endif
