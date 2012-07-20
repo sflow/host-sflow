@@ -2287,6 +2287,10 @@ extern "C" {
     virConnectClose(sp->virConn);
 #endif
 
+#ifdef HSF_NVML
+    nvml_stop(sp);
+#endif
+
     if(debug == 0) {
       // shouldn't need to be root again to remove the pidFile
       // (i.e. we should still have execute permission on /var/run)
