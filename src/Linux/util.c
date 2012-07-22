@@ -194,23 +194,33 @@ extern "C" {
     UTHeapHeader *utBuf = UTHeapQHdr(buf);
     int rc = utBuf->h.refCount;
     assert(rc != 0);
-    assert(utBuf->h.realmIdx == utRealm.realmIdx);
-
-    // UT_MAX_REFCOUNT => immortality
-    if(rc != UT_MAX_REFCOUNT) {
-      // decrement the ref count
-      if(--rc != 0) {
-	// not zero yet, so just write back the decremented refcount
-	utBuf->h.refCount = rc;
-      }
-      else {
-	// reference count reached zero, so it's time to free this buffer for real
-	// read the queue index before we overwrite it
-	uint16_t queueIdx = utBuf->h.queueIdx;
-	memset(utBuf, 0, 1 << queueIdx);
-	// put it back on the queue
-	utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
-	utRealm.bufferLists[queueIdx] = utBuf;
+    // Instead of aborting if the object is not owned by this thread
+    // just print an error message.  There are places where it really
+    // helps to allow an object to be allocated by one thread and freed
+    // by another so it's worth thinking about how to present that in
+    // the API.  Perhaps as a separate "threadLocalToGlobal()" copy
+    // step,  and a reserved realmIdx that means it is global?
+    // assert(utBuf->h.realmIdx == utRealm.realmIdx);
+    if(utBuf->h.realmIdx != utRealm.realmIdx) {
+      myLog(LOG_ERR, "UTHeapQFree: LEAK (not owner)");
+    }
+    else {
+      // UT_MAX_REFCOUNT => immortality
+      if(rc != UT_MAX_REFCOUNT) {
+	// decrement the ref count
+	if(--rc != 0) {
+	  // not zero yet, so just write back the decremented refcount
+	  utBuf->h.refCount = rc;
+	}
+	else {
+	  // reference count reached zero, so it's time to free this buffer for real
+	  // read the queue index before we overwrite it
+	  uint16_t queueIdx = utBuf->h.queueIdx;
+	  memset(utBuf, 0, 1 << queueIdx);
+	  // put it back on the queue
+	  utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
+	  utRealm.bufferLists[queueIdx] = utBuf;
+	}
       }
     }
   }
