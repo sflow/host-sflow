@@ -2133,6 +2133,10 @@ extern "C" {
 	    // .auto file, we call the installsFlowSettings() function again here.
 	    // Note that the .auto file will not actually be written out
 	    // yet.  That only happens when we get to the main loop.
+	    // TODO: find a better way to do this. The installSFlowSettings() call does
+	    // some alloc and free so here we are trampling all over the rule that
+	    // silos allocation by thread. A DNS-SD settings object being overridden
+	    // here will clearly violate that rule and we'll leak the memory.
 	    installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings);
 
 	    // we must have an agentIP now, so we can use
