@@ -49,15 +49,24 @@ else
 endif
 
 ifeq ($(VRTDSKPATH),yes)
+A
 	CFLAGS += -DHSP_VRT_USE_DISKPATH
 endif
 
 ifeq ($(NVML),)
 	# set $(NVML) to "yes" if the Nvidia library is present
+	NVML=$(shell if ls /usr/lib*/libnvidia-ml.so >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
 endif
 
 ifeq ($(NVML),yes)
 	CFLAGS += -DHSF_NVML
+	LIBS += -lnvidia-ml
+	
+	# we also need the NVML headers, assume /usr/include/nvml
+	ifeq ($(NVML_HEADER_DIR),)
+		NVML_HEADER_DIR=/usr/include/nvml
+	endif
+	CFLAGS+= -I$(NVML_HEADER_DIR)
 endif
 
 ifeq ($(DEBIAN),)

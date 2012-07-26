@@ -87,6 +87,10 @@ extern "C" {
 
 #endif /* HSF_JSON */
 
+#ifdef HSF_NVML
+  #include <nvml.h>
+#endif // HSF_NVML
+
 #define ADD_TO_LIST(linkedlist, obj) \
   do { \
     obj->nxt = linkedlist; \
@@ -281,6 +285,15 @@ extern "C" {
     uint64_t bytes_written;
   } HSPDiskIO;
     
+#ifdef HSF_NVML
+  typedef struct _HSPNVML {
+    unsigned int gpu_count;
+    uint32_t nvml_gpu_time; // mS. accumulator
+    uint32_t nvml_mem_time; // mS. accumulator
+    uint32_t nvml_energy;  // mJ. accumulator
+  } HSPNVML;
+#endif
+
   typedef struct _HSP {
     EnumHSPState state;
     time_t clk;
@@ -362,11 +375,8 @@ extern "C" {
     uint32_t applicationHT_entries;
 #endif
 #ifdef HSF_NVML
-    void *nvml_handle;
-    uint32_t nvml_gpu_time; // mS. accumulator
-    uint32_t nvml_mem_time; // mS. accumulator
-    uint32_t nvml_energy;  // mJ. accumulator
-#endif
+    HSPNVML nvml;
+#endif //HSF_NVML
   } HSP;
 
   // expose some config parser fns
