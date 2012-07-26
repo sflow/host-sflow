@@ -113,11 +113,11 @@ extern "C" {
     }
     if(sp->ulog_soc) {
       for( ; batch < HSP_READPACKET_BATCH; batch++) {
-	char buf[HSP_MAX_MSG_BYTES];
+	char buf[HSP_MAX_ULOG_MSG_BYTES];
 	socklen_t peerlen = sizeof(sp->ulog_peer);
 	int len = recvfrom(sp->ulog_soc,
 			   buf,
-			   HSP_MAX_MSG_BYTES,
+			   HSP_MAX_ULOG_MSG_BYTES,
 			   0,
 			   (struct sockaddr *)&sp->ulog_peer,
 			   &peerlen);

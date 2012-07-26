@@ -58,13 +58,14 @@ extern "C" {
 #include <linux/netlink.h>
 #include <net/if.h>
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
-#define HSP_MAX_MSG_BYTES 10000
+#define HSP_MAX_ULOG_MSG_BYTES 10000
 #define HSP_READPACKET_BATCH 100
 #endif /* HSF_ULOG */
 
 #ifdef HSF_JSON
 #include "cJSON.h"
 
+#define HSP_MAX_JSON_MSG_BYTES 10000
 #define HSP_READJSON_BATCH 100
   typedef struct _HSPApplication {
     struct _HSPApplication *ht_nxt;

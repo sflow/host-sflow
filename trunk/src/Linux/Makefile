@@ -1,6 +1,24 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
+HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
+
+# compiler
+#CC= g++
+CC= gcc -std=gnu99
+
+# optimization
+OPT_FULL = -O3 -DNDEBUG
+OPT_DEBUG = -g -ggdb
+ifeq ($(OPT),)
+	OPT=$(OPT_FULL)
+endif
+
+# base CFLAGS and LIBS
+SFLOWDIR=../sflow
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+
 # if ULOG is not set, assume it should be "yes".
 # (So you can use "make ULOG=no" to compile without this feature)
 ifeq ($(ULOG),)
@@ -16,11 +34,12 @@ ifeq ($(JSON),)
 	JSON=yes
 endif
 ifeq ($(JSON),yes)
-	CFLAGS+=-DHSF_JSON
-	LIBS+= -lm
+	JSONDIR=../json
+	CFLAGS+=-DHSF_JSON -I$(JSONDIR)
+	LIBS+= $(JSONDIR)/libjson.a -lm
 endif
 
-# if LVRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe
+# if LIBVIRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe
 # it would be stronger to test for the libvirt-devel rpm? or look for /usr/include/libvirt/libvirt.h?
 ifeq ($(LIBVIRT),)
 	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
@@ -48,27 +67,26 @@ else
   endif
 endif
 
+# control how to read disk info from libvirt
 ifeq ($(VRTDSKPATH),yes)
-A
 	CFLAGS += -DHSP_VRT_USE_DISKPATH
 endif
 
+# if NVML is not set, then assume it should be "yes" if the Nvidia library is present
 ifeq ($(NVML),)
-	# set $(NVML) to "yes" if the Nvidia library is present
 	NVML=$(shell if ls /usr/lib*/libnvidia-ml.so >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
 endif
 
 ifeq ($(NVML),yes)
-	CFLAGS += -DHSF_NVML
-	LIBS += -lnvidia-ml
-	
-	# we also need the NVML headers, assume /usr/include/nvml
+        # we also need the NVML headers, assume /usr/include/nvml
 	ifeq ($(NVML_HEADER_DIR),)
 		NVML_HEADER_DIR=/usr/include/nvml
 	endif
-	CFLAGS+= -I$(NVML_HEADER_DIR)
+	CFLAGS += -DHSF_NVML -I$(NVML_HEADER_DIR)
+	LIBS += -lnvidia-ml
 endif
 
+# detect Debian systems
 ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
 endif
@@ -96,20 +114,6 @@ else
 	CONF_D=$(INSTROOT)/$(CONFDIR)
 endif
 
-HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
-
-SFLOWDIR=../sflow
-JSONDIR=../json
-
-#CC= g++
-CC= gcc -std=gnu99
-
-OPT_FULL = -O3 -DNDEBUG
-OPT_DEBUG = -g -ggdb
-ifeq ($(OPT),)
-	OPT=$(OPT_FULL)
-endif
-
 READ_OBJS=readInterfaces.o \
           readCpuCounters.o \
           readNvmlCounters.o \
@@ -126,9 +130,6 @@ HSFLOW_OBJS= hsflowconfig.o \
              util.o
 
 SFLOWOVS_OBJS=sflowovsd.o util.o
-
-CFLAGS+= -I. -I$(SFLOWDIR) -I$(JSONDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS+= $(SFLOWDIR)/libsflow.a $(JSONDIR)/libjson.a -lresolv -lpthread
 
 #### BUILD ####
 
