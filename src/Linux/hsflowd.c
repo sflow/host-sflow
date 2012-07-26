@@ -1187,10 +1187,13 @@ extern "C" {
       // a restart. $$$
     }
 
+#ifdef HSF_JSON
     // give the JSON module a chance to remove idle apps
     if(sp->clk % HSP_JSON_APP_TIMEOUT) {
       json_app_timeout_check(sp);
     }
+
+#endif
 
     // rewrite the output if the config has changed
     if(sp->outputRevisionNo != sp->sFlow->revisionNo) {
@@ -2261,17 +2264,21 @@ extern "C" {
 	exit(EXIT_FAILURE);
       }
       if(debug && nfds > 0) {
-	myLog(LOG_INFO, "select returned %d (json soc=%d)", nfds, sp->json_soc);
+	myLog(LOG_INFO, "select returned %d", nfds);
       }
       // may get here just because a signal was caught so these
       // callbacks need to be non-blocking when they read from the socket
+#ifdef HSF_ULOG
       if(sp->ulog_soc && FD_ISSET(sp->ulog_soc, &readfds)) readPackets(sp);
+#endif
+#ifdef HSF_JSON
       if(sp->json_soc && FD_ISSET(sp->json_soc, &readfds)) readJSON(sp, sp->json_soc);
       if(sp->json_soc6 && FD_ISSET(sp->json_soc6, &readfds)) readJSON(sp, sp->json_soc6);
-
-#else
-      my_usleep(HSP_SELECT_TIMEOUT_uS);
 #endif
+
+#else /* (HSF_ULOG || HSF_JSON) */
+      my_usleep(HSP_SELECT_TIMEOUT_uS);
+#endif /* (HSF_ULOG || HSF_JSON) */
     }
 
     // get here if a signal kicks the state to HSPSTATE_END

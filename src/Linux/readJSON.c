@@ -611,10 +611,10 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     int batch = 0;
     if(soc) {
       for( ; batch < HSP_READJSON_BATCH; batch++) {
-	char buf[HSP_MAX_MSG_BYTES];
+	char buf[HSP_MAX_JSON_MSG_BYTES];
 	int len = recvfrom(soc,
 			   buf,
-			   HSP_MAX_MSG_BYTES,
+			   HSP_MAX_JSON_MSG_BYTES,
 			   0,
 			   NULL, /* peer */
 			   0 /* peerlen */);
