@@ -199,9 +199,9 @@ extern "C" {
     SFLPoller *poller;
 
     HSPSFlowSettings *sFlowSettings_file;
-    HSPSFlowSettings *sFlowSettings_dnsSD;
-    HSPSFlowSettings *sFlowSettings;
-    char *sFlowSettings_str;
+    HSPSFlowSettings *sFlowSettings_dnsSD; // owned by DNS-SD thread
+    HSPSFlowSettings *sFlowSettings; // owned by DNS-SD if running, else main
+    char *sFlowSettings_str;  // owned by DNS-SD if running, else main
 
     uint32_t revisionNo;
 

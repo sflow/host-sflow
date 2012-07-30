@@ -1633,7 +1633,15 @@ extern "C" {
     }
     else {
       // new config
-      if(sf->sFlowSettings_str) my_free(sf->sFlowSettings_str);
+      if(sf->sFlowSettings_str) {
+	// note that this object may have been allocated in the DNS-SD thread,
+	// but if it was then only the DNS-SD thread will call this fn.  Likewise
+	// if we are using only the hsflowd.conf file then the main thread is the
+	// only thread that will get here. If we ever change that separation then this
+	// should be revisited because we can easily end up trying to free something
+	// in one thread that was allocated by the other thread.
+	my_free(sf->sFlowSettings_str);
+      }
       sf->sFlowSettings_str = settingsStr;
       sf->revisionNo++;
     }
@@ -2088,6 +2096,17 @@ extern "C" {
 
 	// a sucessful read of the config file is required
 	if(HSPReadConfigFile(sp) == NO) {
+	  myLog(LOG_ERR, "failed to read config file\n");
+	  exitStatus = EXIT_FAILURE;
+	  setState(sp, HSPSTATE_END);
+	}
+	else if(readInterfaces(sp) == 0) {
+	  myLog(LOG_ERR, "failed to read interfaces\n");
+	  exitStatus = EXIT_FAILURE;
+	  setState(sp, HSPSTATE_END);
+	}
+	else if(selectAgentAddress(sp) == NO) {
+	  myLog(LOG_ERR, "failed to select agent address\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
 	}
@@ -2123,25 +2142,7 @@ extern "C" {
       case HSPSTATE_WAITCONFIG:
 	SEMLOCK_DO(sp->config_mut) {
 	  if(sp->sFlow->sFlowSettings) {
-	    // we have a config - proceed. The next step
-	    // is agent-address selection,  which requires
-	    // a successful read of the interfaces first. Delaying
-	    // this to run here allows the agent-address selection
-	    // to be influenced by settings such as agent.cidr.
-	    if(readInterfaces(sp) == 0 || selectAgentAddress(sp) == NO) {
-	      myLog(LOG_ERR, "failed to select agent address\n");
-	      exit(EXIT_FAILURE);
-	    }
-	    // since the choice of agentIP affects the content of the
-	    // .auto file, we call the installsFlowSettings() function again here.
-	    // Note that the .auto file will not actually be written out
-	    // yet.  That only happens when we get to the main loop.
-	    // TODO: find a better way to do this. The installSFlowSettings() call does
-	    // some alloc and free so here we are trampling all over the rule that
-	    // silos allocation by thread. A DNS-SD settings object being overridden
-	    // here will clearly violate that rule and we'll leak the memory.
-	    installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings);
-
+	    // we have a config - proceed
 	    // we must have an agentIP now, so we can use
 	    // it to seed the random number generator
 	    SFLAddress *agentIP = &sp->sFlow->agentIP;

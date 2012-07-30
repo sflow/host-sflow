@@ -565,15 +565,10 @@ extern int debug;
 
     uint32_t boosted_priority = ipPriority;
 
-    if(sp->sFlow && sp->sFlow->sFlowSettings) {
+    if(sp->sFlow && sp->sFlow->sFlowSettings_file) {
       // allow the agent.cidr settings to boost the priority
       // of this address.  The cidrs are in reverse order.
-      // Look for them first in the sFlowSettings (just in case they
-      // were allowed to appear in the DNS-SD TXT record,  for example,
-      // but fall back on the sFlowSettings_file, which by default is
-      // the only place they are allowed to show up).
-      HSPCIDR *cidr = sp->sFlow->sFlowSettings->agentCIDRs;
-      if(cidr == NULL) cidr = sp->sFlow->sFlowSettings_file->agentCIDRs;
+      HSPCIDR *cidr = sp->sFlow->sFlowSettings_file->agentCIDRs;
       uint32_t cidrIndex = 1;
       for(; cidr; cidrIndex++, cidr=cidr->nxt) {
 	if(debug) myLog(LOG_INFO, "testing CIDR at index %d", cidrIndex);
