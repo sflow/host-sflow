@@ -595,6 +595,13 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  SFLADD_ELEMENT(&csample, &c_wrk);
 	}
 
+	// always include the "parent" structure too
+	SFLCounters_sample_element c_par = { 0 };
+        c_par.tag = SFLCOUNTERS_HOST_PAR;
+        c_par.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
+        c_par.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
+        SFLADD_ELEMENT(&csample, &c_par);
+
 	// submit the counter sample
 	sfl_poller_writeCountersSample(application->poller, &csample);
       }
