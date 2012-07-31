@@ -8,14 +8,20 @@ Please port this agent to every OS that you care about.
 If you don't see the binary download you are looking for, such as
 for Debian, Ubuntu, Solaris, FreeBSD or Darwin, you might find that
 you can compile it yourself from the sources.  And if it's
-not there either, try checking out the latest "trunk" sources:
+not there either, try checking out the latest sources:
 
-mkdir host-sflow-trunk
-svn co https://host-sflow.svn.sourceforge.net/svnroot/host-sflow/trunk host-sflow-trunk
+svn checkout svn://svn.code.sf.net/p/host-sflow/code/trunk host-sflow-code
 
-If what you want is *still* not there, please subscribe to the host-sflow-discuss
-mailing list and send a request.
-https://sourceforge.net/mailarchive/forum.php?forum_name=host-sflow-discuss
+If what you want is *still* not there, please subscribe to
+the host-sflow-discuss mailing list and send a request:
+
+https://sourceforge.net/p/host-sflow/mailman/
+
+For release hightlights, troubleshooting FAQ and other resources,
+see the project wiki:
+
+https://sourceforge.net/p/host-sflow/wiki/Home/
+
 
 AUTHORS
 Neil McKee (neil.mckee@inmon.com)
