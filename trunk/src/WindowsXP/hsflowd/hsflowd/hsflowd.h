@@ -32,7 +32,7 @@ extern "C" {
 #define YES 1
 #define NO 0
 
-#define HSP_VERSION "1.20"
+#define HSP_VERSION "1.22"
 #define HSP_DAEMON_NAME "hsflowd"
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
