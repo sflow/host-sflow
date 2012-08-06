@@ -89,12 +89,16 @@ extern "C" {
   */
 
   int runningProcesses(void) {
-    int running = runningProcesses_proc();
-    // may be allowed to read just one psinfo file: our own, so test for <= 1
-    if(running <= 1) {
-      // fall back on an exec of prstat(1)
-      running = runningProcesses_prstat();
-    }
+    int running;
+#if HSP_RUNNINGPROCESSES_PROC
+    // This only works properly if root privileges were retained,  otherwise
+    // we may be allowed to read just one psinfo file: our own, and sometimes
+    // maybe one or two others.
+    running = runningProcesses_proc();
+#else
+    // use a less efficient approach that seems to work without root privileges
+    running = runningProcesses_prstat();
+#endif
     return running;
   }
 
