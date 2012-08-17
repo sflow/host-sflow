@@ -28,6 +28,14 @@ extern int debug;
 #define XML_OSNAME L"OSName"
 #define XML_OSVERSION L"OSVersion"
 
+#define PROP_ELEMENT_NAME L"ElementName"
+#define PROP_SYSTEM_NAME L"SystemName"
+#define PROP_SPEED L"Speed"
+#define PROP_NAME L"Name"
+#define PROP_MAC_ADDR L"PermanentAddress"
+#define PROP_PROCESS L"ProcessID"
+#define PROP_BIOS_GUID L"BIOSGUID"
+
 /**
  * Functions to parse the XML in the GuestIntrinsicExchangeItems 
  * each of which has format:
@@ -193,13 +201,16 @@ void parseKvpXml(VARIANT *vtVar, SFLHost_hid_counters *hid,
 	             char *hnamebuf, uint32_t hnamebufLen,
 				 char *osrelbuf, uint32_t osrelbufLen)
 {
+	if (V_VT(vtVar) != (VT_ARRAY | VT_BSTR)) {
+		return;
+	}
 	LONG lstart, lend;
 	LONG idx = -1;
 	HRESULT hr;
 	BSTR* pbstr;
-	SAFEARRAY *sa = V_ARRAY(vtVar); 
-	// Get the lower and upper bound
+	SAFEARRAY *sa = V_ARRAY(vtVar);
 
+	// Get the lower and upper bound
 	hr = SafeArrayGetLBound(sa, 1, &lstart);
 	if (FAILED(hr)) {
 		return;
@@ -288,8 +299,9 @@ static void readVmHidCounters(HVSVmState *state, SFLHost_hid_counters *hid,
 			hr = kvpEnum->Next(WBEM_INFINITE, 1, &kvpObj, &kvpCount);
 			if (0 != kvpCount) {
 				VARIANT items;
-				kvpObj->Get(L"GuestIntrinsicExchangeItems", 0, &items, 0, 0);
-				parseKvpXml(&items, hid, hnamebuf, hnamebufLen, osrelbuf, osrelbufLen);
+				if (WBEM_S_NO_ERROR == kvpObj->Get(L"GuestIntrinsicExchangeItems", 0, &items, 0, 0)) {
+					parseKvpXml(&items, hid, hnamebuf, hnamebufLen, osrelbuf, osrelbufLen);
+				}
 				VariantClear(&items);
 			}
 		}
@@ -678,11 +690,6 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 	HRESULT hr = S_FALSE;
 
 	BSTR queryLang = SysAllocString(L"WQL");
-	BSTR propSysName = SysAllocString(L"SystemName");
-	BSTR propMacAddr = SysAllocString(L"PermanentAddress");
-	BSTR propSpeed = SysAllocString(L"Speed");
-	BSTR propName = SysAllocString(L"Name");
-	BSTR propElementName = SysAllocString(L"ElementName");
 	wchar_t *queryFormat(L"SELECT * FROM %s WHERE SystemName=\"%s\"");
 	uint32_t portTypeCount = 2;
 	wchar_t *portTypes[2];
@@ -731,59 +738,58 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 						ULONG swPortCount = 0;
 						assocHr = swPortEnum->Next(WBEM_INFINITE, 1, &swPortObj, &swPortCount);
 						if (swPortCount == 1) {
-							VARIANT vmNameVal;
-							VARIANT macVal;
-							VARIANT speedVal;
-							VARIANT nameVal;
-							VARIANT swNameVal;
-							portObj->Get(propSysName, 0, &vmNameVal, 0, 0);
-							portObj->Get(propMacAddr, 0, &macVal, 0, 0);
-							portObj->Get(propSpeed, 0, &speedVal, 0, 0);
-							ULONGLONG ifSpeed = _wcstoui64(speedVal.bstrVal, NULL, 10);
-							swPortObj->Get(propName, 0, &nameVal, 0, 0);
-							swPortObj->Get(propSysName, 0, &swNameVal, 0, 0);
-							char portGuid[FORMATTED_GUID_LEN+1];
-							guidToString(nameVal.bstrVal, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
-							SFLAdaptor *vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
-							if (vAdaptor == NULL) {
-								char uuid[16];
-								hexToBinary((UCHAR *)portGuid, (UCHAR *)uuid, 33);
-								uint32_t ifIndex = assign_dsIndex(&sp->portStore, 
-																  uuid, &sp->maxIfIndex, 
-																  &sp->portStoreInvalid);
-								vAdaptor = addVAdaptor(sp->vAdaptorList, portGuid, ifIndex);
-							}
-							vAdaptor->marked = FALSE;
-							vAdaptor->ifSpeed = ifSpeed;
-							vAdaptor->num_macs = 1;
-							wchexToBinary(macVal.bstrVal, vAdaptor->macs[0].mac, 13);
-							HVSVPortInfo *portInfo = (HVSVPortInfo *)vAdaptor->userData;
-							if (portInfo->vmSystemName != NULL) {
-								my_free(portInfo->vmSystemName);
-							}
-							portInfo->vmSystemName = 
-								(wchar_t *)my_calloc((SysStringLen(vmNameVal.bstrVal)+1)*sizeof(wchar_t));
-							wcscpy_s(portInfo->vmSystemName, SysStringLen(vmNameVal.bstrVal)+1, vmNameVal.bstrVal);
-							if (portInfo->switchName) {
-								my_free(portInfo->switchName);
-							}
-							portInfo->switchName =
-								(wchar_t *)my_calloc((SysStringLen(swNameVal.bstrVal)+1)*sizeof(wchar_t));
-							wcscpy_s(portInfo->switchName, SysStringLen(swNameVal.bstrVal)+1, swNameVal.bstrVal);
-							if (LOG_INFO <= debug) {
-								u_char macAddr[13];
-								if (vAdaptor->num_macs > 0 && vAdaptor->macs) {
-									printHex(vAdaptor->macs[0].mac, 6, macAddr, 13, FALSE);
+							wchar_t *guidString = stringFromWMIProperty(swPortObj, PROP_NAME);
+							if (guidString != NULL) {
+								char portGuid[FORMATTED_GUID_LEN+1];
+								guidToString(guidString, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
+								my_free(guidString);
+								SFLAdaptor *vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
+								if (vAdaptor == NULL) {
+									char uuid[16];
+									hexToBinary((UCHAR *)portGuid, (UCHAR *)uuid, 33);
+									uint32_t ifIndex = assign_dsIndex(&sp->portStore, 
+																	  uuid, &sp->maxIfIndex, 
+																	  &sp->portStoreInvalid);
+									vAdaptor = addVAdaptor(sp->vAdaptorList, portGuid, ifIndex);
 								}
-								myLog(LOG_INFO, 
-									  "readVmAdaptors: updated vAdaptor ifIndex=%u switchPortName=%s ifSpeed=%llu MAC=%s vmName=%S\n", 
-									  vAdaptor->ifIndex, vAdaptor->deviceName, vAdaptor->ifSpeed, macAddr, portInfo->vmSystemName);
+								vAdaptor->marked = FALSE;
+								wchar_t *speedString = stringFromWMIProperty(portObj, PROP_SPEED);
+								if (speedString != NULL) {
+									ULONGLONG ifSpeed = _wcstoui64(speedString, NULL, 10);
+									vAdaptor->ifSpeed = ifSpeed;
+									my_free(speedString);
+								}
+								wchar_t *macString = stringFromWMIProperty(portObj, PROP_MAC_ADDR);
+								if (macString != NULL) {
+									vAdaptor->num_macs = 1;
+									wchexToBinary(macString, vAdaptor->macs[0].mac, 13);
+									my_free(macString);
+								}
+								HVSVPortInfo *portInfo = (HVSVPortInfo *)vAdaptor->userData;
+								wchar_t *sysName = stringFromWMIProperty(portObj, PROP_SYSTEM_NAME);
+								if (sysName != NULL) {
+									if (portInfo->vmSystemName != NULL) {
+										my_free(portInfo->vmSystemName);
+									}
+									portInfo->vmSystemName = sysName;
+								}
+								wchar_t *switchName = stringFromWMIProperty(swPortObj, PROP_SYSTEM_NAME);
+								if (switchName != NULL) {
+									if (portInfo->switchName) {
+										my_free(portInfo->switchName);
+									}
+									portInfo->switchName = switchName;
+								}
+								if (LOG_INFO <= debug) {
+									u_char macAddr[13];
+									if (vAdaptor->num_macs > 0 && vAdaptor->macs) {
+										printHex(vAdaptor->macs[0].mac, 6, macAddr, 13, FALSE);
+									}
+									myLog(LOG_INFO, 
+										"readVmAdaptors: updated vAdaptor ifIndex=%u switchPortName=%s ifSpeed=%llu MAC=%s vmName=%S\n", 
+										vAdaptor->ifIndex, vAdaptor->deviceName, vAdaptor->ifSpeed, macAddr, portInfo->vmSystemName);
+								}
 							}
-							VariantClear(&speedVal);
-							VariantClear(&vmNameVal);
-							VariantClear(&macVal);
-							VariantClear(&nameVal);
-							VariantClear(&swNameVal);
 							swPortObj->Release();
 						}
 					}
@@ -797,11 +803,6 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 		portEnum->Release();
 	}
 	SysFreeString(queryLang);
-	SysFreeString(propSysName);
-	SysFreeString(propMacAddr);
-	SysFreeString(propSpeed);
-	SysFreeString(propName);
-	SysFreeString(propElementName);
 }
 
 void readVmDisks(IWbemServices *pNamespace, IWbemClassObject *vmObj, HVSVmState *state)
@@ -830,22 +831,24 @@ void readVmDisks(IWbemServices *pNamespace, IWbemClassObject *vmObj, HVSVmState 
 				settingHr = diskSettingEnum->Next(WBEM_INFINITE, 1, &settingObj, &settingCount);
 				if (SUCCEEDED(settingHr) && settingCount == 1) {
 					VARIANT connection;
-					settingObj->Get(L"Connection", 0, &connection, 0, 0);
-					SAFEARRAY *sa = V_ARRAY(&connection);
-					LONG lstart, lend;
-					SafeArrayGetLBound(sa, 1, &lstart);
-					SafeArrayGetUBound(sa, 1, &lend);
-					if (lstart <= lend) {
-						BSTR *pbstr;
-						settingHr = SafeArrayAccessData(sa, (void HUGEP **)&pbstr);
-						if (SUCCEEDED(settingHr)) {
-							wchar_t *disk = my_wcsdup(pbstr[lstart]);
-							if (wcsArrayIndexOf(state->disks, disk) == -1) {
-								wcsArrayAdd(state->disks, disk);
+					if (WBEM_S_NO_ERROR == settingObj->Get(L"Connection", 0, &connection, 0, 0) &&
+						V_VT(&connection) == (VT_ARRAY | VT_BSTR)) {
+						SAFEARRAY *sa = V_ARRAY(&connection);
+						LONG lstart, lend;
+						SafeArrayGetLBound(sa, 1, &lstart);
+						SafeArrayGetUBound(sa, 1, &lend);
+						if (lstart <= lend) {
+							BSTR *pbstr;
+							settingHr = SafeArrayAccessData(sa, (void HUGEP **)&pbstr);
+							if (SUCCEEDED(settingHr)) {
+								wchar_t *disk = my_wcsdup(pbstr[lstart]);
+								if (wcsArrayIndexOf(state->disks, disk) == -1) {
+									wcsArrayAdd(state->disks, disk);
+								}
+								my_free(disk);
 							}
-							my_free(disk);
+							SafeArrayUnaccessData(sa);
 						}
-						SafeArrayUnaccessData(sa);
 					}
 					VariantClear(&connection);
 				}
@@ -891,23 +894,12 @@ void readVms(HSP *sp)
 			SysFreeString(query1);
 			if (!SUCCEEDED(hr)) {
 				myLog(LOG_ERR,"readVms: ExecQuery() failed for query %S error=0x%x", query1, hr);
-				SysFreeString(queryLang);
-				pNamespace->Release();
-				CoUninitialize();
 				sp->num_partitions = 0;
 			} else {
 				wchar_t *query2 = L"SELECT * FROM Msvm_VirtualSystemSettingData WHERE SettingType=3 AND InstanceID=\"Microsoft:%s\"";
-				BSTR propElementName = SysAllocString(L"ElementName");
-				BSTR propName = SysAllocString(L"Name");
-				BSTR propProcess = SysAllocString(L"ProcessID");
-				BSTR propBiosGuid = SysAllocString(L"BIOSGUID");
 				IWbemClassObject *vmObj = NULL;
 				IEnumWbemClassObject *vssdEnum = NULL;
 				IWbemClassObject *vssdObj = NULL;
-				VARIANT elementVal;
-				VARIANT nameVal;
-				VARIANT processVal;
-				VARIANT biosGuidVal;
 				time_t now = time(NULL);
 				uint32_t numPartitions = 0;
 
@@ -919,107 +911,103 @@ void readVms(HSP *sp)
 						break;
 					}
 					numPartitions++;
-					hr = vmObj->Get(propName, 0, &nameVal, 0, 0);
-					hr = vmObj->Get(propElementName, 0, &elementVal, 0, 0);
-					hr = vmObj->Get(propProcess, 0, &processVal, 0, 0);
-					uint32_t processId = processVal.ulVal;
-					size_t length = SysStringLen(nameVal.bstrVal)+1;
-					wchar_t *vmName = (wchar_t*)my_calloc(length*sizeof(wchar_t));
-					wcscpy_s(vmName, length, nameVal.bstrVal);
-					//get the adaptor and switch port info for the vm
-					readVmAdaptors(sp, pNamespace, vmName);
-					length += wcslen(query2)+1;
-					wchar_t *vmQuery = (wchar_t *)my_calloc(length*sizeof(wchar_t));
-					swprintf_s(vmQuery, length, query2, vmName);
-					hr = pNamespace->ExecQuery(queryLang, vmQuery, WBEM_FLAG_FORWARD_ONLY, NULL, &vssdEnum);
-					if (!SUCCEEDED(hr)) {
-						myLog(LOG_ERR,"readVms: ExecQuery() failed for query: %S error=0x%x", vmQuery, hr);
-					} else {
-						ULONG settingCount;
-						hr = vssdEnum->Next(WBEM_INFINITE, 1, &vssdObj, &settingCount);
-						if (0 != settingCount) {
-							BOOL noUUID = true;
-							while (vssdObj && noUUID) {
-								hr = vssdObj->Get(propBiosGuid, 0, &biosGuidVal, 0, 0);
-								noUUID = false;
-							}
-							uint32_t len = SysStringLen(elementVal.bstrVal)+1;
-							wchar_t *friendlyName = (wchar_t*)my_calloc(len*sizeof(wchar_t));
-							wcscpy_s(friendlyName, len, elementVal.bstrVal);
-							len = SysStringLen(biosGuidVal.bstrVal);
-							char uuid[16];
-							wchexToBinary(biosGuidVal.bstrVal, (UCHAR *)uuid, 33);
-							if (&biosGuidVal != NULL) {
-								VariantClear(&biosGuidVal);
-							}
-							uint32_t dsIndex = assign_dsIndex(&sp->vmStore, uuid, &sp->maxDsIndex, &sp->vmStoreInvalid);
-							SFLDataSource_instance dsi;
-							// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
-							SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + dsIndex, 0);
-							SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
-							HVSVmState *state = (HVSVmState *)vpoller->userData;
-							if (state != NULL) {
-								// We already know about this VM, so just clear the mark
-								state->marked = FALSE;
-								//Reset info we are about to refresh
-								state->processId = processId;
-								if (state->vmName != NULL) {
-									my_free(state->vmName);
+					wchar_t *vmName = stringFromWMIProperty(vmObj, PROP_NAME);
+					if (vmName != NULL) {
+						//get the adaptor and switch port info for the vm
+						readVmAdaptors(sp, pNamespace, vmName);
+						size_t length = wcslen(vmName)+1+wcslen(query2)+1;
+						wchar_t *vmQuery = (wchar_t *)my_calloc(length*sizeof(wchar_t));
+						swprintf_s(vmQuery, length, query2, vmName);
+						hr = pNamespace->ExecQuery(queryLang, vmQuery, WBEM_FLAG_FORWARD_ONLY, NULL, &vssdEnum);
+						if (!SUCCEEDED(hr)) {
+							myLog(LOG_ERR,"readVms: ExecQuery() failed for query: %S error=0x%x", vmQuery, hr);
+						} else {
+							ULONG settingCount;
+							hr = vssdEnum->Next(WBEM_INFINITE, 1, &vssdObj, &settingCount);
+							if (0 != settingCount) {
+								BOOL noUUID = true;
+								wchar_t *biosGuidString = NULL;
+								while (vssdObj && noUUID) {
+									biosGuidString = stringFromWMIProperty(vssdObj, PROP_BIOS_GUID);
+									noUUID = false;
 								}
-								state->vmName = vmName;
-								if (state->vmFriendlyName != NULL) {
-									my_free(state->vmFriendlyName);
-								}
-								state->vmFriendlyName = friendlyName;
-								state->timestamp = now;
-							} else {
-								//found a new vm
-								uint32_t pollingInterval = sf->sFlowSettings ? 
-									sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-								if (pollingInterval > 0) {
-									sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-									sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-									// hang a new HVSVmState object on the userData hook
-									state = (HVSVmState *)my_calloc(sizeof(HVSVmState));
-									state->marked = FALSE;
-									state->processId = processId;
-									state->vmName = vmName;
-									state->vmFriendlyName = friendlyName;
-									memcpy(state->uuid, uuid, 16);
-									state->timestamp = now;
-									vpoller->userData = state;
-									state->disks = wcsArrayNew();
-									//get the disk info
-									readVmDisks(pNamespace, vmObj, state);
-									if (LOG_INFO <= debug) {
-										u_char uuidbuf[FORMATTED_GUID_LEN+1];
-										printUUID(state->uuid, uuidbuf, FORMATTED_GUID_LEN);
-										myLog(LOG_INFO, "readVms: adding vm at dsIndex=%u %S, %S, %s, %ul",
-											  SFL_DS_INDEX(vpoller->dsi),   
-											  state->vmFriendlyName, state->vmName, uuidbuf, state->processId);
+								if (biosGuidString != NULL) { 
+									char uuid[16];
+									wchexToBinary(biosGuidString, (UCHAR *)uuid, 33);
+									my_free(biosGuidString);
+									wchar_t *friendlyName = stringFromWMIProperty(vmObj, PROP_ELEMENT_NAME);
+									VARIANT processVal;
+									uint32_t processId = 0;
+									hr = vmObj->Get(PROP_PROCESS, 0, &processVal, 0, 0);
+									if (WBEM_S_NO_ERROR == hr && 
+										(V_VT(&processVal) == VT_I4 || V_VT(&processVal) == VT_UI4)) {
+										processId = processVal.ulVal;
 									}
-								}
-							}
-						}
-						vssdEnum->Release();
-					}
+									VariantClear(&processVal);
+
+									uint32_t dsIndex = assign_dsIndex(&sp->vmStore, uuid, &sp->maxDsIndex, &sp->vmStoreInvalid);
+									SFLDataSource_instance dsi;
+									// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+									SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + dsIndex, 0);
+									SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
+									HVSVmState *state = (HVSVmState *)vpoller->userData;
+									if (state != NULL) {
+										// We already know about this VM, so just clear the mark
+										state->marked = FALSE;
+										//Reset info we are about to refresh
+										state->processId = processId;
+										if (state->vmName != NULL) {
+											my_free(state->vmName);
+										}
+										state->vmName = vmName;
+										if (state->vmFriendlyName != NULL) {
+											my_free(state->vmFriendlyName);
+										}
+										state->vmFriendlyName = friendlyName;
+										state->timestamp = now;
+									} else {
+										//found a new vm
+										uint32_t pollingInterval = sf->sFlowSettings ? 
+										sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+										if (pollingInterval > 0) {
+											sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
+											sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
+											// hang a new HVSVmState object on the userData hook
+											state = (HVSVmState *)my_calloc(sizeof(HVSVmState));
+											state->marked = FALSE;
+											state->processId = processId;
+											state->vmName = vmName;
+											state->vmFriendlyName = friendlyName;
+											memcpy(state->uuid, uuid, 16);
+											state->timestamp = now;
+											vpoller->userData = state;
+											state->disks = wcsArrayNew();
+											//get the disk info
+											readVmDisks(pNamespace, vmObj, state);
+											if (LOG_INFO <= debug) {
+												u_char uuidbuf[FORMATTED_GUID_LEN+1];
+												printUUID(state->uuid, uuidbuf, FORMATTED_GUID_LEN);
+												myLog(LOG_INFO, "readVms: adding vm at dsIndex=%u %S, %S, %s, %ul",
+												SFL_DS_INDEX(vpoller->dsi),   
+												state->vmFriendlyName, state->vmName, uuidbuf, state->processId);
+											}
+										} //pollingInterval > 0
+									} //found new vm
+								} //got biosGuid
+							} //settingCount != 0
+							vssdEnum->Release();
+						} //finished with vssdEnum
+						my_free(vmQuery);
+					} //nmName != NULL
 					vmObj->Release();
-					VariantClear(&nameVal);
-					VariantClear(&elementVal);
-					VariantClear(&processVal);
-					my_free(vmQuery);
-				}
+				} //while vmEnum->Next, assign vmObj
 				vmEnum->Release();
-				SysFreeString(propElementName);
-				SysFreeString(propName);
-				SysFreeString(propProcess);
-				SysFreeString(propBiosGuid);
-				pNamespace->Release();
-				CoUninitialize();
-				SysFreeString(queryLang);
-				sp->num_partitions = numPartitions;
-			}
-		}
+				sp->num_partitions = numPartitions;				
+			} //done with vmEnum
+			pNamespace->Release();
+			CoUninitialize();
+			SysFreeString(queryLang);
+		} //done with connection to WMI
 
 		// 3a. remove any pollers that don't exist any more
 		for (SFLPoller *poller = sf->agent->pollers; poller != NULL; poller = poller->nxt) {

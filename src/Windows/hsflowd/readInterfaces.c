@@ -10,6 +10,12 @@ extern "C" {
 #include <Mstcpip.h>
 
 #define VMSMP L"VMSMP"
+#define PROP_GUID L"GUID"
+#define PROP_NAME L"Name"
+#define PROP_MAC L"MACAddress"
+#define PROP_IFINDEX L"InterfaceIndex"
+#define PROP_SVC_NAME L"ServiceName"
+
 
  /**
  * Frees the allocated memory for a HSPAdaptorNIO.
@@ -138,17 +144,8 @@ void readInterfaces(HSP *sp, BOOL getIpAddr)
 		CoUninitialize();
 		return;
 	}
-	BSTR propGuid = SysAllocString(L"GUID");
-	BSTR propName = SysAllocString(L"Name");
-	BSTR propMac = SysAllocString(L"MACAddress");
-	BSTR propifIndex = SysAllocString(L"InterfaceIndex");
-	BSTR propSvcName = SysAllocString(L"ServiceName");
 	IWbemClassObject *adapterObj = NULL;
-	VARIANT guidVal;
-	VARIANT nameVal;
-	VARIANT macVal;
 	VARIANT ifIndexVal;
-	VARIANT svcNameVal;
 	hr = WBEM_S_NO_ERROR;
 	while (WBEM_S_NO_ERROR == hr) {
 		ULONG adapterCount = 1;
@@ -156,50 +153,53 @@ void readInterfaces(HSP *sp, BOOL getIpAddr)
 		if (0 == adapterCount) {
 			break;
 		}
-		adapterObj->Get(propGuid, 0, &guidVal, 0, 0);
-		adapterObj->Get(propName, 0, &nameVal, 0, 0);
-		adapterObj->Get(propMac, 0, &macVal, 0, 0);
-		adapterObj->Get(propifIndex, 0, &ifIndexVal, 0, 0);
-		adapterObj->Get(propSvcName, 0, &svcNameVal, 0, 0);
-		u_char deviceName[FORMATTED_GUID_LEN+1];
-		guidToString(guidVal.bstrVal, deviceName, FORMATTED_GUID_LEN);
-		u_char mac[13];
-		wchexToBinary(macVal.bstrVal, mac, 13);
-		SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, 
-											 (char *)deviceName, mac, 
-											 sizeof(HSPAdaptorNIO));
-		// clear the mark so we don't free it below
-		adaptor->marked = FALSE;
-		adaptor->ifIndex = ifIndexVal.ulVal;
-		HSPAdaptorNIO *userData = (HSPAdaptorNIO *)adaptor->userData;
-		if (userData->countersInstance != NULL) {
-			my_free(userData->countersInstance);
+		wchar_t *guidString = stringFromWMIProperty(adapterObj, PROP_GUID);
+		wchar_t *macString = stringFromWMIProperty(adapterObj, PROP_MAC);
+		if (guidString != NULL && macString != NULL) {
+			u_char deviceName[FORMATTED_GUID_LEN+1];
+			guidToString(guidString, deviceName, FORMATTED_GUID_LEN);
+			u_char mac[13];
+			wchexToBinary(macString, mac, 13);
+			SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, 
+												(char *)deviceName, mac, 
+												sizeof(HSPAdaptorNIO));
+			// clear the mark so we don't free it below
+			adaptor->marked = FALSE;
+			if (WBEM_S_NO_ERROR == adapterObj->Get(PROP_IFINDEX, 0, &ifIndexVal, 0, 0) &&
+				(V_VT(&ifIndexVal) == VT_I4 || V_VT(&ifIndexVal) == VT_UI4)) {
+				adaptor->ifIndex = ifIndexVal.ulVal;
+			}
+			HSPAdaptorNIO *userData = (HSPAdaptorNIO *)adaptor->userData;
+			if (userData->countersInstance != NULL) {
+				my_free(userData->countersInstance);
+			}
+			wchar_t *counterName = stringFromWMIProperty(adapterObj, PROP_NAME);
+			if (counterName != NULL) {
+				cleanCounterName(counterName, UTNETWORK_INTERFACE);
+				userData->countersInstance = counterName;
+			}
+			wchar_t *svcName = stringFromWMIProperty(adapterObj, PROP_SVC_NAME);
+			if (svcName != NULL) {
+				userData->isVirtual = (_wcsicmp(VMSMP, svcName) == 0);
+				my_free(svcName);
+			}
+			if (getIpAddr) {
+				userData->ipPriority = IPSP_NONE;
+				readIpAddresses(pNamespace, adapterObj, adaptor);
+			}
+			myLog(LOG_INFO,"ReadInterfaces:\n\tAdapterName:\t%s\n\tifIndex:\t%lu\n\tCounterName:\t%S\n\tisVirtual\t%u",
+				adaptor->deviceName, adaptor->ifIndex, userData->countersInstance, userData->isVirtual);
 		}
-		size_t length = SysStringLen(nameVal.bstrVal)+1;
-		wchar_t *counterName = (wchar_t *)my_calloc(length*sizeof(wchar_t));
-		wcscpy_s(counterName, length, nameVal.bstrVal);
-		cleanCounterName(counterName, UTNETWORK_INTERFACE);
-		userData->countersInstance = counterName;
-		userData->isVirtual = (_wcsicmp(VMSMP, svcNameVal.bstrVal) == 0);
-		if (getIpAddr) {
-			userData->ipPriority = IPSP_NONE;
-			readIpAddresses(pNamespace, adapterObj, adaptor);
+		if (guidString != NULL) {
+			my_free(guidString);
 		}
-		myLog(LOG_INFO,"ReadInterfaces:\n\tAdapterName:\t%s\n\tifIndex:\t%lu\n\tCounterName:\t%S\n\tisVirtual\t%u",
-			  adaptor->deviceName, adaptor->ifIndex, userData->countersInstance, userData->isVirtual);
+		if (macString != NULL) {
+			my_free(macString);
+		}
 		adapterObj->Release();
-		VariantClear(&guidVal);
-		VariantClear(&nameVal);
-		VariantClear(&macVal);
 		VariantClear(&ifIndexVal);
-		VariantClear(&svcNameVal);
 	}
 	adapterEnum->Release();
-	SysFreeString(propGuid);
-	SysFreeString(propName);
-	SysFreeString(propMac);
-	SysFreeString(propifIndex);
-	SysFreeString(propSvcName);
 	pNamespace->Release();
 	CoUninitialize();
 	adaptorListFreeMarked(sp->adaptorList, freeAdaptorInfo);

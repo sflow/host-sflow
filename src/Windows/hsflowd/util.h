@@ -105,6 +105,7 @@ HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace);
 HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj, 
 					   wchar_t *assocClass, wchar_t *endClass, wchar_t *resultRole,
 					   IEnumWbemClassObject **resultEnum);
+wchar_t *stringFromWMIProperty(IWbemClassObject *classObj, LPCWSTR property);
 enum UTWmiCharSubstitutions {
 	UTHYPERV_VIRT_STORAGE_DEV = 0,
 	UTHYPERV_DYN_MEM_VM,
