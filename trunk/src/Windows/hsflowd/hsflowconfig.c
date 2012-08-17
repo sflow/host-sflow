@@ -258,9 +258,29 @@ BOOL readConfig(HSP *sp)
 		return FALSE;
 	}
 
+	//Read the sFlow port from the registry. If the port is not
+	//set in the registry, we will use the already initialised defaults
+	//see newCollector(HSPSFlow *sf)
+	DWORD dwPort = 0;
+	dwRet = RegQueryValueEx(hkey,
+							HSP_REGVAL_PORT,
+							NULL,
+							NULL,
+							(LPBYTE)&dwPort,
+							&cbData);
+	if (dwRet == ERROR_SUCCESS) {
+		if (dwPort <= 0 || dwPort > 65535) {
+			myLog(debug, "readConfig: invalid sFlow udp port %u read from %s\\%s, using default %u",
+				dwPort, HSP_REG_KEY, HSP_REGVAL_PORT, SFL_DEFAULT_COLLECTOR_PORT);
+		} else {
+			collector->udpPort = dwPort;
+		}
+	}
+
+
 	//Read the sampling rate and polling interval from the registry.
 	//If values do not exist, we will use the already initialised
-	//defaults (see newSFlowSettings()).
+	//defaults (see newSFlowSettings(HSPSFlow *sf)).
 	DWORD dwSamplingRate = 0;
 	dwRet = RegQueryValueEx(hkey,
 							HSP_REGVAL_SAMPLING_RATE,
@@ -296,8 +316,8 @@ BOOL readConfig(HSP *sp)
 	} else if (collector->ipAddr.type == SFLADDRESSTYPE_IP_V6) {
 		InetNtop(AF_INET6, &collector->ipAddr.address.ip_v6, collectorStr, MAX_IPV6_STRLEN); 
 	}
-	myLog(debug, "readConfig: agent=%s collector=%s samplingRate=%u pollingInterval=%u",
-		  agentStr, collectorStr, sp->sFlow->sFlowSettings->samplingRate, 
+	myLog(debug, "readConfig: agent=%s collector=%s port=%u samplingRate=%u pollingInterval=%u",
+		agentStr, collectorStr, collector->udpPort, sp->sFlow->sFlowSettings->samplingRate, 
 		  sp->sFlow->sFlowSettings->pollingInterval);
     return TRUE;
 }

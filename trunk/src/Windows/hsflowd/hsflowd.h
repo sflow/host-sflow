@@ -41,6 +41,7 @@ extern "C" {
 #define HSP_DEFAULT_PORTSTORE L"ports.txt"
 #define HSP_REG_KEY "system\\currentcontrolset\\services\\hsflowd\\Parameters"
 #define HSP_REGVAL_COLLECTOR "collector"
+#define HSP_REGVAL_PORT "port"
 #define HSP_REGVAL_SAMPLING_RATE "samplingRate"
 #define HSP_REGVAL_POLLING_INTERVAL "pollingInterval"
 #define HSP_REGVAL_AGENT "agentAddress"
