@@ -477,8 +477,12 @@ void openFilter(HSP *sp)
 		                         NULL, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, NULL);
 	if (sp->filter.dev == INVALID_HANDLE_VALUE) {
 		DWORD error = GetLastError();
-        myLog(LOG_ERR, "openFilter: could not open device file %S: %ld", 
-			  SFLOW_FILTER_DEVICE, error);
+		if (error == ERROR_FILE_NOT_FOUND) {
+			 myLog(LOG_ERR, "openFilter: sFlow Hyper-V switch extension not found (Windows Server 2012 Hyper-V not running or sFlow extension not installed). Monitoring host performance only");
+		} else {
+			myLog(LOG_ERR, "openFilter: could not open device file %S: %ld. Monitoring host performance only.", 
+				  SFLOW_FILTER_DEVICE, error);
+		}
 	} else {
 		myLog(debug, "openFilter: attached to sFlow Hyper-V Switch extension");
 		//Create the ioctl overlaps for communication with the device
