@@ -579,6 +579,28 @@ HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj,
 }
 
 /**
+ * Returns a wide character string that results from accessing an the specified
+ * property of the specified classObject. Returns null if there is an error
+ * when accessing the property or if the property value is not of type
+ * VT_BSTR. This function allocates space for the returned string.
+ */
+wchar_t *stringFromWMIProperty(IWbemClassObject *classObj, LPCWSTR property)
+{
+	VARIANT variant;
+	HRESULT hr = classObj->Get(property, 0, &variant, 0, 0);
+	if (WBEM_S_NO_ERROR == hr && V_VT(&variant) == VT_BSTR) {
+		int length = SysStringLen(variant.bstrVal)+1; //include room for terminating null
+		wchar_t *stringVal = (wchar_t *)my_calloc(length*sizeof(wchar_t));
+		wcscpy_s(stringVal, length, variant.bstrVal);
+		VariantClear(&variant);
+		return stringVal;
+	} else {
+		VariantClear(&variant);
+		return NULL;
+	}
+}
+
+/**
  * Returns the substitution character for a reserved character
  * when using "names" discovered via enumerating WMI objects
  * to access performance counters.

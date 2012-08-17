@@ -18,6 +18,10 @@ extern "C" {
 
 extern int debug;
 
+#define PROP_ELEMENT_NAME L"ElementName"
+#define PROP_SYSTEM_NAME L"SystemName"
+#define PROP_NAME L"Name"
+#define PROP_SPEED L"Speed"
 
 /**
  * Sets the counters instance name for the SFLAdaptor representing the switch port.
@@ -84,16 +88,6 @@ void readWMISwitchPorts(HSP *sp)
 	}
 	IWbemClassObject *switchPortObj = NULL;
 
-	BSTR propElementName = SysAllocString(L"ElementName");
-	BSTR propSystemName = SysAllocString(L"SystemName");
-	BSTR propName = SysAllocString(L"Name");
-	BSTR propSpeed = SysAllocString(L"Speed");
-	//could also get ifDirection but FullDuplex=True always
-	VARIANT systemVal;
-	VARIANT elementVal;
-	VARIANT nameVal;
-	VARIANT speedVal;
-
 	hr = WBEM_S_NO_ERROR;
 	while (WBEM_S_NO_ERROR == hr) {
 		SFLAdaptor *vAdaptor = NULL;
@@ -102,38 +96,39 @@ void readWMISwitchPorts(HSP *sp)
 		if (0 == uReturned) {
 			break;
 		}
-		HRESULT portHr;
-		portHr = switchPortObj->Get(propName, 0, &nameVal, 0, 0);
-		char portGuid[FORMATTED_GUID_LEN+1];
-		guidToString(nameVal.bstrVal, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
-		myLog(LOG_INFO, "readWMISwitchPorts: portGuid=%s", portGuid);
-		VariantClear(&nameVal);
-		vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
+		wchar_t *guidString = stringFromWMIProperty(switchPortObj, PROP_NAME);
+		if (guidString != NULL) {
+			char portGuid[FORMATTED_GUID_LEN+1];
+			guidToString(guidString, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
+			myLog(LOG_INFO, "readWMISwitchPorts: portGuid=%s", portGuid);
+			my_free(guidString);
+			vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
+		}
 		if (vAdaptor != NULL) {
-			portHr = switchPortObj->Get(propSystemName, 0, &systemVal, 0, 0);
-			portHr = switchPortObj->Get(propElementName, 0, &elementVal, 0, 0);
-			portHr = switchPortObj->Get(propSpeed, 0, &speedVal, 0, 0);
-			int length = SysStringLen(systemVal.bstrVal)+1; //include room for terminating null
-			wchar_t *switchName = (wchar_t *)my_calloc(length*sizeof(wchar_t));
-			wcscpy_s(switchName, length, systemVal.bstrVal);
-			length = SysStringLen(elementVal.bstrVal)+1; 
-			wchar_t *friendlyName = (wchar_t *)my_calloc(length*sizeof(wchar_t));
-			wcscpy_s(friendlyName, length, elementVal.bstrVal);
-			ULONGLONG ifSpeed = _wcstoui64(speedVal.bstrVal, NULL, 10);
-			VariantClear(&systemVal);
-			VariantClear(&elementVal);
-			VariantClear(&speedVal);
 			HVSVPortInfo *portInfo = (HVSVPortInfo *)vAdaptor->userData;
-			if (portInfo->switchName != NULL) {
-				my_free(portInfo->switchName);
+			wchar_t *switchName = stringFromWMIProperty(switchPortObj, PROP_SYSTEM_NAME);
+			if (switchName != NULL) {
+				if (portInfo->switchName != NULL) {
+					my_free(portInfo->switchName);
+				}
+				portInfo->switchName = switchName;
 			}
-			portInfo->switchName = switchName;
-			if (portInfo->portFriendlyName != NULL) {
-				my_free(portInfo->portFriendlyName);
+			wchar_t *friendlyName = stringFromWMIProperty(switchPortObj, PROP_ELEMENT_NAME);
+			if (friendlyName != NULL) {
+				if (portInfo->portFriendlyName != NULL) {
+					my_free(portInfo->portFriendlyName);
+				}
+				portInfo->portFriendlyName = friendlyName;
 			}
-			portInfo->portFriendlyName = friendlyName;
 			setPortCountersInstance(vAdaptor);
-			vAdaptor->ifSpeed = ifSpeed;
+			wchar_t *speedString = stringFromWMIProperty(switchPortObj, PROP_SPEED);
+			if (speedString != NULL) {
+				ULONGLONG ifSpeed = _wcstoui64(speedString, NULL, 10);
+				vAdaptor->ifSpeed = ifSpeed;
+				my_free(speedString);
+			}
+			//could also get ifDirection but FullDuplex=True always
+
 			//Get the MACs and VM system name when we enumerate the vms.
 			myLog(LOG_INFO, 
 				  "readWMISwitchPorts: updated switch port %s %S portId=%u ifIndex=%u ifSpeed=%llu counterName=%S", 
@@ -147,12 +142,6 @@ void readWMISwitchPorts(HSP *sp)
 	switchPortEnum->Release();
 	pNamespace->Release();
 	CoUninitialize();
-	SysFreeString(propElementName);
-	SysFreeString(propSystemName);
-	SysFreeString(propName);
-	SysFreeString(propSpeed);
-
-	return;
 }
 
 /**
