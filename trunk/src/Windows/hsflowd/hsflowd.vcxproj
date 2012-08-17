@@ -233,6 +233,7 @@
     <ClInclude Include="hypervSwitch.h" />
     <ClInclude Include="hypervUtil.h" />
     <ClInclude Include="readWindowsEnglishCounters.h" />
+    <ClInclude Include="sflowfilter.h" />
     <ClInclude Include="xmlUtil.h" />
     <ClInclude Include="hsflowd.h" />
     <ClInclude Include="loadAverage.h" />
