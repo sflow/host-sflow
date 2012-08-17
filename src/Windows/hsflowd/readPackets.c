@@ -225,6 +225,15 @@ void readPackets(HSP *sp, PUCHAR buffer)
 							extSwElem.flowType.sw.dst_vlan, extSwElem.flowType.sw.dst_priority);
 					}
 					break; }
+                case EXTENDED_TUNNEL_RECORD_TYPE: {
+                    PSFlowExtendedTunnel extendedTunnel =
+                        GET_OPAQUE_DATA_ADDR(currRecord, PSFlowExtendedTunnel);
+					if (LOG_INFO <= debug) {
+						myLog(LOG_INFO, "readPackets: sampler %s index %u VSID: %u",
+							sampler->userData, SFL_DS_INDEX(sampler->dsi), 
+							extendedTunnel->vsid);
+					}
+                    break; }
 				default: {
 					myLog(LOG_INFO, "readPackets: unknown filter record type: %u", 
 						currRecord->recordType); }
