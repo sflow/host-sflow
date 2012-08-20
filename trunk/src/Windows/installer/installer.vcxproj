@@ -1,6 +1,7 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\version.targets" />
+  <Import Project="driverVersion.targets" />
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="win-debug|Win32">
       <Configuration>win-debug</Configuration>
@@ -257,13 +258,13 @@
   <ItemGroup>
     <CustomBuild Include="installer.wxs">
       <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -o $(IntDir) "%(Identity)"
+      <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -ddriverVersion="$(DriverVersion)" -o $(IntDir) "%(Identity)"
 "$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -o $(IntDir) "%(Identity)"
 "$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
       <Command Condition="'$(Configuration)|$(Platform)'=='win|Win32'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -o $(IntDir) "%(Identity)"
 "$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='win|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -o $(IntDir) "%(Identity)"
+      <Command Condition="'$(Configuration)|$(Platform)'=='win|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -ddriverVersion="$(DriverVersion)" -o $(IntDir) "%(Identity)"
 "$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
       <Message Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">Build WiX installer</Message>
       <Message Condition="'$(Configuration)|$(Platform)'=='win|Win32'">Build WiX installer</Message>
@@ -277,6 +278,7 @@
     </CustomBuild>
   </ItemGroup>
   <ItemGroup>
+    <None Include="driverVersion.targets" />
     <None Include="license.rtf" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
