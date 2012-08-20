@@ -26,5 +26,6 @@
     <None Include="license.rtf">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="driverVersion.targets" />
   </ItemGroup>
 </Project>
