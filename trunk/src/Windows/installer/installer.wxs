@@ -13,8 +13,8 @@
            Manufacturer='InMon Corp.'>
 
     <Package Keywords='Installer' Description='sFlow agent installer'
-      Manufacturer='Host sFlow project'
-      InstallerVersion='200' Languages='1033' Compressed='yes' SummaryCodepage='1252' />
+             Manufacturer='Host sFlow project'
+             InstallerVersion='200' Languages='1033' Compressed='yes' SummaryCodepage='1252' />
 
     <Media Id='1' Cabinet='hsflowd.cab' EmbedCab='yes' />
 
@@ -118,7 +118,7 @@
     </Feature>
 
     <?ifdef extension ?>
-      <Binary Id='protinst.exe' SourceFile='$(var.sourceDir)\protinst.exe' />
+      <Binary Id='protinst.dll' SourceFile='$(var.driverSourceDir)\protinst.dll' />
     <?endif ?>
     <Binary Id='installHelper.dll' SourceFile='$(var.sourceDir)\installHelper.dll' />
     
@@ -133,11 +133,15 @@
                   Value="Thank you for installing [ProductName]. To complete the installation, please enable the sFlow extension in your virtual switches, using the Hyper-V virtual switch manager."/>
 
     <?ifdef extension ?>
-      <CustomAction Id='UninstallExtension' BinaryKey='protinst.exe'
-                    ExeCommand='-u sflowfilter'
+      <CustomAction Id='SetUninstallExtnParams' Property='UninstallExtension'
+                    Value='-u sflowfilter' />
+      <CustomAction Id='UninstallExtension' BinaryKey='protinst.dll'
+                    DllEntry='protinstDLL'
                     Execute='deferred' Impersonate='no' Return='ignore' />
-      <CustomAction Id='InstallExtension' BinaryKey='protinst.exe'
-                    ExeCommand='-i sflowfilter "[Extension]sflowfilter.inf"'
+      <CustomAction Id='SetInstallExtnParams' Property='InstallExtension'
+                    Value='-i sflowfilter "[Extension]sflowfilter.inf"' />
+      <CustomAction Id='InstallExtension' BinaryKey='protinst.dll'
+                    DllEntry='protinstDLL'
                     Execute='deferred' Impersonate='no' Return='check' />
       <CustomAction Id='HyperVPresent' BinaryKey='installHelper.dll'
                     DllEntry='testForHyperV' />
@@ -160,6 +164,8 @@
     </InstallUISequence>
     
     <InstallExecuteSequence>
+      <Custom Action="SetUninstallExtnParams" After="CostFinalize" />
+      <Custom Action="SetInstallExtnParams" After="CostFinalize" />
       <Custom Action="PreventDowngrading" After="FindRelatedProducts">NEWPRODUCTFOUND</Custom>
       <RemoveExistingProducts After="InstallFinalize" />
       <?ifdef extension ?>
@@ -171,7 +177,7 @@
         </Custom>
         <Custom Action='InstallExtension' Before='StartServices'>
           <![CDATA[$sFlowExtension = 3]]>
-      </Custom>
+        </Custom>
       <?endif ?>
     </InstallExecuteSequence>
 
