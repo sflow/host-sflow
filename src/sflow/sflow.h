@@ -357,7 +357,7 @@ typedef struct {
 
 #define SFLAPP_MAX_APPLICATION_LEN 32
 #define SFLAPP_MAX_OPERATION_LEN 32
-#define SFLAPP_MAX_ATTRIBUTES_LEN 64
+#define SFLAPP_MAX_ATTRIBUTES_LEN 255
 
 /* Sampled Enterprise Operation */
 /* opaque = flow_data; enterprise = 0; format = 2202 */
