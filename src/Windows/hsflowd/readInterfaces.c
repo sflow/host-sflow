@@ -136,14 +136,15 @@ void readInterfaces(HSP *sp, BOOL getIpAddr)
 	BSTR query = SysAllocString(L"SELECT * FROM Win32_NetworkAdapter WHERE NetConnectionStatus=2");
 	IEnumWbemClassObject *adapterEnum = NULL;
 	hr = pNamespace->ExecQuery(queryLang, query, WBEM_FLAG_FORWARD_ONLY, NULL, &adapterEnum);
-	SysFreeString(query);
+	SysFreeString(queryLang);
 	if (!SUCCEEDED(hr)) {
 		myLog(LOG_ERR,"readInterfaces: ExecQuery() failed for query %S error=0x%x", query, hr);
-		SysFreeString(queryLang);
+		SysFreeString(query);
 		pNamespace->Release();
 		CoUninitialize();
 		return;
 	}
+	SysFreeString(query);
 	IWbemClassObject *adapterObj = NULL;
 	VARIANT ifIndexVal;
 	hr = WBEM_S_NO_ERROR;

@@ -72,11 +72,10 @@ void readWMISwitchPorts(HSP *sp)
 	}
 
 	BSTR queryLang = SysAllocString(L"WQL");
-	BSTR query = SysAllocString(L"SELECT * FROM Msvm_EthernetSwitchPort");
+	wchar_t *query = L"SELECT * FROM Msvm_EthernetSwitchPort";
 	IEnumWbemClassObject *switchPortEnum = NULL;
 	hr = pNamespace->ExecQuery(queryLang, query, WBEM_FLAG_FORWARD_ONLY, NULL, &switchPortEnum);
 	SysFreeString(queryLang);
-	SysFreeString(query);
 	if (FAILED(hr)) {
 		myLog(LOG_ERR,"readWMISwitchPorts: ExecQuery() failed for query %S error=0x%x", query, hr);
 		CoUninitialize();
