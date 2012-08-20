@@ -304,6 +304,7 @@ static void readVmHidCounters(HVSVmState *state, SFLHost_hid_counters *hid,
 				}
 				VariantClear(&items);
 			}
+			kvpEnum->Release();
 		}
 		pNamespace->Release();
 		CoUninitialize();
@@ -701,11 +702,12 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 		wchar_t *query = (wchar_t *)my_calloc(length*sizeof(wchar_t));
 		swprintf_s(query, length, queryFormat, portTypes[i], vmName);
 		hr = pNamespace->ExecQuery(queryLang, query, WBEM_FLAG_FORWARD_ONLY, NULL, &portEnum);
-		my_free(query);
 		if (FAILED(hr)) {	
 			myLog(LOG_ERR,"readVmAdaptors: ExecQuery() failed for query %S error=0x%x", query, hr);
+			my_free(query);
 			break;
 		}
+		my_free(query);
 		hr = WBEM_S_NO_ERROR;
 		while (WBEM_S_NO_ERROR == hr) {
 			IWbemClassObject *portObj = NULL;
@@ -851,9 +853,13 @@ void readVmDisks(IWbemServices *pNamespace, IWbemClassObject *vmObj, HVSVmState 
 						}
 					}
 					VariantClear(&connection);
+					settingObj->Release();					
 				}
+				diskSettingEnum->Release();
 			}
+			diskObj->Release();
 		}
+		diskEnum->Release();
 	}
 }
 
@@ -888,10 +894,9 @@ void readVms(HSP *sp)
 			BSTR queryLang = SysAllocString(L"WQL");
 			//libvirt uses EnabledState!=0 AND EnabledState!=3 and EnabledState!=32768 (!unknown !disabled !suspended)
 			//use Description since this is locale independent
-			BSTR query1 = SysAllocString(L"SELECT * FROM Msvm_ComputerSystem WHERE Description=\"Microsoft Virtual Machine\" AND EnabledState=2");
+			wchar_t *query1 = L"SELECT * FROM Msvm_ComputerSystem WHERE Description=\"Microsoft Virtual Machine\" AND EnabledState=2";
 			IEnumWbemClassObject *vmEnum = NULL;
 			hr = pNamespace->ExecQuery(queryLang, query1, WBEM_FLAG_FORWARD_ONLY, NULL, &vmEnum);
-			SysFreeString(query1);
 			if (!SUCCEEDED(hr)) {
 				myLog(LOG_ERR,"readVms: ExecQuery() failed for query %S error=0x%x", query1, hr);
 				sp->num_partitions = 0;
@@ -921,7 +926,9 @@ void readVms(HSP *sp)
 						hr = pNamespace->ExecQuery(queryLang, vmQuery, WBEM_FLAG_FORWARD_ONLY, NULL, &vssdEnum);
 						if (!SUCCEEDED(hr)) {
 							myLog(LOG_ERR,"readVms: ExecQuery() failed for query: %S error=0x%x", vmQuery, hr);
+							my_free(vmQuery);
 						} else {
+							my_free(vmQuery);
 							ULONG settingCount;
 							hr = vssdEnum->Next(WBEM_INFINITE, 1, &vssdObj, &settingCount);
 							if (0 != settingCount) {
@@ -997,7 +1004,6 @@ void readVms(HSP *sp)
 							} //settingCount != 0
 							vssdEnum->Release();
 						} //finished with vssdEnum
-						my_free(vmQuery);
 					} //nmName != NULL
 					vmObj->Release();
 				} //while vmEnum->Next, assign vmObj
