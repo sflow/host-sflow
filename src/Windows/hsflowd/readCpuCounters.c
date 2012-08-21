@@ -61,7 +61,7 @@ void readCpuCounters(SFLHost_cpu_counters *cpu)
 						//count the threads that are running (state==2) and are not owned by the idle process.
 						//the name of each thread state counter starts with the process name.
 						cpu->proc_run++;
-						}
+					}
 				}
 				my_free(values);
 			}	
