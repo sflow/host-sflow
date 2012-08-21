@@ -133,7 +133,9 @@ LONGLONG getRawCounterValue(PDH_HCOUNTER *counter)
  * excluding the _Total instance. This is for use when the counter query has
  * been constructed using a wild card instance to collect counter values
  * for all instances.
- * Memory for the counter items should be freed using my_free when no longer needed.
+ * If getting the counter values fails for some reason any memory allocated is
+ * freed, in all other cases memory for the counter items should be freed using 
+ * my_free when no longer needed.
  * PDH_HCOUNTER *counter handle to counter that contains the counter
  * values.
  * PPDH_RAW_COUNTER_ITEM_W *values will be assigned to structure allocated by
@@ -151,6 +153,8 @@ uint32_t getRawCounterValues(PDH_HCOUNTER *counter, PPDH_RAW_COUNTER_ITEM_W *val
 			if (ret > 0 && wcscmp(COUNTER_INSTANCE_TOTAL, values[0][itemCount-1].szName) == 0) {
 				ret--; // use readSingleCounter if you need _Total;
 			}
+		} else {
+			my_free(*values);
 		}
 	}
 	return ret;
