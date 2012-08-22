@@ -6,6 +6,8 @@ MANUAL INSTALL:
 	1. Copy hsflowd.exe to a suitable location.  %WINDIR%\system32 might be a good choice.  
 	2. Configure hsflowd as a Windows Service: `sc create hsflowd type= own start= auto error= normal binPath= path\to\hsflowd.exe DisplayName= "Host sFlow Agent"`
 	3. Configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v collector /d name.or.ip.of.collector
+	3. [Optional] Configure the sFlow port: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v port /t REG_DWORD /d 6343
+	3. [Optional] Configure the pollingInterval: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v pollingInterval /t REG_DWORD /d 30
 
 Debug:
 	hfslowd is implemented as a Windows service, but it can also be invoked from the command line.  When invoked from the command line hsflowd is in debug mode and will output error and information to stderr. In order to run from the command line the service must already be installed per the instructions above.
