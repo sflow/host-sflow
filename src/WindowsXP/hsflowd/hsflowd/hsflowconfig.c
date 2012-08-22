@@ -86,8 +86,37 @@ extern int debug;
 	sendSocketAddr = (struct sockaddr_in *)&col->sendSocketAddr;
 	sendSocketAddr->sin_family = AF_INET;
 	sendSocketAddr->sin_addr.s_addr = col->ipAddr.address.ip_v4.addr;
+
+	DWORD dwPort = 0;
+	dwRet = RegQueryValueEx( hkey,
+                             "port",
+                             NULL,
+                             NULL,
+                             (LPBYTE)&dwPort,
+                             &cbData );
+	if(dwRet == ERROR_SUCCESS) {
+		if (dwPort <= 0 || dwPort > 65535) {
+			myLog(debug, "readConfig: invalid sFlow udp port %u read from system\\currentcontrolset\\services\\hsflowd\\Parameters\\port, using default %u",
+				dwPort, SFL_DEFAULT_COLLECTOR_PORT);
+		} else {
+			col->udpPort = dwPort;
+		}
+	}
+
+	DWORD dwPollingInterval = 0;
+	dwRet = RegQueryValueEx(hkey,
+							"pollingInterval",
+							NULL,
+							NULL,
+							(LPBYTE)&dwPollingInterval,
+							&cbData);
+	if (dwRet == ERROR_SUCCESS) {
+		sp->sFlow->sFlowSettings->pollingInterval = dwPollingInterval;
+	}
+	RegCloseKey(hkey);
 	
-	myLog(LOG_INFO,"collector: %s",collector_ip);
+	myLog(LOG_INFO,"collector: %s port: %u pollingInterval: %u",
+		collector_ip, col->udpPort, sp->sFlow->sFlowSettings->pollingInterval);
 
     return gotData;
   }
