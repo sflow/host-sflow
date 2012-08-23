@@ -10,9 +10,14 @@ XenServer
 
 Windows
 -------
-*   **Windows Server 2012 RC (with Hyper-V support)**: hsflowd-win2012-<version>-x64.msi
-*   **Windows Server 2008 or later, Windows Vista or later**: hsflowd-win-<version>-x86.exe
-*   **Windows XP or Windows Server 2003**: hsflowd-winXP-<version>-x86.rpm
+*   **Windows 64-bit (Vista or later, includes Hyper-V switch support, installed if possible)**: hsflowd-win-<version>-x64.msi
+*   **Windows 32-bit (Vista or later)**: hsflowd-win-<version>-x86.msi
+*   **Windows XP or Windows Server 2003**: hsflowd-winxp-<version>-x86.msi
+
+For release 1.22.1, all of the Windows builds have been migrated to use an MSI
+installer rather than an exe. If you have an old version installed with the exe
+installer, it will prompt you to first uninstall it. You will need to re-enter
+the sFlow settings for this time only.
 
 Red Hat KVM
 -----------
