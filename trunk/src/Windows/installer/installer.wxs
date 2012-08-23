@@ -51,7 +51,17 @@
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='samplingRate' Type='raw' />
     </Property>
-    
+    <Property Id='NSIS_UNINSTALLER'>
+      <RegistrySearch Id='ExistingNSISUninstaller'
+                      Root='HKLM' Key='Software\Microsoft\Windows\CurrentVersion\Uninstall\Host sFlow Agent'
+                      Name='UninstallString' Type='raw' />
+    </Property>
+    <Property Id='NSIS_WOW_UNINSTALLER'>
+      <RegistrySearch Id='ExistingNSISWOWUninstaller'
+                      Root='HKLM' Key='Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Host sFlow Agent'
+                      Name='UninstallString' Type='raw' />
+    </Property>
+
     <!-- Properties required for SCVMM -->
     <?ifdef extension ?>
       <Property Id='Description' Value='sFlow agent for Hyper-V' />
@@ -133,7 +143,8 @@
                   DllEntry='validateUI' />
     <CustomAction Id="CustomExitDialogText" Property="WIXUI_EXITDIALOGOPTIONALTEXT"
                   Value="Thank you for installing [ProductName]. To complete the installation, please enable the sFlow extension in your virtual switches, using the Hyper-V virtual switch manager."/>
-
+    <CustomAction Id='UninstallNSIS'
+                  Error='An old version of [ProductName] is currently installed. Please uninstall it and then run this installer again' />
     <?ifdef extension ?>
       <CustomAction Id='SetUninstallExtnParams' Property='UninstallExtension'
                     Value='-u sflowfilter' />
@@ -153,6 +164,9 @@
       <Custom Action="PreventDowngrading" After="FindRelatedProducts">
         NEWPRODUCTFOUND
       </Custom>
+      <Custom Action='UninstallNSIS' After='AppSearch'>
+        NSIS_UNINSTALLER OR NSIS_WOW_UNINSTALLER
+      </Custom>
       <Custom Action='CleanPollingInterval' After='AppSearch' />
       <Custom Action='CleanSamplingRate' After='AppSearch' />
       <?ifdef extension ?>
@@ -166,10 +180,10 @@
     </InstallUISequence>
     
     <InstallExecuteSequence>
-      <Custom Action="SetUninstallExtnParams" After="CostFinalize" />
-      <Custom Action="SetInstallExtnParams" After="CostFinalize" />
       <Custom Action="PreventDowngrading" After="FindRelatedProducts">NEWPRODUCTFOUND</Custom>
       <?ifdef extension ?>
+        <Custom Action="SetUninstallExtnParams" After="CostFinalize" />
+        <Custom Action="SetInstallExtnParams" After="CostFinalize" />
         <Custom Action='HyperVPresent' After='AppSearch'>
           <![CDATA[VersionNT64 >= 602]]>
         </Custom>

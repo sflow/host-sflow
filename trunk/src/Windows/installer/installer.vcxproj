@@ -239,23 +239,6 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CustomBuild Include="install.nsi">
-      <FileType>Document</FileType>
-      <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">"$(ProgramFiles)\NSIS\makensis.exe" /V2 /DPLATFORM=$(PlatformShortName) /DBUILD_DIR="$(SolutionDir)build" /DOUTPUT="$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe" /DVERSION="$(VersionFull)" "%(Identity)"</Command>
-      <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">"$(ProgramFiles)\NSIS\makensis.exe" /V2 /DPLATFORM=$(PlatformShortName) /DEXTENSION /DBUILD_DIR="$(SolutionDir)build" /DDRIVER_BUILD_DIR="$(SolutionDir)build/sflowfilter Package" /DOUTPUT="$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe" /DVERSION="$(VersionFull)" "%(Identity)"</Command>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='win|Win32'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe</Outputs>
-      <Outputs Condition="'$(Configuration)|$(Platform)'=='win|x64'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe</Outputs>
-      <Message Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">Build NSIS installer</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='win|Win32'">"$(ProgramFiles)\NSIS\makensis.exe" /V2 /DPLATFORM=$(PlatformShortName) /DBUILD_DIR="$(SolutionDir)build" /DOUTPUT="$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe" /DVERSION="$(VersionFull)" "%(Identity)"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='win|Win32'">Build NSIS installer</Message>
-      <Message Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">Build NSIS installer</Message>
-      <Command Condition="'$(Configuration)|$(Platform)'=='win|x64'">"$(ProgramFiles)\NSIS\makensis.exe" /V2 /DPLATFORM=$(PlatformShortName) /DEXTENSION /DBUILD_DIR="$(SolutionDir)build" /DDRIVER_BUILD_DIR="$(SolutionDir)build/sflowfilter Package" /DOUTPUT="$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).exe" /DVERSION="$(VersionFull)" "%(Identity)"</Command>
-      <Message Condition="'$(Configuration)|$(Platform)'=='win|x64'">Build NSIS installer</Message>
-    </CustomBuild>
-  </ItemGroup>
-  <ItemGroup>
     <CustomBuild Include="installer.wxs">
       <FileType>Document</FileType>
       <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -ddriverVersion="$(DriverVersion)" -o $(IntDir) "%(Identity)"
