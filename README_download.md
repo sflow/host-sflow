@@ -12,7 +12,7 @@ Windows
 -------
 *   **Windows 64-bit (Vista or later, includes Hyper-V switch support, installed if possible)**: hsflowd-win-<version>-x64.msi
 *   **Windows 32-bit (Vista or later)**: hsflowd-win-<version>-x86.msi
-*   **Windows XP or Windows Server 2003**: hsflowd-winxp-<version>-x86.msi
+*   **Windows XP or Windows Server 2003 or 2008 R1**: hsflowd-winxp-<version>-x86.msi
 
 For release 1.22.1, all of the Windows builds have been migrated to use an MSI
 installer rather than an exe. If you have an old version installed with the exe
