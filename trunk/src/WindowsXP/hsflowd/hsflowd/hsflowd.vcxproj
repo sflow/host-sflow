@@ -32,9 +32,6 @@
     <PlatformToolset>v100</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ImportGroup Label="ExtensionSettings">
-    <Import Project="..\install\build_nsis.props" />
-  </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
@@ -101,9 +98,6 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX86</TargetMachine>
     </Link>
-    <Build_NSIS>
-      <AdditionalOptions>/DBUILD_DIR=$(OutDir) /DOUT_FILE=Setup.exe</AdditionalOptions>
-    </Build_NSIS>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="hsflowconfig.c" />
@@ -146,7 +140,4 @@
     </ResourceCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\install\build_nsis.targets" />
-  </ImportGroup>
 </Project>
