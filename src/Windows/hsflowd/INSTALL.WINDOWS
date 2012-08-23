@@ -1,17 +1,16 @@
 Build: 
 	hsflowd has been developed using Visual Studio 2012. To build open the solution file in Visual Studio 2012.  
 	It may also build in Visual Studio 2010 if Properties>Configuration Properties>General: Platform Toolset is changed.
-	Two installers are included - one using NSIS, which generates a .exe installer, and the other using WiX, which creates an MSI. To build the installers, the NSIS and WiX applications must first be installed:
-	   - NSIS: install from http://nsis.sourceforge.net. The version used is 2.46. The NsSCM and Version plugins are also required.
-	   - WiX: install from http://wix.sourceforge.net. The version used is 3.5.
-
+	Previously, two installers were included (NSIS and WiX). The NSIS installer has been removed, and the WiX installer
+        updated to provide a message if a previous NSIS installation is detetected. This has simplified maintenance, and
+        provides a better installation for Windows environments. To build the installers, the WiX application must first be                    installed, from http://wix.sourceforge.net. The version used is 3.5.
 
 Install:
 	Preferred method for installation is to use the installer.
 	The installer will will install the executable, prompt for required parameters, and configure the service.
 
 Manual install:
-	0. Please note you must complete this steps with elevated privileges on Windows Vista or Later.  One way to do this is to right click on cmd.exe and select "run as administrator".
+	0. Please note you must complete this steps with elevated privileges on Windows Vista or Later.  One way to do this is to            right click on cmd.exe and select "run as administrator".
 	1. Copy hsflowd.exe to a suitable location, for example  "$PROGRAMFILES64\Host sFlow Project\Host sFlow Agent".  
 	2. Configure hsflowd as a Windows Service: `sc create hsflowd type= own start= auto error= normal binPath= path\to\hsflowd.exe DisplayName= "Host sFlow Agent"`
 	3. Required: configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v collector /d name.or.ip.of.collector
