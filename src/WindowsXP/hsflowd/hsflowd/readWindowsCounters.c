@@ -33,7 +33,7 @@ uint32_t readMultiCounter(char* path, PPDH_RAW_COUNTER_ITEM *ppBuffer)
     PDH_HCOUNTER Counter;
 	DWORD bufSize = 0, itemCount = 0;
 	uint32_t ret = 0;
-
+    *ppBuffer = NULL;
     if(PdhOpenQuery(NULL, 0, &Query) == ERROR_SUCCESS) {
 		if(PdhAddCounter(Query, path, 0, &Counter) == ERROR_SUCCESS &&
 		   PdhCollectQueryData(Query) == ERROR_SUCCESS &&
