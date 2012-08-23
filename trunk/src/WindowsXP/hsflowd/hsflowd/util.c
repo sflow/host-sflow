@@ -21,8 +21,8 @@ extern int debug;
     va_list args;
     va_start(args, fmt);
     if(debug) {
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
+      vfprintf(stdout, fmt, args);
+      fprintf(stdout, "\n");
     }
   }
 
