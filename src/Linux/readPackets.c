@@ -107,10 +107,17 @@ extern "C" {
   {
     int batch = 0;
     static uint32_t MySkipCount=1;
+
+    if(sp->sFlow->sFlowSettings == NULL) {
+      // config was turned off
+      return 0;
+    }
+
     if(sp->sFlow->sFlowSettings->ulogSubSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
       return 0;
     }
+
     if(sp->ulog_soc) {
       for( ; batch < HSP_READPACKET_BATCH; batch++) {
 	char buf[HSP_MAX_ULOG_MSG_BYTES];

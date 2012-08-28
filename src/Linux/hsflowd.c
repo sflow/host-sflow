@@ -1787,7 +1787,7 @@ extern "C" {
 	    // B: turn off monitoring
 	    installSFlowSettings(sf, NULL);
 	  }
-	  else {
+	  else if(num_servers > 0) {
 	    // C: make this the running config
 	    installSFlowSettings(sf, sf->sFlowSettings_dnsSD);
 	  }
@@ -2077,7 +2077,8 @@ extern "C" {
     setState(sp, HSPSTATE_READCONFIG);
 
     while(sp->state != HSPSTATE_END) {
-      
+      int configOK = NO;
+
       switch(sp->state) {
 	
       case HSPSTATE_READCONFIG:
@@ -2185,9 +2186,6 @@ extern "C" {
 	
       case HSPSTATE_RUN:
 	{
-#ifdef HSF_ULOG
-	  readPackets(sp);
-#endif
 	  // check for second boundaries and generate ticks for the sFlow library
 	  time_t test_clk = time(NULL);
 	  if((test_clk < sp->clk) || (test_clk - sp->clk) > HSP_MAX_TICKS) {
@@ -2202,7 +2200,9 @@ extern "C" {
 
 	    SEMLOCK_DO(sp->config_mut) {
 	      // was the config turned off?
-	      if(sp->sFlow->sFlowSettings) {
+	      // set configOK flag here while we have the semaphore
+	      configOK = (sp->sFlow->sFlowSettings != NULL);
+	      if(configOK) {
 		// did the polling interval change?  We have the semaphore
 		// here so we can just run along and tell everyone.
 		uint32_t piv = sp->sFlow->sFlowSettings->pollingInterval;
@@ -2228,6 +2228,7 @@ extern "C" {
       case HSPSTATE_END:
 	break;
       }
+
       // set the timeout so that if all is quiet we will still loop
       // around and check for ticks/signals several times per second
 #define HSP_SELECT_TIMEOUT_uS 200000
@@ -2250,6 +2251,11 @@ extern "C" {
 	FD_SET(sp->json_soc6, &readfds);
       }
 #endif
+      if(!configOK) {
+	// no config (may be temporary condition caused by DNS-SD),
+	// so disable the socket polling - just use select() to sleep
+	max_fd = 0;
+      }
       struct timeval timeout;
       timeout.tv_sec = 0;
       timeout.tv_usec = HSP_SELECT_TIMEOUT_uS;
