@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <PropertyGroup Label="DriverVersion">
-    <InfFile>$([System.IO.File]::ReadAllText("$(MSBuildProjectDirectory)\..\switch-extension\sflowfilter.inf"))</InfFile>
-    <DriverVersion>$([System.Text.RegularExpressions.Regex]::Match($(InfFile), "DriverVer\s*=\s*(.*)\s*\r").Groups[1].Value)</DriverVersion>
-  </PropertyGroup>
-</Project>
