@@ -1201,7 +1201,7 @@ extern "C" {
       sp->outputRevisionNo = sp->sFlow->revisionNo;
     }
 
-#ifdef HSF_GPU_NVML
+#ifdef HSF_NVML
     // poll the GPU
     nvml_tick(sp);
 #endif
