@@ -52,17 +52,18 @@ extern "C" {
   void *my_os_realloc(void *ptr, size_t bytes);
   void my_os_free(void *ptr);
 
+#define SYS_CALLOC calloc
+#define SYS_REALLOC realloc
+#define SYS_FREE free
+
+#ifdef UTHEAP
+
   // realm allocation (buffer recycling)
   void *UTHeapQNew(size_t len);
   void *UTHeapQReAlloc(void *buf, size_t newSiz);
   void UTHeapQFree(void *buf);
   void UTHeapQKeep(void *buf);
 
-#define SYS_CALLOC calloc
-#define SYS_REALLOC realloc
-#define SYS_FREE free
-
-#ifdef UTHEAP
 #define my_calloc UTHeapQNew
 #define my_realloc UTHeapQReAlloc
 #define my_free UTHeapQFree
