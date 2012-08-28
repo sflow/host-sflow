@@ -132,6 +132,7 @@ extern "C" {
           nvml->fan_speed = speed;
         }
       }
+      procs = 0;
       result = nvmlDeviceGetComputeRunningProcesses(gpu, &procs, NULL);
       if (NVML_SUCCESS == result || NVML_ERROR_INSUFFICIENT_SIZE == result) {
         nvml->processes += procs;
