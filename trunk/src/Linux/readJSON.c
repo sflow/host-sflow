@@ -615,6 +615,10 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 
   int readJSON(HSP *sp, int soc)
   {
+    if(sp->sFlow->sFlowSettings == NULL) {
+      // config was turned off
+      return 0;
+    }
     int batch = 0;
     if(soc) {
       for( ; batch < HSP_READJSON_BATCH; batch++) {
