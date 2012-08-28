@@ -1,0 +1,15 @@
+#!/usr/bin/sh
+
+BASE_D="${BASEDIR}"
+if [ -z "${BASE_D}" ] ; then BASE_D="/"; fi
+CHROOT_D="${BASE_D}"
+DAEMON="hsflowd"
+CONF_F="${BASE_D}/etc/${DAEMON}.conf"
+
+${BASE_D}/usr/sbin/chroot ${CHROOT_D} /usr/sbin/svcadm disable "${DAEMON}"
+
+if [ -f "${CONF_F}" ]; then
+	$BASEDIR/bin/mv -f "${CONF_F}" "${CONF_F}.old";
+fi
+
+exit 0
