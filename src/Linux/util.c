@@ -112,6 +112,7 @@ extern "C" {
     if(ptr) SYS_FREE(ptr);
   }
 
+#ifdef UTHEAP
 
   /*_________________---------------------------------------__________________
     _________________  Realm allocation (buffer recycling)  __________________
@@ -242,6 +243,8 @@ extern "C" {
     assert(utBuf->h.realmIdx == utRealm.realmIdx);
     if(++utBuf->h.refCount == 0) utBuf->h.refCount = UT_MAX_REFCOUNT;
   }
+
+#endif /* UTHEAP */
 
   /*_________________---------------------------__________________
     _________________     safe string fns       __________________
