@@ -1,0 +1,192 @@
+#!/bin/sh
+#
+# init(1) startup script for hsflowd daemon
+#
+# chkconfig: 345 85 15
+# description: Host sFlow Daemon
+# processname: hsflowd
+# pidfile: /var/run/hsflowd.pid
+
+### BEGIN INIT INFO
+# Provides:          hsflowd
+# Required-Start:    $syslog $network $named
+# Required-Stop:     $syslog
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Short-Description: Host sFlow Daemon
+# Description:       Host sFlow Daemon
+### END INIT INFO
+
+EXECPREFIX=/usr/sbin
+
+inm_running() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {pid}"
+	return 1
+    fi
+    kill -0 $1 >/dev/null 2>&1
+}
+
+# A function to find the pid of a program.
+inm_pid() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {program}"
+	return 1
+    fi
+    
+    # try "/var/run/<program>.pid" file
+    if [ -f /var/run/$1.pid ] ; then
+	pid=`head -1 /var/run/$1.pid`
+	if [ "$pid" != "" ] ; then
+	    if inm_running $pid; then
+		echo $pid
+		return 0;
+	    fi
+	fi
+    fi
+}
+
+# A function to test the form of a UUID string
+is_uuid() {
+    local UUID_REGEX;
+    UUID_REGEX='^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+    # newer bash supports the =~ operator but for backwards compatibility we use grep
+    echo $1 | egrep $UUID_REGEX >/dev/null;
+}
+
+# A function to try and find a UUID for this host
+inm_uuid() {
+    local MYUUID;
+
+    if [ -x /usr/sbin/dmidecode ]; then
+	# from the BIOS
+	MYUUID=`/usr/sbin/dmidecode | awk -- '/UUID/{print $2}'`
+        if is_uuid $MYUUID; then
+            echo $MYUUID
+	    return 0;
+	fi;
+    fi
+
+    if [ -d /dev/disk/by-uuid ]; then
+	# first local disk
+	MYUUID=`ls /dev/disk/by-uuid | head -n 1`;
+        if is_uuid $MYUUID; then
+	    echo $MYUUID
+	    return 0;
+	fi;
+    fi
+
+    if [ -x /sbin/blkid ]; then
+	# first local disk (via 'blkid')
+        MYUUID=`blkid | awk -vRS=" " -vFS="=" -- '/UUID/{print $2}' | tr -d '"' | head -1`;
+        if is_uuid $MYUUID; then
+            echo $MYUUID
+	    return 0;
+	fi;
+    fi
+
+    # vol_id, tune2fs are additional options. Or a UUID can be set in the configuration file
+
+    echo "not found";
+    return 1
+}
+
+# A function to start a program.
+inm_daemon() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {program}"
+	return 1
+    fi
+
+    # Do nothing if it's already running.
+    pid=`inm_pid $1`
+    if [ -n "$pid" ] ; then
+	echo -n " already running (pid = $pid) "
+	return 1;
+    fi
+    if UUID=`inm_uuid`; then
+	# invoke with UUID arg
+	su - root -c "$EXECPREFIX/$1 -u '${UUID}'";
+    else
+	# invoke without UUID arg
+	su - root -c "$EXECPREFIX/$1";
+    fi
+}
+
+# A function to stop a program.
+inm_kill() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {program}"
+	return 1
+    fi
+
+    # Find pid.
+    pid=`inm_pid $1`
+
+    # Kill it.  TERM first, then KILL
+    if [ -n "$pid" ] ; then
+	if inm_running $pid; then
+	    # TERM first, then KILL if not dead
+	    kill -TERM $pid
+	    sleep 1 
+	    if inm_running $pid ; then
+		sleep 1
+		if inm_running $pid; then
+		    sleep 5
+		    if inm_running $pid; then
+			sleep 10
+			if inm_running $pid; then
+			    kill -KILL $pid
+			fi
+		    fi
+		fi
+	    fi
+	fi
+    fi
+    
+    # Remove pid file if any.
+    rm -f /var/run/$1.pid
+
+    if [ -n "$pid" ] ; then
+	return 0;
+    else
+	return 1;
+    fi
+}
+
+#########################################################################################
+#########################################################################################
+
+# See how we were called.
+case "$1" in
+       start)
+	echo -n "hsflowd start: "
+	inm_daemon hsflowd && echo "OK" || echo "FAILED"
+	;;
+
+        stop)
+	echo -n "hsflowd stop: "
+	inm_kill hsflowd && echo "OK" || echo "FAILED"
+	;;
+
+      status)
+	echo -n "hsflowd status: "
+	pid=`inm_pid hsflowd`
+	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
+	;;
+
+     restart)
+	$0 stop
+	$0 start
+	;;
+
+force-reload)
+	$0 stop
+	$0 start
+	;;
+  *)
+	echo "Usage: $0 {start|stop|status|restart|force-reload}"
+	exit 1
+esac
+
+exit 0
