@@ -80,7 +80,7 @@ extern "C" {
     time_t last_json_counters;
     time_t last_json;
 #define HSP_COUNTER_SYNTH_TIMEOUT 120
-#define HSP_JSON_APP_TIMEOUT 600
+#define HSP_JSON_APP_TIMEOUT 7200
     SFLSampler *sampler;
     SFLPoller *poller;
     SFLCounters_sample_element counters;
