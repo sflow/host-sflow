@@ -43,5 +43,5 @@ please build from sources
 
 Sources
 -------
-* hsflowd-1.22.tar.gz
-* hsflowd-1_22.zip
+* hsflowd-<version>.tar.gz
+* hsflowd-<version>.zip
