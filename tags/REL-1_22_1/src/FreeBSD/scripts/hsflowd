@@ -1,0 +1,34 @@
+#!/bin/sh
+#
+# init(1) startup script for hsflowd daemon
+#
+# description: Host sFlow Daemon
+# processname: hsflowd
+# pidfile: /var/run/hsflowd.pid
+#
+
+. /etc/rc.subr
+
+hsflowd_enable=${hsflowd_enable}
+
+name=hsflowd
+rcvar=`set_rcvar`
+start_cmd="start_hsflowd"
+stop_postcmd="hsflowd_postcmd"
+
+command="/usr/sbin/${name}"
+pidfile="/var/run/${name}.pid"
+
+start_hsflowd() {
+   echo "Starting ${name}."
+   ${command}
+}
+
+hsflowd_postcmd() {
+   rm -f $pidfile
+}
+
+load_rc_config ${name}
+run_rc_command "$1"
+exit 0
+

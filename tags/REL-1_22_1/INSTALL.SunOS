@@ -1,0 +1,44 @@
+This software is distributed under the following license:
+http://host-sflow-sourceforge.net/license.html
+
+To compile and install, try this:
+
+root> gmake
+root> gmake install
+
+You may find you have to add /usr/ccs/bin and /usr/sfw/bin to
+your $PATH before gmake will run,  and you may have to run:
+
+root> ln -s /lib/libdlpi.so.1 /usr/lib/libdlpi.so
+
+before it will link the dlpi library sucessfully.
+
+Edit /etc/hsflowd.conf for configuration.  The options are
+described in the comments there.
+
+To schedule the daemon to start automatically on a reboot, try:
+
+root> gmake schedule
+
+To start the daemon, run:
+
+root> /usr/sbin/svcadm enable hsflowd
+
+and check the syslog for errors.
+
+To build a package, try:
+
+root> gmake pkg
+
+The package will be written to the src/SunOS directory
+
+To run in debug mode, first stop the daemon, then run
+hsflowd directly at the command line with -d, -dd or -ddd.
+For example:
+
+root> /usr/sbin/svcadm disable hsflowd
+root> cd src/SunOS;  ./hsflowd -ddd
+
+To run in gdb,  remember to use "setargs -d" before
+running,  because -d will also prevent daemonization.
+

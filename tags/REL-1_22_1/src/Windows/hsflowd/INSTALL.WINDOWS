@@ -1,0 +1,64 @@
+Build: 
+	hsflowd has been developed using Visual Studio 2012. To build open the solution file in Visual Studio 2012.  
+	It may also build in Visual Studio 2010 if Properties>Configuration Properties>General: Platform Toolset is changed.
+	Previously, two installers were included (NSIS and WiX). The NSIS installer has been removed, and the WiX installer
+        updated to provide a message if a previous NSIS installation is detetected. This has simplified maintenance, and
+        provides a better installation for Windows environments. To build the installers, the WiX application must first be                    installed, from http://wix.sourceforge.net. The version used is 3.5.
+
+Install:
+	Preferred method for installation is to use the installer.
+	The installer will will install the executable, prompt for required parameters, and configure the service.
+
+Manual install:
+	0. Please note you must complete this steps with elevated privileges on Windows Vista or Later.  One way to do this is to            right click on cmd.exe and select "run as administrator".
+	1. Copy hsflowd.exe to a suitable location, for example  "$PROGRAMFILES64\Host sFlow Project\Host sFlow Agent".  
+	2. Configure hsflowd as a Windows Service: `sc create hsflowd type= own start= auto error= normal binPath= path\to\hsflowd.exe DisplayName= "Host sFlow Agent"`
+	3. Required: configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v collector /d name.or.ip.of.collector
+	3a. Optional: configure the sFlow collector port: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v port /t REG_DWORD /d 6343
+	3b. Optional: configure the sFlow sampling rate: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v samplingRate /t REG_DWORD /d 400
+	3c. Optional: configure the sFlow polling interval: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v pollingInterval /t REG_DWORD /d 30
+	3d. Optional: configure the sFlow agent address: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v agentAddress /d preferred IP address of host.
+
+Configuration:
+	The following configuration parameters are read, on start up, from the registry HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters:
+	collector [required] 
+	IPv4 or IPv6 address or hostname of the system to which sFlow data is to be sent.
+
+	port [optional]
+	Destination UDP port on the system to which sFlow data is to be sent
+	Default 6343. Must be in the 0 < port <= 65535
+
+	samplingRate [optional] (Windows Server 8 with Hyper-V Role installed only)
+	N where randomised 1 in Nth packet forwarded by the virtual switch is sampled and exported. 
+	Default 400. Set to 0 to disable packet sampling.
+	
+	pollingInterval [optional]
+	Time interval in seconds between export of counter samples.
+	Default 30. Set to 0 to disable counter export.
+
+	agentAddress [optional]
+	Preferred IPv4 or IPv6 address of the sFlow agent.
+	hsflowd automatically selects one of the IPv4 addresses associated with the adapters. 
+	If this results in the selection of an undesired address, or an IPv6 agent address is required, use this parameter.
+
+	hsflowd must be restarted for any changes in these parameters to take effect.
+
+Debug:
+	When hsflowd is run as a Windows service, error messages are logged to %SystemDrive%\ProgramData\Host sFlow Project\Host sFlow Agent\hsflowd.log
+	hsflowd can also be invoked from the command line, with the following command line options: [-v[v]] [-l logFile]. When a log file is not specified, messages are logged to stderr.
+
+Supported Windows versions:
+	hsflowd is known to run on:
+		Windows 7
+		Windows 7 x64
+		Windows Server 2008 R2
+		Windows Server 2012
+		Windows 8
+		Windows 8 x64
+	It should run unchanged on:
+		Windows Vista
+		Windows Vista x64
+		Windows Server 2008 R1 (may not run because of dependency on VirtDisk.dll)
+	If you compile and run it on these systems please let us know!
+		
+
