@@ -923,7 +923,7 @@ extern "C" {
       if(xenHandlesOK(sp)) {
 #define DOMAIN_CHUNK_SIZE 256
 	xc_domaininfo_t domaininfo[DOMAIN_CHUNK_SIZE];
-	int32_t num_domains=0, new_domains=0;
+	int32_t num_domains=0, new_domains=0, duplicate_domains=0;
 	do {
 	  new_domains = xc_domain_getinfolist(sp->xc_handle,
 					      num_domains,
@@ -981,23 +981,24 @@ extern "C" {
 	      // really needed at all.  Should take it out. Can still detect
 	      // duplicates using the 'marked' flag).
 	      if(state->vm_index) {
+		duplicate_domains++;
 		if(debug) {
 		  myLog(LOG_INFO, "duplicate entry for domId=%u vm_index %u repeated at %u (keep first one)", domId, state->vm_index, (num_domains + i));
 		}
 	      }
 	      else {
 		state->vm_index = num_domains + i;
+		// and the domId, which might have changed (if vm rebooted)
+		state->domId = domId;
+		// pick up the list of block device numbers
+		xen_collect_block_devices(sp, state);
 	      }
-	      // and the domId, which might have changed (if vm rebooted)
-	      state->domId = domId;
-	      // pick up the list of block device numbers
-	      xen_collect_block_devices(sp, state);
 	    }
 	  }
 	  num_domains += new_domains;
 	} while(new_domains > 0);
 	// remember the number of domains we found
-	sp->num_domains = num_domains;
+	sp->num_domains = num_domains - duplicate_domains;
       }
 #endif
 
