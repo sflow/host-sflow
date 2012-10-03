@@ -1230,6 +1230,13 @@ extern "C" {
 	myLog(LOG_ERR, "ULOG fcntl(O_NONBLOCK) failed: %s", strerror(errno));
       }
       
+      // make sure it doesn't get inherited, e.g. when we fork a script
+      fdFlags = fcntl(sp->ulog_soc, F_GETFD);
+      fdFlags |= FD_CLOEXEC;
+      if(fcntl(sp->ulog_soc, F_SETFD, fdFlags) < 0) {
+	myLog(LOG_ERR, "ULOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
+      }
+      
       // bind
       sp->ulog_bind.nl_family = AF_NETLINK;
       sp->ulog_bind.nl_pid = getpid();
@@ -1239,9 +1246,11 @@ extern "C" {
 	myLog(LOG_ERR, "ULOG bind() failed: %s", strerror(errno));
       }
       
-      // increase receiver buffer size? (probably not necessary)
-      // uint32_t rcvbuf = HSP_ULOG_RCV_BUF;
-      // setsockopt(sp->ulog_soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+      // increase receiver buffer size
+      uint32_t rcvbuf = HSP_ULOG_RCV_BUF;
+      if(setsockopt(sp->ulog_soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+	myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", HSP_ULOG_RCV_BUF, strerror(errno));
+      }
     }
     else {
       myLog(LOG_ERR, "error opening ULOG socket: %s", strerror(errno));
@@ -1258,7 +1267,7 @@ extern "C" {
   */
 
 
-  static int openUDPListenSocket(char *bindaddr, int family, uint16_t port)
+  static int openUDPListenSocket(char *bindaddr, int family, uint16_t port, uint32_t bufferSize)
   {
     struct sockaddr_in myaddr_in = { 0 };
     struct sockaddr_in6 myaddr_in6 = { 0 };
@@ -1278,6 +1287,13 @@ extern "C" {
       myLog(LOG_ERR, "fcntl(O_NONBLOCK) failed: %s", strerror(errno));
       close(soc);
       return 0;
+    }
+
+    // make sure it doesn't get inherited, e.g. when we fork a script
+    fdFlags = fcntl(soc, F_GETFD);
+    fdFlags |= FD_CLOEXEC;
+    if(fcntl(soc, F_SETFD, fdFlags) < 0) {
+      myLog(LOG_ERR, "ULOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
     }
       
     // lookup bind address
@@ -1302,6 +1318,13 @@ extern "C" {
       close(soc); 
       return 0;
     }
+
+    // increase receiver buffer size
+    uint32_t rcvbuf = bufferSize;
+    if(setsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+      myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", bufferSize, strerror(errno));
+    }
+
     return soc;
   }
 
@@ -1385,8 +1408,8 @@ extern "C" {
 #ifdef HSF_JSON
     uint16_t jsonPort = sp->sFlow->sFlowSettings_file->jsonPort;
     if(jsonPort != 0) {
-      sp->json_soc = openUDPListenSocket("127.0.0.1", PF_INET, jsonPort);
-      sp->json_soc6 = openUDPListenSocket("::1", PF_INET6, jsonPort);
+      sp->json_soc = openUDPListenSocket("127.0.0.1", PF_INET, jsonPort, HSP_JSON_RCV_BUF);
+      sp->json_soc6 = openUDPListenSocket("::1", PF_INET6, jsonPort, HSP_JSON_RCV_BUF);
       cJSON_Hooks hooks;
       hooks.malloc_fn = my_calloc;
       hooks.free_fn = my_free;
@@ -2076,9 +2099,9 @@ extern "C" {
     pthread_mutex_init(sp->config_mut, NULL);
     
     setState(sp, HSPSTATE_READCONFIG);
-
+    
+    int configOK = NO;
     while(sp->state != HSPSTATE_END) {
-      int configOK = NO;
 
       switch(sp->state) {
 	
