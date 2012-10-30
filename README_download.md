@@ -2,6 +2,7 @@ Which Download?
 ==============
 XenServer
 ---------
+*   **XenServer 6.1**: hsflowd-xenserver61-<version>.iso
 *   **XenServer 6.02**: hsflowd-xenserver602-<version>.iso
 *   **XenServer 6.0**: hsflowd-xenserver60-<version>.iso
 *   **XenServer 5.6 FP2**: hsflowd-xenserver56FP2-<version>.iso
