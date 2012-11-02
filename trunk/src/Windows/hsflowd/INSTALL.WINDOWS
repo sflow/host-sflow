@@ -10,21 +10,24 @@ Install:
 	The installer will will install the executable, prompt for required parameters, and configure the service.
 
 Manual install:
-	0. Please note you must complete this steps with elevated privileges on Windows Vista or Later.  One way to do this is to            right click on cmd.exe and select "run as administrator".
+	0. Please note you must complete theses steps with elevated privileges.
+           One way to do this is to right click on cmd.exe and select "run as administrator".
 	1. Copy hsflowd.exe to a suitable location, for example  "$PROGRAMFILES64\Host sFlow Project\Host sFlow Agent".  
 	2. Configure hsflowd as a Windows Service: `sc create hsflowd type= own start= auto error= normal binPath= path\to\hsflowd.exe DisplayName= "Host sFlow Agent"`
-	3. Required: configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v collector /d name.or.ip.of.collector
-	3a. Optional: configure the sFlow collector port: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v port /t REG_DWORD /d 6343
+	3. Required: configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters\collectors\collector1 /v collector /d name.or.ip.of.collector
+	3a. Optional: configure the sFlow collector port: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters\collectors\collector1 /v port /t REG_DWORD /d 6343
 	3b. Optional: configure the sFlow sampling rate: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v samplingRate /t REG_DWORD /d 400
 	3c. Optional: configure the sFlow polling interval: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v pollingInterval /t REG_DWORD /d 30
 	3d. Optional: configure the sFlow agent address: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v agentAddress /d preferred IP address of host.
 
 Configuration:
 	The following configuration parameters are read, on start up, from the registry HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters:
-	collector [required] 
+	collectors\*\collector [required unless DNS-SD configuration is enabled, see below] 
 	IPv4 or IPv6 address or hostname of the system to which sFlow data is to be sent.
+        Multiple collectors can be defined by creating multiple sub-keys in the collectors key (eg collector1, collector2),
+        then setting collector and port values in each of the sub-keys.
 
-	port [optional]
+	collectors\*\port [optional]
 	Destination UDP port on the system to which sFlow data is to be sent
 	Default 6343. Must be in the 0 < port <= 65535
 
@@ -40,6 +43,17 @@ Configuration:
 	Preferred IPv4 or IPv6 address of the sFlow agent.
 	hsflowd automatically selects one of the IPv4 addresses associated with the adapters. 
 	If this results in the selection of an undesired address, or an IPv6 agent address is required, use this parameter.
+
+        DNSSD [optional]
+        off or on (string value)
+        If "on", hsflowd makes DNS requests to discover the configuration and ignores collector settings in the registry.
+        See http://blog.sflow.com/2010/06/dns-sd.html
+        Default off
+
+        DNSSD_Domain [optional]
+        Force hsflowd to request configuration settings for a specific zone (eg .noc.mycompany.com)
+        By default hsflowd attempts to use the domain configured on the system.
+                
 
 	hsflowd must be restarted for any changes in these parameters to take effect.
 
