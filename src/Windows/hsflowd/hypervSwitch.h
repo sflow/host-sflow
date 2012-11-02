@@ -12,6 +12,7 @@ extern "C" {
 #endif
 
 void openFilter(HSP *sp);
+ULONG_PTR setFilterSamplingParams(HSP *sp);
 DWORD queueRead(HANDLE dev, PUCHAR buffer, DWORD bufferLen, LPOVERLAPPED overlap);
 ULONG_PTR readFilterSwitchPorts(HSP *sp);
 void readPackets(HSP *sp, PUCHAR buffer);

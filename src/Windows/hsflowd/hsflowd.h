@@ -39,12 +39,20 @@ extern "C" {
 #define HSP_DEFAULT_LOGFILE "hsflowd.log"
 #define HSP_DEFAULT_VMSTORE L"vms.txt"
 #define HSP_DEFAULT_PORTSTORE L"ports.txt"
-#define HSP_REG_KEY "system\\currentcontrolset\\services\\hsflowd\\Parameters"
+#define HSP_REGKEY_PARMS "system\\currentcontrolset\\services\\hsflowd\\Parameters"
+#define HSP_REGKEY_CURRCONFIG "system\\currentcontrolset\\services\\hsflowd\\currentconfig"
+#define HSP_REGKEY_COLLECTORS "collectors"
+#define HSP_REGVAL_SERIAL "serialNumber"
 #define HSP_REGVAL_COLLECTOR "collector"
 #define HSP_REGVAL_PORT "port"
 #define HSP_REGVAL_SAMPLING_RATE "samplingRate"
 #define HSP_REGVAL_POLLING_INTERVAL "pollingInterval"
 #define HSP_REGVAL_AGENT "agentAddress"
+#define HSP_REGVAL_DNSSD "DNSSD"
+#define HSP_REGVAL_DNSSD_DOMAIN "DNSSD_Domain"
+#define HSP_REGVAL_ON "on"
+#define HSP_REGVAL_OFF "off"
+#define HSP_REGVAL_OFF_LEN 4 //include room for terminating NULL
 
 // only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
@@ -63,6 +71,9 @@ extern "C" {
 #define HSP_FILTER_ACTIVE(filter) (filter).dev!=INVALID_HANDLE_VALUE
 
 #define HSP_MAX_TICKS 60
+#define HSP_DEFAULT_DNSSD_STARTDELAY 30
+#define HSP_DEFAULT_DNSSD_RETRYDELAY 300
+#define HSP_DEFAULT_DNSSD_MINDELAY 10
 
 //timeout for interval between checking for samples, signals and whether
 //to generate next tick. Set so that we loop around several times/s.
@@ -85,31 +96,42 @@ extern "C" {
   struct _HSPSFlow;
   struct _HSP;
 
+  typedef struct _HSPCollector {
+    struct _HSPCollector *nxt;
+	CHAR *name; //IP or DNS name read from config
+    SFLAddress ipAddr;
+    uint32_t udpPort;
+    struct sockaddr_in6 sendSocketAddr;
+  } HSPCollector;
+
   typedef struct _HSPSFlowSettings {
+#define HSP_SERIAL_INVALID 0UL
+	DWORD serialNumber;
+	HSPCollector *collectors;
+    uint32_t numCollectors;
     uint32_t pollingInterval;
 	uint32_t samplingRate;
 	uint32_t headerBytes;
 #define HSP_MAX_HEADER_BYTES 256
   } HSPSFlowSettings;
 
-  typedef struct _HSPCollector {
-    struct _HSPCollector *nxt;
-    SFLAddress ipAddr;
-    uint32_t udpPort;
-    struct sockaddr_in6 sendSocketAddr;
-  } HSPCollector;
-
   typedef struct _HSPSFlow {
     struct _HSP *myHSP;
     SFLAgent *agent;
     SFLPoller *poller;
-    HSPCollector *collectors;
-    uint32_t numCollectors;
     HSPSFlowSettings *sFlowSettings;
+	uint32_t revision;
     uint32_t subAgentId;
     char *agentDevice;
     SFLAddress agentIP;
   } HSPSFlow; 
+
+  typedef enum {
+	  HSPSTATE_READCONFIG = 0,
+	  HSPSTATE_WAITCONFIG,
+	  HSPSTATE_RUN,
+	  HSPSTATE_END
+  } EnumHSPState;
 
   typedef enum { 
 	  IPSP_NONE=0,
@@ -192,6 +214,13 @@ typedef struct _HSP {
 	FILE *f_vmStore;
 	GuidStore *vmStore;
 	BOOL vmStoreInvalid;
+	//config params via DNS-SD
+	BOOL DNSSD;
+	CHAR *DNSSD_domain;
+	time_t DNSSD_countdown;
+	uint32_t DNSSD_startDelay;
+	uint32_t DNSSD_retryDelay;
+	uint32_t DNSSD_ttl; //only accessed on DNS thread
     // UDP send sockets
     SOCKET socket4;
     SOCKET socket6;
@@ -202,7 +231,11 @@ typedef struct _HSP {
 
 // config parser
 BOOL readConfig(HSP *sp);
-
+BOOL readSFlowSettings(HSPSFlowSettings *settings);
+BOOL newerSettingsAvailable(HSPSFlowSettings *settings);
+void insertCollector(HSPSFlowSettings *settings, CHAR *name, DWORD port);
+void clearCollectors(HSPSFlowSettings *settings);
+unsigned __stdcall runDNSSD(void *magic);
 void removeQueuedPoller(HSP *sp, SFLPoller *poller);
 
 void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs);
@@ -222,6 +255,11 @@ BOOL readSystemUUID(u_char *uuidbuf);
 void readVms(HSP *sp);
 
 EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr);
+
+// using DNS SRV+TXT records
+#define SFLOW_DNS_SD "_sflow._udp"
+#define HSP_MAX_DNS_LEN 255
+int dnsSD(HSP *sp, HSPSFlowSettings *settings);
 
 #if defined(__cplusplus)
 } /* extern "C" */
