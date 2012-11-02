@@ -12,6 +12,7 @@ extern "C" {
 #include <Shlwapi.h>
 #include <fcntl.h>
 #include <io.h>
+#include <process.h>
 
 #define instanceMutexName "Global\\hsflowd-{0C4FB5D9-641D-428C-8216-950962E608E0}"
 
@@ -60,7 +61,7 @@ static void agentCB_sendPkt(void *magic, SFLAgent *agent, SFLReceiver *receiver,
 	int result = 0;
 	HSPCollector *coll;
 
-	for (coll = sp->sFlow->collectors; coll; coll=coll->nxt) {
+	for (coll = sp->sFlow->sFlowSettings->collectors; coll; coll=coll->nxt) {
 		switch(coll->ipAddr.type) {
 		case SFLADDRESSTYPE_IP_V4:
 			{
@@ -231,7 +232,6 @@ static void tick(HSP *sp)
 static BOOL initAgent(HSP *sp)
 {
 	time_t now;
-	HSPCollector *collector;
 	SFLReceiver *receiver;
 	uint32_t receiverIndex;
 	SFLDataSource_instance dsi;
@@ -241,7 +241,7 @@ static BOOL initAgent(HSP *sp)
 	int WSARes = 0;
 
 	myLog(LOG_INFO,"creating sfl agent\n");
-	if (sf->collectors == NULL) {
+	if (sf->sFlowSettings->collectors == NULL) {
 		myLog(LOG_ERR,"No collectors defined\n");
 		return FALSE;
 	}
@@ -277,7 +277,6 @@ static BOOL initAgent(HSP *sp)
 				   agentCB_error,
 				   agentCB_sendPkt);
 	// just one receiver - we are serious about making this lightweight for now
-	collector = sf->collectors;
 	receiver = sfl_agent_addReceiver(sf->agent);
 	receiverIndex = HSP_SFLOW_RECEIVER_INDEX;
     
@@ -287,12 +286,6 @@ static BOOL initAgent(HSP *sp)
 	// set the timeout to infinity
 	sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
 
-	// receiver address/port - set it for the first collector,  but
-	// actually we'll send the same feed to all collectors.  This step
-	// may not be necessary at all when we are using the sendPkt callback.
-	sfl_receiver_set_sFlowRcvrAddress(receiver, &collector->ipAddr);
-	sfl_receiver_set_sFlowRcvrPort(receiver, collector->udpPort);
-    
 	pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
 	// add a single poller to represent the whole physical host
 	if (pollingInterval > 0) {
@@ -371,30 +364,26 @@ void processQueuedPoller(HSP *sp)
 	}
 }
 
-/*_________________---------------------------__________________
-  _________________       freeSFlow           __________________
-  -----------------___________________________------------------
-*/
-
-static void freeSFlow(HSPSFlow *sf)
+/**
+ * Initialises the sFlow settings 
+ * pollingInterval = 0
+ * samplingRate = 0
+ * serialNumber = HSP_SERIAL_INVALID
+ * headerBytes = SFL_DEFAULT_HEADER_SIZE
+ */
+HSPSFlowSettings *newSFlowSettings() 
 {
-	HSPCollector *coll;
-	if (sf == NULL) return;
-	if (sf->sFlowSettings) {
-		my_free(sf->sFlowSettings);
-	}
-	if (sf->agent) {
-		sfl_agent_release(sf->agent);
-	}
-	for (coll = sf->collectors; coll; ) {
-		HSPCollector *nextColl = coll->nxt;
-		my_free(coll);
-		coll = nextColl;
-	}
-	if (sf->agentDevice) {
-		my_free(sf->agentDevice);
-	}
-	my_free(sf);
+	HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
+	st->serialNumber = HSP_SERIAL_INVALID;
+	st->pollingInterval = 0;
+	st->samplingRate = 0;
+	st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
+	return st;
+}
+
+void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
+	clearCollectors(sFlowSettings);
+	my_free(sFlowSettings);
 }
 
 static bool initialiseDir(wchar_t *path, wchar_t *dirName)
@@ -473,6 +462,16 @@ static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
 		sp->f_portStore = _fdopen(cHandle, "r+t");
 	}
 	return true;
+}
+
+static void logSFlowSettings(HSPSFlowSettings *settings)
+{
+	myLog(debug, "sFlow configuration serialNumber=%u: pollingInterval=%u, samplingRate=%u", 
+				 settings->serialNumber, settings->pollingInterval, settings->samplingRate);
+	for (HSPCollector *collector= settings->collectors;
+		collector; collector = collector->nxt) {
+		myLog(debug, "collector=%s:%u", collector->name, collector->udpPort);
+	}
 }
 
 VOID usage(char *prog)
@@ -583,6 +582,8 @@ void ServiceMain(int argc, char** argv)
 	fflush(logFile);
 
 	HSP sp = { 0 };
+	sp.DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
+	sp.DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
 	// look up host-id fields at startup only (hostname
 	// may change dynamically so will have to revisit this $$$)
 	sp.host_hid.hostname.str = (char *)my_calloc(SFL_MAX_HOSTNAME_CHARS+1);
@@ -616,8 +617,58 @@ void ServiceMain(int argc, char** argv)
 		readGuidStore(sp.f_vmStore, sp.vmStoreFile, &sp.vmStore, &sp.maxDsIndex);
 		readGuidStore(sp.f_portStore, sp.portStoreFile, &sp.portStore, &sp.maxIfIndex);
 	}
+	
+	if (sp.DNSSD) {
+		//start the DNS thread and loop waiting until we have the config from DNSSD
+		HANDLE dnsSDThread;
+		unsigned threadID;
+		dnsSDThread = (HANDLE)_beginthreadex(NULL, 0, &runDNSSD, &sp, 0, &threadID);
+		BOOL gotConfig = FALSE;
+		while (!gotConfig) {
+			HSPSFlowSettings *settings = sp.sFlow->sFlowSettings;
+			if (newerSettingsAvailable(settings)) {
+				HSPSFlowSettings *newSettings = newSFlowSettings();
+				if (readSFlowSettings(newSettings)) {
+					//we have the config now
+					gotConfig = TRUE;
+					if (settings != NULL) {
+						freeSFlowSettings(settings);
+					}
+					sp.sFlow->sFlowSettings = newSettings;
+					myLog(debug, "%s.ServiceMain: DNS-SD enabled. Initial sFlow settings from registry currentconfig",
+						HSP_SERVICE_NAME);
+				} else {
+					freeSFlowSettings(newSettings);
+					myLog(LOG_ERR, "%s.ServiceMain: invalid DNS-SD discovered sFlow settings", HSP_SERVICE_NAME);
+					if (hStatus != 0) {
+						ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+						ServiceStatus.dwWin32ExitCode = ERROR_INVALID_PARAMETER;
+						SetServiceStatus(hStatus, &ServiceStatus);
+					}
+					return;
+				}
+			} else {
+				Sleep(sp.DNSSD_startDelay*1000);
+			}
+		}
+	} else { // read the manual config
+		HSPSFlowSettings *newSettings = newSFlowSettings();
+		if (readSFlowSettings(newSettings)) {
+			sp.sFlow->sFlowSettings = newSettings;
+		} else {
+			myLog(LOG_ERR, "%s.ServiceMain: invalid sFlow configuration in registry", HSP_SERVICE_NAME);
+			if (hStatus != 0) {
+				ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+				ServiceStatus.dwWin32ExitCode = ERROR_INVALID_PARAMETER;
+				SetServiceStatus(hStatus, &ServiceStatus);
+			}
+			return;
+		}
+	}
 	openFilter(&sp); //try to initialise the sFlow filter for sampling
 	initAgent(&sp);
+	logSFlowSettings(sp.sFlow->sFlowSettings);
+
 
 	// initialize the clock so we can detect second boundaries
 	sp.clk = time(NULL);
@@ -625,7 +676,7 @@ void ServiceMain(int argc, char** argv)
     // main loop
 	BOOL dataAvailable = true;
 	uint32_t currReadNum = 0;
-    while (ServiceStatus.dwCurrentState == SERVICE_RUNNING && dataAvailable)
+	while (ServiceStatus.dwCurrentState == SERVICE_RUNNING && dataAvailable)
 	{
 		// check for second boundaries and generate ticks for the sFlow library
 		time_t now = time(NULL);
@@ -637,7 +688,29 @@ void ServiceMain(int argc, char** argv)
 		while (sp.clk < now) { //only happens on second boundary
 			//start critical
 			if (sp.sFlow->sFlowSettings) {
-				// update polling interval here if config has changed.
+				if (sp.clk%5 == 0 && newerSettingsAvailable(sp.sFlow->sFlowSettings)) {
+					//get the new config
+					HSPSFlowSettings *newSettings = newSFlowSettings();
+					if (readSFlowSettings(newSettings)) {
+						//we have the config now
+						BOOL pollingChanged = sp.sFlow->sFlowSettings->pollingInterval !=  newSettings->pollingInterval;
+						BOOL samplingChanged = sp.sFlow->sFlowSettings->samplingRate !=  newSettings->samplingRate;
+						freeSFlowSettings(sp.sFlow->sFlowSettings);
+						sp.sFlow->sFlowSettings = newSettings;
+						logSFlowSettings(sp.sFlow->sFlowSettings);
+						if (pollingChanged) {
+							for (SFLPoller *poller = sp.sFlow->agent->pollers;
+								poller; poller = poller->nxt) {
+								sfl_poller_set_sFlowCpInterval(poller, sp.sFlow->sFlowSettings->pollingInterval);
+							}
+						}
+						if (samplingChanged && HSP_FILTER_ACTIVE(sp.filter)) {
+							setFilterSamplingParams(&sp);
+						}
+					} else {
+						freeSFlowSettings(newSettings);
+					}
+				}
 				tick(&sp);
 			}
 			//end critical

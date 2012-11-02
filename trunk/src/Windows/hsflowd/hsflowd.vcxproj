@@ -105,7 +105,7 @@
       <SubSystem>Console</SubSystem>
       <TargetMachine>MachineX86</TargetMachine>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;DnsAPI.lib;KtmW32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -130,7 +130,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;DnsAPI.lib;KtmW32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -163,7 +163,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX86</TargetMachine>
-      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;DnsAPI.lib;KtmW32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <Build_NSIS>
       <AdditionalOptions>/DBUILD_DIR=$(OutDir) /DOUT_FILE=Setup.exe</AdditionalOptions>
@@ -194,7 +194,7 @@
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Ws2_32.lib;IPHLPAPI.lib;pdh.lib;Wbemuuid.lib;xmllite.lib;Shlwapi.lib;Normaliz.lib;VirtDisk.lib;Ntdll.lib;DnsAPI.lib;KtmW32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
@@ -211,6 +211,7 @@
     <ClCompile Include="hypervVm.c" />
     <ClCompile Include="readPackets.c" />
     <ClCompile Include="readWindowsEnglishCounters.c" />
+    <ClCompile Include=".\dnsSD.c" />
     <ClCompile Include="xmlUtil.cpp" />
     <ClCompile Include="hsflowconfig.c" />
     <ClCompile Include="hsflowd.c" />
