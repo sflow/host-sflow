@@ -112,7 +112,9 @@ int dnsSD(HSP *sp, HSPSFlowSettings *settings)
 		char *dot = "";
 		if (status) {
 			domain = "";
-			myLog(LOG_ERR, "dnsSD: DnsConfigPrimaryDomainName() failed %u", status);
+			myLog(LOG_ERR, "dnsSD: DnsQueryConfig(DnsConfigPrimaryDomainName_A) failed error=%u", status);
+			// status == ERROR_OUTOFMEMORY if domain is not configured 
+			//(set domain in Control Panel>System, change computer name, full name under More
 		} else {
 			domain = (char *)buff;
 			dot = ".";
