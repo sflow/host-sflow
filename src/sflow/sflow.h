@@ -297,6 +297,35 @@ typedef struct _SFLExtended_vlan_tunnel {
 			  innermost. */ 
 } SFLExtended_vlan_tunnel;
 
+/* Extended tunnel information structures that allow a tunnel end
+   point to export information related to the tunnel. 
+   Network virtualization protocols such as VxLAN, NVGRE and GRE
+   have been developed to virtualize networking by encapsulating 
+   layer 2 frames in layer 3 and layer 4 tunnels.
+   Extended tunnel structures allow sFlow agents in ingress and 
+   egress switches to describe outer headers that are added 
+   or removed as packets transit the switch.*/
+
+typedef struct _SFLExtended_l2_tunnel {
+	SFLSampled_ethernet header;
+} SFLExtended_l2_tunnel;
+
+typedef struct _SFLExtended_ipv4_tunnel {
+	SFLSampled_ipv4 header;
+} SFLExtended_ipv4_tunnel;
+
+typedef struct _SFLExtended_ipv6_tunnel {
+	SFLSampled_ipv6 header;
+} SFLExtended_ipv6_tunnel;
+
+typedef struct _SFLExtended_decapsulate {
+   uint32_t inner_header_offset;
+} SFLExtended_decapsulate;
+
+typedef struct _SFLExtended_vni {
+   uint32_t vni;            /* virtual network identifier */
+} SFLExtended_vni;
+
 /* Extended socket information,
    Must be filled in for all application transactions associated with a network socket
    Omit if transaction associated with non-network IPC  */
@@ -396,6 +425,16 @@ enum SFLFlow_type_tag {
   SFLFLOW_EX_MPLS_FTN     = 1010,
   SFLFLOW_EX_MPLS_LDP_FEC = 1011,
   SFLFLOW_EX_VLAN_TUNNEL  = 1012,   /* VLAN stack */
+  SFLFLOW_EX_L2_TUNNEL_EGRESS    = 1021,
+  SFLFLOW_EX_L2_TUNNEL_INGRESS   = 1022,
+  SFLFLOW_EX_IPV4_TUNNEL_EGRESS  = 1023,
+  SFLFLOW_EX_IPV4_TUNNEL_INGRESS = 1024,
+  SFLFLOW_EX_IPV6_TUNNEL_EGRESS  = 1025,
+  SFLFLOW_EX_IPV6_TUNNEL_INGRESS = 1026,
+  SFLFLOW_EX_DECAP_EGRESS        = 1027,
+  SFLFLOW_EX_DECAP_INGRESS       = 1028,
+  SFLFLOW_EX_VNI_EGRESS          = 1029,
+  SFLFLOW_EX_VNI_INGRESS         = 1030,
   SFLFLOW_EX_SOCKET4        = 2100, /* server socket */
   SFLFLOW_EX_SOCKET6        = 2101, /* server socket */
   SFLFLOW_EX_PROXY_SOCKET4  = 2102, /* back-end (client) socket */
@@ -423,6 +462,11 @@ typedef union _SFLFlow_type {
   SFLExtended_mpls_FTN mpls_ftn;
   SFLExtended_mpls_LDP_FEC mpls_ldp_fec;
   SFLExtended_vlan_tunnel vlan_tunnel;
+  SFLExtended_l2_tunnel tunnel_l2;
+  SFLExtended_ipv4_tunnel tunnel_ipv4;
+  SFLExtended_ipv6_tunnel tunnel_ipv6;
+  SFLExtended_decapsulate tunnel_decap;
+  SFLExtended_vni tunnel_vni;
   SFLSampled_APP app;
   SFLSampled_APP_CTXT context;
   SFLSampled_APP_ACTOR actor;

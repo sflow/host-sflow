@@ -232,6 +232,38 @@ static void putMACAddress(SFLReceiver *receiver, uint8_t *mac)
   receiver->sampleCollector.datap += 2;
 }
 
+static void putSampledEthernet(SFLReceiver *receiver, SFLSampled_ethernet *ethernet)
+{
+  putNet32(receiver, ethernet->eth_len);
+  putMACAddress(receiver, ethernet->src_mac);
+  putMACAddress(receiver, ethernet->dst_mac);
+  putNet32(receiver, ethernet->eth_type);
+}
+
+static void putSampledIPv4(SFLReceiver *receiver, SFLSampled_ipv4 *ipv4)
+{
+  putNet32(receiver, ipv4->length);
+  putNet32(receiver, ipv4->protocol);
+  put32(receiver, ipv4->src_ip.addr);
+  put32(receiver, ipv4->dst_ip.addr);
+  putNet32(receiver, ipv4->src_port);
+  putNet32(receiver, ipv4->dst_port);
+  putNet32(receiver, ipv4->tcp_flags);
+  putNet32(receiver, ipv4->tos);
+}
+
+static void putSampledIPv6(SFLReceiver *receiver, SFLSampled_ipv6 *ipv6)
+{
+  putNet32(receiver, ipv6->length);
+  putNet32(receiver, ipv6->protocol);
+  put128(receiver, ipv6->src_ip.addr);
+  put128(receiver, ipv6->dst_ip.addr);
+  putNet32(receiver, ipv6->src_port);
+  putNet32(receiver, ipv6->dst_port);
+  putNet32(receiver, ipv6->tcp_flags);
+  putNet32(receiver, ipv6->priority);
+}
+
 static void putSwitch(SFLReceiver *receiver, SFLExtended_switch *sw)
 {
   putNet32(receiver, sw->src_vlan);
@@ -394,6 +426,14 @@ static void putMplsLdpFec(SFLReceiver *receiver, SFLExtended_mpls_LDP_FEC *ldpfe
 }
 
 static uint32_t mplsLdpFecEncodingLength(SFLExtended_mpls_LDP_FEC *ldpfec) {
+  return 4;
+}
+
+static uint32_t tunnelDecapEncodingLength(SFLExtended_decapsulate *decap) {
+  return 4;
+}
+
+static uint32_t tunnelVniEncodingLength(SFLExtended_vni *vni) {
   return 4;
 }
 
@@ -572,6 +612,14 @@ static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_MPLS_FTN: elemSiz = mplsFtnEncodingLength(&elem->flowType.mpls_ftn); break;
     case SFLFLOW_EX_MPLS_LDP_FEC: elemSiz = mplsLdpFecEncodingLength(&elem->flowType.mpls_ldp_fec); break;
     case SFLFLOW_EX_VLAN_TUNNEL: elemSiz = vlanTunnelEncodingLength(&elem->flowType.vlan_tunnel); break;
+	case SFLFLOW_EX_L2_TUNNEL_EGRESS:
+	case SFLFLOW_EX_L2_TUNNEL_INGRESS: elemSiz = sizeof(SFLExtended_l2_tunnel); break;
+	case SFLFLOW_EX_IPV4_TUNNEL_EGRESS:
+	case SFLFLOW_EX_IPV4_TUNNEL_INGRESS: elemSiz = sizeof(SFLExtended_ipv4_tunnel); break;
+	case SFLFLOW_EX_DECAP_EGRESS:
+	case SFLFLOW_EX_DECAP_INGRESS: elemSiz = tunnelDecapEncodingLength(&elem->flowType.tunnel_decap); break;
+	case SFLFLOW_EX_VNI_EGRESS:
+	case SFLFLOW_EX_VNI_INGRESS: elemSiz = tunnelVniEncodingLength(&elem->flowType.tunnel_vni); break;
     case SFLFLOW_APP: elemSiz = appEncodingLength(&elem->flowType.app); break;
     case SFLFLOW_APP_CTXT: elemSiz = appContextLength(&elem->flowType.context); break;
     case SFLFLOW_APP_ACTOR_INIT:
@@ -669,32 +717,9 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     /* round up to multiple of 4 to preserve alignment */
     receiver->sampleCollector.datap += ((elem->flowType.header.header_length + 3) / 4);
       break;
-    case SFLFLOW_ETHERNET:
-      putNet32(receiver, elem->flowType.ethernet.eth_len);
-      putMACAddress(receiver, elem->flowType.ethernet.src_mac);
-      putMACAddress(receiver, elem->flowType.ethernet.dst_mac);
-      putNet32(receiver, elem->flowType.ethernet.eth_type);
-      break;
-    case SFLFLOW_IPV4:
-      putNet32(receiver, elem->flowType.ipv4.length);
-      putNet32(receiver, elem->flowType.ipv4.protocol);
-      put32(receiver, elem->flowType.ipv4.src_ip.addr);
-      put32(receiver, elem->flowType.ipv4.dst_ip.addr);
-      putNet32(receiver, elem->flowType.ipv4.src_port);
-      putNet32(receiver, elem->flowType.ipv4.dst_port);
-      putNet32(receiver, elem->flowType.ipv4.tcp_flags);
-      putNet32(receiver, elem->flowType.ipv4.tos);
-      break;
-    case SFLFLOW_IPV6:
-      putNet32(receiver, elem->flowType.ipv6.length);
-      putNet32(receiver, elem->flowType.ipv6.protocol);
-      put128(receiver, elem->flowType.ipv6.src_ip.addr);
-      put128(receiver, elem->flowType.ipv6.dst_ip.addr);
-      putNet32(receiver, elem->flowType.ipv6.src_port);
-      putNet32(receiver, elem->flowType.ipv6.dst_port);
-      putNet32(receiver, elem->flowType.ipv6.tcp_flags);
-      putNet32(receiver, elem->flowType.ipv6.priority);
-      break;
+	case SFLFLOW_ETHERNET: putSampledEthernet(receiver, &elem->flowType.ethernet); break;
+	case SFLFLOW_IPV4: putSampledIPv4(receiver, &elem->flowType.ipv4); break;
+	case SFLFLOW_IPV6: putSampledIPv6(receiver, &elem->flowType.ipv6); break;
     case SFLFLOW_EX_SWITCH: putSwitch(receiver, &elem->flowType.sw); break;
     case SFLFLOW_EX_ROUTER: putRouter(receiver, &elem->flowType.router); break;
     case SFLFLOW_EX_GATEWAY: putGateway(receiver, &elem->flowType.gateway); break;
@@ -707,6 +732,26 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_MPLS_FTN: putMplsFtn(receiver, &elem->flowType.mpls_ftn); break;
     case SFLFLOW_EX_MPLS_LDP_FEC: putMplsLdpFec(receiver, &elem->flowType.mpls_ldp_fec); break;
     case SFLFLOW_EX_VLAN_TUNNEL: putVlanTunnel(receiver, &elem->flowType.vlan_tunnel); break;
+	case SFLFLOW_EX_L2_TUNNEL_EGRESS: 
+	case SFLFLOW_EX_L2_TUNNEL_INGRESS:
+		putSampledEthernet(receiver, &elem->flowType.tunnel_l2.header);
+		break;
+	case SFLFLOW_EX_IPV4_TUNNEL_EGRESS:
+	case SFLFLOW_EX_IPV4_TUNNEL_INGRESS:
+		putSampledIPv4(receiver, &elem->flowType.tunnel_ipv4.header);
+		break;
+	case SFLFLOW_EX_IPV6_TUNNEL_EGRESS:
+	case SFLFLOW_EX_IPV6_TUNNEL_INGRESS:
+		putSampledIPv6(receiver, &elem->flowType.tunnel_ipv6.header);
+		break;
+	case SFLFLOW_EX_DECAP_EGRESS:
+	case SFLFLOW_EX_DECAP_INGRESS:
+		putNet32(receiver, elem->flowType.tunnel_decap.inner_header_offset);
+		break;
+	case SFLFLOW_EX_VNI_EGRESS:
+	case SFLFLOW_EX_VNI_INGRESS:
+		putNet32(receiver, elem->flowType.tunnel_vni.vni);
+		break;
     case SFLFLOW_APP: putAPP(receiver, &elem->flowType.app); break;
     case SFLFLOW_APP_CTXT: putAPPContext(receiver, &elem->flowType.context); break;
     case SFLFLOW_APP_ACTOR_INIT:
