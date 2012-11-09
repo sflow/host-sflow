@@ -183,6 +183,8 @@ void readPackets(HSP *sp, PUCHAR buffer)
 			PSFlowRecord currRecord = &sample->firstRecord;
 			SFLFlow_sample_element hdrElem = { 0 };
 			SFLFlow_sample_element extSwElem = { 0 };
+			SFLFlow_sample_element vniInElem = { 0 };
+			SFLFlow_sample_element vniOutElem = { 0 };
 			while (currRecord->recordType != NULL_RECORD_TYPE) {
 				switch(currRecord->recordType) {
 				case SAMPLED_HEADER_RECORD_TYPE: {
@@ -228,6 +230,12 @@ void readPackets(HSP *sp, PUCHAR buffer)
                 case EXTENDED_TUNNEL_RECORD_TYPE: {
                     PSFlowExtendedTunnel extendedTunnel =
                         GET_OPAQUE_DATA_ADDR(currRecord, PSFlowExtendedTunnel);
+					vniOutElem.tag = SFLFLOW_EX_VNI_EGRESS;
+					vniInElem.tag = SFLFLOW_EX_VNI_INGRESS;
+					vniOutElem.flowType.tunnel_vni.vni = extendedTunnel->vsid;
+					vniInElem.flowType.tunnel_vni.vni = extendedTunnel->vsid;
+					SFLADD_ELEMENT(&fs, &vniOutElem);
+					SFLADD_ELEMENT(&fs, &vniInElem);
 					if (LOG_INFO <= debug) {
 						myLog(LOG_INFO, "readPackets: sampler %s index %u VSID: %u",
 							sampler->userData, SFL_DS_INDEX(sampler->dsi), 
