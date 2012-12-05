@@ -45,7 +45,7 @@ static int dnsSD_Request(HSP *sp, HSPSFlowSettings *settings,
 	PDNS_RECORD pDnsRecord;
 	DNS_FREE_TYPE dnsFreeType;
 	dnsFreeType = DnsFreeRecordListDeep;
-	DNS_STATUS status = DnsQuery(dname, rtype, DNS_QUERY_STANDARD, NULL, &pDnsRecord, NULL);
+	DNS_STATUS status = DnsQuery(dname, rtype, DNS_QUERY_WIRE_ONLY, NULL, &pDnsRecord, NULL);
 	if (status) {
 		//fail
 		myLog(LOG_ERR, "dnsSD_Request: DNSQuery(%s, %u) failed error=%u", dname, rtype, status);
