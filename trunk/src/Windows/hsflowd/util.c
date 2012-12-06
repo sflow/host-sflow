@@ -545,7 +545,7 @@ HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace)
 	hr = pLocator->ConnectServer(path, NULL, NULL, NULL, 0, NULL, NULL, pNamespace);
 	pLocator->Release();
 	if (WBEM_S_NO_ERROR != hr) {
-		myLog(LOG_ERR,"connecttoWMI: ConnectServer() failed for namespace %S", path);
+		myLog(LOG_INFO,"connectToWMI: ConnectServer() failed for namespace %S", path);
 		CoUninitialize();
 	}
 	return hr;
