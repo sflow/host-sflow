@@ -78,14 +78,6 @@ static BOOL lookupAddress(char *name, int family, struct sockaddr *sockaddr, SFL
 	return TRUE;
 }
 
-static PCSTR addrToStr(SFLAddress *address, char *buf, size_t len)
-{
-	return InetNtop(address->type == SFLADDRESSTYPE_IP_V6 ? AF_INET6 : AF_INET,
-					&address->address,
-					buf,
-					len);
-}
-
 void clearCollectors(HSPSFlowSettings *settings) 
 {
 	if (settings->collectors != NULL) {
@@ -320,7 +312,7 @@ static BOOL readReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings, BOOL us
 					if (result != ERROR_SUCCESS && useDefaults) {
 						port = SFL_DEFAULT_COLLECTOR_PORT;
 					}
-					//myLog(LOG_ERR, "readReg_sFlowSettings: %s index=%u found collector %s:%u", key, index, collectorStr, port);
+					myLog(LOG_INFO, "readReg_sFlowSettings: %s index=%u found collector %s:%u", key, index, collectorStr, port);
 					insertCollector(settings, collectorStr, (WORD)port);
 				}
 				RegCloseKey(collectorKey);

@@ -464,10 +464,21 @@ static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
 	return true;
 }
 
-static void logSFlowSettings(HSPSFlowSettings *settings)
+static PCSTR addrToStr(SFLAddress *address, char *buf, size_t len)
 {
-	myLog(debug, "sFlow configuration serialNumber=%u: pollingInterval=%u, samplingRate=%u", 
-				 settings->serialNumber, settings->pollingInterval, settings->samplingRate);
+	return InetNtop(address->type == SFLADDRESSTYPE_IP_V6 ? AF_INET6 : AF_INET,
+					&address->address,
+					buf,
+					len);
+}
+
+static void logSFlowSettings(HSPSFlow *sFlow)
+{
+	HSPSFlowSettings *settings = sFlow->sFlowSettings;
+	char agentAddr[255];
+	addrToStr(&sFlow->agentIP, agentAddr, 255);
+	myLog(debug, "sFlow configuration agent=%s serialNumber=%u: pollingInterval=%u, samplingRate=%u", 
+		  agentAddr, settings->serialNumber, settings->pollingInterval, settings->samplingRate);
 	for (HSPCollector *collector= settings->collectors;
 		collector; collector = collector->nxt) {
 		myLog(debug, "collector=%s:%u", collector->name, collector->udpPort);
@@ -667,7 +678,7 @@ void ServiceMain(int argc, char** argv)
 	}
 	openFilter(&sp); //try to initialise the sFlow filter for sampling
 	initAgent(&sp);
-	logSFlowSettings(sp.sFlow->sFlowSettings);
+	logSFlowSettings(sp.sFlow);
 
 
 	// initialize the clock so we can detect second boundaries
@@ -697,7 +708,7 @@ void ServiceMain(int argc, char** argv)
 						BOOL samplingChanged = sp.sFlow->sFlowSettings->samplingRate !=  newSettings->samplingRate;
 						freeSFlowSettings(sp.sFlow->sFlowSettings);
 						sp.sFlow->sFlowSettings = newSettings;
-						logSFlowSettings(sp.sFlow->sFlowSettings);
+						logSFlowSettings(sp.sFlow);
 						if (pollingChanged) {
 							for (SFLPoller *poller = sp.sFlow->agent->pollers;
 								poller; poller = poller->nxt) {

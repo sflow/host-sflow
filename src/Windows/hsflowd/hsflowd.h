@@ -89,6 +89,7 @@ extern "C" {
 
 #define WMI_WMI_NS L"root\\wmi"
 #define WMI_CIMV2_NS L"root\\cimv2"
+#define WMI_STD_CIMV2_NS L"root\\standardcimv2"
 #define WMI_VIRTUALIZATION_NS_V1 L"root\\virtualization"
 #define WMI_VIRTUALIZATION_NS_V2 L"root\\virtualization\\v2"
 
