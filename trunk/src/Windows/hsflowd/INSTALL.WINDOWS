@@ -14,22 +14,20 @@ Manual install:
            One way to do this is to right click on cmd.exe and select "run as administrator".
 	1. Copy hsflowd.exe to a suitable location, for example  "$PROGRAMFILES64\Host sFlow Project\Host sFlow Agent".  
 	2. Configure hsflowd as a Windows Service: `sc create hsflowd type= own start= auto error= normal binPath= path\to\hsflowd.exe DisplayName= "Host sFlow Agent"`
-	3. Required: configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters\collectors\collector1 /v collector /d name.or.ip.of.collector
-	3a. Optional: configure the sFlow collector port: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters\collectors\collector1 /v port /t REG_DWORD /d 6343
-	3b. Optional: configure the sFlow sampling rate: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v samplingRate /t REG_DWORD /d 400
-	3c. Optional: configure the sFlow polling interval: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v pollingInterval /t REG_DWORD /d 30
-	3d. Optional: configure the sFlow agent address: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v agentAddress /d preferred IP address of host.
+	3. Required: configure the sFlow collector: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters\collector /v collector /d name.or.ip.of.collector
+	3a. Optional: configure the sFlow sampling rate: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v samplingRate /t REG_DWORD /d 400
+	3b. Optional: configure the sFlow polling interval: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v pollingInterval /t REG_DWORD /d 30
+	3c. Optional: configure the sFlow agent address: `reg ADD HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters /v agentAddress /d preferred IP address of host.
 
 Configuration:
 	The following configuration parameters are read, on start up, from the registry HKLM\SYSTEM\CurrentControlSet\Services\hsflowd\Parameters:
-	collectors\*\collector [required unless DNS-SD configuration is enabled, see below] 
+	collector [required unless DNS-SD configuration is enabled, see below] 
 	IPv4 or IPv6 address or hostname of the system to which sFlow data is to be sent.
-        Multiple collectors can be defined by creating multiple sub-keys in the collectors key (eg collector1, collector2),
-        then setting collector and port values in each of the sub-keys.
-
-	collectors\*\port [optional]
-	Destination UDP port on the system to which sFlow data is to be sent
-	Default 6343. Must be in the 0 < port <= 65535
+        Multiple collectors can be defined by using a list of ip addresses or hostnames separated with commas.
+        If sFlow is to be sent to a non-standard UDP port, then append ":port" to the ip or hostname
+        (0 < port <= 65535), in this case, IPv6 addresses must be enclosed in []. 
+        Example to send sFlow to 10.0.0.1 port 6343, 10.0.0.2 port 6344 and fe80::cabc:c8ff:fe97:ab14 port 6344
+        10.0.0.1,10.0.0.2:6344,[fe80::cabc:c8ff:fe97:ab14]:6344
 
 	samplingRate [optional] (Windows Server 8 with Hyper-V Role installed only)
 	N where randomised 1 in Nth packet forwarded by the virtual switch is sampled and exported. 
