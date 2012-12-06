@@ -14,6 +14,7 @@ extern "C" {
 #define MAX_IPV6_STRLEN 46
 #define MAX_IPV4_STRLEN 16
 #define MAX_KEY_LEN 255
+#define MAX_VAL_LEN 10*(MAX_HOSTNAME_LEN+8)+1 //arbitrary 10 collectors
 
 extern int debug;
 
@@ -223,6 +224,60 @@ EnumIPSelectionPriority agentAddressPriority(SFLAddress *addr)
 }
 
 /**
+ * Parse a string of comma separated collectors and use to populate settings.
+ * a collector will be represented in the string with one of the forms:
+ * ipv4 | ipv6 | hostname - default port assumed if useDefaults
+ * ipv4:port
+ * [ipv6]:port
+ */
+static void parseCollectors(CHAR *collectorsStr, HSPSFlowSettings *settings, BOOL useDefaults)
+{
+	char seps[] = " ,\t";
+	char sepsIpv6[] = "[]";
+	char sepsPort[] = ":";
+	char *collToken;
+	char *collNextToken;
+	//first split out collectors
+	collToken = strtok_s(collectorsStr, seps, &collNextToken);
+	while (collToken != NULL) {
+		//now look for hostname or ip and port
+		char *addrToken;
+		char *addrNextToken;
+		DWORD port = 0;
+		addrToken = strtok_s(collToken, sepsIpv6, &addrNextToken);
+		if (addrToken == collToken) {
+			//either ipv6 with no port or hostname/ipv4 with or without port
+			int count = 0;
+			char *p = addrToken;
+			do {
+				if (*p == ':') count++;
+			} while (*(p++));
+			if (count == 1) {
+				//ipv4 or hostname and port
+				char *portString = strchr(addrToken, ':');
+				*portString = '\0';
+				portString++;
+				port = strtol(portString, NULL, 10);
+			}  
+			//else if count = 0 ipv4/hostname and no port
+			//else ipv6 and no port
+		} else {
+			//ipv6 possibly with port
+			char *portString = strtok_s(NULL, sepsPort, &addrNextToken);
+			if (portString != NULL) {
+				port = strtol(portString, NULL, 10);
+			}
+		}
+		if (port == 0 && useDefaults) {
+			port = SFL_DEFAULT_COLLECTOR_PORT;
+		}
+		myLog(LOG_INFO, "parseCollectors: found collector %s:%u", addrToken, port);
+		insertCollector(settings, addrToken, (WORD)port);
+		collToken = strtok_s(NULL, seps, &collNextToken);
+	}
+}
+
+/**
  * Reads the sFlow configuration settings from the registry location
  * identified by key and populates sampling and polling settings
  * in settings, together with adding collectors (name and port only). 
@@ -259,66 +314,80 @@ static BOOL readReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings, BOOL us
 		(LPBYTE)&serialNumber, 
 		&cbData);
 	settings->serialNumber = serialNumber;
-	result = RegOpenKeyEx(
+	char collectors[MAX_VAL_LEN];
+	cbData = MAX_VAL_LEN;
+	result = RegQueryValueEx(
 		settingsKey,
-		HSP_REGKEY_COLLECTORS,
-		0,
-		KEY_READ,
-		&collectorsKey);
+		HSP_REGVAL_COLLECTOR,
+		NULL,
+		NULL,
+		(LPBYTE)collectors,
+		&cbData);
 	if (result == ERROR_SUCCESS) {
-		//now enumerate the sub keys (one for each collector).
-		DWORD countSubKeys = 0;
-		result = RegQueryInfoKey(collectorsKey, NULL, NULL, NULL, &countSubKeys, 
-								 NULL, NULL, NULL, NULL, NULL, NULL, NULL);
-		for (DWORD index = 0; index < countSubKeys; index++) {
-			CHAR collectorName[MAX_KEY_LEN];
-			DWORD collNameLen = MAX_KEY_LEN;
-			result = RegEnumKeyEx(
-				collectorsKey,
-				index,
-				collectorName,
-				&collNameLen,
-				NULL,
-				NULL,
-				NULL,
-				NULL);
-			HKEY collectorKey;
-			result = RegOpenKeyEx(
-				collectorsKey, 
-				collectorName, 
-				0, 
-				KEY_QUERY_VALUE, 
-				&collectorKey);
-			if (result == ERROR_SUCCESS) {
-				char collectorStr[MAX_HOSTNAME_LEN];
-				cbData = MAX_HOSTNAME_LEN;
-				result = RegQueryValueEx(
-					collectorKey,
-					HSP_REGVAL_COLLECTOR,
+		myLog(LOG_ERR, "got collectors %s", collectors);
+		parseCollectors(collectors, settings, useDefaults);
+	} else {
+		result = RegOpenKeyEx(
+			settingsKey,
+			HSP_REGKEY_COLLECTORS,
+			0,
+			KEY_READ,
+			&collectorsKey);
+		if (result == ERROR_SUCCESS) {
+			//now enumerate the sub keys (one for each collector).
+			DWORD countSubKeys = 0;
+			result = RegQueryInfoKey(collectorsKey, NULL, NULL, NULL, &countSubKeys, 
+									 NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+			for (DWORD index = 0; index < countSubKeys; index++) {
+				CHAR collectorName[MAX_KEY_LEN];
+				DWORD collNameLen = MAX_KEY_LEN;
+				result = RegEnumKeyEx(
+					collectorsKey,
+					index,
+					collectorName,
+					&collNameLen,
 					NULL,
 					NULL,
-					(LPBYTE)collectorStr,
-					&cbData );
+					NULL,
+					NULL);
+				HKEY collectorKey;
+				result = RegOpenKeyEx(
+					collectorsKey, 
+					collectorName, 
+					0, 
+					KEY_QUERY_VALUE, 
+					&collectorKey);
 				if (result == ERROR_SUCCESS) {
-					//now get the port and create a collector
-					DWORD port = 0;
+					char collectorStr[MAX_HOSTNAME_LEN];
+					cbData = MAX_HOSTNAME_LEN;
 					result = RegQueryValueEx(
 						collectorKey,
-						HSP_REGVAL_PORT,
+						HSP_REGVAL_COLLECTOR,
 						NULL,
 						NULL,
-						(LPBYTE)&port,
-						&cbData);
-					if (result != ERROR_SUCCESS && useDefaults) {
-						port = SFL_DEFAULT_COLLECTOR_PORT;
+						(LPBYTE)collectorStr,
+						&cbData );
+					if (result == ERROR_SUCCESS) {
+						//now get the port and create a collector
+						DWORD port = 0;
+						result = RegQueryValueEx(
+							collectorKey,
+							HSP_REGVAL_PORT,
+							NULL,
+							NULL,
+							(LPBYTE)&port,
+							&cbData);
+						if (result != ERROR_SUCCESS && useDefaults) {
+							port = SFL_DEFAULT_COLLECTOR_PORT;
+						}
+						myLog(LOG_INFO, "readReg_sFlowSettings: %s index=%u found collector %s:%u", key, index, collectorStr, port);
+						insertCollector(settings, collectorStr, (WORD)port);
 					}
-					myLog(LOG_INFO, "readReg_sFlowSettings: %s index=%u found collector %s:%u", key, index, collectorStr, port);
-					insertCollector(settings, collectorStr, (WORD)port);
+					RegCloseKey(collectorKey);
 				}
-				RegCloseKey(collectorKey);
 			}
+			RegCloseKey(collectorsKey);
 		}
-		RegCloseKey(collectorsKey);
 	}
 	//read the sampling and polling settings
 	DWORD samplingRate = 0;
@@ -689,8 +758,8 @@ BOOL newerSettingsAvailable(HSPSFlowSettings *settings)
 
 /**
  * Converts the legacy registry settings to the current format.
- * Moves the single collector and port to a sub-key under the
- * collectors sub-key.
+ * Combines collector and port values into a collector value
+ * of ipOrHostname:port
  * Returns TRUE on success, FALSE on failure
  */
 static BOOL convertReg(CHAR *key)
@@ -707,96 +776,63 @@ static BOOL convertReg(CHAR *key)
 		myLog(LOG_ERR, "convertReg: failed to open key=%s error=%u", key, result);
 		return FALSE;
 	}
-	char collectorStr[MAX_HOSTNAME_LEN];
-	cbData = MAX_HOSTNAME_LEN;
+	DWORD port = 0;
 	result = RegQueryValueEx(
 		hkey,
-		HSP_REGVAL_COLLECTOR,
+		HSP_REGVAL_PORT,
 		NULL,
 		NULL,
-		(LPBYTE)collectorStr,
+		(LPBYTE)&port,
 		&cbData);
 	if (result == ERROR_SUCCESS) {
-		//legacy config
-		//now create the collectors sub-key
-		HKEY collectorsKey;
-		result = RegCreateKeyEx(
-			hkey,
-			HSP_REGKEY_COLLECTORS,
-			0,
-			NULL,
-			REG_OPTION_NON_VOLATILE,
-			KEY_WRITE,
-			NULL,
-			&collectorsKey,
-			NULL);
-		if (result != ERROR_SUCCESS) {
-			myLog(LOG_ERR, "convertReg: cannot create %s\\%s error=%u",
-				  key, HSP_REGKEY_COLLECTORS, result);
-			RegCloseKey(hkey);
-			return FALSE;
-		}
-		HKEY collectorKey;
-		CHAR *collectorKeyName = "collector1";
-		result = RegCreateKeyEx(
-			collectorsKey,
-			collectorKeyName,
-			0,
-			NULL,
-			REG_OPTION_NON_VOLATILE,
-			KEY_SET_VALUE,
-			NULL,
-			&collectorKey,
-			NULL);
-		if (result != ERROR_SUCCESS) {
-			myLog(LOG_ERR, "convertReg: cannot create %s\\%s\\%s error=%u",
-				  key, HSP_REGKEY_COLLECTORS, collectorKeyName, result);
-			RegCloseKey(hkey);
-			RegCloseKey(collectorsKey);
-			return FALSE;
-		}
-		result = RegSetValueEx(
-			collectorKey,
-			HSP_REGVAL_COLLECTOR,
-			0,
-			REG_SZ,
-			(LPBYTE)collectorStr,
-			cbData);
-		if (result != ERROR_SUCCESS) {
-			myLog(LOG_ERR, "convertReg: cannot set collector value %s\\%s\\%s %s error=%u",
-				  key, HSP_REGKEY_COLLECTORS, collectorStr, collectorStr, result);
-			RegCloseKey(hkey);
-			RegCloseKey(collectorsKey);
-			return FALSE;
-		}
-		DWORD port = 0;
+		//if there is a port specified, then we need to convert
+		//if there is a collector specified
+		char collectorStr[MAX_HOSTNAME_LEN];
+		cbData = MAX_HOSTNAME_LEN;
 		result = RegQueryValueEx(
 			hkey,
-			HSP_REGVAL_PORT,
+			HSP_REGVAL_COLLECTOR,
 			NULL,
 			NULL,
-			(LPBYTE)&port,
+			(LPBYTE)collectorStr,
 			&cbData);
 		if (result == ERROR_SUCCESS) {
+			//we have a collector so we need to test for IPv6
+			//so that we can enclose in []
+			BOOL isv6 = strchr(collectorStr, ':') != NULL;
+			char *newCollStr;
+			if (isv6) {
+				char v6CollStr[MAX_VAL_LEN];
+				sprintf_s(v6CollStr, MAX_VAL_LEN, "[%s]:%u",collectorStr, port);
+				newCollStr = v6CollStr;
+			} else {
+				newCollStr = collectorStr;
+			}
 			result = RegSetValueEx(
-				collectorKey,
-				HSP_REGVAL_PORT,
+				hkey,
+				HSP_REGVAL_COLLECTOR,
 				0,
-				REG_DWORD,
-				(LPBYTE)&port,
+				REG_SZ,
+				(LPBYTE)newCollStr,
 				cbData);
-			if (result != ERROR_SUCCESS) {
-				myLog(LOG_ERR, "convertReg: cannot set collector port value %s\\%s\\%s %u error=%u",
-					  key, HSP_REGKEY_COLLECTORS, collectorStr, port, result);
+			if (result == ERROR_SUCCESS) {
+				//remove the port value
+				result = RegDeleteValue(
+					hkey,
+					HSP_REGVAL_PORT);
+				if (result != ERROR_SUCCESS) {
+					myLog(LOG_ERR, "convertReg: cannot remove port value %s\\%s error=%u",
+						  key, HSP_REGVAL_PORT, result);
+					RegCloseKey(hkey);
+					return false;
+				}
+			} else {
+				myLog(LOG_ERR, "convertReg: cannot set collector value %s\\%s %s error=%u",
+					  key, HSP_REGVAL_COLLECTOR, newCollStr, result);
 				RegCloseKey(hkey);
-				RegCloseKey(collectorsKey);
 				return FALSE;
 			}
 		}
-		RegDeleteValue(hkey, HSP_REGVAL_COLLECTOR);
-		RegDeleteValue(hkey, HSP_REGVAL_PORT);
-		RegCloseKey(collectorKey);
-		RegCloseKey(collectorsKey);
 		RegCloseKey(hkey);
 		return TRUE;
 	} else {
@@ -809,7 +845,7 @@ static BOOL convertReg(CHAR *key)
 /**
  * Reads the initial configuration from the registry - agent address,
  * DNS-SD settings and if DNS-SD config is not enabled, reads the manual
- * manual sFlow settings (converting from old style if necessary), saving it
+ * manual sFlow settings (converting from old style if necessary),
  * saving it to the registry under the current config key (without validating).
  * Returns TRUE if all registry reads (and writes) are successful, 
  * FALSE if the agent address cannot be determined.
