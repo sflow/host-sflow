@@ -36,20 +36,25 @@
       DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 
     <Property Id='SFLOW_PARAMS_KEY' Value='SYSTEM\CurrentControlSet\Services\hsflowd\Parameters' />
-    <Property Id='COLLECTOR_VALUE' Value='localhost'>
+    <Property Id='SFLOW_COLLECTOR' Value='localhost'>
       <RegistrySearch Id='ExistingCollectorValue'
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='collector' Type='raw' />
     </Property>
-    <Property Id='POLLING_VALUE' Value='20'>
+    <Property Id='SFLOW_POLLING' Value='20'>
       <RegistrySearch Id='ExistingPollingValue'
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='pollingInterval' Type='raw' />
     </Property>
-    <Property Id='SAMPLING_VALUE' Value='256'>
+    <Property Id='SFLOW_SAMPLING' Value='256'>
       <RegistrySearch Id='ExistingSamplingValue'
                       Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
                       Name='samplingRate' Type='raw' />
+    </Property>
+    <Property Id='SFLOW_DNSSD' Value='on'>
+      <RegistrySearch Id='ExistingDNSSD'
+                      Root='HKLM' Key='[SFLOW_PARAMS_KEY]'
+                      Name='DNSSD' Type='raw' />
     </Property>
     <Property Id='NSIS_UNINSTALLER'>
       <RegistrySearch Id='ExistingNSISUninstaller'
@@ -67,7 +72,7 @@
       <Property Id='Description' Value='sFlow agent for Hyper-V' />
       <Property Id='DriverID' Value='{AF8CAD53-C7B7-420C-9439-135A87818A64}' />
       <Property Id='DriverVersion' Value='$(var.driverVersion)' />
-      <Property Id='DriverInstallParams' Value='/q' />
+      <!--<Property Id='DriverInstallParams' Value='/q' />-->
       <Property Id='ExtensionType' Value='Capture' />
     <?endif ?>
 
@@ -111,9 +116,10 @@
     <DirectoryRef Id='TARGETDIR'>
       <Component Id="RegistryConfiguration" Guid="456B3793-F77E-43EF-89AA-FA7AC33844C9">
         <RegistryKey Root="HKLM" Key="[SFLOW_PARAMS_KEY]" >
-          <RegistryValue Type="string" Name="collector" Value="[COLLECTOR_VALUE]" KeyPath="yes" />
-          <RegistryValue Type="integer" Name="pollingInterval" Value="[POLLING_VALUE]" />
-          <RegistryValue Type="integer" Name="samplingRate" Value="[SAMPLING_VALUE]" />
+          <RegistryValue Type="string" Name="collector" Value="[SFLOW_COLLECTOR]" KeyPath="yes" />
+          <RegistryValue Type="integer" Name="pollingInterval" Value="[SFLOW_POLLING]" />
+          <RegistryValue Type="integer" Name="samplingRate" Value="[SFLOW_SAMPLING]" />
+          <RegistryValue Type="string" Name="DNSSD" Value="[SFLOW_DNSSD]" />
         </RegistryKey>
       </Component>
     </DirectoryRef>
@@ -145,6 +151,8 @@
                   Value="Thank you for installing [ProductName]. To complete the installation, please enable the sFlow extension in your virtual switches, using the Hyper-V virtual switch manager."/>
     <CustomAction Id='UninstallNSIS'
                   Error='An old version of [ProductName] is currently installed. Please uninstall it and then run this installer again' />
+    <CustomAction Id='ClearDNSSDFlag' Property='SFLOW_DNSSD' Value='{}' Execute='firstSequence' />
+    <CustomAction Id='SetDNSSDFlagOff' Property='SFLOW_DNSSD' Value='off' />
     <?ifdef extension ?>
       <CustomAction Id='SetUninstallExtnParams' Property='UninstallExtension'
                     Value='-u sflowfilter' />
@@ -167,6 +175,9 @@
       <Custom Action='UninstallNSIS' After='AppSearch'>
         NSIS_UNINSTALLER OR NSIS_WOW_UNINSTALLER
       </Custom>
+      <Custom Action='ClearDNSSDFlag' After='AppSearch'>
+        <![CDATA[SFLOW_DNSSD <> "on"]]>
+      </Custom>
       <Custom Action='CleanPollingInterval' After='AppSearch' />
       <Custom Action='CleanSamplingRate' After='AppSearch' />
       <?ifdef extension ?>
@@ -181,6 +192,8 @@
     
     <InstallExecuteSequence>
       <Custom Action="PreventDowngrading" After="FindRelatedProducts">NEWPRODUCTFOUND</Custom>
+      <Custom Action='CleanPollingInterval' After='AppSearch' />
+      <Custom Action='CleanSamplingRate' After='AppSearch' />
       <?ifdef extension ?>
         <Custom Action="SetUninstallExtnParams" After="CostFinalize" />
         <Custom Action="SetInstallExtnParams" After="CostFinalize" />
@@ -188,12 +201,15 @@
           <![CDATA[VersionNT64 >= 602]]>
         </Custom>
         <Custom Action='UninstallExtension' After='StopServices'>
-          <![CDATA[(VersionNT64 >= 602) AND (HYPERV_PRESENT = "1")]]>
+          <![CDATA[(?sFlowExtension = 3) AND ((REMOVE ~= "ALL") OR (REINSTALL <> ""))]]>
         </Custom>
         <Custom Action='InstallExtension' Before='StartServices'>
-          <![CDATA[$sFlowExtension = 3]]>
+          <![CDATA[($sFlowExtension = 3) AND ((NOT INSTALLED) OR (REINSTALL <> ""))]]>
         </Custom>
       <?endif ?>
+      <Custom Action='SetDNSSDFlagOff' After='CostFinalize'>
+        <![CDATA[SFLOW_DNSSD <> "on"]]>
+      </Custom>
     </InstallExecuteSequence>
 
     <UI Id="sFlowInstallDir">
@@ -216,21 +232,37 @@
       <DialogRef Id="UserExit" />
  
       <Dialog Id="ConfigDlg" Width="370" Height="270" Title="[ProductName] [Setup]" NoMinimize="yes">
-        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Set the sFlow collector address and sampling parameters" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="44" Transparent="yes" NoPrefix="yes" Text="If DNS-SD configuration is enabled, the configuration will be set automatically through DNS, and cannot be manually set." />
         <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="Set sampling parameters" />
         <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.InstallDirDlgBannerBitmap)" />
         <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
         <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-
-        <Control Id="CollectorLabel" Type="Text" X="20" Y="60" Width="100" Height="15" NoPrefix= "yes" RightAligned="yes" Text="sFlow collector:" />
-        <Control Id="Collector" Type="Edit" Property="COLLECTOR_VALUE" X="122" Y="58" Width="130" Height="15" />
-        <Control Id="PollingLabel" Type="Text" X="20" Y="90" Width="100" Height="15" NoPrefix= "yes" RightAligned="yes" Text="Counter polling interval (s):" />
-        <Control Id="PollingInterval" Type="Edit" Property="POLLING_VALUE" X="122" Y="88" Width="130" Height="15" />
-        <Control Id="SamplingLabel" Type="Text" X="20" Y="120" Width="100" Height="15" NoPrefix= "yes" RightAligned="yes" Text="Sampling rate:">
-          <Condition Action="hide"><![CDATA[(VersionNT64 < 602) OR (HYPERV_PRESENT <> "1")]]></Condition>
+        <Control Id="DNSSD" Type="CheckBox" Property="SFLOW_DNSSD" Text="Configure using DNS-SD" CheckBoxValue="on" X="122" Y="58" Width="130" Height="15" />
+        <Control Id="CollectorLabel" Type="Text" X="20" Y="90" Width="100" Height="15" NoPrefix= "yes" RightAligned="yes" Text="sFlow collector:" >
+          <Condition Action="enable" ><![CDATA[SFLOW_DNSSD <> "on"]]></Condition>
+          <Condition Action="disable">SFLOW_DNSSD = "on"</Condition>
         </Control>
-        <Control Id="SamplingRate" Type="Edit" Property="SAMPLING_VALUE" X="122" Y="118" Width="130" Height="15">
+        <Control Id="Collector" Type="Edit" Property="SFLOW_COLLECTOR" X="122" Y="88" Width="130" Height="15">
+          <Condition Action="enable" ><![CDATA[SFLOW_DNSSD <> "on"]]></Condition>
+          <Condition Action="disable">SFLOW_DNSSD = "on"</Condition>
+        </Control>
+        <Control Id="PollingLabel" Type="Text" X="20" Y="120" Width="100" Height="15" NoPrefix= "yes" RightAligned="yes" Text="Counter polling interval (s):" >
+          <Condition Action="enable" ><![CDATA[SFLOW_DNSSD <> "on"]]></Condition>
+          <Condition Action="disable">SFLOW_DNSSD = "on"</Condition>
+        </Control>
+        <Control Id="PollingInterval" Type="Edit" Property="SFLOW_POLLING" X="122" Y="118" Width="130" Height="15" >
+          <Condition Action="enable" ><![CDATA[SFLOW_DNSSD <> "on"]]></Condition>
+          <Condition Action="disable">SFLOW_DNSSD = "on"</Condition>
+        </Control>
+        <Control Id="SamplingLabel" Type="Text" X="20" Y="150" Width="100" Height="15" NoPrefix= "yes" RightAligned="yes" Text="Sampling rate:">
           <Condition Action="hide"><![CDATA[(VersionNT64 < 602) OR (HYPERV_PRESENT <> "1")]]></Condition>
+          <Condition Action="enable" ><![CDATA[SFLOW_DNSSD <> "on"]]></Condition>
+          <Condition Action="disable">SFLOW_DNSSD = "on"</Condition>
+        </Control>
+        <Control Id="SamplingRate" Type="Edit" Property="SFLOW_SAMPLING" X="122" Y="148" Width="130" Height="15">
+          <Condition Action="hide"><![CDATA[(VersionNT64 < 602) OR (HYPERV_PRESENT <> "1")]]></Condition>
+          <Condition Action="enable" ><![CDATA[SFLOW_DNSSD <> "on"]]></Condition>
+          <Condition Action="disable">SFLOW_DNSSD = "on"</Condition>
         </Control>        
         <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)" />
         <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)" />
@@ -291,13 +323,18 @@
       <Publish Dialog="ConfigDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="2">
         POLLING_VALIDATED = "1" AND SAMPLING_VALIDATED = "1"
       </Publish>
-      
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ConfigDlg" />
+
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="ConfigDlg">
+        <![CDATA[WixUI_InstallMode <> "Remove"]]>
+      </Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg">
+        WixUI_InstallMode = "Remove"
+      </Publish>
 
       <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg">1</Publish>
 
       <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="ConfigDlg">1</Publish>
-      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="ConfigDlg">1</Publish>
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
       <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg">1</Publish>
 
       <Property Id="ARPNOMODIFY" Value="1" />
