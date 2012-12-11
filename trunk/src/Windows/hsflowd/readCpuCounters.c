@@ -38,10 +38,10 @@ void readCpuCounters(SFLHost_cpu_counters *cpu)
 			addCounterToQuery(SYS_COUNTER_OBJECT, NULL, SYS_COUNTER_PROCESSES, &query, &processes) == ERROR_SUCCESS &&
 			PdhCollectQueryData(query) == ERROR_SUCCESS) {
 			//CPU time is in 100ns units, divide by 10000 for ms
-			cpu->cpu_user = (uint32_t)getRawCounterValue(&userTime)/tick_to_ms;
-			cpu->cpu_system = (uint32_t)getRawCounterValue(&systemTime)/tick_to_ms;
-			cpu->cpu_idle = (uint32_t)getRawCounterValue(&idleTime)/tick_to_ms;
-			cpu->cpu_intr = (uint32_t)getRawCounterValue(&intrTime)/tick_to_ms;
+			cpu->cpu_user = (uint32_t)(getRawCounterValue(&userTime)/tick_to_ms);
+			cpu->cpu_system = (uint32_t)(getRawCounterValue(&systemTime)/tick_to_ms);
+			cpu->cpu_idle = (uint32_t)(getRawCounterValue(&idleTime)/tick_to_ms);
+			cpu->cpu_intr = (uint32_t)(getRawCounterValue(&intrTime)/tick_to_ms);
 			cpu->interrupts = (uint32_t)getRawCounterValue(&interrupts);
 			cpu->contexts = (uint32_t)getRawCounterValue(&contexts);
 			cpu->uptime = (uint32_t)getCookedCounterValue(&uptime);
