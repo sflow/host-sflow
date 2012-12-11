@@ -80,7 +80,7 @@
 //time in 100ns units (counterType=542573824, PERF_PRECISION_100NS_TIMER)
 #define VCPU_COUNTER_CPU_TIME L"% Guest Run Time"
 
-#define tick_to_ms 10000; //divide by this to convert 100ns tick to ms
+#define tick_to_ms 10000 //divide by this to convert 100ns tick to ms
 
 PDH_STATUS makeSingleCounterQuery(wchar_t *object, wchar_t *instance, wchar_t *counterName,
 								  PDH_HQUERY *query, PDH_HCOUNTER *counter);

@@ -362,7 +362,7 @@ static void readVmCpuCounters(HVSVmState *state, SFLHost_vrt_cpu_counters *cpu)
 			for (uint32_t i = 0; i < count; i++) {
 				if (StrStrIW(values[i].szName, counterPrefix) != NULL) {
 					//Time in 100ns units, divide by 10000 for ms
-					cpu->cpuTime += (uint32_t)values[i].RawValue.FirstValue / tick_to_ms;
+					cpu->cpuTime += (uint32_t)(values[i].RawValue.FirstValue/tick_to_ms);
 					cpuCount++;
 				}
 			}

@@ -32,10 +32,10 @@ void readDiskCounters(SFLHost_dsk_counters *dsk)
 			addCounterToQuery(DISK_COUNTER_OBJECT, COUNTER_INSTANCE_TOTAL, DISK_COUNTER_WRITES, &query, &writeBytes) == ERROR_SUCCESS &&
 			PdhCollectQueryData(query) == ERROR_SUCCESS) {
 			dsk->reads = (uint32_t)getRawCounterValue(&reads);
-			dsk->read_time = (uint32_t)getRawCounterValue(&readTime)/tick_to_ms;
+			dsk->read_time = (uint32_t)(getRawCounterValue(&readTime)/tick_to_ms);
 			dsk->bytes_read = getRawCounterValue(&readBytes);
 			dsk->writes = (uint32_t)getRawCounterValue(&writes);
-			dsk->write_time = (uint32_t)getRawCounterValue(&writeTime)/tick_to_ms;
+			dsk->write_time = (uint32_t)(getRawCounterValue(&writeTime)/tick_to_ms);
 			dsk->bytes_written = getRawCounterValue(&writeBytes);
 		}
 		PdhCloseQuery(query);
