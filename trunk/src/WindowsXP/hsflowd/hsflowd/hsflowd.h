@@ -33,9 +33,6 @@ extern "C" {
 #define NO 0
 
 #define HSP_VERSION VER_PRODUCT_VERSION_STR
-#define HSP_DAEMON_NAME "hsflowd"
-#define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
-#define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
 
 #define UNKNOWN_COUNTER    0xFFFFFFFF 
 #define UNKNOWN_COUNTER_64 0xFFFFFFFFFFFFFFFF
@@ -45,7 +42,7 @@ extern "C" {
 #define UNKNOWN_INT 0
 #define UNKNOWN_FLOAT -1
 
-
+#define tick_to_ms 10000 //divide by this to convert 100ns tick to ms
 
   // forward declarations
   struct _HSPSFlow;
