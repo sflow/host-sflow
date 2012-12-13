@@ -25,11 +25,11 @@ extern int debug;
 	uint32_t tmp_part_used = 0;
     
 	dsk->reads = (uint32_t)readSingleCounter("\\PhysicalDisk(_Total)\\Disk Reads/sec");
-	dsk->read_time = (uint32_t)readSingleCounter("\\PhysicalDisk(_Total)\\% Disk Read Time");
+	dsk->read_time = (uint32_t)(readSingleCounter("\\PhysicalDisk(_Total)\\% Disk Read Time")/tick_to_ms);
 	dsk->bytes_read = readSingleCounter("\\PhysicalDisk(_Total)\\Disk Read Bytes/sec");
 
 	dsk->writes = (uint32_t)readSingleCounter("\\PhysicalDisk(_Total)\\Disk Writes/sec");
-	dsk->write_time = (uint32_t)readSingleCounter("\\PhysicalDisk(_Total)\\% Disk Write Time");
+	dsk->write_time = (uint32_t)(readSingleCounter("\\PhysicalDisk(_Total)\\% Disk Write Time")/tick_to_ms);
 	dsk->bytes_written = readSingleCounter("\\PhysicalDisk(_Total)\\Disk Write Bytes/sec");
 
 	dsk->disk_total = UNKNOWN_GAUGE_64;
