@@ -20,18 +20,57 @@ extern FILE *logFile;
   -----------------___________________________------------------
 */
 
+static void logDate()
+{
+	char datebuf[9];
+	char timebuf[9];
+	_strdate_s(datebuf, 9);
+	_strtime_s(timebuf, 9);
+	fprintf(logFile, "%s %s: ", datebuf, timebuf);
+}
+
 void myLog(int syslogType, char *fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
 	if (syslogType <= debug) {
-		char datebuf[9];
-		char timebuf[9];
-		_strdate_s(datebuf, 9);
-		_strtime_s(timebuf, 9);
-		fprintf(logFile, "%s %s: ", datebuf, timebuf);
+		logDate();
 		vfprintf(logFile, fmt, args);
 		fprintf(logFile, "\n");
+		fflush(logFile);
+	}
+}
+
+/**
+ * If syslogType <= debug, logs an error message, using the error code, hr, 
+ * to look up the error message.
+ */
+void logErr(int syslogType, HRESULT hr, char *fmt, ...)
+{
+	if (syslogType <= debug) {
+		va_list args;
+		va_start(args, fmt);
+		logDate();
+		vfprintf(logFile, fmt, args);
+		va_end(args);
+		fprintf(logFile, "\n");
+		if (hr != 0) {
+			LPTSTR sysMsg;
+			FormatMessage(
+				FORMAT_MESSAGE_ALLOCATE_BUFFER |
+				FORMAT_MESSAGE_FROM_SYSTEM |
+				FORMAT_MESSAGE_IGNORE_INSERTS,
+				NULL,
+				hr,
+				MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+				(LPTSTR)&sysMsg,
+				0,
+				NULL);
+			if (sysMsg) {
+		        fprintf(logFile, "Possible cause: %s\n", sysMsg);
+				LocalFree((HLOCAL)sysMsg);
+			}
+		}
 		fflush(logFile);
 	}
 }

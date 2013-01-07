@@ -15,6 +15,11 @@ extern int debug;
 #define HSF_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
 #define HSF_MAX_TXT_LEN 255 //include NULL
 
+/**
+ * Parses the DNS TXT record, txt, to extract the sampling rate and
+ * polling interval settings which are then used to populate the
+ * HSPSFlowSettings, settings.
+ */
 static void dnsSD_parseTxt(HSPSFlowSettings *settings,
 						   CHAR *txt)
 {
@@ -39,6 +44,22 @@ static void dnsSD_parseTxt(HSPSFlowSettings *settings,
 	}
 }
 
+/**
+ * Issues the DNS request to discover the sFlow service settings
+ * (collector addresses and ports, sampling rates and polling intervals).
+ * The DNS request is configured to bypass the DNS cache and go straight
+ * to the wire to avoid using stale entries.
+ * If the request succeeds, updates the min TTL in HSP *sp, parses the response,
+ * and returns the number of records returned, populating HSPSFlowSettings *settings
+ * with the parsed result.
+ * If the request fails, returns -1.
+ * char *dname contains the DNS query (fully qualified)
+ * WORD dtype the DNS query type (SRV for collectors or TEXT for sampling rates
+ * and polling intervals)
+ * Note that we are using the DnsQuery function to make the DNS request.
+ * This function does not take into account the system DNS search path, so the
+ * DNS query must be fully qualified (ie include the domain to search).
+ */
 static int dnsSD_Request(HSP *sp, HSPSFlowSettings *settings,
 						 char *dname, WORD rtype)
 {
@@ -48,7 +69,7 @@ static int dnsSD_Request(HSP *sp, HSPSFlowSettings *settings,
 	DNS_STATUS status = DnsQuery(dname, rtype, DNS_QUERY_WIRE_ONLY, NULL, &pDnsRecord, NULL);
 	if (status) {
 		//fail
-		myLog(LOG_ERR, "dnsSD_Request: DNSQuery(%s, %u) failed error=%u", dname, rtype, status);
+		logErr(LOG_ERR, status, "dnsSD_Request: DNSQuery(%s, %u) failed error=%u", dname, rtype, status);
 		return -1;
 	} else {
 		 //process results and free
@@ -98,29 +119,41 @@ static int dnsSD_Request(HSP *sp, HSPSFlowSettings *settings,
 	}
 }
 
+/**
+ * Runs the DNS-SD sequence to discover the sFlow server settings,
+ * collector addresses and ports and sampling rates and polling interval
+ * settings.
+ * The DNS query is scoped to query for entries in the domain (zone)
+ * configured as the domain override in the registry (if set), or the
+ * primary domain name configured on the system if there is no domain
+ * override.
+ * Note that the DNS query could fail or return no results if we are
+ * unable to discover the primary domain of the system.
+ * HSP *sp used to update the min TTL for DNS entries so that the
+ * next DNS request can be scheduled.
+ * HSPSFlowSettings *settings in which sFlow collector addresses and ports
+ * and sampling and polling settings will be populated.
+ * Returns the number of sFlow collectors discovered or -1 on failure.
+ */
 int dnsSD(HSP *sp, HSPSFlowSettings *settings)
 {
     char request[HSP_MAX_DNS_LEN];
 	if (sp->DNSSD_domain) {
 		sprintf_s(request, HSP_MAX_DNS_LEN, "%s%s", SFLOW_DNS_SD, sp->DNSSD_domain);
 	} else {
-		void *buff;
-		DWORD len;
-		DNS_STATUS status;
-		status = DnsQueryConfig(DnsConfigPrimaryDomainName_A, DNS_CONFIG_FLAG_ALLOC, NULL, NULL, &buff, &len);
-		char *domain;
+		char domain[MAX_HOSTNAME_LEN];
+		memset(domain, 0, MAX_HOSTNAME_LEN);
+		DWORD len = MAX_HOSTNAME_LEN;
 		char *dot = "";
-		if (status) {
-			domain = "";
-			myLog(LOG_ERR, "dnsSD: DnsQueryConfig(DnsConfigPrimaryDomainName_A) failed error=%u", status);
-			// status == ERROR_OUTOFMEMORY if domain is not configured 
-			//(set domain in Control Panel>System, change computer name, full name under More
+		if (GetComputerNameEx(ComputerNameDnsDomain, domain, &len) == 0) {
+			DWORD err = GetLastError();
+			logErr(LOG_ERR, err, "dnsSD: cannot determined DNS domain for this computer error=%u", err);
+		} else if (len == 0) {
+			myLog(LOG_ERR, "dnsSD: DNS domain for this computer not set");
 		} else {
-			domain = (char *)buff;
 			dot = ".";
 		}
 		sprintf_s(request, HSP_MAX_DNS_LEN, "%s%s%s", SFLOW_DNS_SD, dot, domain);
-		LocalFree(buff);
 	}
 	myLog(LOG_INFO, "dnsSD: request=%s", request);
     int num_servers = dnsSD_Request(sp, settings, request, DNS_TYPE_SRV);

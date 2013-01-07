@@ -708,6 +708,7 @@ void ServiceMain(int argc, char** argv)
 						BOOL samplingChanged = sp.sFlow->sFlowSettings->samplingRate !=  newSettings->samplingRate;
 						freeSFlowSettings(sp.sFlow->sFlowSettings);
 						sp.sFlow->sFlowSettings = newSettings;
+						myLog(debug, "%s.ServiceMain: updated configuration settings", HSP_SERVICE_NAME);
 						logSFlowSettings(sp.sFlow);
 						if (pollingChanged) {
 							for (SFLPoller *poller = sp.sFlow->agent->pollers;
