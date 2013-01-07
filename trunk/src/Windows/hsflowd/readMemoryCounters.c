@@ -49,7 +49,7 @@ BOOL readMemoryCounters(SFLHost_mem_counters *mem)
 		PDH_HCOUNTER cache, pageIn, pageOut;
 		if (addCounterToQuery(MEM_COUNTER_OBJECT, NULL, MEM_COUNTER_CACHE, &query, &cache) == ERROR_SUCCESS &&
 			addCounterToQuery(MEM_COUNTER_OBJECT, NULL, MEM_COUNTER_PAGE_IN, &query, &pageIn) == ERROR_SUCCESS &&
-			addCounterToQuery(MEM_COUNTER_OBJECT, NULL, MEM_COUNTER_CACHE, &query, &pageOut) == ERROR_SUCCESS &&
+			addCounterToQuery(MEM_COUNTER_OBJECT, NULL, MEM_COUNTER_PAGE_OUT, &query, &pageOut) == ERROR_SUCCESS &&
 			PdhCollectQueryData(query) == ERROR_SUCCESS) {
 			mem->mem_cached= getRawCounterValue(&cache);
 			mem->page_in = (uint32_t)getRawCounterValue(&pageIn);
