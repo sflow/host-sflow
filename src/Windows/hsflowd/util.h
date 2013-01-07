@@ -49,6 +49,7 @@ BOOL guidToString(wchar_t *guid, u_char *guidStr, int guidStrLen);
 #define LOG_INFO 6
 #define LOG_DEBUG 7
 void myLog(int syslogType, char *fmt, ...);
+void logErr(int syslogType, HRESULT hr, char *fmt, ...);
 
 // OS allocation
 void *my_os_calloc(size_t bytes);

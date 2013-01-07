@@ -306,20 +306,22 @@ static BOOL readReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings, BOOL us
 	}
 	DWORD serialNumber = HSP_SERIAL_INVALID;
 	cbData = sizeof(DWORD);
-	result = RegQueryValueEx(
-		settingsKey, 
+	result = RegGetValue(
+		settingsKey,
+		NULL, 
 		HSP_REGVAL_SERIAL, 
-		NULL,
+		RRF_RT_REG_DWORD,
 		NULL,
 		(LPBYTE)&serialNumber, 
 		&cbData);
 	settings->serialNumber = serialNumber;
 	char collectors[MAX_VAL_LEN];
 	cbData = MAX_VAL_LEN;
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		settingsKey,
-		HSP_REGVAL_COLLECTOR,
 		NULL,
+		HSP_REGVAL_COLLECTOR,
+		RRF_RT_REG_SZ,
 		NULL,
 		(LPBYTE)collectors,
 		&cbData);
@@ -360,20 +362,22 @@ static BOOL readReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings, BOOL us
 				if (result == ERROR_SUCCESS) {
 					char collectorStr[MAX_HOSTNAME_LEN];
 					cbData = MAX_HOSTNAME_LEN;
-					result = RegQueryValueEx(
+					result = RegGetValue(
 						collectorKey,
-						HSP_REGVAL_COLLECTOR,
 						NULL,
+						HSP_REGVAL_COLLECTOR,
+						RRF_RT_REG_SZ,
 						NULL,
 						(LPBYTE)collectorStr,
 						&cbData );
 					if (result == ERROR_SUCCESS) {
 						//now get the port and create a collector
 						DWORD port = 0;
-						result = RegQueryValueEx(
+						result = RegGetValue(
 							collectorKey,
-							HSP_REGVAL_PORT,
 							NULL,
+							HSP_REGVAL_PORT,
+							RRF_RT_REG_DWORD,
 							NULL,
 							(LPBYTE)&port,
 							&cbData);
@@ -391,10 +395,11 @@ static BOOL readReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings, BOOL us
 	}
 	//read the sampling and polling settings
 	DWORD samplingRate = 0;
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		settingsKey,
-		HSP_REGVAL_SAMPLING_RATE,
 		NULL,
+		HSP_REGVAL_SAMPLING_RATE,
+		RRF_RT_REG_DWORD,
 		NULL,
 		(LPBYTE)&samplingRate,
 		&cbData);
@@ -403,10 +408,11 @@ static BOOL readReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings, BOOL us
 	}
 	settings->samplingRate = samplingRate;
 	DWORD pollingInterval = 0;
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		settingsKey,
-		HSP_REGVAL_POLLING_INTERVAL,
 		NULL,
+		HSP_REGVAL_POLLING_INTERVAL,
+		RRF_RT_REG_DWORD,
 		NULL,
 		(LPBYTE)&pollingInterval,
 		&cbData);
@@ -557,10 +563,11 @@ static DWORD writeReg_sFlowSettings(CHAR *key, HSPSFlowSettings *settings)
 	}
 	DWORD serialNumber = HSP_SERIAL_INVALID;
 	DWORD cbData = sizeof(DWORD);
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		settingsKey,
-		HSP_REGVAL_SERIAL,
 		NULL,
+		HSP_REGVAL_SERIAL,
+		RRF_RT_REG_DWORD,
 		NULL,
 		(LPBYTE)&serialNumber,
 		&cbData);
@@ -696,10 +703,15 @@ unsigned __stdcall runDNSSD(void *magic)
 			// we want the min ttl so clear it here
 			sp->DNSSD_ttl = 0;
 			int numServers = dnsSD(sp, &settings);
-			//numServers == -1 DNS query failed so keep current config
-			if (numServers != -1) {  
-				//(i) numServers == 0 write out the config and stop monitoring
-				//(ii) numServers > 0 write out the config and use it.
+			if (numServers == -1) {
+				//numServers == -1 DNS query failed so keep current config
+				myLog(debug, "runDNSSD: DNS-SD failed, retaining current config");
+			} else {  
+				if (numServers == 0) {
+					// numServers == 0 write out the config and stop monitoring
+					myLog(debug, "runDNSSD: DNS-SD found no sFlow records, disabling monitoring");
+				}
+				//numServers > 0 write out the config and use it.
 				if (writeReg_sFlowSettings(HSP_REGKEY_CURRCONFIG, &settings) == HSP_SERIAL_INVALID) {
 					myLog(LOG_ERR, "runDNSSD: saving DNS_SD config failed");
 				}
@@ -740,10 +752,11 @@ BOOL newerSettingsAvailable(HSPSFlowSettings *settings)
 	}
 	DWORD serialNumber = HSP_SERIAL_INVALID;
 	DWORD cbData = sizeof(DWORD);
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		settingsKey,
-		HSP_REGVAL_SERIAL,
 		NULL,
+		HSP_REGVAL_SERIAL,
+		RRF_RT_REG_DWORD,
 		NULL,
 		(LPBYTE)&serialNumber,
 		&cbData);
@@ -777,10 +790,11 @@ static BOOL convertReg(CHAR *key)
 		return FALSE;
 	}
 	DWORD port = 0;
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		hkey,
-		HSP_REGVAL_PORT,
 		NULL,
+		HSP_REGVAL_PORT,
+		RRF_RT_REG_DWORD,
 		NULL,
 		(LPBYTE)&port,
 		&cbData);
@@ -789,10 +803,11 @@ static BOOL convertReg(CHAR *key)
 		//if there is a collector specified
 		char collectorStr[MAX_HOSTNAME_LEN];
 		cbData = MAX_HOSTNAME_LEN;
-		result = RegQueryValueEx(
+		result = RegGetValue(
 			hkey,
-			HSP_REGVAL_COLLECTOR,
 			NULL,
+			HSP_REGVAL_COLLECTOR,
+			RRF_RT_REG_SZ,
 			NULL,
 			(LPBYTE)collectorStr,
 			&cbData);
@@ -881,11 +896,12 @@ BOOL readConfig(HSP *sp)
 	//Using the priorities defined in EnumIpSelectionPriority
 	char agentStr[MAX_IPV6_STRLEN];
 	memset(agentStr, 0, MAX_IPV6_STRLEN);
-	cbData = MAX_IPV6_STRLEN;;
-	result = RegQueryValueEx(
+	cbData = MAX_IPV6_STRLEN;
+	result = RegGetValue(
 		hkey,
-		HSP_REGVAL_AGENT,
 		NULL,
+		HSP_REGVAL_AGENT,
+		RRF_RT_REG_SZ,
 		NULL,
 		(LPBYTE)agentStr,
         &cbData);
@@ -925,10 +941,11 @@ BOOL readConfig(HSP *sp)
 	sp->DNSSD = FALSE;
 	char dnssdStr[HSP_REGVAL_OFF_LEN];
 	cbData = HSP_REGVAL_OFF_LEN;
-	result = RegQueryValueEx(
+	result = RegGetValue(
 		hkey,
-		HSP_REGVAL_DNSSD,
 		NULL,
+		HSP_REGVAL_DNSSD,
+		RRF_RT_REG_SZ,
 		NULL,
 		(LPBYTE)dnssdStr,
 		&cbData);
@@ -944,10 +961,11 @@ BOOL readConfig(HSP *sp)
 			char domain[MAX_HOSTNAME_LEN];
 			memset(domain, 0, MAX_HOSTNAME_LEN);
 			cbData = MAX_HOSTNAME_LEN;
-			result = RegQueryValueEx(
+			result = RegGetValue(
 				hkey,
-				HSP_REGVAL_DNSSD_DOMAIN,
 				NULL,
+				HSP_REGVAL_DNSSD_DOMAIN,
+				RRF_RT_REG_SZ,
 				NULL,
 				(LPBYTE)domain,
 				&cbData);
