@@ -24,6 +24,36 @@ extern "C" {
     return YES;
   }
 
+  /* could have used kvm_getswapinfo() here for deeper backward-compatibility, but
+   * the use of the kvm library seems to be deprecated in favour of sysctl, so that
+   * is preferred here.  Thanks to Hubert Chu for contributing this.
+   */
+  int getSysvmswapfree(struct xswdev *xswtotal)
+  {
+    int mib[CTL_MAXNAME];
+    int n;
+    size_t size;
+    struct xswdev xsw;
+    
+    xswtotal->xsw_nblks = 0;
+    xswtotal->xsw_used = 0;
+    size_t mibsize = sizeof(mib) / sizeof(mib[0]);
+    
+    if (sysctlnametomib("vm.swap_info", mib, &mibsize) == -1) {
+      return NO;
+    }
+    for (n=0; ; ++n) {
+      mib[mibsize] = n;
+      size = sizeof(xsw);
+      if (sysctl(mib, mibsize + 1, &xsw, &size, NULL, 0) == -1) {
+	break;
+      }
+      xswtotal->xsw_nblks += xsw.xsw_nblks;
+      xswtotal->xsw_used += xsw.xsw_used;
+    }
+    return YES;
+  }
+
   /*_________________---------------------------__________________
     _________________     readMemoryCounters    __________________
     -----------------___________________________------------------
@@ -34,6 +64,7 @@ extern "C" {
 
     uint64_t val64;
     struct vmtotal vmt;
+    struct xswdev xswtotal;
     uint32_t page_size=4096; /* start with a guess */
  
     /* Get the page size */
@@ -92,9 +123,10 @@ extern "C" {
     }
 
     /* Swap_free */
-    if(getSys64("vm.stats.vm.v_swappgsout", &val64)) {
+    if(getSysvmswapfree(&xswtotal)) {
       gotData = YES;
-      mem->swap_free = mem->swap_total - (val64 * page_size);
+      mem->swap_free = ((uint64_t)(xswtotal.xsw_nblks -
+				   xswtotal.xsw_used) * page_size);
     }
 
     /* Swap_in */
