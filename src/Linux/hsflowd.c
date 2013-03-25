@@ -405,21 +405,29 @@ extern "C" {
     if(xenHandlesOK(sp)) {
 
       xc_domaininfo_t domaininfo;
-      // it seems that xc_domain_getinfolist takes the domId after all
-      // so state->vm_index is not actually needed any more
-      // int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
-      int32_t n = xc_domain_getinfolist(sp->xc_handle, state->domId, 1, &domaininfo);
-      if(n < 0 || domaininfo.domain != state->domId) {
-	// Assume something changed under our feet.
-	// Request a reload of the VM information and bail.
-	// We'll try again next time.
-	myLog(LOG_INFO, "request for vm_index %u (dom_id=%u) returned %d (with dom_id=%u)",
-	      state->vm_index,
-	      state->domId,
-	      n,
-	      domaininfo.domain);
-	sp->refreshVMList = YES;
-	return;
+      if(sp->sFlow->sFlowSettings_file->xen_opt_xcgil) {
+	// this optimization forces us to use the (stale) domaininfo from the last time
+	// we refreshed the VM list.  Most of these parameters change very rarely anyway
+	// so this is not a big sacrifice at all.
+	domaininfo = state->domaininfo; // struct copy
+      }
+      else {
+	// it seems that xc_domain_getinfolist takes the domId after all
+	// so state->vm_index is not actually needed any more
+	// int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
+	int32_t n = xc_domain_getinfolist(sp->xc_handle, state->domId, 1, &domaininfo);
+	if(n < 0 || domaininfo.domain != state->domId) {
+	  // Assume something changed under our feet.
+	  // Request a reload of the VM information and bail.
+	  // We'll try again next time.
+	  myLog(LOG_INFO, "request for vm_index %u (dom_id=%u) returned %d (with dom_id=%u)",
+		state->vm_index,
+		state->domId,
+		n,
+		domaininfo.domain);
+	  sp->refreshVMList = YES;
+	  return;
+	}
       }
       
       // host ID
@@ -992,6 +1000,9 @@ extern "C" {
 		state->domId = domId;
 		// pick up the list of block device numbers
 		xen_collect_block_devices(sp, state);
+		// store state so we don't have to call xc_domain_getinfolist() again for every
+		// VM when we are sending it's counter-sample in agentCB_getCountersVM
+		state->domaininfo = domaininfo[i]; // structure copy
 	      }
 	    }
 	  }
@@ -1377,7 +1388,12 @@ extern "C" {
 		   agentCB_sendPkt);
     // just one receiver - we are serious about making this lightweight for now
     SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
-    
+
+    // max datagram size might have been tweaked in the config file
+    if(sf->sFlowSettings_file->datagramBytes) {
+      sfl_receiver_set_sFlowRcvrMaximumDatagramSize(receiver, sf->sFlowSettings_file->datagramBytes);
+    }
+
     // claim the receiver slot
     sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
     

@@ -129,7 +129,7 @@ extern "C" {
     int8_t sorted;
   } UTStringArray;
 
-  UTStringArray *strArrayNew();
+  UTStringArray *strArrayNew(void);
   void strArrayAdd(UTStringArray *ar, char *str);
   void strArrayReset(UTStringArray *ar);
   void strArrayFree(UTStringArray *ar);
@@ -149,7 +149,7 @@ extern "C" {
   int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen);
 
   // SFLAdaptorList
-  SFLAdaptorList *adaptorListNew();
+  SFLAdaptorList *adaptorListNew(void);
   void adaptorListReset(SFLAdaptorList *adList);
   void adaptorListFree(SFLAdaptorList *adList);
   void adaptorListMarkAll(SFLAdaptorList *adList);
