@@ -731,6 +731,12 @@ extern int debug;
 	  case HSPTOKEN_HEADERBYTES:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
 	    break;
+	  case HSPTOKEN_DATAGRAMBYTES:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->datagramBytes, SFL_MIN_DATAGRAM_SIZE, SFL_MAX_DATAGRAM_SIZE)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_XEN_OPT_XCGIL:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->xen_opt_xcgil, 0, 1)) == NULL) return NO;
+	    break;
 	  case HSPTOKEN_ULOGGROUP:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
 	    break;

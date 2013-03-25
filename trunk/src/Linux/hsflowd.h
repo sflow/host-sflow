@@ -182,6 +182,8 @@ extern "C" {
     uint32_t samplingRate;
     uint32_t pollingInterval;
     uint32_t headerBytes;
+    uint32_t datagramBytes;
+    uint32_t xen_opt_xcgil;
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
@@ -249,6 +251,9 @@ extern "C" {
     SFLAdaptorList *interfaces;
     UTStringArray *volumes;
     UTStringArray *disks;
+#ifdef HSF_XEN
+    xc_domaininfo_t domaininfo;
+#endif
   } HSPVMState;
     
   typedef enum { IPSP_NONE=0,

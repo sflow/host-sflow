@@ -16,7 +16,7 @@ endif
 
 # base CFLAGS and LIBS
 SFLOWDIR=../sflow
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -Wunused-but-set-variable -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
 LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
 # if ULOG is not set, assume it should be "yes".
@@ -59,6 +59,7 @@ else
 	XEN_DDK=no
 	include $(XEN_ROOT)/tools/Rules.mk
 	CFLAGS+= -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
+	CFLAGS += -Wno-declaration-after-statement # turn off "mixed declarations and code" warning
 	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
   endif
   ifeq ($(XEN_DDK),yes)
