@@ -183,7 +183,13 @@ extern "C" {
     uint32_t pollingInterval;
     uint32_t headerBytes;
     uint32_t datagramBytes;
-    uint32_t xen_opt_xcgil;
+
+    // performance tuning options for Xen
+    int xen_update_dominfo; // update dominfo for every VM at poll-time?
+    int xen_dsk; // include disk counters?
+    // may include flags to turn off hostname and MAC lookup calls
+    // to xs_read(),  but surely those are not so slow?
+
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
@@ -331,8 +337,11 @@ extern "C" {
     time_t nio_polling_secs;
 #define HSP_NIO_POLLING_SECS_32BIT 3
 
-    int refreshAdaptorList;
-    int refreshVMList;
+    int refreshAdaptorList; // request flag
+    uint32_t refreshAdaptorListSecs; // poll interval
+    int refreshVMList; // request flag
+    uint32_t refreshVMListSecs; // poll interval
+
     // 64-bit diskIO accumulators
     HSPDiskIO diskIO;
     // UDP send sockets

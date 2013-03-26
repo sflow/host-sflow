@@ -405,7 +405,7 @@ extern "C" {
     if(xenHandlesOK(sp)) {
 
       xc_domaininfo_t domaininfo;
-      if(sp->sFlow->sFlowSettings_file->xen_opt_xcgil) {
+      if(!sp->sFlow->sFlowSettings_file->xen_update_dominfo) {
 	// this optimization forces us to use the (stale) domaininfo from the last time
 	// we refreshed the VM list.  Most of these parameters change very rarely anyway
 	// so this is not a big sacrifice at all.
@@ -537,8 +537,10 @@ extern "C" {
       // VM disk I/O counters
       SFLCounters_sample_element dskElem = { 0 };
       dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-      if(xenstat_dsk(sp, state, &dskElem.counterBlock.host_vrt_dsk)) {
-	SFLADD_ELEMENT(cs, &dskElem);
+      if(sp->sFlow->sFlowSettings_file->xen_dsk) {
+	if(xenstat_dsk(sp, state, &dskElem.counterBlock.host_vrt_dsk)) {
+	  SFLADD_ELEMENT(cs, &dskElem);
+	}
       }
 
       // include my slice of the adaptor list - and update
@@ -999,7 +1001,9 @@ extern "C" {
 		// and the domId, which might have changed (if vm rebooted)
 		state->domId = domId;
 		// pick up the list of block device numbers
-		xen_collect_block_devices(sp, state);
+		if(sp->sFlow->sFlowSettings_file->xen_dsk) {
+		  xen_collect_block_devices(sp, state);
+		}
 		// store state so we don't have to call xc_domain_getinfolist() again for every
 		// VM when we are sending it's counter-sample in agentCB_getCountersVM
 		state->domaininfo = domaininfo[i]; // structure copy
@@ -1176,7 +1180,7 @@ extern "C" {
     }
     
     // refresh the list of VMs periodically or on request
-    if(sp->refreshVMList || (sp->clk % HSP_REFRESH_VMS) == 0) {
+    if(sp->refreshVMList || (sp->clk % sp->refreshVMListSecs) == 0) {
       sp->refreshVMList = NO;
       configVMs(sp);
     }
@@ -1190,7 +1194,7 @@ extern "C" {
 #endif
 
     // refresh the interface list periodically or on request
-    if(sp->refreshAdaptorList || (sp->clk % HSP_REFRESH_ADAPTORS) == 0) {
+    if(sp->refreshAdaptorList || (sp->clk % sp->refreshAdaptorListSecs) == 0) {
       sp->refreshAdaptorList = NO;
       readInterfaces(sp);
       // this may be the right place to check that the agent-address
@@ -1450,6 +1454,8 @@ extern "C" {
     sp->vmStoreFile = HSP_DEFAULT_VMSTORE_FILE;
     sp->crashFile = HSP_DEFAULT_CRASH_FILE;
     sp->dropPriv = YES;
+    sp->refreshAdaptorListSecs = HSP_REFRESH_ADAPTORS;
+    sp->refreshVMListSecs = HSP_REFRESH_VMS;
   }
 
   /*_________________---------------------------__________________
