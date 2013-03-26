@@ -16,7 +16,7 @@ endif
 
 # base CFLAGS and LIBS
 SFLOWDIR=../sflow
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -Wunused-but-set-variable -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
 LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
 # if ULOG is not set, assume it should be "yes".
@@ -37,6 +37,24 @@ ifeq ($(JSON),yes)
 	JSONDIR=../json
 	CFLAGS+=-DHSF_JSON -I$(JSONDIR)
 	LIBS+= $(JSONDIR)/libjson.a -lm
+endif
+
+# The options LIBVIRT=yes, XEN_DDK=yes and XEN_ROOT=<path> should be mutually exclusive.
+# Enforce that here, so that XEN_ROOT takes priority, then XEN_DDK, then LIBVIRT.  It might
+# work better to just have a TARGET=<xen|xensource|kvm|linux> options and insist that it be
+# set to something before we proceed (like haproxy)
+ifeq ($(LIBVIRT),yes)
+	XEN_DDK=no
+	XEN_ROOT=
+endif
+ifeq ($(XEN_DDK),yes)
+	LIBVIRT=no
+	XEN_ROOT=
+endif
+ifeq ($(XEN_ROOT),)
+else
+	LIBVIRT=no
+	XEN_DDK=no
 endif
 
 # if LIBVIRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe

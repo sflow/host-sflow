@@ -169,9 +169,9 @@ extern int debug;
     return t;
   }
 
-  // expectDNSSD
+  // expectONOFF
 
-  static HSPToken *expectDNSSD(HSP *sp, HSPToken *tok)
+  static HSPToken *expectONOFF(HSP *sp, HSPToken *tok, int *arg)
   {
     HSPToken *t = tok;
     t = t->nxt;
@@ -180,7 +180,7 @@ extern int debug;
       return NULL;
     }
     // enable or disable DNS server discovery
-    sp->DNSSD = (strcasecmp(t->str, "on") == 0);
+    (*arg) = (strcasecmp(t->str, "on") == 0);
     return t;
   }
 
@@ -276,6 +276,8 @@ extern int debug;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
     st->jsonPort = HSP_DEFAULT_JSON_PORT;
+    st->xen_update_dominfo = 0;
+    st->xen_dsk = 1;
     return st;
   }
 
@@ -685,15 +687,26 @@ extern int debug;
 	case HSPOBJ_SFLOW:
 
 	  switch(tok->stok) {
+
+	    // Perhaps these sp->xxx settings should be outside the sflow { } block?
+	    // ======================================================================
 	  case HSPTOKEN_LOOPBACK:
 	    if((tok = expectLoopback(sp, tok)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_DNSSD:
-	    if((tok = expectDNSSD(sp, tok)) == NULL) return NO;
+	    if((tok = expectONOFF(sp, tok, &sp->DNSSD)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_DNSSD_DOMAIN:
 	    if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
 	    break;
+	  case HSPTOKEN_REFRESH_ADAPTORS:
+	    if((tok = expectInteger32(sp, tok, &sp->refreshAdaptorListSecs, 60, 3600)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_REFRESH_VMS:
+	    if((tok = expectInteger32(sp, tok, &sp->refreshVMListSecs, 60, 3600)) == NULL) return NO;
+	    break;
+	    // ======================================================================
+
 	  case HSPTOKEN_COLLECTOR:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    newCollector(sp->sFlow->sFlowSettings_file);
@@ -734,8 +747,11 @@ extern int debug;
 	  case HSPTOKEN_DATAGRAMBYTES:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->datagramBytes, SFL_MIN_DATAGRAM_SIZE, SFL_MAX_DATAGRAM_SIZE)) == NULL) return NO;
 	    break;
-	  case HSPTOKEN_XEN_OPT_XCGIL:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->xen_opt_xcgil, 0, 1)) == NULL) return NO;
+	  case HSPTOKEN_XEN_UPDATE_DOMINFO:
+	    if((tok = expectONOFF(sp, tok, &sp->sFlow->sFlowSettings_file->xen_update_dominfo)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_XEN_DSK:
+	    if((tok = expectONOFF(sp, tok, &sp->sFlow->sFlowSettings_file->xen_dsk)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_ULOGGROUP:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
