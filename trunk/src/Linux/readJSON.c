@@ -25,7 +25,9 @@ extern "C" {
 
     // we stashed a pointer to the application in the userData field
     HSPApplication *application = (HSPApplication *)poller->userData;
-    int json_ctrs = ((sp->clk - application->json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
+
+    // are we receiving counter updates via JSON messages?
+    int json_ctrs = ((sp->clk - application->last_json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
 
     if(json_ctrs != application->json_counters) {
       // state transition - reset seq no
