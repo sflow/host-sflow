@@ -36,11 +36,9 @@ extern "C" {
 
 #define UNKNOWN_COUNTER    0xFFFFFFFF 
 #define UNKNOWN_COUNTER_64 0xFFFFFFFFFFFFFFFF
-#define UNKNOWN_GAUGE    0xFFFFFFFF 
-#define UNKNOWN_GAUGE_64 0xFFFFFFFFFFFFFFFF
+#define UNKNOWN_GAUGE    0 
+#define UNKNOWN_GAUGE_64 0
 #define UNKNOWN_PERCENT -1
-#define UNKNOWN_INT 0
-#define UNKNOWN_FLOAT -1
 
 #define tick_to_ms 10000 //divide by this to convert 100ns tick to ms
 
