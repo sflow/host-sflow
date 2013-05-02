@@ -517,7 +517,6 @@ extern int debug;
 
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback)
   {
-    if(debug) myLog(LOG_INFO, "agentAddressPriority");
     EnumIPSelectionPriority ipPriority = IPSP_NONE;
 
     switch(addr->type) {
