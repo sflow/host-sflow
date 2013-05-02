@@ -81,11 +81,10 @@ extern "C" {
 
 #define UNKNOWN_COUNTER    0xFFFFFFFF 
 #define UNKNOWN_COUNTER_64 0xFFFFFFFFFFFFFFFF
-#define UNKNOWN_GAUGE    0xFFFFFFFF 
-#define UNKNOWN_GAUGE_64 0xFFFFFFFFFFFFFFFF
+#define UNKNOWN_GAUGE    0
+#define UNKNOWN_GAUGE_64 0
 #define UNKNOWN_PERCENT -1
-#define UNKNOWN_INT 0
-#define UNKNOWN_FLOAT -1
+#define UNKNOWN_FLOAT -1.0
 
 #define WMI_WMI_NS L"root\\wmi"
 #define WMI_CIMV2_NS L"root\\cimv2"

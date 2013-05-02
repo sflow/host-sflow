@@ -40,7 +40,11 @@
 #define THR_COUNTER_STATE L"Thread State"
 
 #define MEM_COUNTER_OBJECT L"Memory"
-#define MEM_COUNTER_CACHE L"Cache Bytes"
+#define MEM_COUNTER_STANDBY_CORE L"Standby Cache Core Bytes"
+#define MEM_COUNTER_STANDBY_NORMAL L"Standby Cache Normal Priority Bytes"
+#define MEM_COUNTER_STANDBY_RESERVE L"Standby Cache Reserve Bytes"
+#define MEM_COUNTER_MODIFIED L"Modified Page List Bytes"
+#define MEM_COUNTER_FREE L"Free & Zero Page List Bytes"
 #define MEM_COUNTER_PAGE_IN L"Pages Input/sec"
 #define MEM_COUNTER_PAGE_OUT L"Pages Output/sec"
 

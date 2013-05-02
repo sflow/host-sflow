@@ -88,7 +88,7 @@ void readCpuCounters(SFLHost_cpu_counters *cpu)
 								 NULL,
 			                     (LPBYTE) &cpu->cpu_speed,
 			                     &cbData );
-		if(dwRet != ERROR_SUCCESS) cpu->cpu_speed = -1;
+		if(dwRet != ERROR_SUCCESS) cpu->cpu_speed = UNKNOWN_GAUGE;
 		RegCloseKey(hkey);
 	}
 
