@@ -51,7 +51,7 @@ extern double load_1, load_5, load_15;
 								 NULL,
 			                     (LPBYTE) &cpu->cpu_speed,
 			                     &cbData );
-		if(dwRet != ERROR_SUCCESS) cpu->cpu_speed = -1;
+		if(dwRet != ERROR_SUCCESS) cpu->cpu_speed = UNKNOWN_GAUGE;
 		RegCloseKey(hkey);
 	}
 
