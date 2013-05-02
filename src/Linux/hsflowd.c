@@ -162,6 +162,30 @@ extern "C" {
     return NO;
   }
 
+  static int compile_vif_regex(HSP *sp) {
+    int err = regcomp(&sp->vif_regex, HSF_XEN_VIF_REGEX, REG_EXTENDED);
+    if(err) {
+      char errbuf[101];
+      myLog(LOG_ERR, "regcomp(%s) failed: %s", HSF_XEN_VIF_REGEX, regerror(err, &sp->vif_regex, errbuf, 100));
+      return NO;
+    }
+    return YES;
+  }
+
+  static long regmatch_as_long(regmatch_t *rm, char *str) {
+    int len = (int)rm->rm_eo - (int)rm->rm_so;
+      // copy it out so we can null-terminate just to be safe
+      char extraction[8];
+      if(rm->rm_so != -1 && len > 0 && len < 8) {
+	memcpy(extraction, str + rm->rm_so, len);
+	extraction[len] = '\0';
+	return strtol(extraction, NULL, 0);
+      }
+      else {
+	return -1;
+      }
+  }
+
 /* For convenience, define a domId to mean "the physical host" */
 #define XEN_DOMID_PHYSICAL (uint32_t)-1
 
@@ -169,14 +193,35 @@ extern "C" {
   {
     if(debug > 3) {
       if(dom_id == XEN_DOMID_PHYSICAL) myLog(LOG_INFO, "xenstat_adaptors(): looking for physical host interfaces");
-      else myLog(LOG_INFO, "xenstat_adaptors(): looking for vif%"PRIu32".<netid>", dom_id);
+      else myLog(LOG_INFO, "xenstat_adaptors(): looking for vif with domId=%"PRIu32, dom_id);
     }
+
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       uint32_t vif_domid=0;
       uint32_t vif_netid=0;
       uint32_t xapi_index=0;
-      int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
+      int isVirtual = NO;
+#ifdef HSF_XEN_VIF_REGEX
+      // we could move this regex extraction to the point where we first learn the adaptor->name and
+      // store it wit the adaptor user-data.  Then we wouldn't have to do it so often.  It might get
+      // expensive on a system with a large number of VMs.
+      if(regexec(&sp->vif_regex, adaptor->deviceName, HSF_XEN_VIF_REGEX_NMATCH, sp->vif_match, 0) == 0) {
+	long ifield1 = regmatch_as_long(&sp->vif_match[1], adaptor->deviceName);
+	long ifield2 = regmatch_as_long(&sp->vif_match[2], adaptor->deviceName);
+	if(ifield1 == -1 || ifield2 == -1) {
+	  myLog(LOG_ERR, "failed to parse domId and netId from vif name <%s>", adaptor->deviceName);
+	}
+	else {
+	  vif_domid = (uint32_t)ifield1;
+	  vif_netid = (uint32_t)ifield2;
+	  isVirtual = YES;
+	}
+      }
+#else
+      isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
+#endif
+
       int isXapi = (sscanf(adaptor->deviceName, "xapi%"SCNu32, &xapi_index) == 1);
       if(debug > 3) {
 	myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32") (xapi=%s, index=%"PRIu32")",
@@ -2220,6 +2265,11 @@ extern "C" {
 		drop_privileges(HSP_RLIMIT_MEMLOCK);
 	      }
 
+#ifdef HSF_XEN
+	      if(compile_vif_regex(sp) == NO) {
+		exit(EXIT_FAILURE);
+	      }
+#endif
 	      setState(sp, HSPSTATE_RUN);
 	    }
 	    else {

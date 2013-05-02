@@ -46,6 +46,15 @@ extern "C" {
 #include "xs.h"
 #include "xenctrl.h"
 #include "dirent.h"
+#include "regex.h" // for vif detection
+// The pattern on a xenserver is usually just "vif%d.%d" but
+// different platforms may have different strings here, so
+// make it a regular expression that can be changed at
+// compile time.  This expression looks for anything that
+// has "vif" in it and ends with domid.netid,  which might
+// actually work for all xen variants.
+#define HSF_XEN_VIF_REGEX ".*vif.*([0-9]+)\\.([0-9]+)$"
+#define HSF_XEN_VIF_REGEX_NMATCH 3 // fields-to-extract + 1
 #endif
 
 #ifdef HSF_VRT
@@ -348,6 +357,9 @@ extern "C" {
     int socket4;
     int socket6;
 #ifdef HSF_XEN
+    regex_t vif_regex;
+    regmatch_t vif_match[HSF_XEN_VIF_REGEX_NMATCH];
+
 #ifdef XENCTRL_HAS_XC_INTERFACE
     xc_interface *xc_handle;
 #else
