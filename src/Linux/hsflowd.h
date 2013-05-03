@@ -53,7 +53,7 @@ extern "C" {
 // compile time.  This expression looks for anything that
 // has "vif" in it and ends with domid.netid,  which might
 // actually work for all xen variants.
-#define HSF_XEN_VIF_REGEX ".*vif.*([0-9]+)\\.([0-9]+)$"
+#define HSF_XEN_VIF_REGEX "vif[^0-9]*([0-9]+)\\.([0-9]+)$"
 #define HSF_XEN_VIF_REGEX_NMATCH 3 // fields-to-extract + 1
 #endif
 
