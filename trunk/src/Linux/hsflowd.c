@@ -347,7 +347,11 @@ extern "C" {
 #ifdef HSF_XEN
 
 #define HSP_MAX_PATHLEN 256
-#define XEN_SYSFS_VBD_PATH "/sys/devices/xen-backend"
+
+  // allow HSF_XEN_VBD_PATH to be passed in at compile time,  but fall back on the default if it is not.
+#ifndef HSF_XEN_VBD_PATH
+#define HSF_XEN_VBD_PATH /sys/devices/xen-backend
+#endif
 
   static int64_t xen_vbd_counter(uint32_t dom_id, char *vbd_dev, char *counter, int usec)
   {
@@ -360,9 +364,9 @@ extern "C" {
     char path[HSP_MAX_PATHLEN];
     FILE *file = NULL;
     // try vbd first,  then tap
-    snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/vbd-%s", ctrspec);
+    snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSF_XEN_VBD_PATH) "/vbd-%s", ctrspec);
     if((file = fopen(path, "r")) == NULL) {
-      snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/tap-%s", ctrspec);
+      snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSF_XEN_VBD_PATH) "/tap-%s", ctrspec);
       file = fopen(path, "r");
     }
     
@@ -391,9 +395,9 @@ extern "C" {
   
   static int xen_collect_block_devices(HSP *sp, HSPVMState *state)
   {
-    DIR *sysfsvbd = opendir(XEN_SYSFS_VBD_PATH);
+    DIR *sysfsvbd = opendir(STRINGIFY_DEF(HSF_XEN_VBD_PATH));
     if(sysfsvbd == NULL) {
-      myLog(LOG_ERR, "opendir %s failed : %s", XEN_SYSFS_VBD_PATH, strerror(errno));
+      myLog(LOG_ERR, "opendir %s failed : %s", STRINGIFY_DEF(HSF_XEN_VBD_PATH), strerror(errno));
       return 0;
     }
     int found = 0;
