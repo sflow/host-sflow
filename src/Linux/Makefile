@@ -16,8 +16,8 @@ endif
 
 # base CFLAGS and LIBS
 SFLOWDIR=../sflow
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
 # if ULOG is not set, assume it should be "yes".
 # (So you can use "make ULOG=no" to compile without this feature)
@@ -25,7 +25,7 @@ ifeq ($(ULOG),)
 	ULOG=yes
 endif
 ifeq ($(ULOG),yes)
-	CFLAGS+=-DHSF_ULOG
+	CFLAGS += -DHSF_ULOG
 endif
 
 # if JSON is not set, assume it should be "yes".
@@ -35,8 +35,8 @@ ifeq ($(JSON),)
 endif
 ifeq ($(JSON),yes)
 	JSONDIR=../json
-	CFLAGS+=-DHSF_JSON -I$(JSONDIR)
-	LIBS+= $(JSONDIR)/libjson.a -lm
+	CFLAGS += -DHSF_JSON -I$(JSONDIR)
+	LIBS += $(JSONDIR)/libjson.a -lm
 endif
 
 # The options LIBVIRT=yes, XEN_DDK=yes and XEN_ROOT=<path> should be mutually exclusive.
@@ -63,8 +63,8 @@ ifeq ($(LIBVIRT),)
 	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(LIBVIRT),yes)
-	CFLAGS+= -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
-	LIBS+= -lvirt -lxml2
+	CFLAGS += -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
+	LIBS += -lvirt -lxml2
 else
   # if XEN_DDK is not set, then assume it should be "yes" if we are on a Xenserver DDK (or equivalent) system.
   # Just test if the xenstore and xenctrl libs are present.
@@ -76,15 +76,22 @@ else
   else
 	XEN_DDK=no
 	include $(XEN_ROOT)/tools/Rules.mk
-	CFLAGS+= -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
+	CFLAGS += -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
 	CFLAGS += -Wno-declaration-after-statement # turn off "mixed declarations and code" warning
-	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
+	LIBS += -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
   endif
   ifeq ($(XEN_DDK),yes)
-	CFLAGS+= -DHSF_XEN
-	LIBS+= -lxenstore -lxenctrl
+	CFLAGS += -DHSF_XEN
+	LIBS += -lxenstore -lxenctrl
   endif
 endif
+
+# allow HSF_XEN_VBD_PATH to be overridden here.  For example: make HSF_XEN_VBD_PATH=/sys/devices
+ifeq ($(HSF_XEN_VBD_PATH),)
+else
+	CFLAGS += -DHSF_XEN_VBD_PATH=$(HSF_XEN_VBD_PATH)
+endif
+
 
 # control how to read disk info from libvirt
 ifeq ($(VRTDSKPATH),yes)
