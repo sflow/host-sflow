@@ -1,0 +1,7 @@
+i pkginfo
+i preinstall
+i postinstall
+f none /etc/hsflowd.conf 0644 root root
+f none /usr/sbin/hsflowd 0755 root root
+f none /lib/svc/method/svc-hsflowd 0555 root root
+f none /var/svc/manifest/site/hsflowd.xml 0444 root root

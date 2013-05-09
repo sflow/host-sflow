@@ -1,0 +1,22 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+Red Hat KVM Hypervisor
+======================
+
+To compile for a Red Hat KVM hypervisor:
+
+DDK> export LIBVIRT=yes
+DDK> make rpm
+
+The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
+(where <ARCH> is i386 or x86_64 or ...)
+
+Copy this rpm to the hypervisor, and install it,
+then start the daemon with:
+
+root> /etc/init.d/hsflowd start
+
+You can use virsh(1) and virt-manager(1) to see the data
+that hsflowd can see via libvirt.
+
