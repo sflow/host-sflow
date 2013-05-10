@@ -13,6 +13,34 @@ extern "C" {
 
 #ifdef HSF_JSON
 
+  /*_________________---------------------------__________________
+    _________________  int counters and gauges  __________________
+    -----------------___________________________------------------
+    Avoid cJSON->valueint, because it is limited to INT_MAX in the
+    cJSON library, which is only 2^31 on Linux,  even on 64-bit architectures.
+  */
+  static uint16_t json_uint16(cJSON *cj, const char *fieldName) {
+    cJSON *field = cJSON_GetObjectItem(cj, fieldName);
+    return field ? (uint16_t)field->valuedouble : 0;
+  }
+  static uint32_t json_uint32(cJSON *cj, const char *fieldName) {
+    cJSON *field = cJSON_GetObjectItem(cj, fieldName);
+    return field ? (uint32_t)field->valuedouble : 0;
+  }
+  static uint64_t json_uint64(cJSON *cj, const char *fieldName) {
+    cJSON *field = cJSON_GetObjectItem(cj, fieldName);
+    return field ? (uint64_t)field->valuedouble : 0;
+  }
+  static uint32_t json_gauge32(cJSON *cj, const char *fieldName) {
+    return json_uint32(cj, fieldName);
+  }
+  static uint64_t json_gauge64(cJSON *cj, const char *fieldName) {
+    return json_uint64(cj, fieldName);
+  }
+  static uint32_t json_counter32(cJSON *cj, const char *fieldName) {
+    cJSON *field = cJSON_GetObjectItem(cj, fieldName);
+    return field ? (uint32_t)field->valuedouble : (uint32_t)-1;
+  }
 
   /*_________________---------------------------__________________
     _________________    agentCB_getCounters    __________________
@@ -325,26 +353,26 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
   {
     if(debug > 1) logJSON(fs, "got flow sample");
     cJSON *app = cJSON_GetObjectItem(fs, "app_name");
-    cJSON *service_port = cJSON_GetObjectItem(fs, "service_port");
+    uint16_t service_port = json_uint16(fs, "service_port");
     cJSON *as_client = cJSON_GetObjectItem(fs, "client");
-    cJSON *smp = cJSON_GetObjectItem(fs, "sampling_rate");
-    uint32_t sampling_n = smp ? smp->valueint : 1;
+    uint32_t sampling_n = json_uint32(fs, "sampling_rate");
+    if(sampling_n == 0) sampling_n = 1;
     
     if(app) {
-      HSPApplication *application = getApplication(sp,
-						   app->valuestring,
-						   (uint16_t)(service_port ? service_port->valueint : 0));
+      HSPApplication *application = getApplication(sp, app->valuestring, service_port);
       if(application) {
 	// remember that we heard from this application
 	application->last_json = sp->clk;
 
 	cJSON *opn = cJSON_GetObjectItem(fs, "app_operation");
 	if(opn) {
+	  EnumSFLAPPStatus status = SFLAPP_SUCCESS;
 	  cJSON *sts = cJSON_GetObjectItem(opn, "status");
-
-	  EnumSFLAPPStatus status = sts ? (EnumSFLAPPStatus)sts->valueint : SFLAPP_SUCCESS;
-	  if((u_int)status > (u_int)SFLAPP_UNAUTHORIZED) {
-	    status = SFLAPP_OTHER;
+	  if(sts) {
+	    status = (EnumSFLAPPStatus)json_uint32(opn, "status");
+	    if((u_int)status > (u_int)SFLAPP_UNAUTHORIZED) {
+	      status = SFLAPP_OTHER;
+	    }
 	  }
 	
 	  // update my version of the counters - even if we are not going to send them
@@ -368,9 +396,10 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	    cJSON *operation = cJSON_GetObjectItem(opn, "operation");
 	    cJSON *attributes = cJSON_GetObjectItem(opn, "attributes");
 	    cJSON *status_descr = cJSON_GetObjectItem(opn, "status_descr");
-	    cJSON *req_bytes = cJSON_GetObjectItem(opn, "req_bytes");
-	    cJSON *resp_bytes = cJSON_GetObjectItem(opn, "resp_bytes");
-	    cJSON *uS = cJSON_GetObjectItem(opn, "uS");
+
+	    uint64_t req_bytes = json_gauge64(opn, "req_bytes");
+	    uint64_t resp_bytes = json_gauge64(opn, "resp_bytes");
+	    uint32_t uS = json_gauge32(opn, "uS");
 
 	    // optional fields: parent context
 	    char *parent_app = NULL;
@@ -404,10 +433,9 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	    SFLExtended_socket_ipv4 soc4 = {  0 };
 	    cJSON *extended_socket_ipv4 = cJSON_GetObjectItem(fs, "extended_socket_ipv4");
 	    if(extended_socket_ipv4) {
-	      cJSON *protocol = cJSON_GetObjectItem(extended_socket_ipv4, "protocol");
-	      if(protocol) {
-		soc4.protocol = protocol->valueint;
-	      }
+	      soc4.protocol = json_uint32(extended_socket_ipv4, "protocol");
+	      soc4.local_port = json_uint32(extended_socket_ipv4, "local_port");
+	      soc4.remote_port = json_uint32(extended_socket_ipv4, "remote_port");
 	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv4, "local_ip");
 	      if(local_ip) {
 		SFLAddress addr = { 0 };
@@ -422,23 +450,14 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 		  soc4.remote_ip = addr.address.ip_v4;
 		}
 	      }
-	      cJSON *local_port = cJSON_GetObjectItem(extended_socket_ipv4, "local_port");
-	      if(local_port) {
-		soc4.local_port = local_port->valueint;
-	      }
-	      cJSON *remote_port = cJSON_GetObjectItem(extended_socket_ipv4, "remote_port");
-	      if(remote_port) {
-		soc4.remote_port = remote_port->valueint;
-	      }
 	    }
 
 	    SFLExtended_socket_ipv6 soc6 = {  0 };
 	    cJSON *extended_socket_ipv6 = cJSON_GetObjectItem(fs, "extended_socket_ipv6");
 	    if(extended_socket_ipv6) {
-	      cJSON *protocol = cJSON_GetObjectItem(extended_socket_ipv6, "protocol");
-	      if(protocol) {
-		soc6.protocol = protocol->valueint;
-	      }
+	      soc6.protocol = json_uint32(extended_socket_ipv6, "protocol");
+	      soc6.local_port = json_uint32(extended_socket_ipv6, "local_port");
+	      soc6.remote_port = json_uint32(extended_socket_ipv6, "remote_port");
 	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv6, "local_ip");
 	      if(local_ip) {
 		SFLAddress addr = { 0 };
@@ -453,28 +472,20 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 		  soc6.remote_ip = addr.address.ip_v6;
 		}
 	      }
-	      cJSON *local_port = cJSON_GetObjectItem(extended_socket_ipv6, "local_port");
-	      if(local_port) {
-		soc6.local_port = local_port->valueint;
-	      }
-	      cJSON *remote_port = cJSON_GetObjectItem(extended_socket_ipv6, "remote_port");
-	      if(remote_port) {
-		soc6.remote_port = remote_port->valueint;
-	      }
 	    }
 
 	    // submit the flow sample
 	    sendAppSample(sp,
 			  application,
 			  effective_sampling_n,
-			  as_client ? (as_client->valueint == cJSON_True) : NO,
+			  as_client ? (as_client->type == cJSON_True) : NO,
 			  operation ? operation->valuestring : NULL,
 			  attributes ? attributes->valuestring : NULL,
 			  status_descr ? status_descr->valuestring : NULL,
 			  status,
-			  req_bytes ? req_bytes->valueint : 0, // valuedouble?
-			  resp_bytes ? resp_bytes->valueint : 0, // valuedouble?
-			  uS ? uS->valueint : 0,
+			  req_bytes,
+			  resp_bytes,
+			  uS,
 			  parent_app,       // any of the following may be NULL
 			  parent_operation,
 			  parent_attributes,
@@ -497,11 +508,9 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
   {
     if(debug > 1) logJSON(cs, "got counter sample");
     cJSON *app_name = cJSON_GetObjectItem(cs, "app_name");
-    cJSON *service_port = cJSON_GetObjectItem(cs, "service_port");
+    uint16_t service_port = json_uint16(cs, "service_port");
     if(app_name) {
-      HSPApplication *application = getApplication(sp,
-						   app_name->valuestring,
-						   (uint16_t)(service_port ? service_port->valueint : 0));
+      HSPApplication *application = getApplication(sp, app_name->valuestring, service_port);
       if(application) {
 	// remember that we heard from this application
 	application->last_json = sp->clk;
@@ -523,29 +532,17 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  c_ops.tag = SFLCOUNTERS_APP;
 	  c_ops.counterBlock.app.application.str = app_name->valuestring;
 	  c_ops.counterBlock.app.application.len = my_strlen(app_name->valuestring);
-	  cJSON *cnt;
-	  cnt = cJSON_GetObjectItem(ops, "success");
-	  if(cnt) c_ops.counterBlock.app.status_OK = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "other");
-	  if(cnt) c_ops.counterBlock.app.errors_OTHER = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "timeout");
-	  if(cnt) c_ops.counterBlock.app.errors_TIMEOUT = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "internal_error");
-	  if(cnt) c_ops.counterBlock.app.errors_INTERNAL_ERROR = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "bad_request");
-	  if(cnt) c_ops.counterBlock.app.errors_BAD_REQUEST = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "forbidden");
-	  if(cnt) c_ops.counterBlock.app.errors_FORBIDDEN = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "too_large");
-	  if(cnt) c_ops.counterBlock.app.errors_TOO_LARGE = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "not_implemented");
-	  if(cnt) c_ops.counterBlock.app.errors_NOT_IMPLEMENTED = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "not_found");
-	  if(cnt) c_ops.counterBlock.app.errors_NOT_FOUND = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "unavailable");
-	  if(cnt) c_ops.counterBlock.app.errors_UNAVAILABLE = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(ops, "unauthorized");
-	  if(cnt) c_ops.counterBlock.app.errors_UNAUTHORIZED = cnt->valueint;
+	  c_ops.counterBlock.app.status_OK = json_counter32(ops, "success");
+	  c_ops.counterBlock.app.errors_OTHER = json_counter32(ops, "other");
+	  c_ops.counterBlock.app.errors_TIMEOUT = json_counter32(ops, "timeout");
+	  c_ops.counterBlock.app.errors_INTERNAL_ERROR = json_counter32(ops, "internal_error");
+	  c_ops.counterBlock.app.errors_BAD_REQUEST = json_counter32(ops, "bad_request");
+	  c_ops.counterBlock.app.errors_FORBIDDEN = json_counter32(ops, "forbidden");
+	  c_ops.counterBlock.app.errors_TOO_LARGE = json_counter32(ops, "too_large");
+	  c_ops.counterBlock.app.errors_NOT_IMPLEMENTED = json_counter32(ops, "not_implemented");
+	  c_ops.counterBlock.app.errors_NOT_FOUND = json_counter32(ops, "not_found");
+	  c_ops.counterBlock.app.errors_UNAVAILABLE = json_counter32(ops, "unavailable");
+	  c_ops.counterBlock.app.errors_UNAUTHORIZED = json_counter32(ops, "unauthorized");
 	  SFLADD_ELEMENT(&csample, &c_ops);
 	}
 	else {
@@ -558,23 +555,14 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	cJSON *res = cJSON_GetObjectItem(cs, "app_resources");
 	if(res) {
 	  c_res.tag = SFLCOUNTERS_APP_RESOURCES;
-	  cJSON *cnt;
-	  cnt = cJSON_GetObjectItem(res, "user_time");
-	  if(cnt) c_res.counterBlock.appResources.user_time = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(res, "system_time");
-	  if(cnt) c_res.counterBlock.appResources.system_time = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(res, "mem_used");
-	  if(cnt) c_res.counterBlock.appResources.mem_used = (uint64_t)cnt->valuedouble; // avoid 32-bit limit
-	  cnt = cJSON_GetObjectItem(res, "mem_max");
-	  if(cnt) c_res.counterBlock.appResources.mem_max = (uint64_t)cnt->valuedouble; // avoid 32-bit limit
-	  cnt = cJSON_GetObjectItem(res, "fd_open");
-	  if(cnt) c_res.counterBlock.appResources.fd_open = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(res, "fd_max");
-	  if(cnt) c_res.counterBlock.appResources.fd_max = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(res, "conn_open");
-	  if(cnt) c_res.counterBlock.appResources.conn_open = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(res, "conn_max");
-	  if(cnt) c_res.counterBlock.appResources.conn_max = cnt->valueint;
+	  c_res.counterBlock.appResources.user_time = json_gauge32(res, "user_time");
+	  c_res.counterBlock.appResources.system_time = json_gauge32(res, "system_time");
+	  c_res.counterBlock.appResources.mem_used = json_gauge64(res, "mem_used");
+	  c_res.counterBlock.appResources.mem_max = json_gauge64(res, "mem_max");
+	  c_res.counterBlock.appResources.fd_open = json_gauge32(res, "fd_open");
+	  c_res.counterBlock.appResources.fd_max = json_gauge32(res, "fd_max");
+	  c_res.counterBlock.appResources.conn_open = json_gauge32(res, "conn_open");
+	  c_res.counterBlock.appResources.conn_max = json_gauge32(res, "conn_max");
 	  SFLADD_ELEMENT(&csample, &c_res);
 	}
 
@@ -583,17 +571,11 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	cJSON *wrk = cJSON_GetObjectItem(cs, "app_workers");
 	if(wrk) {
 	  c_wrk.tag = SFLCOUNTERS_APP_WORKERS;
-	  cJSON *cnt;
-	  cnt = cJSON_GetObjectItem(wrk, "workers_active");
-	  if(cnt) c_wrk.counterBlock.appWorkers.workers_active = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(wrk, "workers_idle");
-	  if(cnt) c_wrk.counterBlock.appWorkers.workers_idle = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(wrk, "workers_max");
-	  if(cnt) c_wrk.counterBlock.appWorkers.workers_max = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(wrk, "req_delayed");
-	  if(cnt) c_wrk.counterBlock.appWorkers.req_delayed = cnt->valueint;
-	  cnt = cJSON_GetObjectItem(wrk, "req_dropped");
-	  if(cnt) c_wrk.counterBlock.appWorkers.req_dropped = cnt->valueint;
+	  c_wrk.counterBlock.appWorkers.workers_active = json_gauge32(wrk, "workers_active");
+	  c_wrk.counterBlock.appWorkers.workers_idle = json_gauge32(wrk, "workers_idle");
+	  c_wrk.counterBlock.appWorkers.workers_max = json_gauge32(wrk, "workers_max");
+	  c_wrk.counterBlock.appWorkers.req_delayed = json_counter32(wrk, "req_delayed");
+	  c_wrk.counterBlock.appWorkers.req_dropped = json_counter32(wrk, "req_dropped");
 	  SFLADD_ELEMENT(&csample, &c_wrk);
 	}
 
