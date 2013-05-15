@@ -531,7 +531,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	if(json_ops) {
 	  c_ops.tag = SFLCOUNTERS_APP;
 	  c_ops.counterBlock.app.application.str = app_name->valuestring;
-	  c_ops.counterBlock.app.application.len = my_strlen(app_name->valuestring);
+	  c_ops.counterBlock.app.application.len = my_strnlen(app_name->valuestring, SFLAPP_MAX_APPLICATION_LEN);
 	  c_ops.counterBlock.app.status_OK = json_counter32(ops, "success");
 	  c_ops.counterBlock.app.errors_OTHER = json_counter32(ops, "other");
 	  c_ops.counterBlock.app.errors_TIMEOUT = json_counter32(ops, "timeout");
