@@ -72,8 +72,8 @@
       <Property Id='Description' Value='sFlow agent for Hyper-V' />
       <Property Id='DriverID' Value='{AF8CAD53-C7B7-420C-9439-135A87818A64}' />
       <Property Id='DriverVersion' Value='$(var.driverVersion)' />
-      <!--<Property Id='DriverInstallParams' Value='/q' />-->
       <Property Id='ExtensionType' Value='Capture' />
+      <Property Id='MinApplicableOSVersion' Value='6.2' />
     <?endif ?>
 
     <Directory Id='TARGETDIR' Name='SourceDir'>
