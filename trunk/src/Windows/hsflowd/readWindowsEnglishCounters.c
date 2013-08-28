@@ -9,8 +9,6 @@ extern "C" {
 #include "hsflowd.h"
 #include "readWindowsEnglishCounters.h"
 
-extern int debug;
-
 /**
  * Functions which use the PDH API to obtain counter values.
  * Uses the pdhAddEnglishCounter function, so can only be used post WinXP,

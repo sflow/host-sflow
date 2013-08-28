@@ -10,15 +10,15 @@ extern "C" {
 #include "hypervSwitch.h"
 #include "util.h"
 
-extern int debug;
-
 /**
  * Test to see whether we are running on a system with Hyper-V enabled.
  * We consider Hyper-V to be running (and can export per vm stats) if
  * the Hyper-V related services (nvspwmi, vmm, vhdsvc) are running and
- * we can access the WMI namespace root\virtualization (ie v1 for Win 2008).
- * We do not check for the v2 namespace, since this is not required for 
- * per vm stats.
+ * we can access the WMI namespace root\virtualization (ie v1 for Win 2008
+ * and v2 for Win 2012).
+ * We need to check for the v2 namespace and use in preference to v1, 
+ * since v1 was deprecated and all classes removed in Win 2012 R2. So
+ * we also set the global variable wmiVirtNs to the preferred namespace.
  * The ability connect to the sFlow filter for export of packet samples 
  * and counter samples for the virtual switch is made separately.
  */
@@ -57,19 +57,33 @@ BOOL testForHyperv()
 		}
 		serviceEnum->Release();
 		pNamespace->Release();
-		if (gotHyperVSvc) { //now check that we have the v1 virtualization namespace
+		if (gotHyperVSvc) { //now check that we have the v2 virtualization namespace
 			CoUninitialize();
-			path = SysAllocString(WMI_VIRTUALIZATION_NS_V1);
+			path = SysAllocString(WMI_VIRTUALIZATION_NS_V2);
 			hr = connectToWMI(path, &pNamespace);
 			SysFreeString(path);
 			if (WBEM_NO_ERROR == hr) {
 				gotHyperV = true;
+				wmiVirtNsVer = 2;
 				pNamespace->Release();
+			} else {
+				CoUninitialize();
+				path = SysAllocString(WMI_VIRTUALIZATION_NS_V1);
+				hr = connectToWMI(path, &pNamespace);
+				SysFreeString(path);
+				if (WBEM_NO_ERROR == hr) {
+					gotHyperV = true;
+					wmiVirtNsVer = 1;
+					pNamespace->Release();
+				}
+			}
+			if (!(wmiVirtNsVer == 1 || wmiVirtNsVer == 2)) {
+				myLog(LOG_ERR, "testForHyperv: unknown wmiVirtNsVer=%u", wmiVirtNsVer);
 			}
 		}
 	}
 	CoUninitialize();
-	myLog(LOG_INFO, "testForHyperv: HyperV=%u", gotHyperV);
+	myLog(LOG_INFO, "testForHyperv: HyperV=%u wmiVirtNsVer=%u", gotHyperV, wmiVirtNsVer);
 	return gotHyperV;
 }
 

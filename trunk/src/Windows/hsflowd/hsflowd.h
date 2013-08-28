@@ -92,6 +92,10 @@ extern "C" {
 #define WMI_VIRTUALIZATION_NS_V1 L"root\\virtualization"
 #define WMI_VIRTUALIZATION_NS_V2 L"root\\virtualization\\v2"
 
+//globals
+extern int debug;
+extern int wmiVirtNsVer;
+
   // forward declarations
   struct _HSPSFlow;
   struct _HSP;

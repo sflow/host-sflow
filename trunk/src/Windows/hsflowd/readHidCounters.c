@@ -9,8 +9,6 @@ extern "C" {
 
 #include "hsflowd.h"
 
-extern int debug;
-
 /**
  * Populates the host_descr structure with, computer name for hostname,
  * processor architecture, os_name (Windows), os version, and BIOS UUID.

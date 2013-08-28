@@ -10,8 +10,6 @@ extern "C" {
 #include "hsflowd.h"
 #include "readWindowsEnglishCounters.h"
 
-extern int debug;
-
 #define HSF_MAX_DRIVESTRINGS_LEN 1024
 
 /**
