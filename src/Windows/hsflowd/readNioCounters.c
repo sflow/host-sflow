@@ -10,8 +10,6 @@ extern "C" {
 #include "hsflowd.h"
 #include "readWindowsEnglishCounters.h"
 
-extern int debug;
-
 static PDH_HQUERY query = NULL;
 static PDH_HCOUNTER bytesIn, pktsIn, errorsIn, discardsIn;
 static PDH_HCOUNTER bytesOut, pktsOut,errorsOut, discardsOut;

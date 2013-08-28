@@ -251,6 +251,9 @@
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">VERSION_MAJOR=$(VersionMajor); VERSION_MINOR=$(VersionMinor); VERSION_REVISION=$(VersionRevision)</PreprocessorDefinitions>
     </ResourceCompile>
   </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\version.txt" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

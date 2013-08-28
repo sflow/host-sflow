@@ -18,6 +18,7 @@ extern "C" {
 
 //globals
 int debug = LOG_ERR;
+int wmiVirtNsVer = 0; //set when test for hyperv
 FILE *logFile = stderr;
 
 SERVICE_STATUS ServiceStatus; 

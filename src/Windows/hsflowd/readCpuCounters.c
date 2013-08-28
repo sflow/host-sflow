@@ -10,7 +10,6 @@ extern "C" {
 #include "hsflowd.h"
 #include "readWindowsEnglishCounters.h"
 
-extern int debug;
 extern int cpu_num;
 extern double load_1, load_5, load_15;
 

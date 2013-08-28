@@ -9,8 +9,6 @@ extern "C" {
 #include "hsflowd.h"
 #include <windns.h>
 
-extern int debug;
-
 #define HSF_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
 #define HSF_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
 #define HSF_MAX_TXT_LEN 255 //include NULL

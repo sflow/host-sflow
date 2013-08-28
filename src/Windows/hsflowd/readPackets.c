@@ -10,8 +10,6 @@ extern "C" {
 #include "readWindowsEnglishCounters.h"
 #include "sflowfilter.h"
 
-extern int debug;
-
 /**
  * Convenience function for addCounterToQuery with counter object always IF_COUNTER_OBJECT.
  * Adds the counter with path constructed from IF_COUNTER_OBJECT, instance, counterName,

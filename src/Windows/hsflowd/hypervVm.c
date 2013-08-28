@@ -16,8 +16,6 @@ extern "C" {
 #include <Shlwapi.h>
 #include <virtdisk.h>
 
-extern int debug;
-
 #define XML_INSTANCE L"INSTANCE"
 #define XML_PROPERTY L"PROPERTY"
 #define XML_NAME L"NAME"
@@ -276,7 +274,11 @@ static void readVmHidCounters(HVSVmState *state, SFLHost_hid_counters *hid,
 							  char *hnamebuf, uint32_t hnamebufLen,
 							  char *osrelbuf, uint32_t osrelbufLen)
 {
-	BSTR path = SysAllocString(WMI_VIRTUALIZATION_NS_V1);
+	if (!(wmiVirtNsVer == 1 || wmiVirtNsVer == 2)) {
+		return;
+	}
+	BSTR path = SysAllocString(wmiVirtNsVer == 1 ? 
+							WMI_VIRTUALIZATION_NS_V1 : WMI_VIRTUALIZATION_NS_V2);
 	HRESULT hr = S_FALSE;
 	IWbemServices *pNamespace = NULL;
 
@@ -447,7 +449,7 @@ static uint64_t getVmDioCounterVal(HVSVmState *state, PDH_HCOUNTER *counter)
 
 /**
  * Populates SFLHost_vrt_dsk_counters structure from the Hyper-V Virtual Storage Device
- * performance counters for disk IO and used the OpenVirtualDisk function for capacity
+ * performance counters for disk IO and uses the OpenVirtualDisk function for capacity
  * and allocation.
  * OpenVirtualDisk is called with OPEN_VIRTUAL_DISK_VERSION_2 which gives better file 
  * sharing support and avoids access violation errors, however, this is not available
@@ -549,6 +551,13 @@ static uint64_t getVmNioCounterVal(HVSVmState *state, PDH_HCOUNTER *counter)
 	return counterVal;
 }
 
+/**
+ * Uses PDH to query for the NIO counters for the vm represented by state.
+ * For Windows Server 2008 synthetic virtual adapters the discard/drops counters
+ * are not supported - so we query for these separately.
+ * For legacy virtual adapters on Windows Server 2008 we need to use  
+ * Hyper-V Legacy Network Adapter (and frames dropped for dicards) - TODO
+ */
 static void readVmNioCounters(HVSVmState *state, SFLHost_nio_counters *nio)
 {
 	PDH_HQUERY query;
@@ -570,6 +579,17 @@ static void readVmNioCounters(HVSVmState *state, SFLHost_nio_counters *nio)
 						  COUNTER_INSTANCE_ALL, 
 						  VNIO_COUNTER_PACKETS_OUT, 
 						  &query, &pktsOut) == ERROR_SUCCESS &&
+		PdhCollectQueryData(query) == ERROR_SUCCESS) {
+		nio->bytes_in = getVmNioCounterVal(state, &bytesIn);
+		nio->bytes_out = getVmNioCounterVal(state, &bytesOut);
+		nio->pkts_in = (uint32_t)getVmNioCounterVal(state, &pktsIn);
+		nio->pkts_out = (uint32_t)getVmNioCounterVal(state, &pktsOut);
+		if (query) {
+			PdhCloseQuery(query);
+			query = NULL;
+		}
+	}
+	if (PdhOpenQuery(NULL, 0, &query) == ERROR_SUCCESS &&				  
 		addCounterToQuery(VNIO_COUNTER_OBJECT, 
 						  COUNTER_INSTANCE_ALL, 
 						  VNIO_COUNTER_DISCARDS_IN, 
@@ -579,15 +599,14 @@ static void readVmNioCounters(HVSVmState *state, SFLHost_nio_counters *nio)
 						  VNIO_COUNTER_DISCARDS_OUT, 
 						  &query, &dropsOut) == ERROR_SUCCESS &&
 		PdhCollectQueryData(query) == ERROR_SUCCESS) {
-		nio->bytes_in = getVmNioCounterVal(state, &bytesIn);
-		nio->bytes_out = getVmNioCounterVal(state, &bytesOut);
-		nio->pkts_in = (uint32_t)getVmNioCounterVal(state, &pktsIn);
-		nio->pkts_out = (uint32_t)getVmNioCounterVal(state, &pktsOut);
 		nio->drops_in = (uint32_t)getVmNioCounterVal(state, &dropsIn);
 		nio->drops_out = (uint32_t)getVmNioCounterVal(state, &dropsOut);
 		if (query) {
 			PdhCloseQuery(query);
 		}
+	} else {
+		nio->drops_in = UNKNOWN_COUNTER;
+		nio->drops_out = UNKNOWN_COUNTER;
 	}
 	nio->errs_in = UNKNOWN_COUNTER;
 	nio->errs_out = UNKNOWN_COUNTER;
@@ -682,8 +701,114 @@ void getCounters_vm(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs
 }
 
 /**
+ * Follows the associations from portObj Msvm_{Synthetic/Emulated}EthernetPort to
+ * obtain associated virtual switch port. Updates the associated vAdaptor in sp (creating
+ * it if it does not already exist, using the switch port guid as the unique identifier).
+ * Updates vAdaptor->userData (HVSVPortInfo) with:
+ * vmSystemName (from portObj->SystemName)
+ * switchName (from switchPort->SystemName)
+ * Uses wmi namespace virtualization/v2 (for Windows Server 2012) and v1 for Windows Server 2008.
+ */
+SFLAdaptor *updateVmAdaptor(HSP *sp, IWbemServices *pNamespace, IWbemClassObject *portObj) 
+{
+	if (!(wmiVirtNsVer == 1 || wmiVirtNsVer == 2)) {
+		return NULL;
+	}
+	SFLAdaptor *vAdaptor = NULL;
+	HRESULT assocHr;
+	IEnumWbemClassObject *lanEpEnum = NULL;
+	wchar_t *resultClass = wmiVirtNsVer == 1 ? L"Msvm_VmLANEndPoint" : L"Msvm_LANEndPoint";
+	assocHr = associatorsOf(pNamespace, portObj,
+							L"Msvm_DeviceSAPImplementation",
+							resultClass,
+							L"Dependent", &lanEpEnum);
+	if (SUCCEEDED(assocHr)) {
+		IWbemClassObject *lanEpObj;
+		IEnumWbemClassObject *lanEpEnum2 = NULL;
+		IWbemClassObject *lanEpObj2 = NULL;
+		ULONG epCount = 0;
+		assocHr = lanEpEnum->Next(WBEM_INFINITE, 1, &lanEpObj, &epCount);
+		if (epCount == 1) {
+			IEnumWbemClassObject *swPortEnum = NULL;
+			if (wmiVirtNsVer == 1) {
+				assocHr = associatorsOf(pNamespace, lanEpObj,
+										L"Msvm_ActiveConnection",
+										L"Msvm_SwitchPort",
+										L"Antecedent", &swPortEnum);
+			} else { //wmiVirtNsVer == 2
+				assocHr = associatorsOf(pNamespace, lanEpObj,
+										L"Msvm_ActiveConnection",
+										L"Msvm_LANEndPoint",
+										L"Antecedent", &lanEpEnum2);
+				if (SUCCEEDED(assocHr)) {
+					epCount = 0;
+					assocHr = lanEpEnum2->Next(WBEM_INFINITE, 1, &lanEpObj2, &epCount);
+					if (epCount == 1) {
+						assocHr = associatorsOf(pNamespace, lanEpObj2,
+											L"Msvm_EthernetDeviceSAPImplementation",
+											L"Msvm_EthernetSwitchPort",
+											L"Antecedent", &swPortEnum);
+					}
+				}
+			}
+			if (SUCCEEDED(assocHr)) {
+				IWbemClassObject *swPortObj = NULL;
+				ULONG swPortCount = 0;
+				assocHr = swPortEnum->Next(WBEM_INFINITE, 1, &swPortObj, &swPortCount);
+				if (swPortCount == 1) {
+					wchar_t *guidString = stringFromWMIProperty(swPortObj, PROP_NAME);
+					if (guidString != NULL) {
+						char portGuid[FORMATTED_GUID_LEN+1];
+						guidToString(guidString, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
+						my_free(guidString);
+						vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
+						if (vAdaptor == NULL) {
+							char uuid[16];
+							hexToBinary((UCHAR *)portGuid, (UCHAR *)uuid, 33);
+							uint32_t ifIndex = assign_dsIndex(&sp->portStore, 
+															  uuid, &sp->maxIfIndex, 
+															  &sp->portStoreInvalid);
+							vAdaptor = addVAdaptor(sp->vAdaptorList, portGuid, ifIndex);
+						}
+						vAdaptor->marked = FALSE;
+						HVSVPortInfo *portInfo = (HVSVPortInfo *)vAdaptor->userData;
+						wchar_t *sysName = stringFromWMIProperty(portObj, PROP_SYSTEM_NAME);
+						if (sysName != NULL) {
+							if (portInfo->vmSystemName != NULL) {
+								my_free(portInfo->vmSystemName);
+							}
+							portInfo->vmSystemName = sysName;
+						}
+						wchar_t *switchName = stringFromWMIProperty(swPortObj, PROP_SYSTEM_NAME);
+						if (switchName != NULL) {
+							if (portInfo->switchName) {
+								my_free(portInfo->switchName);
+							}
+							portInfo->switchName = switchName;
+						}
+					}
+					swPortObj->Release();
+				}
+				if (swPortEnum != NULL) {
+					swPortEnum->Release();
+				}
+			}
+			lanEpObj->Release();
+		}
+		lanEpEnum->Release();
+		if (lanEpEnum2 != NULL) {
+			lanEpEnum2->Release();
+		}
+		if (lanEpObj2 != NULL) {
+			lanEpObj2->Release();
+		}
+	} 
+	return vAdaptor;
+}
+
+/**
  * Used to discover the virtual adaptors used by a vm and map to associated switch
- * ports. As new adaptors the HSP->vAdaptors if they don't already exist
+ * ports. Adds new adaptors the HSP->vAdaptors if they don't already exist
  * (from discovery via the sFlow filter or previous vm enumeration).
  */
 void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
@@ -719,88 +844,32 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 			if (sp->vAdaptorList == NULL) {
 				sp->vAdaptorList = adaptorListNew();
 			}
-			HRESULT assocHr;
-			IEnumWbemClassObject *lanEpEnum = NULL;
-			assocHr = associatorsOf(pNamespace, portObj,
-									L"Msvm_DeviceSAPImplementation",
-									L"Msvm_VmLANEndPoint",
-									L"Dependent", &lanEpEnum);
-			if (SUCCEEDED(assocHr)) {
-				IWbemClassObject *lanEpObj;
-				ULONG epCount = 0;
-				assocHr = lanEpEnum->Next(WBEM_INFINITE, 1, &lanEpObj, &epCount);
-				if (epCount == 1) {
-					IEnumWbemClassObject *swPortEnum = NULL;
-					assocHr = associatorsOf(pNamespace, lanEpObj,
-											L"Msvm_ActiveConnection",
-											L"Msvm_SwitchPort",
-											L"Antecedent", &swPortEnum);
-					if (SUCCEEDED(assocHr)) {
-						IWbemClassObject *swPortObj = NULL;
-						ULONG swPortCount = 0;
-						assocHr = swPortEnum->Next(WBEM_INFINITE, 1, &swPortObj, &swPortCount);
-						if (swPortCount == 1) {
-							wchar_t *guidString = stringFromWMIProperty(swPortObj, PROP_NAME);
-							if (guidString != NULL) {
-								char portGuid[FORMATTED_GUID_LEN+1];
-								guidToString(guidString, (UCHAR *)portGuid, FORMATTED_GUID_LEN);
-								my_free(guidString);
-								SFLAdaptor *vAdaptor = adaptorListGet(sp->vAdaptorList, portGuid);
-								if (vAdaptor == NULL) {
-									char uuid[16];
-									hexToBinary((UCHAR *)portGuid, (UCHAR *)uuid, 33);
-									uint32_t ifIndex = assign_dsIndex(&sp->portStore, 
-																	  uuid, &sp->maxIfIndex, 
-																	  &sp->portStoreInvalid);
-									vAdaptor = addVAdaptor(sp->vAdaptorList, portGuid, ifIndex);
-								}
-								vAdaptor->marked = FALSE;
-								wchar_t *speedString = stringFromWMIProperty(portObj, PROP_SPEED);
-								if (speedString != NULL) {
-									ULONGLONG ifSpeed = _wcstoui64(speedString, NULL, 10);
-									vAdaptor->ifSpeed = ifSpeed;
-									my_free(speedString);
-								}
-								wchar_t *macString = stringFromWMIProperty(portObj, PROP_MAC_ADDR);
-								if (macString != NULL) {
-									vAdaptor->num_macs = 1;
-									wchexToBinary(macString, vAdaptor->macs[0].mac, 13);
-									my_free(macString);
-								}
-								HVSVPortInfo *portInfo = (HVSVPortInfo *)vAdaptor->userData;
-								wchar_t *sysName = stringFromWMIProperty(portObj, PROP_SYSTEM_NAME);
-								if (sysName != NULL) {
-									if (portInfo->vmSystemName != NULL) {
-										my_free(portInfo->vmSystemName);
-									}
-									portInfo->vmSystemName = sysName;
-								}
-								wchar_t *switchName = stringFromWMIProperty(swPortObj, PROP_SYSTEM_NAME);
-								if (switchName != NULL) {
-									if (portInfo->switchName) {
-										my_free(portInfo->switchName);
-									}
-									portInfo->switchName = switchName;
-								}
-								if (LOG_INFO <= debug) {
-									u_char macAddr[13];
-									if (vAdaptor->num_macs > 0 && vAdaptor->macs) {
-										printHex(vAdaptor->macs[0].mac, 6, macAddr, 13, FALSE);
-									}
-									myLog(LOG_INFO, 
-										"readVmAdaptors: updated vAdaptor ifIndex=%u switchPortName=%s ifSpeed=%llu MAC=%s vmName=%S\n", 
-										vAdaptor->ifIndex, vAdaptor->deviceName, vAdaptor->ifSpeed, macAddr, portInfo->vmSystemName);
-								}
-							}
-							swPortObj->Release();
-						}
-					}
-					swPortEnum->Release();
+			SFLAdaptor *vAdaptor = updateVmAdaptor(sp, pNamespace, portObj);
+			if (vAdaptor != NULL) {
+				wchar_t *speedString = stringFromWMIProperty(portObj, PROP_SPEED);
+				if (speedString != NULL) {
+					ULONGLONG ifSpeed = _wcstoui64(speedString, NULL, 10);
+					vAdaptor->ifSpeed = ifSpeed;
+					my_free(speedString);
 				}
-				lanEpObj->Release();
+				wchar_t *macString = stringFromWMIProperty(portObj, PROP_MAC_ADDR);
+				if (macString != NULL) {
+					vAdaptor->num_macs = 1;
+					wchexToBinary(macString, vAdaptor->macs[0].mac, 13);
+					my_free(macString);
+				}
+				if (LOG_INFO <= debug) {
+					u_char macAddr[13];
+					if (vAdaptor->num_macs > 0 && vAdaptor->macs) {
+						printHex(vAdaptor->macs[0].mac, 6, macAddr, 13, FALSE);
+					}
+					HVSVPortInfo *portInfo = (HVSVPortInfo *)vAdaptor->userData;
+					myLog(LOG_INFO, 
+						"readVmAdaptors: updated vAdaptor ifIndex=%u switchPortName=%s ifSpeed=%llu MAC=%s vmName=%S\n", 
+						vAdaptor->ifIndex, vAdaptor->deviceName, vAdaptor->ifSpeed, macAddr, portInfo->vmSystemName);
+				}
 			}
 			portObj->Release();
-			lanEpEnum->Release();
 		}
 		portEnum->Release();
 	}
@@ -823,17 +892,26 @@ void readVmDisks(IWbemServices *pNamespace, IWbemClassObject *vmObj, HVSVmState 
 				break;
 			}
 			IEnumWbemClassObject *diskSettingEnum;
-			HRESULT settingHr = associatorsOf(pNamespace, diskObj,
-											  L"Msvm_ElementSettingData",
-											  L"Msvm_ResourceAllocationSettingData",
-											  L"SettingData", &diskSettingEnum);
+			HRESULT settingHr = wbemErrNotFound;
+			if (wmiVirtNsVer == 1) {
+				settingHr = associatorsOf(pNamespace, diskObj,
+										  L"Msvm_ElementSettingData",
+										  L"Msvm_ResourceAllocationSettingData",
+										  L"SettingData", &diskSettingEnum);
+			} else if (wmiVirtNsVer == 2) {
+				settingHr = associatorsOf(pNamespace, diskObj,
+										  L"Msvm_SettingsDefineState",
+										  L"Msvm_StorageAllocationSettingData",
+										  L"SettingData", &diskSettingEnum);
+			}
 			if (SUCCEEDED(settingHr)) {
 				IWbemClassObject *settingObj;
 				ULONG settingCount;
 				settingHr = diskSettingEnum->Next(WBEM_INFINITE, 1, &settingObj, &settingCount);
 				if (SUCCEEDED(settingHr) && settingCount == 1) {
+					wchar_t *prop = wmiVirtNsVer == 1 ? L"Connection" : L"HostResource";
 					VARIANT connection;
-					if (WBEM_S_NO_ERROR == settingObj->Get(L"Connection", 0, &connection, 0, 0) &&
+					if (WBEM_S_NO_ERROR == settingObj->Get(prop, 0, &connection, 0, 0) &&
 						V_VT(&connection) == (VT_ARRAY | VT_BSTR)) {
 						SAFEARRAY *sa = V_ARRAY(&connection);
 						LONG lstart, lend;
@@ -846,6 +924,7 @@ void readVmDisks(IWbemServices *pNamespace, IWbemClassObject *vmObj, HVSVmState 
 								wchar_t *disk = my_wcsdup(pbstr[lstart]);
 								if (wcsArrayIndexOf(state->disks, disk) == -1) {
 									wcsArrayAdd(state->disks, disk);
+									//myLog(LOG_INFO, "readVmDisks: for %S adding disk %S", state->vmFriendlyName, disk);
 								}
 								my_free(disk);
 							}
@@ -865,6 +944,9 @@ void readVmDisks(IWbemServices *pNamespace, IWbemClassObject *vmObj, HVSVmState 
 
 void readVms(HSP *sp)
 {
+	if (!(wmiVirtNsVer == 1 || wmiVirtNsVer == 2)) {
+		return;
+	}
 	HSPSFlow *sf = sp->sFlow;
 	if (sf != NULL && sf->agent != NULL) {
 		// mark and sweep
@@ -880,9 +962,9 @@ void readVms(HSP *sp)
 			sp->vAdaptorList = adaptorListNew();
 		}
 		adaptorListMarkAll(sp->vAdaptorList);
-		
 		// 2. create new VM pollers, or clear the mark on existing ones
-		BSTR path = SysAllocString(WMI_VIRTUALIZATION_NS_V1);
+		BSTR path = SysAllocString(wmiVirtNsVer == 1 ? 
+									WMI_VIRTUALIZATION_NS_V1 : WMI_VIRTUALIZATION_NS_V2);
 		HRESULT hr = S_FALSE;
 		IWbemServices *pNamespace = NULL;
 
@@ -901,7 +983,8 @@ void readVms(HSP *sp)
 				myLog(LOG_ERR,"readVms: ExecQuery() failed for query %S error=0x%x", query1, hr);
 				sp->num_partitions = 0;
 			} else {
-				wchar_t *query2 = L"SELECT * FROM Msvm_VirtualSystemSettingData WHERE SettingType=3 AND InstanceID=\"Microsoft:%s\"";
+				//current settings: settingType=3, snapshot settings settingType=5 not supported in virtualizationv2 namespace
+				//wchar_t *query2 = L"SELECT * FROM Msvm_VirtualSystemSettingData WHERE SettingType=3 AND InstanceID=\"Microsoft:%s\"";
 				IWbemClassObject *vmObj = NULL;
 				IEnumWbemClassObject *vssdEnum = NULL;
 				IWbemClassObject *vssdObj = NULL;
@@ -920,15 +1003,15 @@ void readVms(HSP *sp)
 					if (vmName != NULL) {
 						//get the adaptor and switch port info for the vm
 						readVmAdaptors(sp, pNamespace, vmName);
-						size_t length = wcslen(vmName)+1+wcslen(query2)+1;
-						wchar_t *vmQuery = (wchar_t *)my_calloc(length*sizeof(wchar_t));
-						swprintf_s(vmQuery, length, query2, vmName);
-						hr = pNamespace->ExecQuery(queryLang, vmQuery, WBEM_FLAG_FORWARD_ONLY, NULL, &vssdEnum);
+						//Association Msvm_SettingsDefineState gives VSSD for current config
+						//for virtualization namespace v1 and v2
+						hr = associatorsOf(pNamespace, vmObj, 
+										L"Msvm_SettingsDefineState", 
+										L"Msvm_VirtualSystemSettingData", 
+										L"SettingData", &vssdEnum);
 						if (!SUCCEEDED(hr)) {
-							myLog(LOG_ERR,"readVms: ExecQuery() failed for query: %S error=0x%x", vmQuery, hr);
-							my_free(vmQuery);
+							myLog(LOG_ERR,"readVms: associatorsOf() failed getting VSSD for: %S error=0x%x", vmName, hr);
 						} else {
-							my_free(vmQuery);
 							ULONG settingCount;
 							hr = vssdEnum->Next(WBEM_INFINITE, 1, &vssdObj, &settingCount);
 							if (0 != settingCount) {

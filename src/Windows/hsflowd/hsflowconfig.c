@@ -16,8 +16,6 @@ extern "C" {
 #define MAX_KEY_LEN 255
 #define MAX_VAL_LEN 10*(MAX_HOSTNAME_LEN+8)+1 //arbitrary 10 collectors
 
-extern int debug;
-
 /**
  * Looks up host name or IP address and converts to SFLAddress, storing it in the
  * specified SFLAddress. Returns TRUE on success, FALSE on failure.

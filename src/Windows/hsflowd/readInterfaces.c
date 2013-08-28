@@ -88,7 +88,7 @@ static void readIpAddressesMsft(IWbemServices *pNamespace, SFLAdaptor *adaptor)
 	HRESULT hr = pNamespace->ExecQuery(queryLang, ipQuery, WBEM_FLAG_FORWARD_ONLY, NULL, &ipEnum);
 	SysFreeString(queryLang);
 	if (!SUCCEEDED(hr)) {
-		myLog(LOG_ERR,"readInterfacesMsft: ExecQuery() failed for query %S error=0x%x", ipQuery, hr);
+		myLog(LOG_ERR,"readIpAddressesMsft: ExecQuery() failed for query %S error=0x%x", ipQuery, hr);
 		return;
 	}
 	IWbemClassObject *ipObj;

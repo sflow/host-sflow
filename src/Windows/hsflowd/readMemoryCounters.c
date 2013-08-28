@@ -10,8 +10,6 @@ extern "C" {
 #include "hsflowd.h"
 #include "readWindowsEnglishCounters.h"
 
-extern int debug;
-
 /**
  * Populates the host_memory structure using data retrieved using
  * GlobalMemoryStatusEx function and the Memory performance counter

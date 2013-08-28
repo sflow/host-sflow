@@ -16,8 +16,6 @@ extern "C" {
 #include <Objbase.h>
 #include <Wbemidl.h>
 
-extern int debug;
-
 #define PROP_ELEMENT_NAME L"ElementName"
 #define PROP_SYSTEM_NAME L"SystemName"
 #define PROP_NAME L"Name"
