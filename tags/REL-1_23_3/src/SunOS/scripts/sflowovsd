@@ -1,0 +1,138 @@
+#!/bin/sh
+#
+# init(1) startup script for sflowovsd daemon
+#
+# chkconfig: 345 85 15
+# description: sFlow Daemon to configure sFlow on Open VSwitch
+# processname: sflowovsd
+# pidfile: /var/run/sflowovsd.pid
+
+### BEGIN INIT INFO
+# Provides:          sflowovsd
+# Required-Start:    $syslog $network $named
+# Required-Stop:     $syslog
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Short-Description: sFlow Daemon to configure sFlow on Open VSwitch
+# Description:       sFlow Daemon to configure sFlow on Open VSwitch
+### END INIT INFO
+
+EXECPREFIX=/usr/sbin
+
+inm_running() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {pid}"
+	return 1
+    fi
+    kill -0 $1 >/dev/null 2>&1
+}
+
+# A function to find the pid of a program.
+inm_pid() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {program}"
+	return 1
+    fi
+    
+    # try "/var/run/<program>.pid" file
+    if [ -f /var/run/$1.pid ] ; then
+	pid=`head -1 /var/run/$1.pid`
+	if [ "$pid" != "" ] ; then
+	    if inm_running $pid; then
+		echo $pid
+		return 0;
+	    fi
+	fi
+    fi
+}
+
+# A function to start a program.
+inm_daemon() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {program}"
+	return 1
+    fi
+
+    # Do nothing if it's already running.
+    pid=`inm_pid $1`
+    if [ -n "$pid" ] ; then
+	echo -n " already running (pid = $pid) "
+	return 1;
+    fi
+    su - root -c "$EXECPREFIX/$1";
+}
+
+# A function to stop a program.
+inm_kill() {
+    if [ $# = 0 ] ; then
+	echo "Usage: $0 {program}"
+	return 1
+    fi
+
+    # Find pid.
+    pid=`inm_pid $1`
+
+    # Kill it.  TERM first, then KILL
+    if [ -n "$pid" ] ; then
+	if inm_running $pid; then
+	    # TERM first, then KILL if not dead
+	    kill -TERM $pid
+	    sleep 1 
+	    if inm_running $pid ; then
+		sleep 1
+		if inm_running $pid; then
+		    sleep 5
+		    if inm_running $pid; then
+			sleep 10
+			if inm_running $pid; then
+			    kill -KILL $pid
+			fi
+		    fi
+		fi
+	    fi
+	fi
+    fi
+    
+    # Remove pid file if any.
+    rm -f /var/run/$1.pid
+
+    if [ -n "$pid" ] ; then
+	return 0;
+    else
+	return 1;
+    fi
+}
+
+#########################################################################################
+#########################################################################################
+
+# See how we were called.
+case "$1" in
+  start)
+	echo -n "sflowovsd start: "
+	inm_daemon sflowovsd && echo "OK" || echo "FAILED"
+	;;
+  stop)
+	echo -n "sflowovsd stop: "
+	inm_kill sflowovsd && echo "OK" || echo "FAILED"
+	;;
+  status)
+	echo -n "sflowovsd status: "
+	pid=`inm_pid sflowovsd`
+	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
+	;;
+  restart)
+	$0 stop
+	$0 start
+
+	;;
+  force-reload)
+	$0 stop
+	$0 start
+	;;
+  *)
+	echo "Usage: $0 {start|stop|status|restart|force-reload}"
+	exit 1
+esac
+
+exit 0
