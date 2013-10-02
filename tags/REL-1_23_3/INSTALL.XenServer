@@ -1,0 +1,57 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+Citrix XenServer
+================
+
+To compile for XenServer, install these sources into the
+equivalent XenServer DDK VM, and compile with XEN_DDK=yes:
+
+DDK> export XEN_DDK=yes
+DDK> export LIBVIRT=no
+DDK> make rpm
+DDK> make xenserver
+
+The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
+(where <ARCH> is i386 or x86_64 or ...)
+
+Also, the Xenserver .iso will now be accessible as
+xenserver-ddk/xenserver-hsflowd.iso.
+
+To install from the rpm, copy it to the XenServer dom0 host,
+and install it:
+
+[root@xenserver ~]# rpm -Uvh hsflowd-<VERSION>-1.<ARCH>.rpm
+
+Then start it:
+
+[root@xenserver ~]# /sbin/service hsflowd start
+
+Alternatively, to install from the .iso, copy it to the
+XenServer dom0 and run these commands:
+
+mkdir /tmp/iso 
+mount -o loop xenserver-hsflowd-X_XX.iso /tmp/iso 
+cd /tmp/iso 
+./install.sh 
+cd 
+umount /tmp/iso
+
+If Open VSwitch is running (it is the default virtual
+switch in XenServer 6.0), then starting sflowovsd will
+propagate sFlow configuration to the switch via ovs-vsctl(1):
+
+[root@xenserver ~]# /sbin/service sflowovsd start
+
+This will turn on standard sFlow monitoring of all the
+traffic through the virtual switch, providing L2-L7
+visibility into the traffic patterns (including MAC, VLAN,
+ARP, FCoE, IPv4, IPv6, TCP, UDP and ICMP) as well as
+providing a feed of standard interface-counter data
+for every virtual port on the switch.
+
+Output will go to /var/log/messages.
+
+
+
+
