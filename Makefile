@@ -46,6 +46,19 @@ rpm:
 	cp -r . $$MYSRCDIR; \
 	tar cz -C $(RPM_SOURCES_DIR) -f $$MYSRCDIR.tar.gz $(PROG)-$$MYVER; \
 	rpmbuild -ba $(PROG).spec
+
+aixrpm:
+	PLATFORM=`uname`; \
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+	SOURCES=/opt/freeware/src/packages/SOURCES; \
+	MYSRCDIR=$$SOURCES/$(PROG)-$$MYVER; \
+	rm -rf $$MYSRCDIR; \
+	cp -r . $$MYSRCDIR; \
+	tar cf $$MYSRCDIR.tar -C $$SOURCES $(PROG)-$$MYVER; \
+        gzip -f $$MYSRCDIR.tar; \
+	rpm -ba $(PROG)_aix.spec
+
 pkg:
 	PLATFORM=`uname`; \
 	MYVER=`./getVersion`; \

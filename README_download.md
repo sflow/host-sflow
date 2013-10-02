@@ -32,7 +32,7 @@ Linux
 
 Solaris
 -------
-See 1.20 release
+See 1.20 release, or build from sources
 
 FreeBSD
 -------
@@ -41,6 +41,10 @@ please build from sources
 Darwin
 ------
 please build from sources
+
+AIX
+---
+*  **AIX 7.1 ppc**: hsflowd-<version>.aix7.1.ppc.rpm 
 
 Sources
 -------
