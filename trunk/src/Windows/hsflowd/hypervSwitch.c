@@ -76,6 +76,7 @@ void readWMISwitchPorts(HSP *sp)
 	SysFreeString(queryLang);
 	if (FAILED(hr)) {
 		myLog(LOG_ERR,"readWMISwitchPorts: ExecQuery() failed for query %S error=0x%x", query, hr);
+		pNamespace->Release();
 		CoUninitialize();
 		return;
 	}

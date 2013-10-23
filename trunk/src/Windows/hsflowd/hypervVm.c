@@ -219,22 +219,23 @@ void parseKvpXml(VARIANT *vtVar, SFLHost_hid_counters *hid,
 	}
 	// loop
 	hr = SafeArrayAccessData(sa, (void HUGEP**)&pbstr);
-	if (SUCCEEDED(hr))
-	{
+	if (SUCCEEDED(hr)) {
 		for (idx=lstart; idx <= lend; idx++) {		
 			BSTR s;
 			s = pbstr[idx];
 			// s now contains the item at position idx in the array
 			//printf("***parseKvpXml: Item=%S\n", s);
 			IXmlReader *xmlReader = NULL;
-			ISequentialStream *xmlStream = NULL;
-			xmlStream = new CStringStream(s);
 			if (FAILED(hr = CreateXmlReader(__uuidof(IXmlReader), (void **)&xmlReader, NULL))) {
 				myLog(LOG_ERR, "parseKvpXml: error creating xml reader 0x%x", hr);
+				SafeArrayUnaccessData(sa);
 				return;
 			}
+			ISequentialStream *xmlStream = new CStringStream(s);
 			if (FAILED(hr = xmlReader->SetInput(xmlStream))) {
 				myLog(LOG_ERR, "parseKvpXml: Error setting input for reader 0x%x", hr);
+				delete xmlStream;
+				SafeArrayUnaccessData(sa);
 				return;
 			}
 			if (S_OK == xmlReader->Read(NULL)) {
@@ -243,9 +244,13 @@ void parseKvpXml(VARIANT *vtVar, SFLHost_hid_counters *hid,
 			if (xmlReader) {
 				xmlReader->Release();
 			}
+			delete xmlStream;
 		}
 	}
-	hr = SafeArrayUnaccessData(sa);	
+	hr = SafeArrayUnaccessData(sa);
+	if (FAILED(hr)) {
+		myLog(LOG_ERR, "parseKvpXml: Error in SafeArrayUnaccessData 0x%x", hr);
+	}
 }
 
 /**
@@ -305,6 +310,7 @@ static void readVmHidCounters(HVSVmState *state, SFLHost_hid_counters *hid,
 					parseKvpXml(&items, hid, hnamebuf, hnamebufLen, osrelbuf, osrelbufLen);
 				}
 				VariantClear(&items);
+				kvpObj->Release();
 			}
 			kvpEnum->Release();
 		}
@@ -816,7 +822,7 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 	HRESULT hr = S_FALSE;
 
 	BSTR queryLang = SysAllocString(L"WQL");
-	wchar_t *queryFormat(L"SELECT * FROM %s WHERE SystemName=\"%s\"");
+	wchar_t *queryFormat = L"SELECT * FROM %s WHERE SystemName=\"%s\"";
 	uint32_t portTypeCount = 2;
 	wchar_t *portTypes[2];
 	portTypes[0] = L"Msvm_SyntheticEthernetPort";
@@ -872,6 +878,7 @@ void readVmAdaptors(HSP *sp, IWbemServices *pNamespace, wchar_t *vmName)
 			portObj->Release();
 		}
 		portEnum->Release();
+		portEnum = NULL;
 	}
 	SysFreeString(queryLang);
 }
@@ -1021,6 +1028,9 @@ void readVms(HSP *sp)
 									biosGuidString = stringFromWMIProperty(vssdObj, PROP_BIOS_GUID);
 									noUUID = false;
 								}
+								if (vssdObj != NULL) {
+									vssdObj->Release();
+								}
 								if (biosGuidString != NULL) { 
 									char uuid[16];
 									wchexToBinary(biosGuidString, (UCHAR *)uuid, 33);
@@ -1087,8 +1097,9 @@ void readVms(HSP *sp)
 							} //settingCount != 0
 							vssdEnum->Release();
 						} //finished with vssdEnum
-					} //nmName != NULL
+					} //vmName != NULL
 					vmObj->Release();
+					vmObj = NULL;
 				} //while vmEnum->Next, assign vmObj
 				vmEnum->Release();
 				sp->num_partitions = numPartitions;				

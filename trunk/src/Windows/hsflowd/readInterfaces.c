@@ -151,7 +151,7 @@ BOOL readInterfacesMsft(SFLAdaptorList *adaptorList, BOOL getIpAddr)
 	IEnumWbemClassObject *adapterEnum = NULL;
 	hr = pNamespace->ExecQuery(queryLang, query, WBEM_FLAG_FORWARD_ONLY, NULL, &adapterEnum);
 	SysFreeString(queryLang);
-		if (!SUCCEEDED(hr)) {
+	if (!SUCCEEDED(hr)) {
 		myLog(LOG_ERR,"readInterfacesMsft: ExecQuery() failed for query %S error=0x%x", query, hr);
 		SysFreeString(query);
 		pNamespace->Release();
