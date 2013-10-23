@@ -573,7 +573,7 @@ HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace)
 		return hr;
 	}
 
-	hr =  CoInitializeSecurity(NULL,-1,NULL,NULL,RPC_C_AUTHN_LEVEL_DEFAULT,RPC_C_IMP_LEVEL_IMPERSONATE,NULL,EOAC_NONE,NULL);
+	hr = CoInitializeSecurity(NULL,-1,NULL,NULL,RPC_C_AUTHN_LEVEL_DEFAULT,RPC_C_IMP_LEVEL_IMPERSONATE,NULL,EOAC_NONE,NULL);
 	hr = CoCreateInstance(CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLocator );
 	if (!SUCCEEDED(hr)) {
 		myLog(LOG_ERR,"connectToWMI: failed to create WMI instance");
@@ -614,6 +614,7 @@ HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj,
 	swprintf_s(query, length, formatString, path.bstrVal, assocClass, resultClass, resultRole);
 	hr = pNamespace->ExecQuery(L"WQL", query, WBEM_FLAG_FORWARD_ONLY, NULL, resultEnum);
 	my_free(query);
+	VariantClear(&path);
 	return hr;
 }
 
