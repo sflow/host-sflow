@@ -315,7 +315,6 @@ static void readVmHidCounters(HVSVmState *state, SFLHost_hid_counters *hid,
 			kvpEnum->Release();
 		}
 		pNamespace->Release();
-		CoUninitialize();
 		SysFreeString(queryLang);
 	}
 	//now fill in the rest...
@@ -1105,7 +1104,6 @@ void readVms(HSP *sp)
 				sp->num_partitions = numPartitions;				
 			} //done with vmEnum
 			pNamespace->Release();
-			CoUninitialize();
 			SysFreeString(queryLang);
 		} //done with connection to WMI
 

@@ -103,7 +103,6 @@ BOOL readSystemUUID(u_char *uuidbuf){
 			smbiosObj->Release();
 		}
 	}
-	CoUninitialize();
 	return gotData;
 }
 
