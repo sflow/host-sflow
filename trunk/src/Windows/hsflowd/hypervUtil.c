@@ -58,7 +58,6 @@ BOOL testForHyperv()
 		serviceEnum->Release();
 		pNamespace->Release();
 		if (gotHyperVSvc) { //now check that we have the v2 virtualization namespace
-			CoUninitialize();
 			path = SysAllocString(WMI_VIRTUALIZATION_NS_V2);
 			hr = connectToWMI(path, &pNamespace);
 			SysFreeString(path);
@@ -67,7 +66,6 @@ BOOL testForHyperv()
 				wmiVirtNsVer = 2;
 				pNamespace->Release();
 			} else {
-				CoUninitialize();
 				path = SysAllocString(WMI_VIRTUALIZATION_NS_V1);
 				hr = connectToWMI(path, &pNamespace);
 				SysFreeString(path);
@@ -82,7 +80,6 @@ BOOL testForHyperv()
 			}
 		}
 	}
-	CoUninitialize();
 	myLog(LOG_INFO, "testForHyperv: HyperV=%u wmiVirtNsVer=%u", gotHyperV, wmiVirtNsVer);
 	return gotHyperV;
 }

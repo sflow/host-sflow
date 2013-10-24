@@ -102,6 +102,7 @@ void wcsArrayFree(WcsArray *wcsArray);
 uint32_t wcsArrayIndexOf(WcsArray *wcsArray, wchar_t *str);
 
 //WMI functions
+HRESULT initCom();
 HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace);
 HRESULT associatorsOf(IWbemServices *pNamespace, IWbemClassObject *classObj, 
 					   wchar_t *assocClass, wchar_t *endClass, wchar_t *resultRole,

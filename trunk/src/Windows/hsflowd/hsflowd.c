@@ -593,6 +593,17 @@ void ServiceMain(int argc, char** argv)
 	myLog(debug, "-------------Starting %s %s--------------", HSP_SERVICE_NAME, HSP_VERSION);
 	fflush(logFile);
 
+	HRESULT initComHr = initCom();
+	if (FAILED(initComHr)) {
+		myLog(LOG_ERR, "%s.ServiceMain: cannot initialize COM for WMI error=0x%x", HSP_SERVICE_NAME, initComHr);
+		if (hStatus != 0) {
+			ServiceStatus.dwCurrentState = SERVICE_STOPPED;
+			ServiceStatus.dwWin32ExitCode = ERROR_APP_INIT_FAILURE;
+			SetServiceStatus(hStatus, &ServiceStatus);
+		}
+		return;
+	}
+
 	HSP sp = { 0 };
 	sp.DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
 	sp.DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;

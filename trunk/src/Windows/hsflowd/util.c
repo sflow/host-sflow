@@ -557,7 +557,46 @@ BOOL guidToString(wchar_t *guid, u_char *guidStr, int guidStrLen)
 */
 
 /**
+ * Initializes the COM library for the calling thread. Initialized
+ * for multi-threaded object concurrency. Registers the security
+ * policy and sets the security values for the process:
+ * authLevel = default
+ * impLevel = impersonate (client security context)
+ * authList = EOAC_NONE
+ * If initializing COM succeeds but registering the security policy
+ * fails, COM is uninitialized before returning.
+ * Returns HRESULT indicating success or failure.
+ */
+HRESULT initCom()
+{
+	HRESULT hr = S_FALSE;
+	hr =  CoInitializeEx(0, COINIT_MULTITHREADED);
+	if (FAILED(hr)) {
+		myLog(LOG_ERR,"initCom: failed to initialize COM 0x%x", hr);
+		CoUninitialize();
+		return hr;
+	}	
+	hr = CoInitializeSecurity(
+		NULL, 
+		-1, 
+		NULL, 
+		NULL, 
+		RPC_C_AUTHN_LEVEL_DEFAULT,
+		RPC_C_IMP_LEVEL_IMPERSONATE,
+		NULL,
+		EOAC_NONE,
+		NULL);
+	if (FAILED(hr)) {
+		myLog(LOG_ERR, "initCom: failed to initialize COM security 0x%x", hr);
+		CoUninitialize();
+	}
+	return hr;
+}
+
+/**
  * Connect to WMI using the specified path to the name space.
+ * Assumes that COM library is already loaded and initialized
+ * (see initCom).
  * BSTR path containing path to the name space.
  * IWbemServices *pNamespace  pointer successfully connected to.
  * Returns HRESULT indicating success or not.
@@ -566,18 +605,9 @@ HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace)
 {
 	HRESULT hr = S_FALSE;
 	IWbemLocator *pLocator = NULL;
-	hr =  CoInitializeEx(0, COINIT_MULTITHREADED);
-	if (!SUCCEEDED(hr)) {
-		myLog(LOG_ERR,"connectToWMI failed to initialize COM");
-		CoUninitialize();
-		return hr;
-	}
-
-	hr = CoInitializeSecurity(NULL,-1,NULL,NULL,RPC_C_AUTHN_LEVEL_DEFAULT,RPC_C_IMP_LEVEL_IMPERSONATE,NULL,EOAC_NONE,NULL);
 	hr = CoCreateInstance(CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER, IID_IWbemLocator, (LPVOID *)&pLocator );
 	if (!SUCCEEDED(hr)) {
 		myLog(LOG_ERR,"connectToWMI: failed to create WMI instance");
-		CoUninitialize();
 		return hr;
 	}
 
@@ -585,7 +615,6 @@ HRESULT connectToWMI(BSTR path, IWbemServices **pNamespace)
 	pLocator->Release();
 	if (WBEM_S_NO_ERROR != hr) {
 		myLog(LOG_INFO,"connectToWMI: ConnectServer() failed for namespace %S", path);
-		CoUninitialize();
 	}
 	return hr;
 }

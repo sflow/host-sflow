@@ -155,7 +155,6 @@ BOOL readInterfacesMsft(SFLAdaptorList *adaptorList, BOOL getIpAddr)
 		myLog(LOG_ERR,"readInterfacesMsft: ExecQuery() failed for query %S error=0x%x", query, hr);
 		SysFreeString(query);
 		pNamespace->Release();
-		CoUninitialize();
 		return FALSE;
 	}
 	SysFreeString(query);
@@ -217,7 +216,6 @@ BOOL readInterfacesMsft(SFLAdaptorList *adaptorList, BOOL getIpAddr)
 	}
 	adapterEnum->Release();
 	pNamespace->Release();
-	CoUninitialize();
 	return TRUE;
 }
 
@@ -302,7 +300,6 @@ static BOOL readInterfacesWin32(SFLAdaptorList *adaptorList, BOOL getIpAddr)
 		myLog(LOG_ERR,"readInterfacesWin32: ExecQuery() failed for query %S error=0x%x", query, hr);
 		SysFreeString(query);
 		pNamespace->Release();
-		CoUninitialize();
 		return FALSE;
 	}
 	SysFreeString(query);
@@ -363,7 +360,6 @@ static BOOL readInterfacesWin32(SFLAdaptorList *adaptorList, BOOL getIpAddr)
 	}
 	adapterEnum->Release();
 	pNamespace->Release();
-	CoUninitialize();
 	return TRUE;
 }
 
