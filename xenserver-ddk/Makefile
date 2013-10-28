@@ -30,12 +30,12 @@ RPM_FILES := $(patsubst %, $(RPMROOT)/RPMS/$(ARCH)/%.$(ARCH).rpm, $(RPMS))
 build-iso: build-rpms
 	mkdir -p $(PACKAGE)
 	cp -fp $(RPM_FILES) $(PACKAGE)
-	cd $(PACKAGE) && /usr/local/bin/build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) $(patsubst %, %.$(ARCH).rpm, $(RPMS))
+	cd $(PACKAGE) && build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) $(patsubst %, %.$(ARCH).rpm, $(RPMS))
 
 build-tarball: build-rpms
 	mkdir -p $(PACKAGE)
 	cp -fp $(RPM_FILES) $(PACKAGE)
-	cd $(PACKAGE) && /usr/local/bin/build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) --no-iso --tarball $(patsubst %, %.$(ARCH).rpm, $(RPMS))
+	cd $(PACKAGE) && build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) --no-iso --tarball $(patsubst %, %.$(ARCH).rpm, $(RPMS))
 
 build-rpms:
 	rpmbuild -bb --define "version $(RPM_VERSION)" --define "release $(RPM_RELEASE)" $(SPEC)
