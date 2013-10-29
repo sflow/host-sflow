@@ -1018,8 +1018,6 @@ extern "C" {
 	      if(state) {
 		// it was already there, just clear the mark.
 		state->marked = NO;
-		// and reset the information that we are about to refresh
-		strArrayReset(state->volumes);
 	      }
 	      else {
 		// new one - tell it what to do.
@@ -1050,6 +1048,7 @@ extern "C" {
 		// and the domId, which might have changed (if vm rebooted)
 		state->domId = domId;
 		// pick up the list of block device numbers
+		strArrayReset(state->volumes);
 		if(sp->sFlow->sFlowSettings_file->xen_dsk) {
 		  xen_collect_block_devices(sp, state);
 		}
