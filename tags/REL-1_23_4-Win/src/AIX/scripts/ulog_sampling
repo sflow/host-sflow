@@ -1,0 +1,6 @@
+#!/bin/bash
+MOD_STATISTIC="-m statistic --mode random --probability 0.01"
+#NFLOG_SAMPLING="--nflog-group 5 --nflog-prefix SFLOW --nflog-threshold 4"
+ULOG_SAMPLING="--ulog-nlgroup 5 --ulog-prefix SFLOW --ulog-qthreshold 4"
+iptables -I INPUT -j ULOG $MOD_STATISTIC $ULOG_SAMPLING
+iptables -I OUTPUT -j ULOG $MOD_STATISTIC $ULOG_SAMPLING
