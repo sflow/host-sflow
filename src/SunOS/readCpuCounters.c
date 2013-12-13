@@ -129,17 +129,20 @@ extern "C" {
 	myLog(LOG_ERR, "kstat_read error (module: %s, name: %s, class: %s)",
 	      ksp->ks_module, ksp->ks_name, ksp->ks_class);
       } else {
+	// kstat load-averages are expressed in fixed-point, so we must
+	// divide by 256.0 to get to the correct float value.  Thanks
+	// to David Johnson for pointing this out.
 	// load_one
 	knp = kstat_data_lookup(ksp, "avenrun_1min");
-	cpu->load_one = (float)knp->value.ui32;
+	cpu->load_one = ((float)knp->value.ui32) / 256.0;
 
 	// load_five
 	knp = kstat_data_lookup(ksp, "avenrun_5min");
-	cpu->load_five = (float)knp->value.ui32;
+	cpu->load_five = ((float)knp->value.ui32) / 256.0;
 
 	// load_fifteen
 	knp = kstat_data_lookup(ksp, "avenrun_15min");
-	cpu->load_fifteen = (float)knp->value.ui32;
+	cpu->load_fifteen = ((float)knp->value.ui32) / 256.0;
 
 	// proc_total
 	knp = kstat_data_lookup(ksp, "nproc");
