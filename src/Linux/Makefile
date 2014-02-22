@@ -112,6 +112,11 @@ ifeq ($(NVML),yes)
 	LIBS += -lnvidia-ml
 endif
 
+# set ETHTOOL_STATS=yes to enable the use of ethtool for discerning interface counter details
+ifeq ($(ETHTOOL_STATS),yes)
+	CFLAGS += -DHSP_ETHTOOL_STATS
+endif
+
 # detect Debian systems
 ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)

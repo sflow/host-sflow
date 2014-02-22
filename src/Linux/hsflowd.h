@@ -71,7 +71,8 @@ extern "C" {
 #define HSP_MAX_ULOG_MSG_BYTES 10000
 #define HSP_READPACKET_BATCH 100
 #define HSP_ULOG_RCV_BUF 2000000
-#define HSP_ETHTOOL_STATS 1
+// let Makefile determine whether to set HSP_ETHTOOL_STATS
+// #define HSP_ETHTOOL_STATS 1
 #define HSP_SWITCHPORT_REGEX "^swp[0-9]+$"
 #endif /* HSF_ULOG */
 
