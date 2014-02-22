@@ -440,12 +440,15 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  static int parseOrResolveAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family, int numeric)
   {
     struct addrinfo *info = NULL;
     struct addrinfo hints = { 0 };
     hints.ai_socktype = SOCK_DGRAM; // constrain this so we don't get lots of answers
     hints.ai_family = family; // PF_INET, PF_INET6 or 0
+    if(numeric) {
+      hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+    }
     int err = getaddrinfo(name, NULL, &hints, &info);
     if(err) {
       if(debug) myLog(LOG_INFO, "getaddrinfo() failed: %s", gai_strerror(err));
@@ -491,6 +494,16 @@ extern "C" {
     // free the dynamically allocated data before returning
     freeaddrinfo(info);
     return YES;
+  }
+
+  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  {
+    return parseOrResolveAddress(name, sa, addr, family, NO);
+  }
+
+  int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  {
+    return parseOrResolveAddress(name, sa, addr, family, YES);
   }
 
   /*________________---------------------------__________________
@@ -1007,6 +1020,16 @@ extern "C" {
 
     return YES;
   }
+
+  int isZeroMAC(SFLMacAddress *mac) {
+    return (mac->mac[0] == 0
+	    && mac->mac[1] == 0
+	    && mac->mac[2] == 0
+	    && mac->mac[3] == 0
+	    && mac->mac[4] == 0
+	    && mac->mac[5] == 0);
+  }
+
 
 #if defined(__cplusplus)
 }  /* extern "C" */
