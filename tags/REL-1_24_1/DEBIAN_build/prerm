@@ -1,3 +1,0 @@
-#!/bin/bash
-update-rc.d -f hsflowd remove
-update-rc.d -f sflowovsd remove
