@@ -1,7 +1,7 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
-HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
+HEADERS= hsflowd.h hsflowtokens.h hsflow_ethtool.h sflowovsd.h Makefile
 
 # compiler
 #CC= g++

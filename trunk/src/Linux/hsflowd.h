@@ -67,9 +67,12 @@ extern "C" {
 #include <linux/netlink.h>
 #include <net/if.h>
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
+#include "regex.h" // for switchport detection
 #define HSP_MAX_ULOG_MSG_BYTES 10000
 #define HSP_READPACKET_BATCH 100
 #define HSP_ULOG_RCV_BUF 2000000
+#define HSP_ETHTOOL_STATS 1
+#define HSP_SWITCHPORT_REGEX "^swp[0-9]+$"
 #endif /* HSF_ULOG */
 
 #ifdef HSF_JSON
@@ -154,6 +157,9 @@ extern "C" {
 // adaptor takes 16 bytes, so this sets the limit for the adaptorList
 // structure to 516 bytes (see sflow_receiver.c)
 #define HSP_MAX_VIFS 32
+// similar constraint on the number of adaptors that we will
+// list for a physical host
+#define HSP_MAX_PHYSICAL_ADAPTORS 32
 
   // forward declarations
   struct _HSPSFlow;
@@ -284,12 +290,24 @@ extern "C" {
 		 IPSP_NUM_PRIORITIES,
   } EnumIPSelectionPriority;
 
+#ifdef HSP_ETHTOOL_STATS
+  typedef struct _HSP_ethtool_counters {
+    uint64_t mcasts_in;
+    uint64_t mcasts_out;
+    uint64_t bcasts_in;
+    uint64_t bcasts_out;
+  } HSP_ethtool_counters;
+#endif
+
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
     uint32_t /*EnumIPSelectionPriority*/ ipPriority;
-    int32_t loopback;
-    int32_t bond_master;
+    int32_t up:1;
+    int32_t loopback:1;
+    int32_t bond_master:1;
+    int32_t bond_slave:1;
+    int32_t switchPort:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -299,6 +317,24 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
+#ifdef HSP_ETHTOOL_STATS
+    uint32_t et_nctrs; // how many in total
+    uint32_t et_nfound; // how many of the ones we wanted
+    // the offsets within the ethtool stats block
+    uint8_t et_idx_mcasts_in;
+    uint8_t et_idx_mcasts_out;
+    uint8_t et_idx_bcasts_in;
+    uint8_t et_idx_bcasts_out;
+    // latched counter for delta calculation
+    HSP_ethtool_counters et_last;
+    HSP_ethtool_counters et_total;
+#endif
+    SFLLACP_counters lacp;
+    // switch ports that are sending individual interface
+    // counters will keep a pointer to their sflow poller.
+    SFLPoller *poller;
+    // and those sending packet-samples will have a sampler.
+    SFLSampler *sampler;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -395,6 +431,10 @@ extern "C" {
     struct sockaddr_nl ulog_bind;
     struct sockaddr_nl ulog_peer;
 #endif
+#ifdef HSP_SWITCHPORT_REGEX
+    regex_t swp_regex;
+#endif
+
 #ifdef HSF_JSON
     int json_soc;
     int json_soc6;
@@ -436,9 +476,13 @@ extern "C" {
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
   HSPAdaptorNIO *getAdaptorNIO(SFLAdaptorList *adaptorList, char *deviceName);
+  void updateBondCounters(HSP *sp, SFLAdaptor *bond);
+  void readBondState(HSP *sp);
+  void syncBondPolling(HSP *sp);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int readPackets(HSP *sp);
+  int configSwitchPorts(HSP *sp);
   int readJSON(HSP *sp, int soc);
   void json_app_timeout_check(HSP *sp);
 

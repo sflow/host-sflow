@@ -79,6 +79,14 @@ void sfl_poller_set_sFlowCpInterval(SFLPoller *poller, uint32_t sFlowCpInterval)
   poller->countersCountdown = sfl_random(sFlowCpInterval);
 }
 
+void sfl_poller_synchronize_polling(SFLPoller *poller, SFLPoller *master) {
+  /* This can be used if there is a reason to make pollers report at about the same
+     time,  such as if they are in a LAG relationship */
+  if(master->countersCountdown) {
+    poller->countersCountdown = master->countersCountdown;
+  }
+}
+
 /*_________________---------------------------------__________________
   _________________   sequence number reset         __________________
   -----------------_________________________________------------------

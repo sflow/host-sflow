@@ -264,24 +264,25 @@ char *      sfl_receiver_get_sFlowRcvrOwner(SFLReceiver *receiver);
 void        sfl_receiver_set_sFlowRcvrOwner(SFLReceiver *receiver, char *sFlowRcvrOwner);
 time_t      sfl_receiver_get_sFlowRcvrTimeout(SFLReceiver *receiver);
 void        sfl_receiver_set_sFlowRcvrTimeout(SFLReceiver *receiver, time_t sFlowRcvrTimeout);
-uint32_t   sfl_receiver_get_sFlowRcvrMaximumDatagramSize(SFLReceiver *receiver);
+uint32_t    sfl_receiver_get_sFlowRcvrMaximumDatagramSize(SFLReceiver *receiver);
 void        sfl_receiver_set_sFlowRcvrMaximumDatagramSize(SFLReceiver *receiver, uint32_t sFlowRcvrMaximumDatagramSize);
 SFLAddress *sfl_receiver_get_sFlowRcvrAddress(SFLReceiver *receiver);
 void        sfl_receiver_set_sFlowRcvrAddress(SFLReceiver *receiver, SFLAddress *sFlowRcvrAddress);
-uint32_t   sfl_receiver_get_sFlowRcvrPort(SFLReceiver *receiver);
+uint32_t    sfl_receiver_get_sFlowRcvrPort(SFLReceiver *receiver);
 void        sfl_receiver_set_sFlowRcvrPort(SFLReceiver *receiver, uint32_t sFlowRcvrPort);
 /* sampler */
 uint32_t sfl_sampler_get_sFlowFsReceiver(SFLSampler *sampler);
-void      sfl_sampler_set_sFlowFsReceiver(SFLSampler *sampler, uint32_t sFlowFsReceiver);
+void     sfl_sampler_set_sFlowFsReceiver(SFLSampler *sampler, uint32_t sFlowFsReceiver);
 uint32_t sfl_sampler_get_sFlowFsPacketSamplingRate(SFLSampler *sampler);
-void      sfl_sampler_set_sFlowFsPacketSamplingRate(SFLSampler *sampler, uint32_t sFlowFsPacketSamplingRate);
+void     sfl_sampler_set_sFlowFsPacketSamplingRate(SFLSampler *sampler, uint32_t sFlowFsPacketSamplingRate);
 uint32_t sfl_sampler_get_sFlowFsMaximumHeaderSize(SFLSampler *sampler);
-void      sfl_sampler_set_sFlowFsMaximumHeaderSize(SFLSampler *sampler, uint32_t sFlowFsMaximumHeaderSize);
+void     sfl_sampler_set_sFlowFsMaximumHeaderSize(SFLSampler *sampler, uint32_t sFlowFsMaximumHeaderSize);
 /* poller */
 uint32_t sfl_poller_get_sFlowCpReceiver(SFLPoller *poller);
-void      sfl_poller_set_sFlowCpReceiver(SFLPoller *poller, uint32_t sFlowCpReceiver);
+void     sfl_poller_set_sFlowCpReceiver(SFLPoller *poller, uint32_t sFlowCpReceiver);
 uint32_t sfl_poller_get_sFlowCpInterval(SFLPoller *poller);
-void      sfl_poller_set_sFlowCpInterval(SFLPoller *poller, uint32_t sFlowCpInterval);
+void     sfl_poller_set_sFlowCpInterval(SFLPoller *poller, uint32_t sFlowCpInterval);
+void     sfl_poller_synchronize_polling(SFLPoller *poller, SFLPoller *master);
 
 /* call this to indicate a discontinuity with a counter like samplePool so that the
    sflow collector will ignore the next delta */

@@ -198,63 +198,68 @@ extern "C" {
 
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      uint32_t vif_domid=0;
-      uint32_t vif_netid=0;
-      uint32_t xapi_index=0;
-      int isVirtual = NO;
+      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+      if(niostate->up
+	 && (niostate->switchPort == NO)
+	 && myAdaptors->num_adaptors < HSP_MAX_VIFS) {
+	uint32_t vif_domid=0;
+	uint32_t vif_netid=0;
+	uint32_t xapi_index=0;
+	int isVirtual = NO;
 #ifdef HSF_XEN_VIF_REGEX
-      // we could move this regex extraction to the point where we first learn the adaptor->name and
-      // store it wit the adaptor user-data.  Then we wouldn't have to do it so often.  It might get
-      // expensive on a system with a large number of VMs.
-      if(regexec(&sp->vif_regex, adaptor->deviceName, HSF_XEN_VIF_REGEX_NMATCH, sp->vif_match, 0) == 0) {
-	long ifield1 = regmatch_as_long(&sp->vif_match[1], adaptor->deviceName);
-	long ifield2 = regmatch_as_long(&sp->vif_match[2], adaptor->deviceName);
-	if(ifield1 == -1 || ifield2 == -1) {
-	  myLog(LOG_ERR, "failed to parse domId and netId from vif name <%s>", adaptor->deviceName);
+	// we could move this regex extraction to the point where we first learn the adaptor->name and
+	// store it wit the adaptor user-data.  Then we wouldn't have to do it so often.  It might get
+	// expensive on a system with a large number of VMs.
+	if(regexec(&sp->vif_regex, adaptor->deviceName, HSF_XEN_VIF_REGEX_NMATCH, sp->vif_match, 0) == 0) {
+	  long ifield1 = regmatch_as_long(&sp->vif_match[1], adaptor->deviceName);
+	  long ifield2 = regmatch_as_long(&sp->vif_match[2], adaptor->deviceName);
+	  if(ifield1 == -1 || ifield2 == -1) {
+	    myLog(LOG_ERR, "failed to parse domId and netId from vif name <%s>", adaptor->deviceName);
+	  }
+	  else {
+	    vif_domid = (uint32_t)ifield1;
+	    vif_netid = (uint32_t)ifield2;
+	    isVirtual = YES;
+	  }
 	}
-	else {
-	  vif_domid = (uint32_t)ifield1;
-	  vif_netid = (uint32_t)ifield2;
-	  isVirtual = YES;
-	}
-      }
 #else
-      isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
+	isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
 #endif
-
-      int isXapi = (sscanf(adaptor->deviceName, "xapi%"SCNu32, &xapi_index) == 1);
-      if(debug > 3) {
-	myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32") (xapi=%s, index=%"PRIu32")",
-	      adaptor->deviceName,
-	      isVirtual ? "YES" : "NO",
-	      vif_domid,
-	      vif_netid,
-	      isXapi ? "YES" : "NO",
-	      xapi_index);
-      }
-      if((isVirtual && dom_id == vif_domid) ||
-	 (!isVirtual && !isXapi && dom_id == XEN_DOMID_PHYSICAL)) {
-	// include this one (if we have room)
-	if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
-	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
-	  if(isVirtual) {
-	    // for virtual interfaces we need to query for the MAC address
-	    char macQuery[256];
-	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
-	    if(macStr == NULL) {
-	      myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
-	    }
-	    else{
-	      if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
-	      // got it - but make sure there is a place to write it
-	      if(adaptor->num_macs > 0) {
-		// OK, just overwrite the 'dummy' one that was there
-		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
-		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
-		}
+	
+	int isXapi = (sscanf(adaptor->deviceName, "xapi%"SCNu32, &xapi_index) == 1);
+	if(debug > 3) {
+	  myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32") (xapi=%s, index=%"PRIu32")",
+		adaptor->deviceName,
+		isVirtual ? "YES" : "NO",
+		vif_domid,
+		vif_netid,
+		isXapi ? "YES" : "NO",
+		xapi_index);
+	}
+	if((isVirtual && dom_id == vif_domid) ||
+	   (!isVirtual && !isXapi && dom_id == XEN_DOMID_PHYSICAL)) {
+	  // include this one (if we have room)
+	  if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
+	    myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
+	    if(isVirtual) {
+	      // for virtual interfaces we need to query for the MAC address
+	      char macQuery[256];
+	      snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
+	      char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
+	      if(macStr == NULL) {
+		myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
 	      }
-	      free(macStr); // allocated by xs_read()
+	      else{
+		if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
+		// got it - but make sure there is a place to write it
+		if(adaptor->num_macs > 0) {
+		  // OK, just overwrite the 'dummy' one that was there
+		  if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
+		    myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
+		  }
+		}
+		free(macStr); // allocated by xs_read()
+	      }
 	    }
 	  }
 	}
@@ -264,6 +269,36 @@ extern "C" {
   }
 
 #endif
+
+#ifdef HSP_SWITCHPORT_REGEX
+  static int compile_swp_regex(HSP *sp) {
+    int err = regcomp(&sp->swp_regex, HSP_SWITCHPORT_REGEX, REG_EXTENDED | REG_NOSUB | REG_NEWLINE);
+    if(err) {
+      char errbuf[101];
+      myLog(LOG_ERR, "regcomp(%s) failed: %s", HSP_SWITCHPORT_REGEX, regerror(err, &sp->swp_regex, errbuf, 100));
+      return NO;
+    }
+    return YES;
+  }
+#endif
+  
+  static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors)
+  {
+    // build the list of adaptors that are up and have non-empty MACs,
+    // but stop if we hit the HSP_MAX_PHYSICAL_ADAPTORS limit
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+      if(niostate->up
+	 && (niostate->switchPort == NO)
+	 && myAdaptors->num_adaptors < HSP_MAX_PHYSICAL_ADAPTORS
+	 && adaptor->macs
+	 && !isZeroMAC(&adaptor->macs[0])) {
+	myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
+      }
+    }
+    return myAdaptors;
+  }
 
   void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
@@ -321,18 +356,27 @@ extern "C" {
     // include the adaptor list
     SFLCounters_sample_element adaptorsElem = { 0 };
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-    adaptorsElem.counterBlock.adaptors = sp->adaptorList;
+#ifdef HSF_XEN
+    // collect list of host adaptors that do not belong to VMs
+    SFLAdaptorList myAdaptors;
+    SFLAdaptor *adaptors[HSP_MAX_VIFS];
+    myAdaptors.adaptors = adaptors;
+    myAdaptors.capacity = HSP_MAX_VIFS;
+    myAdaptors.num_adaptors = 0;
+    adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, XEN_DOMID_PHYSICAL, &myAdaptors);
+#else
+    // collect list of host adaptors that are up, and have non-zero MACs
+    SFLAdaptorList myAdaptors;
+    SFLAdaptor *adaptors[HSP_MAX_VIFS];
+    myAdaptors.adaptors = adaptors;
+    myAdaptors.capacity = HSP_MAX_PHYSICAL_ADAPTORS;
+    myAdaptors.num_adaptors = 0;
+    adaptorsElem.counterBlock.adaptors = host_adaptors(sp, &myAdaptors);
+#endif
+    // TODO: what about KVM/libvirt
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
 #ifdef HSF_XEN
-    // replace the adaptorList with a filtered version of the same
-      SFLAdaptorList myAdaptors;
-      SFLAdaptor *adaptors[HSP_MAX_VIFS];
-      myAdaptors.adaptors = adaptors;
-      myAdaptors.capacity = HSP_MAX_VIFS;
-      myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, XEN_DOMID_PHYSICAL, &myAdaptors);
-
     // hypervisor node stats
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
@@ -1249,6 +1293,9 @@ extern "C" {
       // selection has not changed -- we really should be willing
       // to adapt to a new agent-address selection without requiring
       // a restart. $$$
+#ifdef HSP_SWITCHPORT_REGEX
+      configSwitchPorts(sp); // in readPackets.c
+#endif
     }
 
 #ifdef HSF_JSON
@@ -2188,7 +2235,13 @@ extern "C" {
 			  sp->os_release,
 			  SFL_MAX_OSRELEASE_CHARS);
 	}
-
+	
+#ifdef HSP_SWITCHPORT_REGEX
+	if(compile_swp_regex(sp) == NO) {
+	  myLog(LOG_ERR, "failed to compile switchPort regex\n");
+	  exit(EXIT_FAILURE);
+	}
+#endif
 	// a sucessful read of the config file is required
 	if(HSPReadConfigFile(sp) == NO) {
 	  myLog(LOG_ERR, "failed to read config file\n");
@@ -2268,6 +2321,13 @@ extern "C" {
 		drop_privileges(HSP_RLIMIT_MEMLOCK);
 	      }
 
+#ifdef HSP_SWITCHPORT_REGEX
+	      // now that interfaces have been read and sflow agent is
+	      // initialized, check to see if we should be exporting
+	      // individual counter data for switch port interfaces.
+	      configSwitchPorts(sp); // in readPackets.c
+#endif
+
 #ifdef HSF_XEN
 	      if(compile_vif_regex(sp) == NO) {
 		exit(EXIT_FAILURE);
@@ -2314,6 +2374,9 @@ extern "C" {
 		    sfl_poller_set_sFlowCpInterval(pl, piv);
 		  }
 		  sp->previousPollingInterval = piv;
+		  // make sure slave ports are on the same
+		  // polling schedule as their bond master.
+		  syncBondPolling(sp);
 		}
 		// clock-tick
 		tick(sp);

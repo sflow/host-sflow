@@ -36,6 +36,27 @@ extern "C" {
 	// make sure the counters are up to the second
 	updateNioCounters(sp);
 	
+	// see if we were able to discern multicast and broadcast counters
+	// by polling for ethtool stats.  Be careful to use unsigned 32-bit
+	// arithmetic here:
+#define UNSUPPORTED_SFLOW_COUNTER32 (uint32_t)-1
+	uint32_t pkts_in = adaptorNIO->nio.pkts_in;
+	uint32_t pkts_out = adaptorNIO->nio.pkts_out;
+	uint32_t mcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
+	uint32_t mcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
+	uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
+	uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
+	// only do this if we were able to find all four
+	// via ethtool, otherwise it would just be too weird...
+	if(adaptorNIO->et_nfound == 4) {
+	  mcasts_in = (uint32_t)adaptorNIO->et_total.mcasts_in;
+	  bcasts_in = (uint32_t)adaptorNIO->et_total.bcasts_in;
+	  pkts_in -= (mcasts_in + bcasts_in);
+	  mcasts_out = (uint32_t)adaptorNIO->et_total.mcasts_out;
+	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
+	  pkts_out -= (mcasts_out + bcasts_out);
+	}
+	
 	// generic interface counters
 	SFLCounters_sample_element elem = { 0 };
 	elem.tag = SFLCOUNTERS_GENERIC;
@@ -43,26 +64,71 @@ extern "C" {
 	elem.counterBlock.generic.ifType = 6; // assume ethernet
 	elem.counterBlock.generic.ifSpeed = adaptor->ifSpeed;
 	elem.counterBlock.generic.ifDirection = adaptor->ifDirection;
-	elem.counterBlock.generic.ifStatus = 3; // ifAdminStatus==up, ifOperstatus==up
+	elem.counterBlock.generic.ifStatus = adaptorNIO->up ? (SFLSTATUS_ADMIN_UP | SFLSTATUS_OPER_UP) : 0;
 	elem.counterBlock.generic.ifPromiscuousMode = adaptor->promiscuous;
 	elem.counterBlock.generic.ifInOctets = adaptorNIO->nio.bytes_in;
-	elem.counterBlock.generic.ifInUcastPkts = adaptorNIO->nio.pkts_in;
-#define UNSUPPORTED_SFLOW_COUNTER32 (uint32_t)-1
-	elem.counterBlock.generic.ifInMulticastPkts = UNSUPPORTED_SFLOW_COUNTER32;
-	elem.counterBlock.generic.ifInBroadcastPkts = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifInUcastPkts = pkts_in;
+	elem.counterBlock.generic.ifInMulticastPkts = mcasts_in;
+	elem.counterBlock.generic.ifInBroadcastPkts = bcasts_in;
 	elem.counterBlock.generic.ifInDiscards = adaptorNIO->nio.drops_in;
 	elem.counterBlock.generic.ifInErrors = adaptorNIO->nio.errs_in;
 	elem.counterBlock.generic.ifInUnknownProtos = UNSUPPORTED_SFLOW_COUNTER32;
 	elem.counterBlock.generic.ifOutOctets = adaptorNIO->nio.bytes_out;
-	elem.counterBlock.generic.ifOutUcastPkts = adaptorNIO->nio.pkts_out;
-	elem.counterBlock.generic.ifOutMulticastPkts = UNSUPPORTED_SFLOW_COUNTER32;
-	elem.counterBlock.generic.ifOutBroadcastPkts = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifOutUcastPkts = pkts_out;
+	elem.counterBlock.generic.ifOutMulticastPkts = mcasts_out;
+	elem.counterBlock.generic.ifOutBroadcastPkts = bcasts_out;
 	elem.counterBlock.generic.ifOutDiscards = adaptorNIO->nio.drops_out;
 	elem.counterBlock.generic.ifOutErrors = adaptorNIO->nio.errs_out;
 	SFLADD_ELEMENT(cs, &elem);
+
+	// add optional interface name struct
+	SFLCounters_sample_element pn_elem = { 0 };
+	pn_elem.tag = SFLCOUNTERS_PORTNAME;
+	pn_elem.counterBlock.portName.portName.len = my_strlen(devName);
+	pn_elem.counterBlock.portName.portName.str = devName;
+	SFLADD_ELEMENT(cs, &pn_elem);
+
+	// possibly include LACP struct for bond master or slave
+	SFLCounters_sample_element lacp_elem = { 0 };
+	if(adaptorNIO->bond_master
+	   || adaptorNIO->bond_slave) {
+	  updateBondCounters(sp, adaptor);
+	  lacp_elem.tag = SFLCOUNTERS_LACP;
+	  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
+	  SFLADD_ELEMENT(cs, &lacp_elem);
+	}
 	sfl_poller_writeCountersSample(poller, cs);
       }
     }
+  }
+
+  /*_________________---------------------------__________________
+    _________________       getPoller           __________________
+    -----------------___________________________------------------
+  */
+
+  static SFLPoller *getPoller(HSP *sp, SFLAdaptor *adaptor)
+  {
+    HSPAdaptorNIO *adaptorNIO=(HSPAdaptorNIO *)adaptor->userData;
+    if(adaptorNIO) {
+      if(adaptorNIO->poller == NULL) {
+	SFLDataSource_instance dsi;
+	SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
+	HSPSFlow *sf = sp->sFlow;
+	uint32_t pollingInterval = sf->sFlowSettings ?
+	  sf->sFlowSettings->pollingInterval :
+	  SFL_DEFAULT_POLLING_INTERVAL;
+	adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
+	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
+	sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
+	// remember the device name to make the lookups easier later.
+	// Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
+	// in case it gets freed at some point.  The device name is enough.
+	adaptorNIO->poller->userData = (void *)my_strdup(adaptor->deviceName);
+      }
+      return adaptorNIO->poller;
+    }
+    return NULL;
   }
 
   /*_________________---------------------------__________________
@@ -70,32 +136,25 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static SFLSampler *getSampler(HSP *sp, char *devName, uint32_t ifIndex)
+  static SFLSampler *getSampler(HSP *sp, SFLAdaptor *adaptor)
   {
-    SFLSampler *sampler = sfl_agent_getSamplerByIfIndex(sp->sFlow->agent, ifIndex);
-    if(sampler == NULL) {
-      SFLDataSource_instance dsi;
-      SFL_DS_SET(dsi, 0, ifIndex, 0); // ds_class,ds_index,ds_instance
-      HSPSFlow *sf = sp->sFlow;
-      // add sampler (with sub-sampling rate), and poller too
-      uint32_t samplingRate = sf->sFlowSettings->ulogSubSamplingRate;
-      sampler = sfl_agent_addSampler(sf->agent, &dsi);
-      sfl_sampler_set_sFlowFsPacketSamplingRate(sampler, samplingRate);
-      sfl_sampler_set_sFlowFsReceiver(sampler, HSP_SFLOW_RECEIVER_INDEX);
-      if(devName) {
-	uint32_t pollingInterval = sf->sFlowSettings ?
-	  sf->sFlowSettings->pollingInterval :
-	  SFL_DEFAULT_POLLING_INTERVAL;
-	SFLPoller *poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
-	sfl_poller_set_sFlowCpInterval(poller, pollingInterval);
-	sfl_poller_set_sFlowCpReceiver(poller, HSP_SFLOW_RECEIVER_INDEX);
-	// remember the device name to make the lookups easier later.
-	// Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
-	// in case it gets freed at some point.  The device name is enough.
-	poller->userData = (void *)my_strdup(devName);
+    HSPAdaptorNIO *adaptorNIO=(HSPAdaptorNIO *)adaptor->userData;
+    if(adaptorNIO) {
+      if(adaptorNIO->sampler == NULL) {
+	SFLDataSource_instance dsi;
+	SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
+	HSPSFlow *sf = sp->sFlow;
+	// add sampler (with sub-sampling rate)
+	uint32_t samplingRate = sf->sFlowSettings->ulogSubSamplingRate;
+	adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
+	sfl_sampler_set_sFlowFsPacketSamplingRate(adaptorNIO->sampler, samplingRate);
+	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
+	// and make sure we have a poller too
+	getPoller(sp, adaptor);
       }
+      return adaptorNIO->sampler;
     }
-    return sampler;
+    return NULL;
   }
 
   /*_________________---------------------------__________________
@@ -187,8 +246,7 @@ extern "C" {
 		
 		SFL_FLOW_SAMPLE_TYPE fs = { 0 };
 	
-		char *sampler_dev = NULL;
-		uint32_t sampler_ifIndex = 0;
+		SFLAdaptor *sampler_dev = NULL;
 
 		// set the ingress and egress ifIndex numbers.
 		// Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
@@ -196,8 +254,7 @@ extern "C" {
 		  SFLAdaptor *in = adaptorListGet(sp->adaptorList, pkt->indev_name);
 		  if(in) {
 		    fs.input = in->ifIndex;
-		    sampler_dev = pkt->indev_name;
-		    sampler_ifIndex = in->ifIndex;
+		    sampler_dev = in;
 		  }
 		}
 		else {
@@ -222,17 +279,16 @@ extern "C" {
 		    // for each interface,  even though it was the same packet.  That
 		    // way we would have true bidirectional sampling on any
 		    // interface that makes it into the adaptorList.
-		    sampler_dev = pkt->outdev_name;
-		    sampler_ifIndex = out->ifIndex;
+		    sampler_dev = out;
 		  }
 		}
 		else {
 		  fs.output = SFL_INTERNAL_INTERFACE;
 		}
 
-		// must have an ifIndex
-		if(sampler_ifIndex) {
-		  SFLSampler *sampler = getSampler(sp, sampler_dev, sampler_ifIndex);
+		// must have a sampler_dev with an ifIndex
+		if(sampler_dev && sampler_dev->ifIndex) {
+		  SFLSampler *sampler = getSampler(sp, sampler_dev);
 		  
 		  if(sampler) {
 		    SFLFlow_sample_element hdrElem = { 0 };
@@ -293,6 +349,55 @@ extern "C" {
     }
     return batch;
   }
+
+
+  /*_________________---------------------------__________________
+    _________________   configSwitchPorts       __________________
+    -----------------___________________________------------------
+    Make sure the switch port interfaces are set up for regular
+    polling even if they are not sampling any packets (yet).  This
+    will be called whenever the interfaces list is refreshed.
+  */
+  
+  int configSwitchPorts(HSP *sp)
+  {
+    // could do a mark-and-sweep here in case some ports have been
+    // removed,  but that seems very unlikely to happen.  Just
+    // make sure we have a poller for every interface that matched
+    // the switchPort regex, and that has an ifIndex.  Note that
+    // bonding-relationships may cause other interfaces to be
+    // marked as switchPorts too, and this is where they are
+    // configured to export individual counters.
+
+    // calling readBondState() here is necesary to trigger the
+    // discovery of bond interfaces and learn their relationship
+    // to their components.  If neither the bond nor
+    // a component have been flagged as a switchPorts,
+    // however (currently by regex),  then individual
+    // polling will not be enabled for them below.
+    readBondState(sp);
+
+    int count = 0;
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      if(adaptor && adaptor->ifIndex) {
+	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	if(niostate) {
+	  if(niostate->switchPort) {
+	    count++;
+	    getPoller(sp, adaptor);
+	  }
+	}
+      }
+    }
+
+    // make sure slave ports are on the same
+    // polling schedule as their bond master.
+    syncBondPolling(sp);
+
+    return count;
+  }
+
 
 #endif /* HSF_ULOG */
   

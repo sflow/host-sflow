@@ -579,6 +579,9 @@ typedef struct _SFLIf_counters {
   uint32_t ifPromiscuousMode;
 } SFLIf_counters;
 
+#define SFLSTATUS_ADMIN_UP 1
+#define SFLSTATUS_OPER_UP 2
+
 /* Ethernet interface counters - see RFC 2358 */
 typedef struct _SFLEthernet_counters {
   uint32_t dot3StatsAlignmentErrors;
@@ -906,6 +909,42 @@ typedef struct {
   uint32_t req_dropped;
 } SFLAPPWorkers;
 
+  /* LAG Port Statistics - see IEEE8023-LAG-MIB */
+  /* opaque = counter_data; enterprise = 0; format = 7 */
+typedef  union _SFLLACP_portState {
+    uint32_t all;
+    struct {
+      uint8_t actorAdmin;
+      uint8_t actorOper;
+      uint8_t partnerAdmin;
+      uint8_t partnerOper;
+    } v;
+} SFLLACP_portState;
+
+typedef struct _SFLLACP_counters {
+  uint8_t actorSystemID[8]; // 6 bytes + 2 pad
+  uint8_t partnerSystemID[8]; // 6 bytes + 2 pad
+  uint32_t attachedAggID;
+  SFLLACP_portState portState;
+  uint32_t LACPDUsRx;
+  uint32_t markerPDUsRx;
+  uint32_t markerResponsePDUsRx;
+  uint32_t unknownRx;
+  uint32_t illegalRx;
+  uint32_t LACPDUsTx;
+  uint32_t markerPDUsTx;
+  uint32_t markerResponsePDUsTx;
+} SFLLACP_counters;
+
+#define XDRSIZ_LACP_COUNTERS 56
+
+/* port name */
+/* opaque = counter_data; enterprise = 0; format = 1005 */
+typedef struct {
+  SFLString portName;
+} SFLPortName;
+
+#define SFL_MAX_PORTNAME_LEN 255
 
 /* Counters data */
 
@@ -917,8 +956,10 @@ enum SFLCounters_type_tag {
   SFLCOUNTERS_VG            = 4,
   SFLCOUNTERS_VLAN          = 5,
   SFLCOUNTERS_80211         = 6,
+  SFLCOUNTERS_LACP          = 7,
   SFLCOUNTERS_PROCESSOR     = 1001,
   SFLCOUNTERS_RADIO         = 1002,
+  SFLCOUNTERS_PORTNAME      = 1005,
   SFLCOUNTERS_HOST_HID      = 2000, /* host id */
   SFLCOUNTERS_ADAPTORS      = 2001, /* host adaptors */
   SFLCOUNTERS_HOST_PAR      = 2002, /* host parent */
@@ -960,6 +1001,8 @@ typedef union _SFLCounters_type {
   SFLAPPCounters app;
   SFLAPPResources appResources;
   SFLAPPWorkers appWorkers;
+  SFLLACP_counters lacp;
+  SFLPortName portName;
 } SFLCounters_type;
 
 typedef struct _SFLCounters_sample_element {
