@@ -437,16 +437,16 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	      soc4.local_port = json_uint32(extended_socket_ipv4, "local_port");
 	      soc4.remote_port = json_uint32(extended_socket_ipv4, "remote_port");
 	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv4, "local_ip");
-	      if(local_ip) {
+	      if(local_ip && my_strlen(local_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET)) {
+		if(parseNumericAddress(local_ip->valuestring, NULL, &addr, PF_INET)) {
 		  soc4.local_ip = addr.address.ip_v4;
 		}
 	      }
 	      cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv4, "remote_ip");
-	      if(remote_ip) {
+	      if(remote_ip && my_strlen(remote_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET)) {
+		if(parseNumericAddress(remote_ip->valuestring, NULL, &addr, PF_INET)) {
 		  soc4.remote_ip = addr.address.ip_v4;
 		}
 	      }
@@ -459,16 +459,16 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	      soc6.local_port = json_uint32(extended_socket_ipv6, "local_port");
 	      soc6.remote_port = json_uint32(extended_socket_ipv6, "remote_port");
 	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv6, "local_ip");
-	      if(local_ip) {
+	      if(local_ip && my_strlen(local_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET6)) {
+		if(parseNumericAddress(local_ip->valuestring, NULL, &addr, PF_INET6)) {
 		  soc6.local_ip = addr.address.ip_v6;
 		}
 	      }
 	      cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv6, "remote_ip");
-	      if(remote_ip) {
+	      if(remote_ip && my_strlen(remote_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET6)) {
+		if(parseNumericAddress(remote_ip->valuestring, NULL, &addr, PF_INET6)) {
 		  soc6.remote_ip = addr.address.ip_v6;
 		}
 	      }

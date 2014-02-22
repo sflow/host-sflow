@@ -39,6 +39,7 @@ extern "C" {
 
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
+  int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
   int parseUUID(char *str, char *uuid);
@@ -170,6 +171,8 @@ extern "C" {
   void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask);  
   int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare);
   int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits);
+
+  int isZeroMAC(SFLMacAddress *mac);
 
 #if defined(__cplusplus)
 } /* extern "C" */
