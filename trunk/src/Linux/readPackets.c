@@ -46,6 +46,7 @@ extern "C" {
 	uint32_t mcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
+#ifdef HSP_ETHTOOL_STATS
 	// only do this if we were able to find all four
 	// via ethtool, otherwise it would just be too weird...
 	if(adaptorNIO->et_nfound == 4) {
@@ -56,7 +57,7 @@ extern "C" {
 	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
 	  pkts_out -= (mcasts_out + bcasts_out);
 	}
-	
+#endif
 	// generic interface counters
 	SFLCounters_sample_element elem = { 0 };
 	elem.tag = SFLCOUNTERS_GENERIC;

@@ -295,8 +295,8 @@ approach seemed more stable and portable.
 	  }
 	}
       }
-    }
 #endif
+    }
   }
 
 /*________________---------------------------__________________
