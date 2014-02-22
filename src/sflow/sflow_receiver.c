@@ -807,6 +807,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_TOKENRING: elemSiz = sizeof(elem->counterBlock.tokenring); break;
     case SFLCOUNTERS_VG: elemSiz = sizeof(elem->counterBlock.vg); break;
     case SFLCOUNTERS_VLAN: elemSiz = sizeof(elem->counterBlock.vlan); break;
+    case SFLCOUNTERS_LACP: elemSiz = XDRSIZ_LACP_COUNTERS; break;
     case SFLCOUNTERS_PROCESSOR: elemSiz = sizeof(elem->counterBlock.processor);  break;
     case SFLCOUNTERS_HOST_HID: elemSiz = hostIdEncodingLength(&elem->counterBlock.host_hid);  break;
     case SFLCOUNTERS_HOST_PAR: elemSiz = 8 /*sizeof(elem->counterBlock.host_par)*/;  break;
@@ -824,6 +825,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_APP:  elemSiz = appCountersEncodingLength(&elem->counterBlock.app); break;
     case SFLCOUNTERS_APP_RESOURCES:  elemSiz = appResourcesEncodingLength(&elem->counterBlock.appResources); break;
     case SFLCOUNTERS_APP_WORKERS:  elemSiz = appWorkersEncodingLength(&elem->counterBlock.appWorkers); break;
+    case SFLCOUNTERS_PORTNAME:  elemSiz = stringEncodingLength(&elem->counterBlock.portName.portName); break;
     default:
       {
 	char errm[128];
@@ -926,6 +928,20 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.vlan.multicastPkts);
       putNet32(receiver, elem->counterBlock.vlan.broadcastPkts);
       putNet32(receiver, elem->counterBlock.vlan.discards);
+      break;
+    case SFLCOUNTERS_LACP:
+      putMACAddress(receiver, elem->counterBlock.lacp.actorSystemID);
+      putMACAddress(receiver, elem->counterBlock.lacp.partnerSystemID);
+      putNet32(receiver, elem->counterBlock.lacp.attachedAggID);
+      putNet32(receiver, elem->counterBlock.lacp.portState.all);
+      putNet32(receiver, elem->counterBlock.lacp.LACPDUsRx);
+      putNet32(receiver, elem->counterBlock.lacp.markerPDUsRx);
+      putNet32(receiver, elem->counterBlock.lacp.markerResponsePDUsRx);
+      putNet32(receiver, elem->counterBlock.lacp.unknownRx);
+      putNet32(receiver, elem->counterBlock.lacp.illegalRx);
+      putNet32(receiver, elem->counterBlock.lacp.LACPDUsTx);
+      putNet32(receiver, elem->counterBlock.lacp.markerPDUsTx);
+      putNet32(receiver, elem->counterBlock.lacp.markerResponsePDUsTx);
       break;
     case SFLCOUNTERS_PROCESSOR:
       putNet32(receiver, elem->counterBlock.processor.five_sec_cpu);
@@ -1080,7 +1096,10 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.appWorkers.req_delayed);
       putNet32(receiver, elem->counterBlock.appWorkers.req_dropped);
       break;
-   default:
+    case SFLCOUNTERS_PORTNAME: 
+      putString(receiver, &elem->counterBlock.portName.portName);
+      break;
+    default:
       {
 	char errm[128];
 	sprintf(errm, "unexpected counters tag (%u)", elem->tag);
