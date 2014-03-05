@@ -1740,6 +1740,72 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________   setUlogSamplingRates    __________________
+    -----------------___________________________------------------
+  */
+  
+#ifdef HSP_SWITCHPORT_CONFIG
+  static int execOutputLine(void *magic, char *line) {
+    char *prefix = (char *)magic;
+    if(debug) myLog(LOG_INFO, "%s: %s", prefix, line);
+    return YES;
+  }
+#endif
+  
+  static void setUlogSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings)
+  {
+#ifdef HSP_SWITCHPORT_CONFIG
+    // We get to set the hardware sampling rate here, so do that and then force
+    // the ulog settings to reflect it (so that the sub-sampling rate is 1:1)
+    UTStringArray *cmdline = strArrayNew();
+    strArrayAdd(cmdline, HSP_SWITCHPORT_CONFIG_PROG);
+    // usage:  <prog> <interface> <ingress-rate> <egress-rate> <ulogGroup>
+#define HSP_MAX_TOK_LEN 16
+    strArrayAdd(cmdline, NULL); // placeholder for port name in slot 1
+    char srate[HSP_MAX_TOK_LEN];
+    snprintf(srate, HSP_MAX_TOK_LEN, "%u", settings->samplingRate);
+    strArrayAdd(cmdline, srate); // ingress
+    strArrayAdd(cmdline, srate); // egress
+    char uloggrp[HSP_MAX_TOK_LEN];
+    snprintf(uloggrp, HSP_MAX_TOK_LEN, "%u", sf->sFlowSettings_file->ulogGroup);
+    strArrayAdd(cmdline, uloggrp);
+#define HSP_MAX_EXEC_LINELEN 1024
+    char outputLine[HSP_MAX_EXEC_LINELEN];
+    char **cmd = strArray(cmdline);
+    SFLAdaptorList *adaptorList = sf->myHSP->adaptorList;
+    for(uint32_t i = 0; i < adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = adaptorList->adaptors[i];
+      if(adaptor && adaptor->ifIndex) {
+	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	if(niostate && niostate->switchPort) {
+	  cmd[1] = adaptor->deviceName;
+	  if(!myExec("Switchport config output", cmd, execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
+	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)", cmd[0], adaptor->deviceName);
+	  }
+	}
+      }
+    }
+    // now force the ulogSamplingRate setting,  then drop into the normal logic below
+    sf->sFlowSettings_file->ulogSamplingRate = settings->samplingRate;
+#endif // HSP_SWITCHPORT_CONFIG
+
+    // calculate the ULOG sub-sampling rate to use.  We may get the local ULOG sampling-rate
+    // from the probability setting in the config file and the desired sampling rate from DNS-SD,
+    // so that's why we have to reconcile the two here.
+    uint32_t ulogsr = sf->sFlowSettings_file->ulogSamplingRate;
+    if(ulogsr == 0) {
+      // assume we have to do all sampling in user-space
+      settings->ulogSubSamplingRate = settings->ulogActualSamplingRate = settings->samplingRate;
+    }
+    else {
+      // use an integer divide to get the sub-sampling rate, but make sure we round up
+      settings->ulogSubSamplingRate = (settings->samplingRate + ulogsr - 1) / ulogsr;
+      // and pre-calculate the actual sampling rate that we will end up applying
+      settings->ulogActualSamplingRate = settings->ulogSubSamplingRate * ulogsr;
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
     -----------------___________________________------------------
 
@@ -1749,20 +1815,7 @@ extern "C" {
   static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
     if(settings && sf->sFlowSettings_file) {
-      // calculate the ULOG sub-sampling rate to use.  We may get the local ULOG sampling-rate
-      // from the config file and the desired sampling rate from DNS-SD,  so that's why
-      // we have to reconcile the two here.
-      uint32_t ulogsr = sf->sFlowSettings_file->ulogSamplingRate;
-      if(ulogsr == 0) {
-	// assume we have to do all sampling in user-space
-	settings->ulogSubSamplingRate = settings->ulogActualSamplingRate = settings->samplingRate;
-      }
-      else {
-	// use an integer divide to get the sub-sampling rate, but make sure we round up
-	settings->ulogSubSamplingRate = (settings->samplingRate + ulogsr - 1) / ulogsr;
-	// and pre-calculate the actual sampling rate that we will end up applying
-	settings->ulogActualSamplingRate = settings->ulogSubSamplingRate * ulogsr;
-      }
+      setUlogSamplingRates(sf, settings);
     }
     
     sf->sFlowSettings = settings;

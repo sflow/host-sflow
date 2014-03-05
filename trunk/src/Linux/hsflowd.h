@@ -62,18 +62,30 @@ extern "C" {
 #include "libxml/xmlreader.h"
 #endif
 
+#ifdef HSF_CUMULUS
+#define HSP_ETHTOOL_STATS 1
+#define HSP_SWITCHPORT_CONFIG 1
+#define HSP_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
+#include "regex.h" // for switchport detection
+#define HSP_SWITCHPORT_REGEX "^swp[0-9]+$"
+// uses ULOG (netlink) channel, so make sure that is enabled:
+#define HSF_ULOG 1
+#define HSP_DEFAULT_ULOG_GROUP 1
+#endif
+
 #ifdef HSF_ULOG
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <net/if.h>
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
-#include "regex.h" // for switchport detection
 #define HSP_MAX_ULOG_MSG_BYTES 10000
 #define HSP_READPACKET_BATCH 100
 #define HSP_ULOG_RCV_BUF 2000000
-// let Makefile determine whether to set HSP_ETHTOOL_STATS
-// #define HSP_ETHTOOL_STATS 1
-#define HSP_SWITCHPORT_REGEX "^swp[0-9]+$"
+
+#ifndef HSP_DEFAULT_ULOG_GROUP
+#define HSP_DEFAULT_ULOG_GROUP 0
+#endif
+
 #endif /* HSF_ULOG */
 
 #ifdef HSF_JSON
@@ -209,13 +221,17 @@ extern "C" {
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
+#ifndef HSP_DEFAULT_ULOG_GROUP
 #define HSP_DEFAULT_ULOG_GROUP 0
+#endif
     double ulogProbability;
     uint32_t ulogSamplingRate;
     uint32_t ulogSubSamplingRate;
     uint32_t ulogActualSamplingRate;
     uint32_t jsonPort;
+#ifndef HSP_DEFAULT_JSON_PORT
 #define HSP_DEFAULT_JSON_PORT 0
+#endif
     HSPCIDR *agentCIDRs;
   } HSPSFlowSettings;
 
