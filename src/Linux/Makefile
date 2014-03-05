@@ -28,6 +28,14 @@ ifeq ($(ULOG),yes)
 	CFLAGS += -DHSF_ULOG
 endif
 
+# Cumulus Linux
+# This turns on the use of ethtool for interface stats,
+# identifies switch ports for individual counter-export
+# and enables ULOG packet-sampling.
+ifeq ($(CUMULUS),yes)
+	CFLAGS += -DHSF_CUMULUS
+endif
+
 # if JSON is not set, assume it should be "yes".
 # (So you can use "make JSON=no" to compile without this feature)
 ifeq ($(JSON),)

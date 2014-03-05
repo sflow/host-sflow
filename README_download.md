@@ -23,7 +23,7 @@ the sFlow settings for this time only.
 
 Red Hat KVM
 -----------
-*   **Linux with KVM (libvirt)**: hsflowd_KVM-<version>.x86_64.rpm
+please build from sources using: **make LIBVIRT=yes**
 
 Linux
 -----

@@ -204,6 +204,7 @@ approach seemed more stable and portable.
     }
   }
 
+#ifdef HSP_ETHTOOL_STATS
 /*________________---------------------------__________________
   ________________  staticStringsIndexOf     __________________
   ----------------___________________________------------------
@@ -215,6 +216,7 @@ approach seemed more stable and portable.
     }
     return -1;
   }
+#endif
 	    
 
 /*________________---------------------------__________________
