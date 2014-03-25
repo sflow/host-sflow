@@ -67,6 +67,7 @@ extern "C" {
     struct lifconf lc;
     struct lifreq rq;
     int i, nFd;
+    int up, loopback, promisc, bond_master;
     long nRet = 0;
     nFd = socket(AF_INET, SOCK_DGRAM, 0);
     if (nFd >= 0)
@@ -120,6 +121,8 @@ extern "C" {
 		    }
 		  }						    
 
+                  /* the enaddr field is not in struct lifrec.  It is only in the obsolete struct ifrec */
+#if 0
 		  if (ioctl(nFd, SIOCGENADDR, &rq) == 0) {
 		    if(debug) myLog(LOG_INFO, "interface:%s ethernet=%02X%02X%02X-%02X%02X%02X",
 				    rq.lifr_name,
@@ -129,11 +132,11 @@ extern "C" {
 				    rq.lifr_enaddr[3],
 				    rq.lifr_enaddr[4],
 				    rq.lifr_enaddr[5]);
-
+#endif
 		    // for now just assume that each interface has only one MAC.  It's not clear how we can
 		    // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
 		    // find or create the "adaptor" entry for this dev
-		    SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, macptr, sizeof(HSPAdaptorNIO));
+		    SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, rq.lifr_name, macptr, sizeof(HSPAdaptorNIO));
 			
 		    // clear the mark so we don't free it below
 		    adaptor->marked = NO; 
@@ -165,7 +168,7 @@ extern "C" {
 		      else if(AF_INET6 == rq.lifr_addr.ss_family) {
 			struct sockaddr_in6 *s = (struct sockaddr_in6 *)&rq.lifr_addr;
 			adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V6;
-			memcpy(&adaptorNIO->ipAddr.address.ip_v6.addr, s->sin6_addr, 16);
+			memcpy(&adaptorNIO->ipAddr.address.ip_v6.addr, &s->sin6_addr, 16);
 		      }
 		      if(debug) {
 			myLog(LOG_INFO, "interface: %s family: %d IP: %s",
@@ -198,7 +201,9 @@ extern "C" {
 		    /*       direction = 1; */
 		    /*     adaptor->ifDirection = direction; */
 		    /*   } */
+#if 0
 		  } 
+#endif
 		}
 	      }
 	    }
@@ -254,7 +259,17 @@ extern "C" {
     if (noErr) {
       for (ksp = kc->kc_chain; NULL != ksp; ksp = ksp->ks_next) {
 	// Look for kstats of class "net"
-	if (!strncmp(ksp->ks_class, "net", 3)) {
+	if (ksp->ks_class &&
+	    ksp->ks_module &&
+	    ksp->ks_name &&
+	    !strncmp(ksp->ks_class, "net", 3)) {
+
+	  if(debug > 2) {
+	    myLog(LOG_INFO, "ksp class=%s, name=%s",
+		  ksp->ks_class ?: "NULL",
+		  ksp->ks_name ?: "NULL");
+	  }
+
 #ifndef KSNAME_BUFFER_SIZE
 #define KSNAME_BUFFER_SIZE 32
 #endif
@@ -330,8 +345,10 @@ extern "C" {
 		} else {
 		  if (AF_INET == ifr.ifr_addr.sa_family) {
 		    struct sockaddr_in *s = (struct sockaddr_in*)&ifr.ifr_addr;
-		    adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
-		    adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+                    if(s) {
+		      adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+		      adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+                    }
 		  }
 		}
 						    
@@ -346,20 +363,23 @@ extern "C" {
 		  } else {
 							
 		    knp = kstat_data_lookup(ksp_tmp, "ifspeed");
-		    adaptor->ifSpeed = knp->value.ui64;
-							
+		    if(knp) {
+		      adaptor->ifSpeed = knp->value.ui64;
+                    }
+		    
 		    uint32_t direction = 0;
 		    knp = kstat_data_lookup(ksp_tmp, "link_duplex");
-		    // The full-duplex and half-duplex values are reversed between the
-		    // comment in sflow.h and link_duplex man page.
-		    if (knp->value.ui32 == 1)
-		      direction = 2;
-		    else if (knp->value.ui32 == 2)
-		      direction = 1;
-		    adaptor->ifDirection = direction;
+                    if(knp) {
+		      // The full-duplex and half-duplex values are reversed between the
+		      // comment in sflow.h and link_duplex man page.
+		      if (knp->value.ui32 == 1)
+		        direction = 2;
+		      else if (knp->value.ui32 == 2)
+		        direction = 1;
+		      adaptor->ifDirection = direction;
+                    }
 		  }
 		} 
-						    
 	      }
 	    }
 	  }
