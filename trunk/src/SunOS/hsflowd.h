@@ -40,6 +40,32 @@ extern "C" {
 #include "util.h"
 #include "sflow_api.h"
 
+#ifdef HSF_JSON
+#include "cJSON.h"
+#define HSP_MAX_JSON_MSG_BYTES 10000
+#define HSP_READJSON_BATCH 100
+#define HSP_JSON_RCV_BUF 2000000
+
+  typedef struct _HSPApplication {
+    struct _HSPApplication *ht_nxt;
+    char *application;
+    uint32_t hash;
+    uint32_t dsIndex;
+    uint16_t servicePort;
+    uint32_t service_port_clash;
+    uint32_t settings_revisionNo;
+    int json_counters;
+    int json_ops_counters;
+    time_t last_json_counters;
+    time_t last_json;
+#define HSP_COUNTER_SYNTH_TIMEOUT 120
+#define HSP_JSON_APP_TIMEOUT 7200
+    SFLSampler *sampler;
+    SFLPoller *poller;
+    SFLCounters_sample_element counters;
+  } HSPApplication;
+
+#endif /* HSF_JSON */
 
 #define ADD_TO_LIST(linkedlist, obj)		\
   do {						\
@@ -60,7 +86,7 @@ extern "C" {
 #define HSP_DEFAULT_SUBAGENTID 100000
 #define HSP_MAX_SUBAGENTID 199999
 #define HSP_DEFAULT_LOGICAL_DSINDEX_START 100000
-
+#define HSP_DEFAULT_APP_DSINDEX_START 150000
 #define HSP_MAX_TICKS 60
 #define HSP_DEFAULT_DNSSD_STARTDELAY 30
 #define HSP_DEFAULT_DNSSD_RETRYDELAY 300
@@ -96,6 +122,13 @@ extern "C" {
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
 
+  typedef struct _HSPCIDR {
+    struct _HSPCIDR *nxt;
+    SFLAddress ipAddr;
+    SFLAddress mask;
+    uint32_t maskBits;
+  } HSPCIDR;
+
 #define SFL_UNDEF_COUNTER(c) c=(typeof(c))-1
 #define SFL_UNDEF_GAUGE(c) c=0
 
@@ -122,6 +155,9 @@ extern "C" {
     uint32_t ulogSamplingRate;
     uint32_t ulogSubSamplingRate;
     uint32_t ulogActualSamplingRate;
+    uint32_t jsonPort;
+#define HSP_DEFAULT_JSON_PORT 0
+    HSPCIDR *agentCIDRs;
   } HSPSFlowSettings;
 
   typedef struct _HSPSFlow {
@@ -138,6 +174,8 @@ extern "C" {
     uint32_t subAgentId;
     char *agentDevice;
     SFLAddress agentIP;
+    int explicitAgentDevice;
+    int explicitAgentIP;
   } HSPSFlow; 
 
   typedef enum { HSPSTATE_READCONFIG=0,
@@ -197,6 +235,7 @@ extern "C" {
     int32_t loopback;
     int32_t bond_master;
     int32_t vlan;
+    int32_t forCounters;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
     SFLHost_nio_counters last_nio;
@@ -282,12 +321,15 @@ extern "C" {
     uint32_t DNSSD_startDelay;
     uint32_t DNSSD_retryDelay;
     uint32_t DNSSD_ttl;
-#ifdef HSF_ULOG
-    // ULOG packet-sampling
-    int ulog_soc;
-    struct sockaddr_nl ulog_bind;
-    struct sockaddr_nl ulog_peer;
+#ifdef HSF_JSON
+    int json_soc;
+    int json_soc6;
+    HSPApplication **applicationHT;
+    uint32_t applicationHT_size;
+#define HSP_INITIAL_JSON_APP_HT_SIZE 16
+    uint32_t applicationHT_entries;
 #endif
+    int use_prstat;
   } HSP;
 
   // expose some config parser fns
@@ -298,8 +340,12 @@ extern "C" {
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
   void clearApplicationSettings(HSPSFlowSettings *settings);
+  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling);
   EnumIPSelectionPriority agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
-    
+  int selectAgentAddress(HSP *sp);
+  void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
+  void clearAgentCIDRs(HSPSFlowSettings *settings);
+
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"
 #define HSP_MAX_DNS_LEN 255
@@ -308,14 +354,15 @@ extern "C" {
 
   // read functions
   int readInterfaces(HSP *sp);
-  int readCpuCounters(SFLHost_cpu_counters *cpu);
+  int readCpuCounters(HSP *sp, SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList);
   HSPAdaptorNIO *getAdaptorNIO(SFLAdaptorList *adaptorList, char *deviceName);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
-  int readPackets(HSP *sp);
+  int readJSON(HSP *sp, int soc);
+  void json_app_timeout_check(HSP *sp);
 
 #if defined(__cplusplus)
 } /* extern "C" */

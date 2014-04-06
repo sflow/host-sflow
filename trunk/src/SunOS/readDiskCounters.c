@@ -50,7 +50,6 @@ extern "C" {
 
     uint32_t reads, writes;
     uint64_t bytes_read, bytes_written;
-    uint32_t read_time, write_time;	
 
     kc = kstat_open();
     if (NULL == kc) {

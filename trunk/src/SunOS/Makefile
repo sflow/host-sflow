@@ -16,6 +16,10 @@ ifeq ($(CONFDIR),)
 	CONFDIR=/etc
 endif
 
+ifeq ($(SOLARISVERSION),)
+	SOLARISVERSION=$(shell ./get_solaris_version)
+endif
+
 INSTALL=/usr/sbin/install
 
 # INSTROOT may be passed in, e.g. RPM_BUILD_ROOT
@@ -36,7 +40,9 @@ HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 SFLOWDIR=../sflow
 
 #CC= g++
-CC= gcc -std=gnu99
+#CC= gcc -std=gnu99
+CC=sparc-sun-solaris2.11-gcc -std=gnu99
+
 
 OPT_FULL = -O3 -DNDEBUG
 OPT_DEBUG = -g -ggdb
@@ -49,7 +55,8 @@ READ_OBJS=readInterfaces.o \
           readMemoryCounters.o \
           readDiskCounters.o \
           readHidCounters.o \
-          readNioCounters.o 
+          readNioCounters.o \
+	  readJSON.o
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
@@ -58,8 +65,19 @@ HSFLOW_OBJS= hsflowconfig.o \
 
 SFLOWOVS_OBJS=sflowovsd.o util.o
 
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -DHSP_VERSION=$(VERSION) -DUTHEAP
+CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -DHSP_VERSION=$(VERSION) -DHSP_SOLARIS=$(SOLARISVERSION) -DUTHEAP
 LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread -lsocket -lnsl -lkstat -ldlpi
+
+# if JSON is not set, assume it should be "yes".
+# (So you can use "make JSON=no" to compile without this feature)
+ifeq ($(JSON),)
+	JSON=yes
+endif
+ifeq ($(JSON),yes)
+	JSONDIR=../json
+	CFLAGS += -DHSF_JSON -I$(JSONDIR)
+	LIBS += $(JSONDIR)/libjson.a -lm
+endif
 
 #### BUILD ####
 
@@ -129,6 +147,7 @@ readCpuCounters.o: readCpuCounters.c $(HEADERS)
 readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
+readJSON.o: readJSON.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
 sflowovsd.o: sflowovsd.c $(HEADERS)
 
