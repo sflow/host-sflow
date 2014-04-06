@@ -186,6 +186,19 @@ extern "C" {
     return NULL;
   }
 
+  // expectCIDR
+
+  static HSPToken *expectCIDR(HSP *sp, HSPToken *tok, HSPCIDR *cidr)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || SFLAddress_parseCIDR(t->str, &cidr->ipAddr, &cidr->mask, &cidr->maskBits) == NO) {
+      parseError(sp, tok, "expected IP CIDR", "");
+      return NULL;
+    }
+    return t;
+  }
+
   // expectLoopback
 
   static HSPToken *expectLoopback(HSP *sp, HSPToken *tok)
@@ -211,13 +224,8 @@ extern "C" {
     HSPToken *t = tok;
     t = t->nxt;
     if(t && t->str) {
-      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	if(adaptor && adaptor->deviceName && strcmp(adaptor->deviceName, t->str) == 0) {
-	  if(p_devName) *p_devName = my_strdup(adaptor->deviceName);
-	  return t;
-	}
-      }
+      *p_devName = my_strdup(t->str);
+      return t;
     }
     parseError(sp, tok, "expected device name", "");
     return NULL;
@@ -249,22 +257,30 @@ extern "C" {
     return col;
   }
 
+  void clearCollectors(HSPSFlowSettings *settings) 
+  {
+    for(HSPCollector *coll = settings->collectors; coll; ) {
+      HSPCollector *nextColl = coll->nxt;
+      my_free(coll);
+      coll = nextColl;
+    }
+    settings->collectors = NULL;
+  }
+
   HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
+    st->jsonPort = HSP_DEFAULT_JSON_PORT;
     return st;
   }
 
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
     clearApplicationSettings(sFlowSettings);
-    for(HSPCollector *coll = sFlowSettings->collectors; coll; ) {
-      HSPCollector *nextColl = coll->nxt;
-      my_free(coll);
-      coll = nextColl;
-    }
+    clearAgentCIDRs(sFlowSettings);
+    clearCollectors(sFlowSettings);
     my_free(sFlowSettings);
   }
 
@@ -348,6 +364,77 @@ extern "C" {
     appSettings->got_polling_secs = YES;
   }
 
+  /*_________________----------------------------__________________
+    _________________  lookupApplicationSettings __________________
+    -----------------____________________________------------------
+    return a deepest match lookup, so that
+    a setting of sampling.app.xyz.pqr = 100 will apply to
+    an application named "app.xyz.pqr.abc" and take precendence
+    over a setting of sampling.app.xyz = 200
+  */
+  
+  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling)
+  {
+    // in the config, the sFlow-APPLICATION settings should always start with sampling.app.<name> or polling.app.<name>
+    // so add the .app prefix here before we start searching...
+    char search[SFLAPP_MAX_APPLICATION_LEN+100];
+    snprintf(search, SFLAPP_MAX_APPLICATION_LEN+100, "app.%s", app);
+    int search_len = my_strlen(search);
+    // the top level settings are the defaults
+    if(p_polling) *p_polling = settings->pollingInterval;
+    if(p_sampling) *p_sampling = settings->samplingRate;
+    // now search for the deepest match
+    HSPApplicationSettings *deepest = NULL;
+    uint32_t deepest_len = 0;
+    for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+      int len = my_strlen(appSettings->application);
+      if(len > deepest_len
+	 && len <= search_len
+	 && my_strnequal(search, appSettings->application, len)) {
+	// has to be an exact match, or one that matches up to a '.'
+	if(len == search_len || search[len] == '.') {
+	  deepest = appSettings;
+	  deepest_len = len;
+	}
+      }
+    }
+
+    if(deepest) {
+      if(p_polling && deepest->got_polling_secs) *p_sampling = deepest->polling_secs;
+      if(p_sampling && deepest->got_sampling_n) *p_sampling = deepest->sampling_n;
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________     addAgentCIDR          __________________
+    -----------------___________________________------------------
+  */
+
+  void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr)
+  {
+    HSPCIDR *mycidr = (HSPCIDR *)my_calloc(sizeof(HSPCIDR));
+    *mycidr = *cidr;
+    // ordering is important here. We want them in reverse order,
+    // so add this at the beginning of the list
+    mycidr->nxt = settings->agentCIDRs;
+    settings->agentCIDRs = mycidr;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    clearAgentCIDRs        __________________
+    -----------------___________________________------------------
+  */
+
+  void clearAgentCIDRs(HSPSFlowSettings *settings) 
+  {
+    for(HSPCIDR *cidr = settings->agentCIDRs; cidr; ) {
+      HSPCIDR *next_cidr = cidr->nxt;
+      my_free(cidr);
+      cidr = next_cidr;
+    }
+    settings->agentCIDRs = NULL;
+  }
+
   /*_________________---------------------------__________________
     _________________      readTokens           __________________
     -----------------___________________________------------------
@@ -421,7 +508,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  EnumIPSelectionPriority agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback)
+  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback)
   {
     EnumIPSelectionPriority ipPriority = IPSP_NONE;
 
@@ -470,7 +557,83 @@ extern "C" {
       ipPriority = IPSP_NONE;
     }
 
-    return ipPriority;
+    uint32_t boosted_priority = ipPriority;
+
+    if(sp->sFlow && sp->sFlow->sFlowSettings_file) {
+      // allow the agent.cidr settings to boost the priority
+      // of this address.  The cidrs are in reverse order.
+      HSPCIDR *cidr = sp->sFlow->sFlowSettings_file->agentCIDRs;
+      uint32_t cidrIndex = 1;
+      for(; cidr; cidrIndex++, cidr=cidr->nxt) {
+	if(debug) myLog(LOG_INFO, "testing CIDR at index %d", cidrIndex);
+	if(SFLAddress_maskEqual(addr, &cidr->mask, &cidr->ipAddr)) break;
+      }
+      
+      if(cidr) {
+	if(debug) myLog(LOG_INFO, "CIDR at index %d matched: boosting priority", cidrIndex);
+	boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES); 
+      }
+    }
+    else {
+      if(debug) myLog(LOG_INFO, "agentAddressPriority: no config yet (so no CIDR boost)");
+    }
+      
+    return boosted_priority;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     selectAgentAddress    __________________
+    -----------------___________________________------------------
+  */
+  
+  int selectAgentAddress(HSP *sp) {
+
+    if(debug) myLog(LOG_INFO, "selectAgentAddress");
+
+    if(sp->sFlow->explicitAgentIP && sp->sFlow->agentIP.type) {
+      // it was hard-coded in the config file
+      if(debug) myLog(LOG_INFO, "selectAgentAddress hard-coded in config file");
+      return YES;
+    }
+    
+    // it may have been defined as agent=<device>
+    if(sp->sFlow->explicitAgentDevice && sp->sFlow->agentDevice) {
+      SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
+      if(ad && ad->userData) {
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
+	sp->sFlow->agentIP = adaptorNIO->ipAddr;
+	if(debug) myLog(LOG_INFO, "selectAgentAddress pegged to device in config file");
+	return YES;
+      }
+    }
+
+    // try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
+    // We already used this ranking to prioritize L3 addresses per adaptor (in the case where
+    // there are more than one) so now we are applying the same ranking globally to pick
+    // the best candidate to represent the whole agent:
+    SFLAdaptor *selectedAdaptor = NULL;
+    EnumIPSelectionPriority ipPriority = IPSP_NONE;
+
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      if(adaptor && adaptor->userData) {
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	if(adaptorNIO->ipPriority > ipPriority) {
+	  selectedAdaptor = adaptor;
+	  ipPriority = adaptorNIO->ipPriority;
+	}
+      }	    
+    }
+    if(selectedAdaptor && selectedAdaptor->userData) {
+      // crown the winner
+      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
+      sp->sFlow->agentIP = adaptorNIO->ipAddr;
+      sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
+      if(debug) myLog(LOG_INFO, "selectAgentAddress selected agentIP with highest priority");
+      return YES;
+    }
+    
+    return NO;
   }
 
   /*_________________---------------------------__________________
@@ -539,9 +702,18 @@ extern "C" {
 	    break;
 	  case HSPTOKEN_AGENTIP:
 	    if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
+	    sp->sFlow->explicitAgentIP = YES;
+	    break;
+	  case HSPTOKEN_AGENTCIDR:
+	    {
+	      HSPCIDR cidr = { 0 };
+	      if((tok = expectCIDR(sp, tok, &cidr)) == NULL) return NO;
+	      addAgentCIDR(sp->sFlow->sFlowSettings_file, &cidr);
+	    }
 	    break;
 	  case HSPTOKEN_AGENT:
 	    if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
+	    sp->sFlow->explicitAgentDevice = YES;
 	    break;
 	  case HSPTOKEN_SUBAGENTID:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
@@ -557,6 +729,9 @@ extern "C" {
 	    break;
 	  case HSPTOKEN_ULOGPROBABILITY:
 	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_JSONPORT:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
 	    break;
 	  default:
 	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
@@ -613,48 +788,6 @@ extern "C" {
       parseOK = NO;
     }
     else {
-      //////////////////////// sFlow /////////////////////////
-      if(sp->sFlow->agentIP.type == 0) {
-	// it may have been defined as agent=<device>
-	if(sp->sFlow->agentDevice) {
-	  SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
-	  if(ad && ad->userData) {
-	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
-	    sp->sFlow->agentIP = adaptorNIO->ipAddr;
-	  }
-	}
-      }
-      if(sp->sFlow->agentIP.type == 0) {
-	// try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
-	// We already used this ranking to prioritize L3 addresses per adaptor (in the case where
-	// there are more than one) so now we are applying the same ranking globally to pick
-	// the best candidate to represent the whole agent:
-	SFLAdaptor *selectedAdaptor = NULL;
-	EnumIPSelectionPriority ipPriority = IPSP_NONE;
-	
-	for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	  SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	  if(adaptor && adaptor->userData) {
-	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	    if(adaptorNIO->ipPriority > ipPriority) {
-	      selectedAdaptor = adaptor;
-	      ipPriority = adaptorNIO->ipPriority;
-	    }
-	  }	    
-	}
-	if(selectedAdaptor && selectedAdaptor->userData) {
-	  // crown the winner
-	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
-	  sp->sFlow->agentIP = adaptorNIO->ipAddr;
-	  sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
-	}
-      }
-
-      if(sp->sFlow->agentIP.type == 0) {
-        // still no agentIP.  That's a showstopper.
-	myLog(LOG_ERR, "parse error in %s : agentIP not defined", sp->configFile);
-	parseOK = NO;
-      }
       if(sp->sFlow->sFlowSettings_file->numCollectors == 0 && sp->DNSSD == NO) {
 	myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
 	parseOK = NO;

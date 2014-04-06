@@ -49,33 +49,45 @@ extern "C" {
 #define FILENAME_BUFFER_SIZE 64	
     DIR *procdir;
     char filename_buf[FILENAME_BUFFER_SIZE];
-    int fd, proc_no;
+    int fd=0, proc_no;
     struct dirent *direntp;
     psinfo_t psinfo;
-    
-    uint32_t proc_run = 0;
+    int proc_run = 0;
+
     if (!(procdir = opendir("/proc"))) {
       return -1;
     }
 
     strncpy(filename_buf, "/proc/", 6);
     for (proc_no = 0; (direntp = readdir(procdir)); ) {
-      if (direntp->d_name[0] == '.')
-	continue;
+
+      if (direntp->d_name[0] == '.') continue;
       
       snprintf(&filename_buf[6], FILENAME_BUFFER_SIZE - 6, "%s/psinfo", direntp->d_name);
-      if ((fd = open(filename_buf, O_RDONLY)) < 0)
-	continue;
-      
-      if (read(fd, &psinfo, sizeof(psinfo_t)) != sizeof(psinfo_t)) {
-	(void) close(fd);
-	continue;
+      if ((fd = open(filename_buf, O_RDONLY)) < 0) {
+	if(debug) myLog(LOG_INFO, "cannot open %s : %s", filename_buf, strerror(errno));
+	proc_run = -1;
+	break;
       }
-      (void) close(fd);
       
-      if ('O' == psinfo.pr_lwp.pr_sname) {
-	proc_run++;
+      if (read(fd, &psinfo, sizeof(psinfo_t)) == sizeof(psinfo_t)) {
+
+	// consult the process state name character
+	if(debug > 2) myLog(LOG_INFO, "pr_sname=%c", psinfo.pr_lwp.pr_sname);
+
+	// http://docs.oracle.com/cd/E19253-01/817-6223/gelse/index.html
+	// 'S' = Sleeping
+	// 'R' = Runnable (but not running right now)
+	// 'Z' = Zombie
+	// 'T' = sTopped
+	// 'I' = Intermediate state
+	// 'O' = On processor (actually running right now)
+
+	if ('O' == psinfo.pr_lwp.pr_sname) {
+	  proc_run++;
+	}
       }
+      close(fd);
     }
     closedir(procdir);
     
@@ -86,19 +98,32 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________     runningProcesses      __________________
     -----------------___________________________------------------
+    Try to use the number from /proc if we can because it is more
+    correct - giving the number of processes that are really running
+    rather than just the number of processes in the process table.
+    However be willing to fall back on prstat if it turns
+    out that we no longer have permission to read the /proc file.
   */
 
-  int runningProcesses(void) {
-    int running;
-#if HSP_RUNNINGPROCESSES_PROC
-    // This only works properly if root privileges were retained,  otherwise
-    // we may be allowed to read just one psinfo file: our own, and sometimes
-    // maybe one or two others.
-    running = runningProcesses_proc();
-#else
-    // use a less efficient approach that seems to work without root privileges
-    running = runningProcesses_prstat();
-#endif
+  int runningProcesses(HSP *sp) {
+    int running = 0;
+
+    if(sp->use_prstat == NO) {
+      // This may only work properly if root privileges were retained,  otherwise
+      // we may be allowed to read just one psinfo file: our own, and sometimes
+      // maybe one or two others.
+      running = runningProcesses_proc();
+      if(running == -1) {
+	if(debug) myLog(LOG_INFO, "falling back prstat(1) for count of running processes");
+	sp->use_prstat = YES;
+      }
+    }
+
+    if(sp->use_prstat) {
+      // use a less efficient approach that seems to work without root privileges
+      running = runningProcesses_prstat();
+    }
+
     return running;
   }
 
@@ -107,7 +132,7 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  int readCpuCounters(SFLHost_cpu_counters *cpu) {
+  int readCpuCounters(HSP *sp, SFLHost_cpu_counters *cpu) {
     int gotData = NO;
 
     kstat_ctl_t *kc;
@@ -182,7 +207,8 @@ extern "C" {
     }
 
     // running processes
-    int running = runningProcesses();
+    int running = runningProcesses(sp);
+    if(debug) myLog(LOG_INFO, "runningProcesses() returned %d\n", running);
     if(running > 0) {
       cpu->proc_run = running;
       gotData = YES;

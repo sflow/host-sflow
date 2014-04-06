@@ -116,7 +116,7 @@ extern "C" {
     // host cpu counters
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_CPU;
-    if(readCpuCounters(&cpuElem.counterBlock.host_cpu)) {
+    if(readCpuCounters(sp, &cpuElem.counterBlock.host_cpu)) {
       SFLADD_ELEMENT(cs, &cpuElem);
     }
 
@@ -235,17 +235,22 @@ extern "C" {
       // mark and sweep
       // 1. mark all the current virtual pollers
       for(SFLPoller *pl = sf->agent->pollers; pl; pl = pl->nxt) {
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
-	  HSPVMState *state = (HSPVMState *)pl->userData;
-	  state->marked = YES;
-	  state->vm_index = 0;
-	}
+	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY
+	   && SFL_DS_INDEX(pl->dsi) >= HSP_DEFAULT_LOGICAL_DSINDEX_START
+	   && SFL_DS_INDEX(pl->dsi) < HSP_DEFAULT_APP_DSINDEX_START)
+	  {
+	    HSPVMState *state = (HSPVMState *)pl->userData;
+	    state->marked = YES;
+	    state->vm_index = 0;
+	  }
       }
 
       // . remove any that don't exist any more
       for(SFLPoller *pl = sf->agent->pollers; pl; ) {
 	SFLPoller *nextPl = pl->nxt;
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
+	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY
+	   && SFL_DS_INDEX(pl->dsi) >= HSP_DEFAULT_LOGICAL_DSINDEX_START
+	   && SFL_DS_INDEX(pl->dsi) < HSP_DEFAULT_APP_DSINDEX_START) {
 	  HSPVMState *state = (HSPVMState *)pl->userData;
 	  if(state->marked) {
 	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
@@ -333,6 +338,12 @@ extern "C" {
       readInterfaces(sp);
     }
 
+#ifdef HSF_JSON
+    // give the JSON module a chance to remove idle apps
+    if(sp->clk % HSP_JSON_APP_TIMEOUT) {
+      json_app_timeout_check(sp);
+    }
+#endif
 
     // rewrite the output if the config has changed
     if(sp->outputRevisionNo != sp->sFlow->revisionNo) {
@@ -340,6 +351,76 @@ extern "C" {
       sp->outputRevisionNo = sp->sFlow->revisionNo;
     }
   }
+
+#ifdef HSF_JSON
+  /*_________________---------------------------__________________
+    _________________     openJSON              __________________
+    -----------------___________________________------------------
+  */
+
+
+  static int openUDPListenSocket(char *bindaddr, int family, uint16_t port, uint32_t bufferSize)
+  {
+    struct sockaddr_in myaddr_in = { 0 };
+    struct sockaddr_in6 myaddr_in6 = { 0 };
+    SFLAddress loopbackAddress = { 0 };
+    int soc = 0;
+
+    // create socket
+    if((soc = socket(family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+      myLog(LOG_ERR, "error opening socket: %s", strerror(errno));
+      return 0;
+    }
+      
+    // set the socket to non-blocking
+    int fdFlags = fcntl(soc, F_GETFL);
+    fdFlags |= O_NONBLOCK;
+    if(fcntl(soc, F_SETFL, fdFlags) < 0) {
+      myLog(LOG_ERR, "fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+      close(soc);
+      return 0;
+    }
+
+    // make sure it doesn't get inherited, e.g. when we fork a script
+    fdFlags = fcntl(soc, F_GETFD);
+    fdFlags |= FD_CLOEXEC;
+    if(fcntl(soc, F_SETFD, fdFlags) < 0) {
+      myLog(LOG_ERR, "ULOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
+    }
+      
+    // lookup bind address
+    struct sockaddr *psockaddr = (family == PF_INET6) ?
+      (struct sockaddr *)&myaddr_in6 :
+      (struct sockaddr *)&myaddr_in;
+    if(lookupAddress(bindaddr, psockaddr, &loopbackAddress, family) == NO) {
+      myLog(LOG_ERR, "error resolving <%s> : %s", bindaddr, strerror(errno));
+      close(soc);
+      return 0;
+    }
+
+    // bind
+    if(family == PF_INET6) myaddr_in6.sin6_port = htons(port);
+    else myaddr_in.sin_port = htons(port);
+    if(bind(soc,
+	    psockaddr,
+	    (family == PF_INET6) ?
+	    sizeof(myaddr_in6) :
+	    sizeof(myaddr_in)) == -1) {
+      myLog(LOG_ERR, "bind(%s) failed: %s", bindaddr, strerror(errno));
+      close(soc); 
+      return 0;
+    }
+
+    // increase receiver buffer size
+    uint32_t rcvbuf = bufferSize;
+    if(setsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+      myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", bufferSize, strerror(errno));
+    }
+
+    return soc;
+  }
+
+#endif
 
   /*_________________---------------------------__________________
     _________________         initAgent         __________________
@@ -414,6 +495,18 @@ extern "C" {
     
     // add <virtualEntity> pollers for each virtual machine
     configVMs(sp);
+
+#ifdef HSF_JSON
+    uint16_t jsonPort = sp->sFlow->sFlowSettings_file->jsonPort;
+    if(jsonPort != 0) {
+      sp->json_soc = openUDPListenSocket("127.0.0.1", PF_INET, jsonPort, HSP_JSON_RCV_BUF);
+      sp->json_soc6 = openUDPListenSocket("::1", PF_INET6, jsonPort, HSP_JSON_RCV_BUF);
+      cJSON_Hooks hooks;
+      hooks.malloc_fn = my_calloc;
+      hooks.free_fn = my_free;
+      cJSON_InitHooks(&hooks);
+    }
+#endif
 
     return YES;
   }
@@ -580,6 +673,11 @@ extern "C" {
 	UTStrBuf_printf(buf, "agent=%s\n", sf->agentDevice);
       }
       UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+
+      // jsonPort always comes from local config file
+      if(sf->sFlowSettings_file && sf->sFlowSettings_file->jsonPort != 0) {
+	UTStrBuf_printf(buf, "jsonPort=%u\n", sf->sFlowSettings_file->jsonPort);
+      }
 
       // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
       // another step here to make sure they are sorted.  Otherwise we think the config has changed
@@ -897,6 +995,11 @@ extern "C" {
   {
     HSP *sp = &HSPSamplingProbe;
 
+#if (HSF_JSON)
+    fd_set readfds;
+    FD_ZERO(&readfds);
+#endif
+
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
     setlogmask(LOG_UPTO(LOG_DEBUG));
@@ -1020,16 +1123,27 @@ extern "C" {
     
     setState(sp, HSPSTATE_READCONFIG);
 
+    int configOK = NO;
     while(sp->state != HSPSTATE_END) {
       
       switch(sp->state) {
 	
       case HSPSTATE_READCONFIG:
-	// On Solaris it is important to readInterfaces at least once before
-	// we drop root prviileges (so we can use dlpi to get the MAC addresses),
-	// We are still root at this point, but be careful if making changes here,
-	// e.g. to support the agent.cidr option.
-	if(readInterfaces(sp) == 0 || HSPReadConfigFile(sp) == NO) {
+	// a sucessful read of the config file is required
+	if(HSPReadConfigFile(sp) == NO) {
+	  myLog(LOG_ERR, "failed to read config file\n");
+	  exitStatus = EXIT_FAILURE;
+	  setState(sp, HSPSTATE_END);
+	}
+	else if(readInterfaces(sp) == 0) {
+	  // On Solaris it is important to readInterfaces at least once before
+	  // we drop root prviileges (so we can use dlpi to get the MAC addresses),
+	  myLog(LOG_ERR, "failed to read interfaces\n");
+	  exitStatus = EXIT_FAILURE;
+	  setState(sp, HSPSTATE_END);
+	}
+	else if(selectAgentAddress(sp) == NO) {
+	  myLog(LOG_ERR, "failed to select agent address\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
 	}
@@ -1042,7 +1156,6 @@ extern "C" {
 	  else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
 	  sfl_random_init(seed);
 
-	
 	  // load the persistent state from last time
 	  readVMStore(sp);
 
@@ -1126,7 +1239,9 @@ extern "C" {
 
 	    SEMLOCK_DO(sp->config_mut) {
 	      // was the config turned off?
-	      if(sp->sFlow->sFlowSettings) {
+	      // set configOK flag here while we have the semaphore
+	      configOK = (sp->sFlow->sFlowSettings != NULL);
+	      if(configOK) {
 		// did the polling interval change?  We have the semaphore
 		// here so we can just run along and tell everyone.
 		uint32_t piv = sp->sFlow->sFlowSettings->pollingInterval;
@@ -1156,7 +1271,50 @@ extern "C" {
       // set the timeout so that if all is quiet we will
       // still loop around and check for ticks/signals
       // several times per second
-      my_usleep(200000);
+#define HSP_SELECT_TIMEOUT_uS 200000
+
+#if (HSF_JSON)
+      int max_fd = 0;
+      if(sp->json_soc) {
+	if(sp->json_soc > max_fd) max_fd = sp->json_soc;
+	FD_SET(sp->json_soc, &readfds);
+      }
+      if(sp->json_soc6) {
+	if(sp->json_soc6 > max_fd) max_fd = sp->json_soc6;
+	FD_SET(sp->json_soc6, &readfds);
+      }
+
+      if(!configOK) {
+	// no config (may be temporary condition caused by DNS-SD),
+	// so disable the socket polling - just use select() to sleep
+	max_fd = 0;
+      }
+      struct timeval timeout;
+      timeout.tv_sec = 0;
+      timeout.tv_usec = HSP_SELECT_TIMEOUT_uS;
+      int nfds = select(max_fd + 1,
+			&readfds,
+			(fd_set *)NULL,
+			(fd_set *)NULL,
+			&timeout);
+      // may return prematurely if a signal was caught, in which case nfds will be
+      // -1 and errno will be set to EINTR.  If we get any other error, abort.
+      if(nfds < 0 && errno != EINTR) {
+	myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      if(debug && nfds > 0) {
+	myLog(LOG_INFO, "select returned %d", nfds);
+      }
+      // may get here just because a signal was caught so these
+      // callbacks need to be non-blocking when they read from the socket
+      if(sp->json_soc && FD_ISSET(sp->json_soc, &readfds)) readJSON(sp, sp->json_soc);
+      if(sp->json_soc6 && FD_ISSET(sp->json_soc6, &readfds)) readJSON(sp, sp->json_soc6);
+
+#else /* (HSF_JSON) */
+      my_usleep(HSP_SELECT_TIMEOUT_uS);
+#endif /* (HSF_JSON) */
+
     }
 
     // get here if a signal kicks the state to HSPSTATE_END

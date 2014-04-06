@@ -6,6 +6,10 @@ To compile and install, try this:
 root> gmake
 root> gmake install
 
+If you are building for Solaris10 on a Solaris11 system, use:
+
+root> gmake SOLARISVERSION=5010
+
 You may find you have to add /usr/ccs/bin and /usr/sfw/bin to
 your $PATH before gmake will run,  and you may have to run:
 

@@ -10,6 +10,53 @@ extern "C" {
 #include "hsflowd.h"
 #include <kstat.h>
 
+extern int debug;
+
+  /*_________________---------------------------__________________
+    _________________      logNioCounters       __________________
+    -----------------___________________________------------------
+  */
+  static void logNioCounters(SFLHost_nio_counters *nio, char *msg1, char *msg2) {
+    myLog(LOG_INFO, "%s (%s):", msg1 ?: "", msg2 ?: "");
+    myLog(LOG_INFO, "  byts_in=%"PRIu64" byts_out=%"PRIu64, nio->bytes_in, nio->bytes_out);
+    myLog(LOG_INFO, "  pkts_in=%"PRIu32" pkts_out=%"PRIu32, nio->pkts_in, nio->pkts_out);
+    myLog(LOG_INFO, "  errs_in=%"PRIu32" errs_out=%"PRIu32, nio->errs_in, nio->errs_out);
+    myLog(LOG_INFO, "  drps_in=%"PRIu32" drps_out=%"PRIu32, nio->drops_in, nio->drops_out);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    get_kstat_uintxx       __________________
+    -----------------___________________________------------------
+  */
+
+  static uint32_t get_kstat_uint32(kstat_t *ksp, char *ctrname) {
+    kstat_named_t *knp = kstat_data_lookup(ksp, ctrname);
+    if(knp) {
+      switch(knp->data_type) {
+      case KSTAT_DATA_INT32: return (uint32_t)knp->value.i32;
+      case KSTAT_DATA_UINT32: return (uint32_t)knp->value.ui32;
+      case KSTAT_DATA_INT64: return (uint32_t)knp->value.i64;
+      case KSTAT_DATA_UINT64: return (uint32_t)knp->value.ui64;
+      default: break;
+      }
+    }
+    return 0;
+  }
+
+  static uint64_t get_kstat_uint64(kstat_t *ksp, char *ctrname) {
+    kstat_named_t *knp = kstat_data_lookup(ksp, ctrname);
+    if(knp) {
+      switch(knp->data_type) {
+      case KSTAT_DATA_INT32: return (uint64_t)knp->value.i32;
+      case KSTAT_DATA_UINT32: return (uint64_t)knp->value.ui32;
+      case KSTAT_DATA_INT64: return (uint64_t)knp->value.i64;
+      case KSTAT_DATA_UINT64: return (uint64_t)knp->value.ui64;
+      default: break;
+      }
+    }
+    return 0;
+  }
+
   /*_________________---------------------------__________________
     _________________    updateNioCounters      __________________
     -----------------___________________________------------------
@@ -25,81 +72,77 @@ extern "C" {
 
     kstat_ctl_t *kc;
     kstat_t *ksp;
-    kstat_named_t *knp;
 #ifndef KSNAME_BUFFER_SIZE
 #define KSNAME_BUFFER_SIZE 32
 #endif
     char devName[KSNAME_BUFFER_SIZE];
 
-    // ASCII numbers in /proc/diskstats may be 64-bit (if not now
-    // then someday), so it seems safer to read into
-    // 64-bit ints with scanf first,  then copy them
-    // into the host_nio structure from there.
-    uint64_t bytes_in = 0;
-    uint64_t pkts_in = 0;
-    uint64_t errs_in = 0;
-    uint64_t drops_in = 0;
-    uint64_t bytes_out = 0;
-    uint64_t pkts_out = 0;
-    uint64_t errs_out = 0;
-    uint64_t drops_out = 0;
 
     kc = kstat_open();
     if (NULL == kc) {
       myLog(LOG_ERR, "readNioCounters kstat_open failed");
     } else {
       for (ksp = kc->kc_chain; NULL != ksp; ksp = ksp->ks_next) {
+	int includeDev = NO;
+	// Concatenate the module name and instance number to create device name
 	snprintf(devName, KSNAME_BUFFER_SIZE, "%s%d", ksp->ks_module, ksp->ks_instance);
+
+#if (HSP_SOLARIS >= 5011)
+	// on solaris 11 we collect name=phys, module!=aggr,vnic for counter purposes.
+	// and don't use any of the others for counters.
+	if(my_strequal(ksp->ks_name, "phys")
+	   && !my_strequal(ksp->ks_module, "aggr") 
+	   && !my_strequal(ksp->ks_module, "vnic")) {
+	  includeDev = YES;
+	}
+#else
+	// If device name equals the kstat's name, then we have a kstat the describes the device. 
 	if (!strncmp(ksp->ks_name, devName, KSNAME_BUFFER_SIZE)) {
+	  includeDev = YES;
+	}
+#endif
+
+	if(includeDev) {
 	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, devName);
 	  if (adaptor && adaptor->userData) {
+	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO*)adaptor->userData;
+
+	    // we might know this is a loopback interface, so apply that filter here
+	    if(niostate->vlan != HSP_VLAN_ALL
+	       || niostate->loopback
+	       || niostate->bond_master) {
+	      continue;
+	    }
+
+
 	    if (-1 == kstat_read(kc, ksp, NULL)) {
 	      myLog(LOG_ERR, "kstat_read error module: %s, name: %s, class: %s): %s",
 		    ksp->ks_module, ksp->ks_name, ksp->ks_class, strerror(errno));
 	      continue;
 	    }
 
-	    knp = kstat_data_lookup(ksp, "ipackets");
-	    if (NULL != knp)
-	      pkts_in += knp->value.ui32;
+	    if(debug) {
+	      myLog(LOG_INFO, "readNioCounters: device=%s (last_update=%u)", devName, niostate->last_update);
+	    }
+	    SFLHost_nio_counters latest = { 0 };
 
-	    knp = kstat_data_lookup(ksp, "ierrors");
-	    if (NULL != knp)
-	      errs_in += knp->value.ui32;
+	    latest.pkts_in = get_kstat_uint32(ksp, "ipackets");
+	    latest.errs_in =  get_kstat_uint32(ksp, "ierrors");
+	    latest.drops_in =  get_kstat_uint32(ksp, "norcvbuf");
+	    latest.bytes_in = get_kstat_uint64(ksp, "rbytes64");
+	    latest.pkts_out = get_kstat_uint32(ksp, "opackets");
+	    latest.errs_out = get_kstat_uint32(ksp, "oerrors");
+	    latest.drops_out = get_kstat_uint32(ksp, "noxmitbuf");
+	    latest.bytes_out = get_kstat_uint64(ksp, "obytes64");
 
-	    knp = kstat_data_lookup(ksp, "norcvbuf");
-	    if (NULL != knp)
-	      drops_in += knp->value.ui32;
-
-	    knp = kstat_data_lookup(ksp, "rbytes64");
-	    if (NULL != knp)
-	      bytes_in += knp->value.ui64;
-
-	    knp = kstat_data_lookup(ksp, "opackets");
-	    if (NULL != knp)
-	      pkts_out += knp->value.ui32;
-
-	    knp = kstat_data_lookup(ksp, "oerrors");
-	    if (NULL != knp)
-	      errs_out += knp->value.ui32;
-
-	    knp = kstat_data_lookup(ksp, "noxmtbuf");
-	    if (NULL != knp)
-	      drops_out += knp->value.ui32;
-
-	    knp = kstat_data_lookup(ksp, "obytes64");
-	    if (NULL != knp)
-	      bytes_out += knp->value.ui64;
-
-	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO*)adaptor->userData;
 	    // have to detect discontinuities here, so use a full
 	    // set of latched counters and accumulators.
 	    int accumulate = niostate->last_update ? YES : NO;
 	    niostate->last_update = sp->clk;
 	    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
 
-	    SFLHost_nio_counters delta;
-#define NIO_COMPUTE_DELTA(field) delta.field = field - niostate->last_nio.field
+	    SFLHost_nio_counters delta = { 0 };
+#define NIO_COMPUTE_DELTA(field) delta.field = latest.field - niostate->last_nio.field
 	    NIO_COMPUTE_DELTA(pkts_in);
 	    NIO_COMPUTE_DELTA(errs_in);
 	    NIO_COMPUTE_DELTA(drops_in);
@@ -115,15 +158,15 @@ extern "C" {
 	    else {
 	      // for case where byte counters are 32-bit,  we need
 	      // to use 32-bit unsigned arithmetic to avoid spikes
-	      delta.bytes_in = (uint32_t)bytes_in - niostate->last_bytes_in32;
-	      delta.bytes_out = (uint32_t)bytes_out - niostate->last_bytes_out32;
-	      niostate->last_bytes_in32 = bytes_in;
-	      niostate->last_bytes_out32 = bytes_out;
+	      delta.bytes_in = (uint32_t)latest.bytes_in - niostate->last_bytes_in32;
+	      delta.bytes_out = (uint32_t)latest.bytes_out - niostate->last_bytes_out32;
+	      niostate->last_bytes_in32 = latest.bytes_in;
+	      niostate->last_bytes_out32 = latest.bytes_out;
 	      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
 	      // if we detect that the OS is using 64-bits then we can turn off the faster
 	      // NIO polling. This should probably be done based on the kernel version or some
 	      // other include-file definition, but it's not expensive to do it here like this:
-	      if(bytes_in > 0xFFFFFFFF || bytes_out > 0xFFFFFFFF) {
+	      if(latest.bytes_in > 0xFFFFFFFF || latest.bytes_out > 0xFFFFFFFF) {
 		myLog(LOG_INFO, "detected 64-bit counters");
 		sp->nio_polling_secs = 0;
 	      }
@@ -154,9 +197,12 @@ extern "C" {
 	      NIO_ACCUMULATE(pkts_out);
 	      NIO_ACCUMULATE(errs_out);
 	      NIO_ACCUMULATE(drops_out);
+	      if(debug > 1) {
+		logNioCounters(&niostate->nio, "accumulate", devName);
+	      }
 	    }
 
-#define NIO_LATCH(field) niostate->last_nio.field = field
+#define NIO_LATCH(field) niostate->last_nio.field = latest.field
 	    NIO_LATCH(bytes_in);
 	    NIO_LATCH(pkts_in);
 	    NIO_LATCH(errs_in);
@@ -200,9 +246,10 @@ extern "C" {
 	  // By leaving this test until now we make it possible
 	  // to know the counters for any interface or sub-interface
 	  // if required (e.g. for the readPackets() module).
-	  if(devFilter == NULL && (niostate->vlan != HSP_VLAN_ALL ||
-				   niostate->loopback ||
-				   niostate->bond_master)) {
+	  if(devFilter == NULL && (niostate->vlan != HSP_VLAN_ALL
+				   || niostate->loopback
+				   || niostate->bond_master
+				   || !niostate->forCounters)) {
 	    continue;
 	  }
 
@@ -218,6 +265,9 @@ extern "C" {
 	  nio->drops_out += niostate->nio.drops_out;
 	}
       }
+    }
+    if(debug > 1) {
+      logNioCounters(nio, "ROLLUP", "ALL");
     }
     return interface_count;
   }

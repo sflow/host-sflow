@@ -285,7 +285,17 @@ extern "C" {
   int my_strequal(char *s1, char *s2) {
     return my_strnequal(s1, s2, UT_DEFAULT_MAX_STRLEN);
   }
-    
+
+  uint32_t my_strhash(char *str)
+  {
+    /* hash function from the great Dan Bernstein */
+    uint32_t hash = 5381;
+    if(str == NULL) return hash;
+    int c;
+    while ((c = *str++) != '\0') hash = hash * 33 ^ c;
+    return hash;
+  }
+  
   /*_________________---------------------------__________________
     _________________     setStr                __________________
     -----------------___________________________------------------
@@ -430,12 +440,15 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  static int parseOrResolveAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family, int numeric)
   {
     struct addrinfo *info = NULL;
     struct addrinfo hints = { 0 };
     hints.ai_socktype = SOCK_DGRAM; // constrain this so we don't get lots of answers
     hints.ai_family = family; // PF_INET, PF_INET6 or 0
+    if(numeric) {
+      hints.ai_flags = AI_NUMERICHOST | AI_NUMERICSERV;
+    }
     int err = getaddrinfo(name, NULL, &hints, &info);
     if(err) {
       if(debug) myLog(LOG_INFO, "getaddrinfo() failed: %s", gai_strerror(err));
@@ -452,7 +465,9 @@ extern "C" {
   
     if(info->ai_addr) {
       // answer is now in info - a linked list of answers with sockaddr values.
-      // extract the address we want from the first one.
+      // extract the address we want from the first one. $$$ should perhaps
+      // traverse the list and look for an IPv4 address since that is more
+      // likely to work?
       switch(info->ai_family) {
       case PF_INET:
 	{
@@ -479,6 +494,16 @@ extern "C" {
     // free the dynamically allocated data before returning
     freeaddrinfo(info);
     return YES;
+  }
+
+  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  {
+    return parseOrResolveAddress(name, sa, addr, family, NO);
+  }
+
+  int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  {
+    return parseOrResolveAddress(name, sa, addr, family, YES);
   }
 
   /*________________---------------------------__________________
@@ -793,7 +818,6 @@ extern "C" {
       ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
       ad->deviceName = my_strdup(dev);
       ad->userData = my_calloc(userDataSize);
-      
       if(adList->num_adaptors == adList->capacity) {
 	// grow
 	adList->capacity *= 2;

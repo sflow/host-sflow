@@ -41,6 +41,7 @@ extern "C" {
 
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
+  int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
   int parseUUID(char *str, char *uuid);
@@ -82,6 +83,7 @@ extern "C" {
   char *my_strdup(char *str);
   int my_strnequal(char *s1, char *s2, uint32_t max);
   int my_strequal(char *s1, char *s2);
+  uint32_t my_strhash(char *str);
 
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {
