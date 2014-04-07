@@ -83,7 +83,10 @@ extern "C" {
 	// 'I' = Intermediate state
 	// 'O' = On processor (actually running right now)
 
-	if ('O' == psinfo.pr_lwp.pr_sname) {
+	// To be consistent with the number in /proc/loadavg on Linux,
+	// we have to count both 'O's and 'R's here:
+	if ('O' == psinfo.pr_lwp.pr_sname
+	    || 'R' == psinfo.pr_lwp.pr_sname) {
 	  proc_run++;
 	}
       }
