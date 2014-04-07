@@ -40,8 +40,8 @@ HEADERS= hsflowd.h hsflowtokens.h sflowovsd.h Makefile
 SFLOWDIR=../sflow
 
 #CC= g++
-#CC= gcc -std=gnu99
-CC=sparc-sun-solaris2.11-gcc -std=gnu99
+CC= gcc -std=gnu99
+#CC=sparc-sun-solaris2.11-gcc -std=gnu99
 
 
 OPT_FULL = -O3 -DNDEBUG
