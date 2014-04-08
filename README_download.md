@@ -33,7 +33,8 @@ Linux
 
 Solaris
 -------
-See 1.20 release, or build from sources
+please build from sources.  Note that a package built on Solaris 10 will
+not work on Solaris 11, and vice-versa.
 
 FreeBSD
 -------
