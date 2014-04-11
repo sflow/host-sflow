@@ -60,7 +60,7 @@ inm_uuid() {
 
     if [ -x /usr/sbin/dmidecode ]; then
 	# from the BIOS
-	MYUUID=`/usr/sbin/dmidecode | awk -- '/UUID/{print $2}'`
+	MYUUID=`/usr/sbin/dmidecode 2>/dev/null | awk -- '/UUID/{print $2}'`
         if is_uuid $MYUUID; then
             echo $MYUUID
 	    return 0;
@@ -78,7 +78,7 @@ inm_uuid() {
 
     if [ -x /sbin/blkid ]; then
 	# first local disk (via 'blkid')
-        MYUUID=`blkid | awk -vRS=" " -vFS="=" -- '/UUID/{print $2}' | tr -d '"' | head -1`;
+        MYUUID=`blkid 2>/dev/null | awk -vRS=" " -vFS="=" -- '/UUID/{print $2}' | tr -d '"' | head -1`;
         if is_uuid $MYUUID; then
             echo $MYUUID
 	    return 0;
