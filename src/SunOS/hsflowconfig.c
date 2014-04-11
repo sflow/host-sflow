@@ -233,7 +233,7 @@ extern "C" {
   
   // expectUUID
   
-  static HSPToken *expectUUID(HSP *sp, HSPToken *tok, char *uuid)
+  static HSPToken *expectUUID(HSP *sp, HSPToken *tok, u_char *uuid)
   {
     HSPToken *t = tok;
     t = t->nxt;

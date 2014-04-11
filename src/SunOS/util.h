@@ -44,7 +44,7 @@ extern "C" {
   int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
-  int parseUUID(char *str, char *uuid);
+  int parseUUID(char *str, u_char *uuid);
   int printUUID(const u_char *a, u_char *buf, int bufLen);
   int uuid_empty(const u_char *uuid);
   
