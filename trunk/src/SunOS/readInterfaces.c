@@ -67,7 +67,7 @@ extern "C" {
       return NO;
     }
     
-    int macaddrlen = DLPI_PHYSADDR_MAX;
+    size_t macaddrlen = DLPI_PHYSADDR_MAX;
     int copied = 0;
     char macaddr[DLPI_PHYSADDR_MAX];
     dlpi_handle_t dh;

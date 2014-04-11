@@ -199,7 +199,7 @@ extern "C" {
 #define HSP_VMSTORE_SEPARATORS " \t\r\n="
   typedef struct _HSPVMStore {
     struct _HSPVMStore *nxt;
-    char uuid[16];
+    u_char uuid[16];
     uint32_t dsIndex;
   } HSPVMStore;
   
@@ -268,7 +268,7 @@ extern "C" {
     // Identity
     char hostname[SFL_MAX_HOSTNAME_CHARS+1];
     char os_release[SFL_MAX_OSRELEASE_CHARS+1];
-    char uuid[16];
+    u_char uuid[16];
     char *uuidFile;
     // interfaces and MACs
     SFLAdaptorList *adaptorList;

@@ -155,7 +155,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static HSPVMStore *newVMStore(HSP *sp, char *uuid, uint32_t dsIndex) {
+  static HSPVMStore *newVMStore(HSP *sp, u_char *uuid, uint32_t dsIndex) {
     HSPVMStore *vmStore = (HSPVMStore *)my_calloc(sizeof(HSPVMStore));
     memcpy(vmStore->uuid, uuid, 16);
     vmStore->dsIndex = dsIndex;
@@ -185,7 +185,7 @@ extern "C" {
 	if(*p != '\0') *p++ = '\0';
       }
       // expect UUID=int
-      char uuid[16];
+      u_char uuid[16];
       if(tokc != 2 || !parseUUID(tokv[0], uuid)) {
 	myLog(LOG_ERR, "readVMStore: bad line %u in %s", lineNo, sp->vmStoreFile);
       }
@@ -201,7 +201,7 @@ extern "C" {
   static void writeVMStore(HSP *sp) {
     rewind(sp->f_vmStore);
     for(HSPVMStore *vmStore = sp->vmStore; vmStore != NULL; vmStore = vmStore->nxt) {
-      char uuidStr[51];
+      u_char uuidStr[51];
       printUUID((u_char *)vmStore->uuid, (u_char *)uuidStr, 50);
       fprintf(sp->f_vmStore, "%s=%u\n", uuidStr, vmStore->dsIndex);
     }
@@ -1100,8 +1100,8 @@ extern "C" {
         exit(EXIT_FAILURE);
       }
       else {
-        char uuidStr[51];
-        printUUID((u_char *)sp->uuid, (u_char *)uuidStr, 50);
+        u_char uuidStr[51];
+        printUUID((sp->uuid, uuidStr, 50);
 	fprintf(f_uuid, "uuid=%s\n", uuidStr);
 	
         fflush(f_uuid);

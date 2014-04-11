@@ -579,9 +579,9 @@ extern "C" {
   -----------------___________________________------------------
 */
 
-  int parseUUID(char *str, char *uuid)
+  int parseUUID(char *str, u_char *uuid)
   {
-    if(hexToBinary((u_char *)str, (u_char *)uuid, 16) != 16) return NO;
+    if(hexToBinary((u_char *)str, uuid, 16) != 16) return NO;
     return YES;
   }
 
