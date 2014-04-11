@@ -1,0 +1,9 @@
+Package: _PACKAGE_
+Version: _VERSION_
+Section: admin 
+Priority: optional
+Architecture: all
+Essential: no
+Maintainer: Neil McKee [neil.mckee@inmon.com]
+Description: sFlow(R) monitoring agent
+Homepage: host-sflow.sourceforge.net

@@ -1,0 +1,92 @@
+;-------------------------------------------------------------------------
+; sFlowFilter.inf -- sFlow flow sampling filter driver installation
+;
+; Copyright (c) Microsoft Corporation.  All rights reserved.
+; Copyright (C) InMon Corporation 2011 ALL RIGHTS RESERVED
+;
+; Version: $Revision: 251 $
+;-------------------------------------------------------------------------
+
+[version]
+Signature       = "$Windows NT$"
+Class           = NetService
+ClassGUID       = {4D36E974-E325-11CE-BFC1-08002BE10318}
+CatalogFile     = sflowfilter.cat
+Provider        = %INMON%
+
+DriverVer=07/17/2012,1.22.0
+
+[Manufacturer]
+InMon=InMon,NTx86,NTamd64
+
+[InMon.NTx86]
+%sFlow_Desc%=Install, sflowfilter
+
+[InMon.NTamd64]
+%sFlow_Desc%=Install, sflowfilter
+
+;-------------------------------------------------------------------------
+; Installation Section
+;-------------------------------------------------------------------------
+[Install]
+AddReg=Inst_Ndi
+; 0x40000 = NCF_LW_FILTER
+Characteristics=0x40000
+
+NetCfgInstanceId="{AF8CAD53-C7B7-420C-9439-135A87818A64}"
+
+Copyfiles = sflowfilter.copyfiles.sys
+
+[SourceDisksNames]
+1=%sFlow_Desc%,"",,
+
+[SourceDisksFiles]
+sflowfilter.sys=1
+
+[DestinationDirs]
+DefaultDestDir=12
+sflowfilter.copyfiles.sys=12
+
+[sflowfilter.copyfiles.sys]
+sflowfilter.sys,,,2
+
+;-------------------------------------------------------------------------
+; Ndi installation support
+;-------------------------------------------------------------------------
+[Inst_Ndi]
+HKR, Ndi,Service,,"sFlowFilter"
+HKR, Ndi,CoServices,0x00010000,"sFlowFilter"
+HKR, Ndi,HelpText,,%sFlow_HelpText%
+; vSwitch capture driver
+HKR, Ndi,FilterClass,, ms_switch_capture
+;     HKR, Ndi,FilterType,0x00010001, 2 ; Modifying filter
+HKR, Ndi,FilterType,0x00010001,2
+; Do not change these values
+HKR, Ndi\Interfaces,UpperRange,,"noupper"
+HKR, Ndi\Interfaces,LowerRange,,"nolower"
+
+HKR, Ndi\Interfaces, FilterMediaTypes,,"vmnetextension"
+HKR, Ndi,FilterRunType,0x00010001, 2 ; Optional filter
+
+;-------------------------------------------------------------------------
+; Service installation support
+;-------------------------------------------------------------------------
+[Install.Services]
+AddService=sFlowFilter,,sFlowFilter_Service_Inst
+
+[sFlowFilter_Service_Inst]
+DisplayName     = %sFlow_Desc%
+ServiceType     = 1 ;SERVICE_KERNEL_DRIVER
+StartType       = 1 ;SERVICE_SYSTEM_START
+ErrorControl    = 1 ;SERVICE_ERROR_NORMAL
+ServiceBinary   = %12%\sflowfilter.sys
+LoadOrderGroup  = NDIS
+Description     = %sFlow_Desc%
+
+[Install.Remove.Services]
+DelService=sFlowFilter,0x200 ; SPSVCINST_STOPSERVICE
+
+[Strings]
+INMON            = "InMon"
+sFlow_Desc       = "sFlow Traffic Monitoring"
+sFlow_HelpText   = "vSwitch Extension Providing sFlow Traffic Monitoring"
