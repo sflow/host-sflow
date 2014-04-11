@@ -130,9 +130,11 @@ ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
 endif
 
-INITSCRIPT=scripts/hsflowd
+HSFLOWD_INITSCRIPT=scripts/hsflowd
+SFLOWOVSD_INITSCRIPT=scripts/sflowovsd
 ifeq ($(DEBIAN),yes)
-	INITSCRIPT=scripts/hsflowd.deb
+	HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
+	SFLOWOVSD_INITSCRIPT=scripts/sflowovsd.deb
 endif
 
 ifeq ($(BINDIR),)
@@ -192,13 +194,13 @@ install: install-hsflowd install-sflowovsd
 install-hsflowd: hsflowd
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
-	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 700 $(INITSCRIPT) $(INIT_D); fi
+	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd; fi
 	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
 
 install-sflowovsd: sflowovsd
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 sflowovsd $(BIN_D)
-	if [ ! -e $(INIT_D)/sflowovsd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 700 scripts/sflowovsd $(INIT_D); fi
+	if [ ! -e $(INIT_D)/sflowovsd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(SFLOWOVSD_INITSCRIPT) $(INIT_D)/sflowovsd; fi
 
 #### SCHEDULE ####
 
