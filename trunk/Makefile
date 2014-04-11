@@ -89,7 +89,8 @@ deb: $(PROG)
 	install -m 555 DEBIAN_build/postinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/prerm debian/DEBIAN; \
 	install -m 700 src/Linux/hsflowd src/Linux/sflowovsd debian/usr/sbin; \
-	install -m 700 src/Linux/scripts/hsflowd src/Linux/scripts/sflowovsd debian/etc/init.d; \
+	install -m 755 src/Linux/scripts/hsflowd.deb debian/etc/init.d/hsflowd; \
+	install -m 755 src/Linux/scripts/sflowovsd.deb debian/etc/init.d/sflowovsd; \
 	install -m 644 src/Linux/scripts/hsflowd.conf debian/etc; \
         cd debian; \
 	find . -type d | xargs chmod 755; \
