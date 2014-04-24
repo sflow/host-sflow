@@ -400,7 +400,12 @@ extern "C" {
 		 delta.bytes_out > maxDeltaBytes ||
 		 delta.pkts_in > HSP_MAX_NIO_DELTA32 ||
 		 delta.pkts_out > HSP_MAX_NIO_DELTA32) {
-		myLog(LOG_ERR, "detected counter discontinuity in /proc/net/dev");
+		myLog(LOG_ERR, "detected counter discontinuity in /proc/net/dev for %s: deltaBytes=%"PRIu64",%"PRIu64" deltaPkts=%u,%u",
+                      adaptor->deviceName,
+                      delta.bytes_in,
+                      delta.bytes_out,
+                      delta.pkts_in,
+                      delta.pkts_out);
 		accumulate = NO;
 	      }
 #ifdef HSP_ETHTOOL_STATS

@@ -202,6 +202,16 @@ extern "C" {
 		  msg->nlmsg_pid);
 	  }
 
+          // check for drops indicated by sequence no
+          uint32_t droppedSamples = 0;
+          if(sp->ulog_seqno) {
+            droppedSamples = msg->nlmsg_seq - sp->ulog_seqno - 1;
+            if(droppedSamples) {
+              sp->ulog_drops += droppedSamples;
+            }
+          }
+          sp->ulog_seqno = msg->nlmsg_seq;
+
 	  switch(msg->nlmsg_type) {
 	  case NLMSG_NOOP:
 	  case NLMSG_ERROR:
@@ -226,7 +236,7 @@ extern "C" {
 		ulog_packet_msg_t *pkt = NLMSG_DATA(msg);
 		
 		if(debug > 1) {
-		  myLog(LOG_INFO, "mark=%u ts=%s hook=%u in=%s out=%s len=%u prefix=%s maclen=%u\n",
+		  myLog(LOG_INFO, "mark=%u ts=%s hook=%u in=%s out=%s len=%u prefix=%s maclen=%u",
 			pkt->mark,
 			ctime(&pkt->timestamp_sec),
 			pkt->hook,
@@ -248,14 +258,27 @@ extern "C" {
 		SFL_FLOW_SAMPLE_TYPE fs = { 0 };
 	
 		SFLAdaptor *sampler_dev = NULL;
-
+                int inIsLoopback=0, outIsLoopback=0;
+ 
 		// set the ingress and egress ifIndex numbers.
 		// Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
 		if(pkt->indev_name[0]) {
 		  SFLAdaptor *in = adaptorListGet(sp->adaptorList, pkt->indev_name);
 		  if(in) {
 		    fs.input = in->ifIndex;
-		    sampler_dev = in;
+                    // record whether this was a loopback or not - used below
+                    HSPAdaptorNIO *inNIO = (HSPAdaptorNIO *)in->userData;
+                    inIsLoopback = inNIO->loopback;
+#ifdef HSF_CUMULUS
+                    // On Cumulus Linux the sampling direction is indicated in the low
+                    // bit of the pkt->hook field: 0==ingress,1==egress
+                    if((pkt->hook & 1) == 0) {
+                      sampler_dev = in;
+                    }
+#else
+                    // set this provisionally - may be overidden below
+	            sampler_dev = in;
+#endif
 		  }
 		}
 		else {
@@ -265,22 +288,24 @@ extern "C" {
 		  SFLAdaptor *out = adaptorListGet(sp->adaptorList, pkt->outdev_name);
 		  if(out && out->ifIndex) {
 		    fs.output = out->ifIndex;
-		    // the sampler_dev may have already been set above.  By overriding
-		    // it here we are biasing towards egress-sampling for packets that
-		    // matched both an ingress and an egress interface.  In practice
-		    // most packets will only match one or the other,  though.  They
-		    // will either be "eth0 -> lo" or "lo -> eth0".  Since we don't
-		    // usually allow "lo" to be in the adaptorList,  the upshot is
-		    // that we are offering bidirectional sampling on the "eth0" (and
-		    // similar) interfaces.
-		    // It might be more stable if we biased towards ingress-sampling
-		    // and only set these vars if they were not set before,  but
-		    // further investigation is required.  For example,  the really
-		    // correct thing to do might be to generate a separate sample
-		    // for each interface,  even though it was the same packet.  That
-		    // way we would have true bidirectional sampling on any
-		    // interface that makes it into the adaptorList.
-		    sampler_dev = out;
+                    HSPAdaptorNIO *outNIO = (HSPAdaptorNIO *)out->userData;
+                    outIsLoopback = outNIO->loopback;
+#ifdef HSF_CUMULUS
+                    // On Cumulus Linux the sampling direction is indicated in the low
+                    // bit of the pkt->hook field: 0==ingress,1==egress
+                    if((pkt->hook & 1) == 1) {
+                      sampler_dev = out;
+                    }
+#else
+                    // If one of them is not a loopback interface, then assume the
+                    // sample was taken there.  In a typical scenario most samples
+	            // will be "lo" -> "eth0" or "eth0" -> "lo", so this ensures that
+                    // that we make that look like bidirectional sampling on eth0.
+                    if(sampler_dev == NULL
+                       || (inIsLoopback && !outIsLoopback)) {
+		      sampler_dev = out;
+                    }
+#endif
 		  }
 		}
 		else {
@@ -289,6 +314,15 @@ extern "C" {
 
 		// must have a sampler_dev with an ifIndex
 		if(sampler_dev && sampler_dev->ifIndex) {
+                  HSPAdaptorNIO *samplerNIO = (HSPAdaptorNIO *)sampler_dev->userData;
+
+                  if(debug > 2) {
+                    myLog(LOG_INFO, "selected sampler %s (loopback in=%d out=%d)",
+                          sampler_dev->deviceName, 
+                          inIsLoopback,
+                          outIsLoopback);
+                  }
+
 		  SFLSampler *sampler = getSampler(sp, sampler_dev);
 		  
 		  if(sampler) {
@@ -339,6 +373,11 @@ extern "C" {
 		    // might be too expensive in the case where ulogSamplingRate==1.
 		    sampler->samplePool += actualSamplingRate;
 		    
+                    // accumulate any dropped-samples we detected against whichever sampler
+                    // sends the next sample. This is not perfect,  but is likely to accrue
+                    // drops against the point whose sampling-rate needs to be adjusted.
+                    samplerNIO->ulog_drops += droppedSamples;
+                    fs.drops = samplerNIO->ulog_drops;
 		    sfl_sampler_writeFlowSample(sampler, &fs);
 		  }
 		}

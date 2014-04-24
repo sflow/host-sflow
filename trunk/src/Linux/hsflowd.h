@@ -79,8 +79,9 @@ extern "C" {
 #include <net/if.h>
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
 #define HSP_MAX_ULOG_MSG_BYTES 10000
-#define HSP_READPACKET_BATCH 100
-#define HSP_ULOG_RCV_BUF 2000000
+#define HSP_READPACKET_BATCH 10000
+#define HSP_ULOG_RCV_BUF 8000000
+#define HSP_SFLOW_SND_BUF 2000000
 
 #ifndef HSP_DEFAULT_ULOG_GROUP
 #define HSP_DEFAULT_ULOG_GROUP 0
@@ -352,6 +353,7 @@ extern "C" {
     SFLPoller *poller;
     // and those sending packet-samples will have a sampler.
     SFLSampler *sampler;
+    uint32_t ulog_drops;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -445,6 +447,8 @@ extern "C" {
 #ifdef HSF_ULOG
     // ULOG packet-sampling
     int ulog_soc;
+    uint32_t ulog_seqno;
+    uint32_t ulog_drops;
     struct sockaddr_nl ulog_bind;
     struct sockaddr_nl ulog_peer;
 #endif

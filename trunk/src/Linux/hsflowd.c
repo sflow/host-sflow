@@ -1463,14 +1463,31 @@ extern "C" {
 
     assert(sf->agentIP.type);
     
+
     // open the sockets if not open already - one for v4 and another for v6
     if(sp->socket4 <= 0) {
-      if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+      if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	myLog(LOG_ERR, "IPv4 send socket open failed : %s", strerror(errno));
+      }
+      else {
+        // increase tx buffer size
+        uint32_t sndbuf = HSP_SFLOW_SND_BUF;
+        if(setsockopt(sp->socket4, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
+          myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v4): %s", HSP_SFLOW_SND_BUF, strerror(errno));
+        }
+      }
     }
     if(sp->socket6 <= 0) {
-      if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+      if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	myLog(LOG_ERR, "IPv6 send socket open failed : %s", strerror(errno));
+      }
+      else {
+        // increase tx buffer size
+        uint32_t sndbuf = HSP_SFLOW_SND_BUF;
+        if(setsockopt(sp->socket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
+          myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v6): %s", HSP_SFLOW_SND_BUF, strerror(errno));
+        }
+      }
     }
 
     time_t now = time(NULL);
@@ -2485,13 +2502,19 @@ extern "C" {
 	myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      if(debug && nfds > 0) {
+      if(debug > 1 && nfds > 0) {
 	myLog(LOG_INFO, "select returned %d", nfds);
       }
       // may get here just because a signal was caught so these
       // callbacks need to be non-blocking when they read from the socket
 #ifdef HSF_ULOG
-      if(sp->ulog_soc && FD_ISSET(sp->ulog_soc, &readfds)) readPackets(sp);
+      if(sp->ulog_soc && FD_ISSET(sp->ulog_soc, &readfds)) {
+        int batch = readPackets(sp);
+        if(debug) {
+          if(debug > 1) myLog(LOG_INFO, "readPackets batch=%d", batch);
+          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets got max batch (%d)", batch);
+        }
+      }
 #endif
 #ifdef HSF_JSON
       if(sp->json_soc && FD_ISSET(sp->json_soc, &readfds)) readJSON(sp, sp->json_soc);
