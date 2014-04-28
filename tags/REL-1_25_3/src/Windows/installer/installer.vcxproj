@@ -1,0 +1,270 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\version.targets" />
+  <Import Project="driverVersion.targets" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="win-debug|Win32">
+      <Configuration>win-debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="win-debug|x64">
+      <Configuration>win-debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="win|Win32">
+      <Configuration>win</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="win|x64">
+      <Configuration>win</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCTargetsPath Condition="'$(VCTargetsPath11)' != '' and '$(VSVersion)' == '' and '$(VisualStudioVersion)' == ''">$(VCTargetsPath11)</VCTargetsPath>
+  </PropertyGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{9E50D21F-CB47-4871-AF2C-1D557A7DC075}</ProjectGuid>
+    <RootNamespace>installer</RootNamespace>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win|Win32'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v110</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='win|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='win|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">
+    <TargetName>
+    </TargetName>
+    <OutDir>$(SolutionDir)dist\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetExt>
+    </TargetExt>
+    <ExtensionsToDeleteOnClean>*.wixobj;$(ExtensionsToDeleteOnClean)</ExtensionsToDeleteOnClean>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">
+    <TargetName>
+    </TargetName>
+    <OutDir>$(SolutionDir)dist\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetExt>
+    </TargetExt>
+    <ExtensionsToDeleteOnClean>*.wixobj;$(ExtensionsToDeleteOnClean)</ExtensionsToDeleteOnClean>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win|Win32'">
+    <OutDir>$(SolutionDir)dist\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>
+    </TargetName>
+    <TargetExt />
+    <ExtensionsToDeleteOnClean>*.wixobj;$(ExtensionsToDeleteOnClean)</ExtensionsToDeleteOnClean>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='win|x64'">
+    <OutDir>$(SolutionDir)dist\</OutDir>
+    <IntDir>$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>
+    </TargetName>
+    <TargetExt />
+    <ExtensionsToDeleteOnClean>*.wixobj;$(ExtensionsToDeleteOnClean)</ExtensionsToDeleteOnClean>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <NoEntryPoint>false</NoEntryPoint>
+    </Link>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+    <CustomBuild>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+      <Outputs>
+      </Outputs>
+    </CustomBuild>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+      <NoEntryPoint>false</NoEntryPoint>
+    </Link>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+    <CustomBuild>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+      <Outputs>
+      </Outputs>
+    </CustomBuild>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='win|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+    <CustomBuild>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+      <Outputs>
+      </Outputs>
+    </CustomBuild>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='win|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PreLinkEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PreLinkEvent>
+    <CustomBuild>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+      <Outputs>
+      </Outputs>
+    </CustomBuild>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+      <Message>
+      </Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="installer.wxs">
+      <FileType>Document</FileType>
+      <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -ddriverVersion="$(DriverVersion)" -o $(IntDir) "%(Identity)"
+"$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -o $(IntDir) "%(Identity)"
+"$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='win|Win32'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -o $(IntDir) "%(Identity)"
+"$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
+      <Command Condition="'$(Configuration)|$(Platform)'=='win|x64'">"$(ProgramFiles)\Windows Installer XML v3.5\bin\candle.exe" -dsourceDir="$(SolutionDir)build" -dextension -ddriverSourceDir="$(SolutionDir)switch-extension" -arch $(PlatformTarget) -darchitecture=$(PlatformTarget) -dversion=$(VersionFull) -ddriverVersion="$(DriverVersion)" -o $(IntDir) "%(Identity)"
+"$(ProgramFiles)\Windows Installer XML v3.5\bin\light.exe" -ext WixUIExtension -spdb -out "$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi" "$(IntDir)\%(Filename).wixobj"</Command>
+      <Message Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">Build WiX installer</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='win|Win32'">Build WiX installer</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">Build WiX installer</Message>
+      <Message Condition="'$(Configuration)|$(Platform)'=='win|x64'">Build WiX installer</Message>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='win-debug|Win32'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='win|Win32'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='win-debug|x64'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi</Outputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='win|x64'">$(SolutionDir)dist\hsflowd-$(Configuration)-$(VersionFull)-$(PlatformShortName).msi</Outputs>
+      <SubType>Designer</SubType>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="driverVersion.targets" />
+    <None Include="license.rtf" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
