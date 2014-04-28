@@ -609,6 +609,44 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     printSpeed            __________________
+    -----------------___________________________------------------
+  */
+
+  int printSpeed(const uint64_t speed, char *buf, int bufLen)
+  {
+    // this print may have a truncating effect,  e.g. if the speed
+    // were somthing like 10000001.  However as long as we are just
+    // using it to match config options then it's OK.
+    snprintf(buf, bufLen, "%"PRIu64, speed);
+    int digits = my_strlen(buf);
+    int chop = 0;
+    int mult = '\0';
+    if(digits > 12) {
+      mult = 'T';
+      chop = 12;
+    }
+    else if(digits > 9) {
+      mult = 'G';
+      chop = 9;
+    }
+    else if(digits > 6) {
+      mult = 'M';
+      chop = 6;
+    }
+    else if(digits > 3) {
+      mult = 'K';
+      chop = 3;
+    }
+    if(chop) {
+      digits -= chop;
+      buf[digits++] = mult;
+      buf[digits] = '\0';
+    }
+    return digits;
+  }
+
+  /*_________________---------------------------__________________
     _________________     my_usleep             __________________
     -----------------___________________________------------------
   */

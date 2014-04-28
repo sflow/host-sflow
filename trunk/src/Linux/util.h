@@ -44,6 +44,7 @@ extern "C" {
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
   int parseUUID(char *str, char *uuid);
   int printUUID(const u_char *a, u_char *buf, int bufLen);
+  int printSpeed(const uint64_t speed, char *buf, int bufLen);
   
   // logger
   void myLog(int syslogType, char *fmt, ...);

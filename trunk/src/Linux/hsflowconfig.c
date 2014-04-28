@@ -378,13 +378,17 @@ extern int debug;
     over a setting of sampling.app.xyz = 200
   */
   
-  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling)
+  int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling)
   {
     // in the config, the sFlow-APPLICATION settings should always start with sampling.app.<name> or polling.app.<name>
     // so add the .app prefix here before we start searching...
-    char search[SFLAPP_MAX_APPLICATION_LEN+100];
-    snprintf(search, SFLAPP_MAX_APPLICATION_LEN+100, "app.%s", app);
-    int search_len = my_strlen(search);
+    char *search = app;
+    int search_len = my_strlen(app);
+    if(prefix) {
+      search_len = my_strlen(app) + my_strlen(prefix) + 1;
+      search = my_calloc(search_len + 1);
+      snprintf(search, search_len, "%s.%s", prefix, app);
+    }
     // the top level settings are the defaults
     if(p_polling) *p_polling = settings->pollingInterval;
     if(p_sampling) *p_sampling = settings->samplingRate;
@@ -403,13 +407,40 @@ extern int debug;
 	}
       }
     }
-
+    
+    if(prefix) {
+      my_free(search);
+    }
+    
     if(deepest) {
       if(p_polling && deepest->got_polling_secs) *p_sampling = deepest->polling_secs;
       if(p_sampling && deepest->got_sampling_n) *p_sampling = deepest->sampling_n;
+      return YES;
     }
+    return NO;
   }
 
+
+  /*_________________----------------------------__________________
+    _________________  lookupPacketSamplingRate  __________________
+    -----------------____________________________------------------
+  */
+  
+  uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings)
+  {
+    // This falls back on the default "sampling=<n>" setting if the speed is
+    // unknown or the  speed-specific lookup fails.
+    uint32_t sampling_n = settings->samplingRate;
+    if(adaptor) {
+      if(adaptor->ifSpeed) {
+	char speedStr[51];
+	if(printSpeed(adaptor->ifSpeed, speedStr, 50)) {
+	  lookupApplicationSettings(settings, NULL, speedStr, &sampling_n, NULL);
+	}
+      }
+    }
+    return sampling_n;
+  }
 
   /*_________________---------------------------__________________
     _________________     addAgentCIDR          __________________
