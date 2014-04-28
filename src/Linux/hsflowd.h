@@ -353,6 +353,7 @@ extern "C" {
     SFLPoller *poller;
     // and those sending packet-samples will have a sampler.
     SFLSampler *sampler;
+    uint32_t sampling_n;
     uint32_t ulog_drops;
   } HSPAdaptorNIO;
 
@@ -478,7 +479,8 @@ extern "C" {
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
   void clearApplicationSettings(HSPSFlowSettings *settings);
-  void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling);
+  int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling);
+  uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings);
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
   int selectAgentAddress(HSP *sp);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);

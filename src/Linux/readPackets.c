@@ -364,7 +364,10 @@ extern "C" {
 		    SFLADD_ELEMENT(&fs, &hdrElem);
 		    // submit the actual sampling rate so it goes out with the sFlow feed
 		    // otherwise the sampler object would fill in his own (sub-sampling) rate.
-		    uint32_t actualSamplingRate = sp->sFlow->sFlowSettings->ulogActualSamplingRate;
+		    // If it's a switch port then samplerNIO->sampling_n will be set, so that
+		    // takes precendence (allows different ports to have different sampling
+		    // settings).
+		    uint32_t actualSamplingRate = samplerNIO->sampling_n ?: sp->sFlow->sFlowSettings->ulogActualSamplingRate;
 		    fs.sampling_rate = actualSamplingRate;
 		    
 		    // estimate the sample pool from the samples.  Could maybe do this

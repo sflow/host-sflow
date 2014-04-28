@@ -1779,10 +1779,8 @@ extern "C" {
     // usage:  <prog> <interface> <ingress-rate> <egress-rate> <ulogGroup>
 #define HSP_MAX_TOK_LEN 16
     strArrayAdd(cmdline, NULL); // placeholder for port name in slot 1
-    char srate[HSP_MAX_TOK_LEN];
-    snprintf(srate, HSP_MAX_TOK_LEN, "%u", settings->samplingRate);
-    strArrayAdd(cmdline, srate); // ingress
-    strArrayAdd(cmdline, srate); // egress
+    strArrayAdd(cmdline, NULL); // placeholder for ingress sampling
+    strArrayAdd(cmdline, NULL); // placeholder for egress sampling
     char uloggrp[HSP_MAX_TOK_LEN];
     snprintf(uloggrp, HSP_MAX_TOK_LEN, "%u", sf->sFlowSettings_file->ulogGroup);
     strArrayAdd(cmdline, uloggrp);
@@ -1795,7 +1793,12 @@ extern "C" {
       if(adaptor && adaptor->ifIndex) {
 	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
 	if(niostate && niostate->switchPort) {
+	  niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
 	  cmd[1] = adaptor->deviceName;
+	  char srate[HSP_MAX_TOK_LEN];
+	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
+	  cmd[2] = srate; // ingress
+	  cmd[3] = srate; // egress
 	  if(!myExec("Switchport config output", cmd, execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
 	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)", cmd[0], adaptor->deviceName);
 	  }

@@ -108,7 +108,7 @@ extern "C" {
     uint32_t sampling_n = 0;
     uint32_t polling_secs = 0;
     aa->settings_revisionNo = sp->sFlow->revisionNo;
-    lookupApplicationSettings(sp->sFlow->sFlowSettings, application, &sampling_n, &polling_secs);
+    lookupApplicationSettings(sp->sFlow->sFlowSettings, "app", application, &sampling_n, &polling_secs);
     // poller
     aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, agentCB_getCounters);
     sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
@@ -198,7 +198,7 @@ extern "C" {
       uint32_t sampling_n = 0;
       uint32_t polling_secs = 0;
       aa->settings_revisionNo = sp->sFlow->revisionNo;
-      lookupApplicationSettings(sp->sFlow->sFlowSettings, application, &sampling_n, &polling_secs);
+      lookupApplicationSettings(sp->sFlow->sFlowSettings, "app", application, &sampling_n, &polling_secs);
       sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
       sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
     }
