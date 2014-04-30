@@ -28,12 +28,16 @@ ifeq ($(ULOG),yes)
 	CFLAGS += -DHSF_ULOG
 endif
 
+# make the inclusion of sflowovsd options
+WITH_SFLOWOVSD=yes
+
 # Cumulus Linux
 # This turns on the use of ethtool for interface stats,
 # identifies switch ports for individual counter-export
 # and enables ULOG packet-sampling.
 ifeq ($(CUMULUS),yes)
 	CFLAGS += -DHSF_CUMULUS
+	WITH_SFLOWOVSD=no
 endif
 
 # if JSON is not set, assume it should be "yes".
@@ -179,7 +183,12 @@ SFLOWOVS_OBJS=sflowovsd.o util.o
 
 #### BUILD ####
 
-all: hsflowd sflowovsd
+BUILDTGTS=hsflowd
+ifeq ($(WITH_SFLOWOVSD),yes)
+	BUILDTGTS += sflowovsd
+endif
+
+all: $(BUILDTGTS)
 
 hsflowd: $(HSFLOW_OBJS) $(READ_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(HSFLOW_OBJS) $(READ_OBJS) $(LIBS)
@@ -189,7 +198,12 @@ sflowovsd: $(SFLOWOVS_OBJS)
 
 #### INSTALL ####
 
-install: install-hsflowd install-sflowovsd
+INSTALLTGTS=install-hsflowd
+ifeq ($(WITH_SFLOWOVSD),yes)
+	INSTALLTGTS += install-sflowovsd
+endif
+
+install: $(INSTALLTGTS)
 
 install-hsflowd: hsflowd
 	$(INSTALL) -d $(BIN_D)
@@ -208,7 +222,12 @@ install-sflowovsd: sflowovsd
 # necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
 # at the required runlevels.
 
-schedule: schedule-hsflowd schedule-sflowovsd
+SCHEDULETGTS=schedule-hsflowd	
+ifeq ($(WITH_SFLOWOVSD),yes)	
+	SCHEDULETGTS += schedule-sflowovsd
+endif
+
+schedule: $(SCHEDULETGTS)
 
 schedule-hsflowd:
 ifeq ($(DEBIAN),yes)

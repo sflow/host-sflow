@@ -17,6 +17,9 @@ extern "C" {
   extern int debug;
   FILE *f_crash;
 
+  static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings);
+  static void setUlogSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings);
+
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
     -----------------___________________________------------------
@@ -1288,11 +1291,42 @@ extern "C" {
     // refresh the interface list periodically or on request
     if(sp->refreshAdaptorList || (sp->clk % sp->refreshAdaptorListSecs) == 0) {
       sp->refreshAdaptorList = NO;
-      readInterfaces(sp);
-      // this may be the right place to check that the agent-address
-      // selection has not changed -- we really should be willing
-      // to adapt to a new agent-address selection without requiring
-      // a restart. $$$
+      uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
+      if(readInterfaces(sp, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
+	myLog(LOG_ERR, "failed to re-read interfaces\n");
+      }
+      else {
+	if(debug) {
+	  myLog(LOG_INFO, "interfaces added: %u removed: %u cameup: %u wentdown: %u changed: %u",
+		ad_added, ad_removed, ad_cameup, ad_wentdown, ad_changed);
+	}
+      }
+
+      int agentAddressChanged=NO;
+      if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
+	  myLog(LOG_ERR, "failed to re-select agent address\n");
+      }
+      if(debug) {
+	myLog(LOG_INFO, "agentAddressChanged=%s", agentAddressChanged ? "YES" : "NO");
+      }
+
+      if(sp->DNSSD == NO) {
+	// see if we need to kick anything
+	if(agentAddressChanged) {
+	  // DNS-SD is not running so we have to kick the config
+	  // to make it flush this change.  If DNS-SD is running then
+	  // this will happen automatically the next time the config
+	  // is checked (don't want to call it from here now because
+	  // when DNS-SD is running then installSFlowSettings() is
+	  // only called from that thread).
+	  installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings);
+	}
+	if(ad_added || ad_cameup || ad_wentdown || ad_changed) {
+	  // set sampling rates again because ifSpeeds may have changed
+	  setUlogSamplingRates(sp->sFlow, sp->sFlow->sFlowSettings);
+	}
+      }
+
 #ifdef HSP_SWITCHPORT_REGEX
       configSwitchPorts(sp); // in readPackets.c
 #endif
@@ -2321,12 +2355,12 @@ extern "C" {
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
 	}
-	else if(readInterfaces(sp) == 0) {
+	else if(readInterfaces(sp, NULL, NULL, NULL, NULL, NULL) == 0) {
 	  myLog(LOG_ERR, "failed to read interfaces\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
 	}
-	else if(selectAgentAddress(sp) == NO) {
+	else if(selectAgentAddress(sp, NULL) == NO) {
 	  myLog(LOG_ERR, "failed to select agent address\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);

@@ -1,0 +1,2 @@
+#!/bin/bash
+test -e /etc/hsflowd.conf && cp /etc/hsflowd.conf /etc/hsflowd.conf.save && echo "previous config saved to /etc/hsflowd.conf.save"

@@ -777,7 +777,7 @@ extern "C" {
     }
   }
 
-  void adaptorListFreeMarked(SFLAdaptorList *adList)
+  int adaptorListFreeMarked(SFLAdaptorList *adList)
   {
     uint32_t removed = 0;
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
@@ -804,6 +804,7 @@ extern "C" {
       }
       adList->num_adaptors = found;
     }
+    return (int)removed;
   }
   
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
