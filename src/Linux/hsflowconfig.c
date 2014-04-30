@@ -428,15 +428,42 @@ extern int debug;
   
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings)
   {
-    // This falls back on the default "sampling=<n>" setting if the speed is
-    // unknown or the  speed-specific lookup fails.
+    // This falls back on the default "sampling=<n>" setting if the speed is unknown or zero
     uint32_t sampling_n = settings->samplingRate;
+    char *method = "global_default";
     if(adaptor) {
-      if(adaptor->ifSpeed) {
+      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+      
+      if(adaptorNIO->up == NO) {
+	sampling_n = 0;
+	method = "interface_down";
+      }
+      else {
 	char speedStr[51];
-	if(printSpeed(adaptor->ifSpeed, speedStr, 50)) {
-	  lookupApplicationSettings(settings, NULL, speedStr, &sampling_n, NULL);
+	if(adaptor->ifSpeed) {
+	  if(printSpeed(adaptor->ifSpeed, speedStr, 50)
+	     && lookupApplicationSettings(settings, NULL, speedStr, &sampling_n, NULL)) {
+	    method = speedStr;
+	  }
+	  else {
+	    // calcuate default sampling rate based on link speed.  This ensures
+	    // that a network switch comes up with manageable defaults even if
+	    // the config file is empty...
+	    sampling_n = adaptor->ifSpeed / HSP_SPEED_SAMPLING_RATIO;
+	    if(sampling_n < HSP_SPEED_SAMPLING_MIN) {
+	      sampling_n = HSP_SPEED_SAMPLING_MIN;
+	    }
+	    method = "speed_default";
+	  }
 	}
+      }
+
+      if(debug) {
+	myLog(LOG_INFO, "%s (speed=%"PRIu64") using %s sampling rate = %u",
+	      adaptor->deviceName,
+	      adaptor->ifSpeed,
+	      method,
+	      sampling_n);
       }
     }
     return sampling_n;
@@ -625,54 +652,66 @@ extern int debug;
     -----------------___________________________------------------
   */
   
-  int selectAgentAddress(HSP *sp) {
+  int selectAgentAddress(HSP *sp, int *p_changed) {
+
+    int selected = NO;
+    SFLAddress previous = sp->sFlow->agentIP;
 
     if(debug) myLog(LOG_INFO, "selectAgentAddress");
 
     if(sp->sFlow->explicitAgentIP && sp->sFlow->agentIP.type) {
       // it was hard-coded in the config file
       if(debug) myLog(LOG_INFO, "selectAgentAddress hard-coded in config file");
-      return YES;
+      selected = YES;
     }
-    
-    // it may have been defined as agent=<device>
-    if(sp->sFlow->explicitAgentDevice && sp->sFlow->agentDevice) {
+    else if(sp->sFlow->explicitAgentDevice && sp->sFlow->agentDevice) {
+      // it may have been defined as agent=<device>
       SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
       if(ad && ad->userData) {
 	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
 	sp->sFlow->agentIP = adaptorNIO->ipAddr;
 	if(debug) myLog(LOG_INFO, "selectAgentAddress pegged to device in config file");
-	return YES;
+	selected = YES;
+      }
+    }
+    else {
+      // try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
+      // We already used this ranking to prioritize L3 addresses per adaptor (in the case where
+      // there are more than one) so now we are applying the same ranking globally to pick
+      // the best candidate to represent the whole agent:
+      SFLAdaptor *selectedAdaptor = NULL;
+      EnumIPSelectionPriority ipPriority = IPSP_NONE;
+      
+      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+	if(adaptor && adaptor->userData) {
+	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	  if(adaptorNIO->ipPriority > ipPriority) {
+	    selectedAdaptor = adaptor;
+	    ipPriority = adaptorNIO->ipPriority;
+	  }
+	}	    
+      }
+      if(selectedAdaptor && selectedAdaptor->userData) {
+	// crown the winner
+	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
+	sp->sFlow->agentIP = adaptorNIO->ipAddr;
+	sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
+	if(debug) myLog(LOG_INFO, "selectAgentAddress selected agentIP with highest priority");
+	selected = YES;
       }
     }
 
-    // try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
-    // We already used this ranking to prioritize L3 addresses per adaptor (in the case where
-    // there are more than one) so now we are applying the same ranking globally to pick
-    // the best candidate to represent the whole agent:
-    SFLAdaptor *selectedAdaptor = NULL;
-    EnumIPSelectionPriority ipPriority = IPSP_NONE;
-
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      if(adaptor && adaptor->userData) {
-	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	if(adaptorNIO->ipPriority > ipPriority) {
-	  selectedAdaptor = adaptor;
-	  ipPriority = adaptorNIO->ipPriority;
-	}
-      }	    
-    }
-    if(selectedAdaptor && selectedAdaptor->userData) {
-      // crown the winner
-      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
-      sp->sFlow->agentIP = adaptorNIO->ipAddr;
-      sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
-      if(debug) myLog(LOG_INFO, "selectAgentAddress selected agentIP with highest priority");
-      return YES;
+    if(p_changed) {
+      if(SFLAddress_equal(&previous, &sp->sFlow->agentIP)) {
+	*p_changed = YES;
+      }
+      else {
+	*p_changed = NO;
+      }
     }
     
-    return NO;
+    return selected;
   }
 
   /*_________________---------------------------__________________

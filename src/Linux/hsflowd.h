@@ -175,6 +175,11 @@ extern "C" {
 // list for a physical host
 #define HSP_MAX_PHYSICAL_ADAPTORS 32
 
+  // For when a switch-port is configured using the default
+  // (calculated) sampling-rate (based on link speed)
+#define HSP_SPEED_SAMPLING_RATIO 1000000
+#define HSP_SPEED_SAMPLING_MIN 100
+
   // forward declarations
   struct _HSPSFlow;
   struct _HSP;
@@ -321,11 +326,11 @@ extern "C" {
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
     uint32_t /*EnumIPSelectionPriority*/ ipPriority;
-    int32_t up:1;
-    int32_t loopback:1;
-    int32_t bond_master:1;
-    int32_t bond_slave:1;
-    int32_t switchPort:1;
+    uint32_t up:1;
+    uint32_t loopback:1;
+    uint32_t bond_master:1;
+    uint32_t bond_slave:1;
+    uint32_t switchPort:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -482,7 +487,7 @@ extern "C" {
   int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling);
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings);
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
-  int selectAgentAddress(HSP *sp);
+  int selectAgentAddress(HSP *sp, int *p_changed);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
     
@@ -493,7 +498,7 @@ extern "C" {
   int dnsSD(HSP *sp, HSPDnsCB callback);
 
   // read functions
-  int readInterfaces(HSP *sp);
+  int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);

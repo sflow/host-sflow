@@ -222,16 +222,22 @@ approach seemed more stable and portable.
 /*________________---------------------------__________________
   ________________    read_ethtool_info      __________________
   ----------------___________________________------------------
+  return true if something changed
 */
-  static void read_ethtool_info(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  static int read_ethtool_info(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
+    int changed = NO;
     struct ethtool_cmd ecmd = { 0 };
     ecmd.cmd = ETHTOOL_GSET;
     ifr->ifr_data = (char *)&ecmd;
     if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-      adaptor->ifDirection = ecmd.duplex ? 1 : 2;
+      uint32_t direction = ecmd.duplex ? 1 : 2;
+      if(direction != adaptor->ifDirection) {
+	changed = YES;
+      }
+      adaptor->ifDirection = direction;
       uint64_t ifSpeed_mb = ecmd.speed;
       // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
       // speed_hi field too,  but we would need to run autoconf-style
@@ -239,10 +245,17 @@ approach seemed more stable and portable.
       if(ifSpeed_mb == (uint16_t)-1 ||
 	 ifSpeed_mb == (uint32_t)-1) {
 	// unknown
+	if(adaptor->ifSpeed != 0) {
+	  changed = YES;
+	}
 	adaptor->ifSpeed = 0;
       }
       else {
-	adaptor->ifSpeed = ifSpeed_mb * 1000000;
+	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
+	if(adaptor->ifSpeed != ifSpeed_bps) {
+	  changed = YES;
+	}
+	adaptor->ifSpeed = ifSpeed_bps;
       }
 #ifdef HSP_ETHTOOL_STATS
       // see if the ethtool stats block can give us multicast/broadcast counters too
@@ -299,6 +312,7 @@ approach seemed more stable and portable.
       }
 #endif
     }
+    return changed;
   }
 
 /*________________---------------------------__________________
@@ -306,8 +320,9 @@ approach seemed more stable and portable.
   ----------------___________________________------------------
 */
 
-int readInterfaces(HSP *sp)
+  int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed)
 {
+  uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
   if(sp->adaptorList == NULL) sp->adaptorList = adaptorListNew();
   else adaptorListMarkAll(sp->adaptorList);
 
@@ -374,7 +389,11 @@ int readInterfaces(HSP *sp)
 	    // for now just assume that each interface has only one MAC.  It's not clear how we can
 	    // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
 	    // find or create a new "adaptor" entry
-	    SFLAdaptor *adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data, sizeof(HSPAdaptorNIO));
+	    SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, devName);
+	    if(adaptor == NULL) {
+	      ad_added++;
+	      adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data, sizeof(HSPAdaptorNIO));
+	    }
 	    
 	    // clear the mark so we don't free it below
 	    adaptor->marked = NO;
@@ -384,6 +403,15 @@ int readInterfaces(HSP *sp)
 	    
 	    // remember some useful flags in the userData structure
 	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+	    if(adaptorNIO->up != up) {
+	      if(up) ad_cameup++;
+	      else ad_wentdown++;
+	      if(debug) {
+		myLog(LOG_INFO, "adaptor %s %s",
+		      adaptor->deviceName,
+		      up ? "came up" : "went down");
+	      }
+	    }
 	    adaptorNIO->up = up;
 	    adaptorNIO->loopback = loopback;
 	    adaptorNIO->bond_master = bond_master;
@@ -431,8 +459,10 @@ int readInterfaces(HSP *sp)
 	      //}
 	    }
 
-	    // use ethtool to get more info
-	    read_ethtool_info(&ifr, fd, adaptor);
+	    // use ethtool to get info about direction/speed and more
+	    if(read_ethtool_info(&ifr, fd, adaptor) == YES) {
+	      ad_changed++;
+	    }
 	  }
 	}
       }
@@ -443,7 +473,7 @@ int readInterfaces(HSP *sp)
   close (fd);
 
   // now remove and free any that are still marked
-  adaptorListFreeMarked(sp->adaptorList);
+  ad_removed = adaptorListFreeMarked(sp->adaptorList);
 
   // check in case any of the survivors are specific
   // to a particular VLAN
@@ -459,6 +489,12 @@ int readInterfaces(HSP *sp)
   // may cause the adaptor's best-choice ipAddress to be
   // overwritten.
   readIPv6Addresses(sp);
+
+  if(p_added) *p_added = ad_added;
+  if(p_removed) *p_removed = ad_removed;
+  if(p_cameup) *p_cameup = ad_cameup;
+  if(p_wentdown) *p_wentdown = ad_wentdown;
+  if(p_changed) *p_changed = ad_changed;
 
   return sp->adaptorList->num_adaptors;
 }

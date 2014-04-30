@@ -86,11 +86,13 @@ deb: $(PROG)
 	sed -i -e s/_PACKAGE_/$(PROG)/g debian/DEBIAN/control; \
 	sed -i -e s/_VERSION_/$${MYVER}-$${MYREL}/g debian/DEBIAN/control; \
 	chmod 644 debian/DEBIAN/control; \
+	install -m 555 DEBIAN_build/preinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/postinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/prerm debian/DEBIAN; \
-	install -m 700 src/Linux/hsflowd src/Linux/sflowovsd debian/usr/sbin; \
+	install -m 700 src/Linux/hsflowd debian/usr/sbin; \
 	install -m 755 src/Linux/scripts/hsflowd.deb debian/etc/init.d/hsflowd; \
-	install -m 755 src/Linux/scripts/sflowovsd.deb debian/etc/init.d/sflowovsd; \
+	test -e src/Linux/sflowovsd && install -m 700 src/Linux/sflowovsd debian/usr/sbin; \
+	test -e src/Linux/sflowovsd && install -m 755 src/Linux/scripts/sflowovsd.deb debian/etc/init.d/sflowovsd; \
 	install -m 644 src/Linux/scripts/hsflowd.conf debian/etc; \
         cd debian; \
 	find . -type d | xargs chmod 755; \
