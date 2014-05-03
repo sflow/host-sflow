@@ -274,7 +274,7 @@ approach seemed more stable and portable.
 	  adaptorNIO->et_nctrs = sset_info.data;
 	  if(adaptorNIO->et_nctrs) {
 	    struct ethtool_gstrings *ctrNames;
-	    uint32_t bytes = sizeof(ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
+	    uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
 	    ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
 	    ctrNames->cmd = ETHTOOL_GSTRINGS;
 	    ctrNames->string_set = ETH_SS_STATS;
