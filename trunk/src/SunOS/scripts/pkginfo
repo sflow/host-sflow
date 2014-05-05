@@ -1,6 +1,6 @@
 PKG="hsflowd"
 NAME="host sFlow daemon"
-VERSION="1.25.3"
+VERSION="1.25.4"
 ARCH="sparc"
 CLASSES="none"
 CATEGORY="application"
