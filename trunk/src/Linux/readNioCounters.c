@@ -325,12 +325,26 @@ extern "C" {
 	    HSP_ethtool_counters et_ctrs = { 0 }, et_delta = { 0 };
 	    if (niostate->et_nfound) {
 	      // get the latest stats block for this device via ethtool
-	      // and read out the counters that we located by name
+	      // and read out the counters that we located by name.	
+
 	      uint32_t bytes = sizeof(struct ethtool_stats);
 	      bytes += niostate->et_nctrs * sizeof(uint64_t);
+	      bytes += 32; // pad - just in case driver wants to write more
 	      struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
 	      et_stats->cmd = ETHTOOL_GSTATS;
-	      et_stats->n_stats = niostate->et_nctrs;
+
+	      // Don't have to ask for all of them, so calulate the max index:
+	      uint32_t nctrs = 0;
+	      if(niostate->et_idx_mcasts_in > nctrs) nctrs = niostate->et_idx_mcasts_in;
+	      if(niostate->et_idx_mcasts_out > nctrs) nctrs = niostate->et_idx_mcasts_out;
+	      if(niostate->et_idx_bcasts_in > nctrs) nctrs = niostate->et_idx_bcasts_in;
+	      if(niostate->et_idx_bcasts_out > nctrs) nctrs = niostate->et_idx_bcasts_out;
+	      // and always ask for an even number to work around a
+	      // corner-case glitch that hasn't been explained yet
+	      if(nctrs & 1) nctrs++;
+	      et_stats->n_stats = nctrs;
+
+	      // now issue the ioctl
 	      strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name));
 	      ifr.ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, &ifr) >= 0) {
