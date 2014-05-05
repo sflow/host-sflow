@@ -1,0 +1,21 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+sFlow Agent Library
+===================
+sflow_api.h		- API for sflow agent library.
+sflow.h			- structure definitions for sFlow.
+sflow_agent.C		- Agent object. Normally one per switch/router, but
+			  "agentSubId" can be used to distinguish multiple
+			  agents representing different parts of the same device.
+sflow_sampler.C		- Sampler object. Normally one per interface instance.
+sflow_poller.C		- Poller object. One per interface instance.
+sflow_receiver.C	- Receiver object. Handles the XDR encoding and marshals
+                          samples into UDP packets to be sent out. Usually created
+                          at startup as a list of available "slots" corresponding
+                          to rows in the receiver table of the MIB.
+
+Neil McKee
+InMon Corp.
+http://www.inmon.com
+email: neil.mckee@inmon.com
