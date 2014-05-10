@@ -32,6 +32,9 @@ endif
 WITH_SFLOWOVSD=yes
 
 # Cumulus Linux
+ifeq ($(CUMULUS),)
+	CUMULUS=$(shell if test -r /etc/os-release && grep -c 'Cumulus Linux' /etc/os-release >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+endif
 # This turns on the use of ethtool for interface stats,
 # identifies switch ports for individual counter-export
 # and enables ULOG packet-sampling.
