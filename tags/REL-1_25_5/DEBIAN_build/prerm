@@ -1,0 +1,4 @@
+#!/bin/bash
+update-rc.d -f hsflowd remove
+test -e /etc/init.d/sflowovsd && update-rc.d -f sflowovsd remove
+exit 0
