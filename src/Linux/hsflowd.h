@@ -224,6 +224,13 @@ extern "C" {
     // may include flags to turn off hostname and MAC lookup calls
     // to xs_read(),  but surely those are not so slow?
 
+    // option to control switch-port sampling direction
+    int samplingDirection;
+#define HSF_DIRN_UNDEFINED 0
+#define HSF_DIRN_IN 1
+#define HSF_DIRN_OUT 2
+#define HSF_DIRN_BOTH (HSF_DIRN_IN | HSF_DIRN_OUT)
+
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;

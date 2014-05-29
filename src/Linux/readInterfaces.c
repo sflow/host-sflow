@@ -286,6 +286,7 @@ approach seemed more stable and portable.
 	      cname[ETH_GSTRING_LEN] = '\0';
 	      for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
 		memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
+		if(debug) myLog(LOG_INFO, "ethtool counter %s is at index %d", cname, ii);
 		// then see if this is one of the ones we want,
 		// and record the index if it is.
 		if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {

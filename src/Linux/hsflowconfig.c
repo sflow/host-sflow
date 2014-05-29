@@ -184,6 +184,22 @@ extern int debug;
     return t;
   }
 
+  // expectDirection
+
+  static HSPToken *expectDirection(HSP *sp, HSPToken *tok, int *arg)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && strcasecmp(t->str, "in") == 0) (*arg) = HSF_DIRN_IN;
+    else if(t && strcasecmp(t->str, "out") == 0) (*arg) = HSF_DIRN_OUT;
+    else if(t && strcasecmp(t->str, "both") == 0) (*arg) = HSF_DIRN_BOTH;
+    else {
+      parseError(sp, tok, "expected 'in' or 'out' or 'both'", "");
+      return NULL;
+    }
+    return t;
+  }
+
   // expectDNSSD_domain
 
   static HSPToken *expectDNSSD_domain(HSP *sp, HSPToken *tok)
@@ -271,6 +287,7 @@ extern int debug;
 
   HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
+    // initialize defaults
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
@@ -278,6 +295,7 @@ extern int debug;
     st->jsonPort = HSP_DEFAULT_JSON_PORT;
     st->xen_update_dominfo = 0;
     st->xen_dsk = 1;
+    st->samplingDirection = HSF_DIRN_IN;
     return st;
   }
 
@@ -830,6 +848,9 @@ extern int debug;
 	    break;
 	  case HSPTOKEN_JSONPORT:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_SAMPLINGDIRECTION:
+	    if((tok = expectDirection(sp, tok, &sp->sFlow->sFlowSettings_file->samplingDirection)) == NULL) return NO;
 	    break;
 	  default:
 	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
