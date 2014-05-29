@@ -332,22 +332,20 @@ extern "C" {
 	      bytes += 32; // pad - just in case driver wants to write more
 	      struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
 	      et_stats->cmd = ETHTOOL_GSTATS;
-
-	      // Don't have to ask for all of them, so calulate the max index:
-	      uint32_t nctrs = 0;
-	      if(niostate->et_idx_mcasts_in > nctrs) nctrs = niostate->et_idx_mcasts_in;
-	      if(niostate->et_idx_mcasts_out > nctrs) nctrs = niostate->et_idx_mcasts_out;
-	      if(niostate->et_idx_bcasts_in > nctrs) nctrs = niostate->et_idx_bcasts_in;
-	      if(niostate->et_idx_bcasts_out > nctrs) nctrs = niostate->et_idx_bcasts_out;
-	      // and always ask for an even number to work around a
-	      // corner-case glitch that hasn't been explained yet
-	      if(nctrs & 1) nctrs++;
-	      et_stats->n_stats = nctrs;
+	      et_stats->n_stats = niostate->et_nctrs;
 
 	      // now issue the ioctl
 	      strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name));
 	      ifr.ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, &ifr) >= 0) {
+		if(debug > 2) {
+		  for(int xx = 0; xx < et_stats->n_stats; xx++) {
+		    myLog(LOG_INFO, "ethtool counter for %s at index %d == %"PRIu64,
+			  adaptor->deviceName,
+			  xx,
+			  et_stats->data[xx]);
+		  }
+		}
 		if(niostate->et_idx_mcasts_in) {
 		  et_ctrs.mcasts_in = et_stats->data[niostate->et_idx_mcasts_in - 1];
 		  et_delta.mcasts_in = et_ctrs.mcasts_in - niostate->et_last.mcasts_in;

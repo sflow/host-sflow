@@ -1831,8 +1831,8 @@ extern "C" {
 	  cmd[1] = adaptor->deviceName;
 	  char srate[HSP_MAX_TOK_LEN];
 	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-	  cmd[2] = srate; // ingress
-	  cmd[3] = srate; // egress
+	  if(settings->samplingDirection & HSF_DIRN_IN) cmd[2] = srate; // ingress
+	  if(settings->samplingDirection & HSF_DIRN_OUT) cmd[3] = srate; // egress
 	  if(!myExec("Switchport config output", cmd, execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
 	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)", cmd[0], adaptor->deviceName);
 	  }
