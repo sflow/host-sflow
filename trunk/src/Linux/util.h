@@ -133,6 +133,7 @@ extern "C" {
 
   UTStringArray *strArrayNew(void);
   void strArrayAdd(UTStringArray *ar, char *str);
+  void strArrayInsert(UTStringArray *ar, int i, char *str);
   void strArrayReset(UTStringArray *ar);
   void strArrayFree(UTStringArray *ar);
   char **strArray(UTStringArray *ar);

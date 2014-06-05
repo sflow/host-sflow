@@ -300,10 +300,12 @@ extern int debug;
   }
 
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings) {
-    clearApplicationSettings(sFlowSettings);
-    clearAgentCIDRs(sFlowSettings);
-    clearCollectors(sFlowSettings);
-    my_free(sFlowSettings);
+    if(sFlowSettings) {
+      clearApplicationSettings(sFlowSettings);
+      clearAgentCIDRs(sFlowSettings);
+      clearCollectors(sFlowSettings);
+      my_free(sFlowSettings);
+    }
   }
 
   static HSPSFlow *newSFlow(HSP *sp) {

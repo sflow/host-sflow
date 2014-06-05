@@ -337,11 +337,10 @@ extern "C" {
     return (UTStringArray *)my_calloc(sizeof(UTStringArray));
   }
 
-   void strArrayAdd(UTStringArray *ar, char *str) {
-    ar->sorted = NO;
-    if(ar->capacity <= ar->n) {
+  static void strArrayGrowthCheck(UTStringArray *ar, int i) {
+    if(ar->capacity <= i) {
       uint32_t oldBytes = ar->capacity * sizeof(char *);
-      ar->capacity = ar->n + 16;
+      ar->capacity = i + 16;
       uint32_t newBytes = ar->capacity * sizeof(char *);
       char **newArray = (char **)my_calloc(newBytes);
       if(ar->strs) {
@@ -350,8 +349,21 @@ extern "C" {
       }
       ar->strs = newArray;
     }
+  }
+
+   void strArrayAdd(UTStringArray *ar, char *str) {
+    ar->sorted = NO;
+    strArrayGrowthCheck(ar, ar->n);
     if(ar->strs[ar->n]) my_free(ar->strs[ar->n]);
     ar->strs[ar->n++] = my_strdup(str);
+  }
+
+  void strArrayInsert(UTStringArray *ar, int i, char *str) {
+    ar->sorted = NO;
+    strArrayGrowthCheck(ar, i);
+    if(ar->strs[i]) my_free(ar->strs[i]);
+    ar->strs[i] = my_strdup(str);
+    if(i >= ar->n) ar->n = i+1;
   }
 
    void strArrayReset(UTStringArray *ar) {
