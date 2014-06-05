@@ -501,8 +501,8 @@ extern "C" {
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"
 #define HSP_MAX_DNS_LEN 255
-  typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen);
-  int dnsSD(HSP *sp, HSPDnsCB callback);
+  typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *settings);
+  int dnsSD(HSP *sp, HSPDnsCB callback, HSPSFlowSettings *settings);
 
   // read functions
   int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);

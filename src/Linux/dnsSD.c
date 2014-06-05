@@ -21,7 +21,7 @@ extern int debug;
   */
 
   static
- int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback)
+  int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback, HSPSFlowSettings *settings)
   {
     u_char buf[PACKETSZ];
 
@@ -159,7 +159,7 @@ extern int debug;
 	      char fqdn_port[PACKETSZ];
 	      sprintf(fqdn_port, "%s/%u", fqdn, res_prt);
 	      // use key == NULL to indicate that the value is host:port
-	      (*callback)(sp, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port));
+	      (*callback)(sp, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port), settings);
 	    }
 	  }
 	}
@@ -197,7 +197,7 @@ extern int debug;
 	      myLog(LOG_ERR, "dsnSD TXT record not in var=val format: %s", x);
 	    }
 	    else {
-	      if(callback) (*callback)(sp, rtype, res_ttl, x, klen, (x+klen+1), (pairlen - klen - 1));
+	      if(callback) (*callback)(sp, rtype, res_ttl, x, klen, (x+klen+1), (pairlen - klen - 1), settings);
 	    }
 	    x += pairlen;
 	  }
@@ -218,13 +218,13 @@ extern int debug;
     ----------------___________________________------------------
   */
 
-  int dnsSD(HSP *sp, HSPDnsCB callback)
+  int dnsSD(HSP *sp, HSPDnsCB callback, HSPSFlowSettings *settings)
   {
     char request[HSP_MAX_DNS_LEN];
     char *domain_override = sp->DNSSD_domain ? sp->DNSSD_domain : "";
     snprintf(request, HSP_MAX_DNS_LEN, "%s%s", SFLOW_DNS_SD, domain_override);
-    int num_servers = dnsSD_Request(sp, request, T_SRV, callback);
-    dnsSD_Request(sp, request, T_TXT, callback);
+    int num_servers = dnsSD_Request(sp, request, T_SRV, callback, settings);
+    dnsSD_Request(sp, request, T_TXT, callback, settings);
     // it's ok even if only the SRV request succeeded
     return num_servers; //  -1 on error
   }

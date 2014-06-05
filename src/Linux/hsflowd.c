@@ -48,8 +48,13 @@ extern "C" {
     size_t socklen = 0;
     int fd = 0;
 
-    for(HSPCollector *coll = sp->sFlow->sFlowSettings->collectors; coll; coll=coll->nxt) {
+    // note that we are relying on any new settings being installed atomically from the DNS-SD
+    // thread (it's just a pointer move,  so it should be atomic).  Otherwise we would want to
+    // grab sf->config_mut whenever we call sfl_sampler_writeFlowSample(),  because that can
+    // bring us here where we read the list of collectors.
 
+    for(HSPCollector *coll = sp->sFlow->sFlowSettings->collectors; coll; coll=coll->nxt) {
+	
       switch(coll->ipAddr.type) {
       case SFLADDRESSTYPE_UNDEFINED:
 	// skip over it if the forward lookup failed
@@ -73,7 +78,7 @@ extern "C" {
 	}
 	break;
       }
-
+	
       if(socklen && fd > 0) {
 	int result = sendto(fd,
 			    pkt,
@@ -1813,32 +1818,38 @@ extern "C" {
     // usage:  <prog> <interface> <ingress-rate> <egress-rate> <ulogGroup>
 #define HSP_MAX_TOK_LEN 16
     strArrayAdd(cmdline, NULL); // placeholder for port name in slot 1
-    strArrayAdd(cmdline, NULL); // placeholder for ingress sampling
-    strArrayAdd(cmdline, NULL); // placeholder for egress sampling
+    strArrayAdd(cmdline, "0");  // placeholder for ingress sampling
+    strArrayAdd(cmdline, "0");  // placeholder for egress sampling
     char uloggrp[HSP_MAX_TOK_LEN];
     snprintf(uloggrp, HSP_MAX_TOK_LEN, "%u", sf->sFlowSettings_file->ulogGroup);
     strArrayAdd(cmdline, uloggrp);
 #define HSP_MAX_EXEC_LINELEN 1024
     char outputLine[HSP_MAX_EXEC_LINELEN];
-    char **cmd = strArray(cmdline);
     SFLAdaptorList *adaptorList = sf->myHSP->adaptorList;
     for(uint32_t i = 0; i < adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = adaptorList->adaptors[i];
       if(adaptor && adaptor->ifIndex) {
 	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-	if(niostate && niostate->switchPort) {
+	if(niostate
+	   && niostate->switchPort
+	   && !niostate->loopback
+	   && !niostate->bond_master) {
 	  niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
-	  cmd[1] = adaptor->deviceName;
+	  strArrayInsert(cmdline, 1, adaptor->deviceName);
 	  char srate[HSP_MAX_TOK_LEN];
 	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-	  if(settings->samplingDirection & HSF_DIRN_IN) cmd[2] = srate; // ingress
-	  if(settings->samplingDirection & HSF_DIRN_OUT) cmd[3] = srate; // egress
-	  if(!myExec("Switchport config output", cmd, execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
-	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)", cmd[0], adaptor->deviceName);
+	  if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
+	  if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
+	  if(!myExec("Switchport config output", strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
+	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
+		  strArrayAt(cmdline, 0),
+		  strArrayAt(cmdline, 1));
 	  }
 	}
       }
     }
+    strArrayFree(cmdline);
+
     // now force the ulogSamplingRate setting,  then drop into the normal logic below
     sf->sFlowSettings_file->ulogSamplingRate = settings->samplingRate;
 #endif // HSP_SWITCHPORT_CONFIG
@@ -1868,11 +1879,18 @@ extern "C" {
   
   static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
+    // This pointer-operation should be atomic.  We rely on it to be so
+    // in places where we consult sf->sFlowSettings without first acquiring
+    // the sf->config_mut lock.
+    sf->sFlowSettings = settings;
+
+    // do this every time in case the switchPorts are not detected yet at
+    // the point where the config is settled (otherwise we could have moved
+    // this into the block below and only executed it when the config changed).
     if(settings && sf->sFlowSettings_file) {
       setUlogSamplingRates(sf, settings);
     }
     
-    sf->sFlowSettings = settings;
     char *settingsStr = sFlowSettingsString(sf, settings);
     if(my_strequal(sf->sFlowSettings_str, settingsStr)) {
       // no change - don't increment the revision number
@@ -1892,6 +1910,7 @@ extern "C" {
       }
       sf->sFlowSettings_str = settingsStr;
       sf->revisionNo++;
+    
     }
   }
 
@@ -1900,10 +1919,8 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void myDnsCB(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen)
+  static void myDnsCB(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *st)
   {
-    HSPSFlowSettings *st = sp->sFlow->sFlowSettings_dnsSD;
-
     // latch the min ttl
     if(sp->DNSSD_ttl == 0 || ttl < sp->DNSSD_ttl) {
       sp->DNSSD_ttl = ttl;
@@ -2002,42 +2019,46 @@ extern "C" {
       else {
 	// initiate server-discovery
 	HSPSFlow *sf = sp->sFlow;
+	HSPSFlowSettings *newSettings_dnsSD = newSFlowSettings();
+	HSPSFlowSettings *prevSettings_dnsSD = sf->sFlowSettings_dnsSD;
+
 	// SIGSEGV on Fedora 14 if HSP_RLIMIT_MEMLOCK is non-zero, because calloc returns NULL.
 	// Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
 	// maybe we are supposed to fork the DNSSD thread before dropping privileges?
-	sf->sFlowSettings_dnsSD = newSFlowSettings();
 
 	// we want the min ttl, so clear it here
 	sp->DNSSD_ttl = 0;
 	// now make the requests
-	int num_servers = dnsSD(sp, myDnsCB);
+	int num_servers = dnsSD(sp, myDnsCB, newSettings_dnsSD);
 	SEMLOCK_DO(sp->config_mut) {
+
 	  // three cases here:
 	  // A) if(num_servers == -1) (i.e. query failed) then keep the current config
 	  // B) if(num_servers == 0) then stop monitoring
 	  // C) if(num_servers > 0) then install the new config
+
 	  if(debug) myLog(LOG_INFO, "num_servers == %d", num_servers);
 
-	  if(num_servers <= 0) {
-	    // A or B: clean up - we don't need this object
-	    freeSFlowSettings(sf->sFlowSettings_dnsSD);
-	    sf->sFlowSettings_dnsSD = NULL;
+	  if(num_servers < 0) {
+	    // A: query failed: keep the current config. Just free the new one.
+	    freeSFlowSettings(newSettings_dnsSD);
 	  }
-
-	  if(num_servers >= 0) {
-	    // B or C: delete the current config too,  if it was dynamically allocated
-	    if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) {
-	      freeSFlowSettings(sf->sFlowSettings);
-	    }
-	  }
-
-	  if(num_servers == 0) {
-	    // B: turn off monitoring
+	  else if(num_servers == 0) {
+	    // B: turn off monitoring.  Free the new one and the previous one.
 	    installSFlowSettings(sf, NULL);
+	    sf->sFlowSettings_dnsSD = NULL;
+	    if(prevSettings_dnsSD) {
+	      freeSFlowSettings(prevSettings_dnsSD);
+	    }
+	    freeSFlowSettings(newSettings_dnsSD);
 	  }
-	  else if(num_servers > 0) {
-	    // C: make this the running config
-	    installSFlowSettings(sf, sf->sFlowSettings_dnsSD);
+	  else {
+	    // C: make this new one the running config.  Free the previous one.
+	    sf->sFlowSettings_dnsSD = newSettings_dnsSD;
+	    installSFlowSettings(sf, newSettings_dnsSD);
+	    if(prevSettings_dnsSD) {
+	      freeSFlowSettings(prevSettings_dnsSD);
+	    }
 	  }
 
 	  // whatever happens we might still learn a TTL (e.g. from the TXT record query)
@@ -2447,7 +2468,7 @@ extern "C" {
 	      setState(sp, HSPSTATE_END);
 	    }
 	  }
-	}
+	} // config_mut
 	break;
 	
       case HSPSTATE_RUN:
