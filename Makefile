@@ -76,7 +76,7 @@ pkg:
 
 deb: $(PROG)
 	PLATFORM=`uname`; \
-	MYARCH=`uname -m`; \
+	MYARCH=`uname -m|sed 's/x86_64/amd64/'`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
 	mkdir -p debian/DEBIAN; \
