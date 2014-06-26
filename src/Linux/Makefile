@@ -1,7 +1,7 @@
 # This software is distributed under the following license:
 # http://host-sflow.sourceforge.net/license.html
 
-HEADERS= hsflowd.h hsflowtokens.h hsflow_ethtool.h sflowovsd.h Makefile
+HEADERS= hsflowd.h hsflowtokens.h hsflow_ethtool.h sflowovsd.h cpu_utils.h Makefile
 
 # compiler
 #CC= g++
@@ -17,7 +17,7 @@ endif
 # base CFLAGS and LIBS
 SFLOWDIR=../sflow
 CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread -lcap
 
 # if ULOG is not set, assume it should be "yes".
 # (So you can use "make ULOG=no" to compile without this feature)
@@ -51,6 +51,12 @@ endif
 ifeq ($(JSON),yes)
 	JSONDIR=../json
 	CFLAGS += -DHSF_JSON -I$(JSONDIR)
+	LIBS += $(JSONDIR)/libjson.a -lm
+endif
+
+# Docker containers
+ifeq ($(DOCKER),yes)
+	CFLAGS += -DHSF_DOCKER -I$(JSONDIR)
 	LIBS += $(JSONDIR)/libjson.a -lm
 endif
 
@@ -175,7 +181,8 @@ READ_OBJS=readInterfaces.o \
           readHidCounters.o \
           readNioCounters.o \
 	  readPackets.o \
-	  readJSON.o
+	  readJSON.o \
+	  readContainerCounters.o
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
@@ -198,6 +205,9 @@ hsflowd: $(HSFLOW_OBJS) $(READ_OBJS)
 
 sflowovsd: $(SFLOWOVS_OBJS)
 	$(CC) $(CFLAGS) -o $@ $(SFLOWOVS_OBJS) $(LIBS)
+
+test_netns: test_netns.o util.o
+	$(CC) $(CFLAGS) -o $@ test_netns.o util.o $(LIBS)
 
 #### INSTALL ####
 
@@ -274,4 +284,5 @@ readNioCounters.o: readNioCounters.c $(HEADERS)
 readPackets.o: readPackets.c $(HEADERS)
 readJSON.o: readJSON.c $(HEADERS)
 sflowovsd.o: sflowovsd.c $(HEADERS)
+readContainerCounters.o: readContainerCounters.c $(HEADERS)
 

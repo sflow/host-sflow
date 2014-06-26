@@ -62,6 +62,36 @@ extern "C" {
 #include "libxml/xmlreader.h"
 #endif
 
+#ifdef HSF_DOCKER
+#include <sys/capability.h>
+#include <sys/prctl.h>
+
+#include "cJSON.h"
+  typedef struct _HSFNameVal {
+    char *nv_name;
+    int nv_found;
+    uint64_t nv_val64;
+  } HSFNameVal;
+
+  typedef struct _HSPContainer {
+    struct _HSPContainer *nxt;
+    char *id;
+    char *longId;
+    char *name;
+    char uuid[16];
+    uint32_t dsIndex;
+    time_t lastActive;
+    pid_t pid;
+    int running;
+  } HSPContainer;
+#define HSF_DOCKER_CMD "/usr/bin/docker"
+#define HSF_NETNS_DIR "/var/run/netns"
+#define HSF_IP_CMD "/usr/sbin/ip"
+#define HSF_DOCKER_MAX_FNAME_LEN 255
+#define HSF_DOCKER_MAX_LINELEN 512
+#define HSF_DOCKER_SHORTID_LEN 12
+#endif
+
 #ifdef HSF_CUMULUS
 #define HSP_ETHTOOL_STATS 1
 #define HSP_SWITCHPORT_CONFIG 1
@@ -305,6 +335,9 @@ extern "C" {
 #ifdef HSF_XEN
     xc_domaininfo_t domaininfo;
 #endif
+#ifdef HSF_DOCKER
+    HSPContainer *container;
+#endif
   } HSPVMState;
     
   typedef enum { IPSP_NONE=0,
@@ -347,9 +380,11 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
-#ifdef HSP_ETHTOOL_STATS
+#if (HSP_ETHTOOL_STATS || HSF_DOCKER)
     uint32_t et_nctrs; // how many in total
     uint32_t et_nfound; // how many of the ones we wanted
+#endif
+#ifdef HSP_ETHTOOL_STATS
     // the offsets within the ethtool stats block
     uint8_t et_idx_mcasts_in;
     uint8_t et_idx_mcasts_out;
@@ -359,6 +394,10 @@ extern "C" {
     HSP_ethtool_counters et_last;
     HSP_ethtool_counters et_total;
 #endif
+    // veth interfaces have a peer - often in another
+    // namespace.  The names can be anything, but the
+    // but the ifIndex is globally unique (and accessible)
+    int peer_ifIndex;
     SFLLACP_counters lacp;
     // switch ports that are sending individual interface
     // counters will keep a pointer to their sflow poller.
@@ -446,6 +485,10 @@ extern "C" {
     FILE *f_vmStore;
     int vmStoreInvalid;
     HSPVMStore *vmStore;
+#ifdef HSF_DOCKER
+    uint32_t num_containers;
+    HSPContainer *containers;
+#endif
     // inter-thread communication
     pthread_mutex_t *config_mut;
     int DNSSD;
@@ -526,6 +569,12 @@ extern "C" {
   void nvml_stop(HSP *sp);
   void nvml_tick(HSP *sp);
   int readNvmlCounters(HSP *sp, SFLHost_gpu_nvml *nvml);
+#endif
+
+#ifdef HSF_DOCKER
+  int readContainerCounters(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
+  int readContainerCountersMulti(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
+  int readContainerInterfaces(HSP *sp, HSPVMState *vm);
 #endif
 
 #if defined(__cplusplus)

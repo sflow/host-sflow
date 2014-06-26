@@ -32,6 +32,13 @@ extern "C" {
   };
 #endif
 
+#ifdef HSF_DOCKER
+  static const char *HSP_ethtool_peer_ifindex_names[] = {
+    "peer_ifindex",
+    NULL
+  };
+#endif
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

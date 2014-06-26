@@ -144,6 +144,9 @@ extern "C" {
   int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
   int strArrayIndexOf(UTStringArray *ar, char *str);
 
+  // tokenizer
+  char *parseNextTok(char **str, char *sep, int delim, char quot, int trim, char *buf, int buflen);
+
   // sleep
   void my_usleep(uint32_t microseconds);
 
