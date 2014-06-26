@@ -10,6 +10,7 @@ extern "C" {
 #include "util.h"
 
   int debug = 0;
+  int daemonize = 0;
 
   /*________________---------------------------__________________
     ________________       UTStrBuf            __________________
@@ -70,7 +71,7 @@ extern "C" {
   {
     va_list args;
     va_start(args, fmt);
-    if(debug) {
+    if(debug && !daemonize) {
       vfprintf(stderr, fmt, args);
       fprintf(stderr, "\n");
     }
@@ -446,6 +447,94 @@ extern "C" {
     }
     return -1;
   } 
+
+  static int isSeparator(char ch, char *separators) {
+    if(separators == NULL) return NO;
+    for(char *sep = separators; (*sep) != '\0'; sep++)
+      if((*sep) == ch) return YES;
+    return NO;
+  }
+
+  char *parseNextTok(char **str, char *sep, int delim, char quot, int trim, char *buf, int buflen)
+  {
+    if(str == NULL) return NULL;
+
+    char *a = (*str);
+
+    if(a == NULL) {
+      // We hit EOS last time and indicated it by setting *str to NULL.
+      // Last time we may have returned an empty string to indicate a
+      // trailing delimiter (or the whole input was ""). This time
+      // we terminate for sure.
+      return NULL;
+    }
+    
+    // initialize buffer to empty string
+    buf[0] = '\0';
+    
+    if(a[0] == '\0') {
+      // return the empty string and make sure we terminate next time
+      *str = NULL;
+      return buf;
+    }
+    
+    int buflast = buflen-1;
+    int len = 0;
+
+    if(delim && isSeparator(a[0], sep)) {
+      // leading delimiter, so don't advance - just allow an
+      // empty-string token to be generated.  The delimiter
+      // will be consumed below
+    }
+    else {
+      if(!delim) {
+	// skip separators
+	while(a[0] != '\0' && isSeparator(a[0], sep)) a++;
+      }
+      if(a[0] == quot) {
+	a++; // consume leading quote
+	while(a[0] != '\0') {
+	  if(a[0] == quot) {
+	    a++; // consume it
+	    if(a[0] != quot) break; // quotquot -> quot
+	  }
+	  if(len < buflast) buf[len++] = a[0];
+	  a++;
+	}
+      }
+      else {
+	while(a[0] != '\0' && !isSeparator(a[0], sep)) {
+	  if(len < buflast) buf[len++] = a[0];
+	  a++;
+	}
+      }	
+    }
+    buf[len] = '\0';
+    
+    if(!delim) {
+      // skip separators again - in case there are no more tokens
+      // and this takes us all the way to EOS
+      while(a[0] != '\0' && isSeparator(a[0], sep)) a++;
+    }
+    
+    if(a[0] == '\0') {
+      // at EOS, so indicate to the caller that there are no more tokens after this one
+      *str = NULL;
+    }
+    else {
+      if(delim) {
+	// since we got a token, we need
+	// to consume the trailing delimiter if it is there
+	if(isSeparator(a[0], sep)) a++;
+	// this may mean we are at EOS now, but that implies
+	// there is one more (empty-string) token,  so it's
+	// correct.
+      }
+      *str = a;
+    }
+    
+    return trim ? trimWhitespace(buf) : buf;
+  }
 
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________

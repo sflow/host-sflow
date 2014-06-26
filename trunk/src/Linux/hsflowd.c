@@ -10,12 +10,14 @@ extern "C" {
 #define HSFLOWD_MAIN
 
 #include "hsflowd.h"
+#include "cpu_utils.h"
 
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
   extern int debug;
   FILE *f_crash;
+  extern int daemonize;
 
   static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings);
   static void setUlogSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings);
@@ -278,6 +280,37 @@ extern "C" {
 
 #endif
 
+#ifdef HSF_DOCKER
+
+  static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors)
+  {
+    // we want the slice of global-namespace adaptors that are veth peers of the adaptors
+    // that belong to this container.
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+      if(niostate->up
+	 && niostate->peer_ifIndex
+	 && (niostate->switchPort == NO)
+	 && (niostate->loopback == NO)
+	 && peerAdaptors->num_adaptors < HSP_MAX_VIFS) {
+
+	for(uint32_t j=0; j < vm->interfaces->num_adaptors; j++) {
+	  SFLAdaptor *vm_adaptor = vm->interfaces->adaptors[j];
+	  if(niostate->peer_ifIndex == vm_adaptor->ifIndex) {
+	    // include this one (if we have room)
+	    if(peerAdaptors->num_adaptors < HSP_MAX_VIFS) {
+	      peerAdaptors->adaptors[peerAdaptors->num_adaptors++] = adaptor;
+	    }
+	  }
+	}
+      }
+    }
+    return peerAdaptors->num_adaptors;
+  }
+
+#endif /* HSF_DOCKER */
+
 #ifdef HSP_SWITCHPORT_REGEX
   static int compile_swp_regex(HSP *sp) {
     int err = regcomp(&sp->swp_regex, HSP_SWITCHPORT_REGEX, REG_EXTENDED | REG_NOSUB | REG_NEWLINE);
@@ -293,12 +326,14 @@ extern "C" {
   static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors)
   {
     // build the list of adaptors that are up and have non-empty MACs,
+    // and are not veth connectors to peers inside containers,
     // but stop if we hit the HSP_MAX_PHYSICAL_ADAPTORS limit
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
       HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
       if(niostate->up
 	 && (niostate->switchPort == NO)
+	 && (niostate->peer_ifIndex == 0)
 	 && myAdaptors->num_adaptors < HSP_MAX_PHYSICAL_ADAPTORS
 	 && adaptor->macs
 	 && !isZeroMAC(&adaptor->macs[0])) {
@@ -498,7 +533,7 @@ extern "C" {
     HSPVMState *state = (HSPVMState *)poller->userData;
     if(state == NULL) return;
 
-#if defined(HSF_XEN) || defined(HSF_VRT)
+#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
 
     HSP *sp = (HSP *)poller->magic;
 
@@ -807,7 +842,127 @@ extern "C" {
       }
     }
 #endif /* HSF_VRT */
-#endif /* HSF_XEN | HSF_VRT */
+
+#ifdef HSF_DOCKER
+    HSPContainer *container = state->container;
+    // host ID
+    SFLCounters_sample_element hidElem = { 0 };
+    hidElem.tag = SFLCOUNTERS_HOST_HID;
+    hidElem.counterBlock.host_hid.hostname.str = container->name;
+    hidElem.counterBlock.host_hid.hostname.len = my_strlen(container->name);
+    memcpy(hidElem.counterBlock.host_hid.uuid, container->uuid, 16);
+
+    // char *osType = virDomainGetOSType(domainPtr); $$$
+    hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
+    hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
+    //hidElem.counterBlock.host_hid.os_release.str = NULL;
+    //hidElem.counterBlock.host_hid.os_release.len = 0;
+    SFLADD_ELEMENT(cs, &hidElem);
+      
+    // host parent
+    SFLCounters_sample_element parElem = { 0 };
+    parElem.tag = SFLCOUNTERS_HOST_PAR;
+    parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
+    parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
+    SFLADD_ELEMENT(cs, &parElem);
+    
+    // VM Net I/O
+    SFLCounters_sample_element nioElem = { 0 };
+    nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
+    // conjure the list of global-namespace adaptors that are
+    // actually veth adaptors peered to adaptors belonging to this
+    // container, and make that the list of adaptors that we sum counters over.
+    SFLAdaptorList peerAdaptors;
+    SFLAdaptor *adaptors[HSP_MAX_VIFS];
+    peerAdaptors.adaptors = adaptors;
+    peerAdaptors.capacity = HSP_MAX_VIFS;
+    peerAdaptors.num_adaptors = 0;
+    if(getContainerPeerAdaptors(sp, state, &peerAdaptors) > 0) {
+      readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, &peerAdaptors);
+      SFLADD_ELEMENT(cs, &nioElem);
+    }
+      
+    // VM cpu counters [ref xenstat.c]
+    SFLCounters_sample_element cpuElem = { 0 };
+    cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
+    HSFNameVal cpuVals[] = {
+      { "user",0,0 },
+      { "system",0,0},
+      { NULL,0,0},
+    };
+    if(readContainerCounters("cpuacct", container->longId, "cpuacct.stat", 2, cpuVals)) {
+    uint64_t cpu_total = 0;
+    if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
+    if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
+
+    cpuElem.counterBlock.host_vrt_cpu.state = container->running ? 
+      SFL_VIR_DOMAIN_RUNNING :
+      SFL_VIR_DOMAIN_PAUSED;
+    cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
+    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
+    SFLADD_ELEMENT(cs, &cpuElem);
+  }
+      
+    SFLCounters_sample_element memElem = { 0 };
+    memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
+    HSFNameVal memVals[] = {
+      { "total_rss",0,0 },
+      { "hierarchical_memory_limit",0,0},
+      { NULL,0,0},
+    };
+    if(readContainerCounters("memory", container->longId, "memory.stat", 2, memVals)) {
+      if(memVals[0].nv_found) {
+        memElem.counterBlock.host_vrt_mem.memory = memVals[0].nv_val64;
+      }
+      if(memVals[1].nv_found && memVals[1].nv_val64 != (uint64_t)-1) {
+	memElem.counterBlock.host_vrt_mem.maxMemory = memVals[1].nv_val64;
+      }
+      SFLADD_ELEMENT(cs, &memElem);
+    }
+
+    // VM disk I/O counters
+    SFLCounters_sample_element dskElem = { 0 };
+    dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
+    HSFNameVal dskValsB[] = {
+      { "Read",0,0 },
+      { "Write",0,0},
+      { NULL,0,0},
+    };
+    if(readContainerCountersMulti("blkio", container->longId, "blkio.io_service_bytes_recursive", 2, dskValsB)) {
+      if(dskValsB[0].nv_found) {
+        dskElem.counterBlock.host_vrt_dsk.rd_bytes += dskValsB[0].nv_val64;
+      }
+      if(dskValsB[1].nv_found) {
+        dskElem.counterBlock.host_vrt_dsk.wr_bytes += dskValsB[1].nv_val64;
+      }
+    }
+    
+    HSFNameVal dskValsO[] = {
+      { "Read",0,0 },
+      { "Write",0,0},
+      { NULL,0,0},
+    };
+    
+    if(readContainerCountersMulti("blkio", container->longId, "blkio.io_serviced_recursive", 2, dskValsO)) {
+      if(dskValsO[0].nv_found) {
+        dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
+      }
+      if(dskValsO[1].nv_found) {
+        dskElem.counterBlock.host_vrt_dsk.wr_req += dskValsO[1].nv_val64;
+      }
+    }
+    // TODO: fill in capacity, allocation, available fields
+    SFLADD_ELEMENT(cs, &dskElem);
+
+    // include my slice of the adaptor list (the ones from my private namespace)
+    SFLCounters_sample_element adaptorsElem = { 0 };
+    adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
+    adaptorsElem.counterBlock.adaptors = state->interfaces;
+    SFLADD_ELEMENT(cs, &adaptorsElem);
+    sfl_poller_writeCountersSample(poller, cs);
+    
+#endif /* HSF_DOCKER */
+#endif /* HSF_XEN | HSF_VRT | HSF_DOCKER */
   }
 
   /*_________________---------------------------__________________
@@ -815,7 +970,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-#if defined(HSF_XEN) || defined(HSF_VRT)
+#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
 
   static HSPVMStore *newVMStore(HSP *sp, char *uuid, uint32_t dsIndex) {
     HSPVMStore *vmStore = (HSPVMStore *)my_calloc(sizeof(HSPVMStore));
@@ -1006,6 +1161,49 @@ extern "C" {
   }
 
 #endif /* HSF_VRT */
+
+#ifdef HSF_DOCKER
+  static HSPContainer *getContainer(HSP *sp, char *id, int create) {
+    HSPContainer *container = sp->containers;
+    for(; container; container=container->nxt) {
+      if(my_strequal(id, container->id)) return container;
+    }
+    if(id && create) {
+      container = (HSPContainer *)my_calloc(sizeof(HSPContainer));
+      container->id = my_strdup(id);
+      // turn it into a UUID
+      int id_len = my_strlen(id);
+      memcpy(container->uuid, id, (id_len > 16) ? 16 : id_len);
+      // and assign a dsIndex that will be persistent across restarts
+      container->dsIndex = assignVM_dsIndex(sp, container->uuid);
+      // this indicates that the container is currently running
+      container->lastActive = sp->clk;
+      // add to list
+      container->nxt = sp->containers;
+      sp->containers = container;
+      sp->num_containers++;
+    }
+    return container;
+  }
+  
+  static int dockerContainerCB(void *magic, char *line) {
+    HSP *sp = (HSP *)magic;
+    char id[HSF_DOCKER_MAX_LINELEN];
+    if(sscanf(line, "%s\n", id) == 1) {
+      getContainer(sp, id, YES);
+    }
+    return YES;
+  }
+  
+  static int dockerInspectCB(void *magic, char *line) {
+    // just append it to the string-buffer
+    UTStrBuf *inspectBuf = (UTStrBuf *)magic;
+    UTStrBuf_append(inspectBuf, line);
+    return YES;
+  }
+
+#endif
+
   /*_________________---------------------------__________________
     _________________    configVMs              __________________
     -----------------___________________________------------------
@@ -1203,6 +1401,130 @@ extern "C" {
       sp->num_domains = num_domains;
       my_free(domainIds);
 #endif
+
+#ifdef HSF_DOCKER
+      static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", "-a", NULL };
+      char dockerLine[HSF_DOCKER_MAX_LINELEN];
+      if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN)) {
+	// successful, now gather data for each one
+	UTStringArray *dockerInspect = strArrayNew();
+	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
+	strArrayAdd(dockerInspect, "inspect");
+	for(HSPContainer *container = sp->containers; container; container=container->nxt) {
+	  // could age them out here based on container->lastActive, because it will reduce
+	  // the size of the JSON data $$$
+	  strArrayAdd(dockerInspect, container->id);
+	  if(debug) {
+	    char *idlist =  strArrayStr(dockerInspect, NULL, NULL, " ", NULL);
+	    myLog(LOG_INFO, "dockerInspect: %s", idlist);
+	    my_free(idlist);
+	  }
+	}
+	strArrayAdd(dockerInspect, NULL);
+	UTStrBuf *inspectBuf = UTStrBuf_new(1024);
+	int inspectOK = myExec(inspectBuf,
+			       strArray(dockerInspect),
+			       dockerInspectCB,
+			       dockerLine,
+			       HSF_DOCKER_MAX_LINELEN);
+	strArrayFree(dockerInspect);
+	char *ibuf = UTStrBuf_unwrap(inspectBuf);
+	if(inspectOK) {
+	  // call was sucessful, so now we should have JSON to parse
+	  cJSON *jtop = cJSON_Parse(ibuf);
+	  if(jtop) {
+	    // top-level should be array
+	    int nc = cJSON_GetArraySize(jtop);
+	    for(int ii = 0; ii < nc; ii++) {
+	      cJSON *jcont = cJSON_GetArrayItem(jtop, ii);
+	      if(jcont) {
+
+		cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
+		if(jid) {
+		  char shortId[HSF_DOCKER_SHORTID_LEN+1];
+		  if(my_strlen(jid->valuestring) >= HSF_DOCKER_SHORTID_LEN) {
+		    memcpy(shortId, jid->valuestring, HSF_DOCKER_SHORTID_LEN);
+		    shortId[HSF_DOCKER_SHORTID_LEN] = '\0';
+		    HSPContainer *container = getContainer(sp, shortId, NO);
+		    if(container) {
+		      if(my_strequal(jid->valuestring, container->longId) == NO) {
+			if(container->longId) my_free(container->longId);
+			container->longId = my_strdup(jid->valuestring);
+		      }
+		      cJSON *jname = cJSON_GetObjectItem(jcont, "Name");
+		      if(my_strequal(jname->valuestring, container->name) == NO) {
+			if(container->name) my_free(container->name);
+			container->name = my_strdup(jname->valuestring);
+		      }
+		      cJSON *jstate = cJSON_GetObjectItem(jcont, "State");
+		      if(jstate) {
+		      	cJSON *jpid = cJSON_GetObjectItem(jstate, "Pid");
+		      	if(jpid) {
+			  container->pid = (pid_t)jpid->valueint;
+		      	}
+		      	cJSON *jrun = cJSON_GetObjectItem(jstate, "Running");
+		      	if(jrun) {
+			  /* assume 'true' maps to to positive int $$$*/
+			  container->running = jpid->valueint;
+		      	}
+		      }
+		      /*cJSON *jconfig = cJSON_GetObjectItem(jcont, "Config"); */
+		      /* if(jConfig) { */
+		      /* 	cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname"); */
+		      /* 	if(jhn) { */
+		      /* 	  // hostname $$$ */
+		      /* 	} */
+		      /* 	cJSON *jdn = cJSON_GetObjectItem(jconfig, "Domainname"); */
+		      /* 	if(jdn) { */
+		      /* 	  // domainname $$$ */
+		      /* 	} */
+		      /* } */
+		    }
+		  }
+		}
+	      }
+	    }
+	    cJSON_Delete(jtop);
+	  }
+	}
+	my_free(ibuf);
+      }
+
+      for(HSPContainer *container = sp->containers; container; container=container->nxt) {
+	SFLDataSource_instance dsi;
+	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+	SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + container->dsIndex, 0);
+	SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
+	HSPVMState *state = (HSPVMState *)vpoller->userData;
+	if(state) {
+	  // it was already there, just clear the mark.
+	  state->marked = NO;
+	  // and reset the information that we are about to refresh
+	  adaptorListMarkAll(state->interfaces);
+	  strArrayReset(state->volumes);
+	  strArrayReset(state->disks);
+	}
+	else {
+	  // new one - tell it what to do.
+	  myLog(LOG_INFO, "configVMs: new container=%u", container->dsIndex);
+	  uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+	  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
+	  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
+	  // hang a new HSPVMState object on the userData hook
+	  state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
+	  state->container = container;
+	  state->network_count = 0;
+	  state->marked = NO;
+	  vpoller->userData = state;
+	  state->interfaces = adaptorListNew();
+	  state->volumes = strArrayNew();
+	  state->disks = strArrayNew();
+	  sp->refreshAdaptorList = YES;
+	}
+	readContainerInterfaces(sp, state);
+	adaptorListFreeMarked(state->interfaces);
+      }
+#endif
       
       // 3. remove any that don't exist any more
       for(SFLPoller *pl = sf->agent->pollers; pl; ) {
@@ -1285,7 +1607,7 @@ extern "C" {
       configVMs(sp);
     }
 
-#if defined(HSF_XEN) || defined(HSF_VRT)
+#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
     // write the persistent state if requested
     if(sp->vmStoreInvalid) {
       writeVMStore(sp);
@@ -1640,9 +1962,10 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dvPp:f:o:u:?h")) != -1) {
+    while ((in = getopt(argc, argv, "dDvPp:f:o:u:?h")) != -1) {
       switch(in) {
       case 'd': debug++; break;
+      case 'D': daemonize++; break;
       case 'v': printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION)); exit(EXIT_SUCCESS); break;
       case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
@@ -2106,12 +2429,197 @@ extern "C" {
   
 #define GETMYLIMIT(L) getMyLimit((L), STRINGIFY(L))
 #define SETMYLIMIT(L,V) setMyLimit((L), STRINGIFY(L), (V))
-  
+
+#ifdef HSF_CAPABILITIES
+  static void logCapability(cap_t myCap, cap_flag_t flag, char *capName) {
+    cap_flag_value_t flag_effective, flag_permitted, flag_inheritable;
+    if(cap_get_flag(myCap, flag, CAP_EFFECTIVE, &flag_effective) == -1 ||
+       cap_get_flag(myCap, flag, CAP_PERMITTED, &flag_permitted) == -1 ||
+       cap_get_flag(myCap, flag, CAP_INHERITABLE, &flag_inheritable) == -1) {
+      myLog(LOG_ERR, "cap_get_flag(%s) failed : %s", capName, strerror(errno));
+    }
+    else {
+      myLog(LOG_INFO, "capability:%s (effective,permitted,inheritable) = (%u, %u, %u)",
+	    capName,
+	    flag_effective,
+	    flag_permitted,
+	    flag_inheritable);
+    }
+  }
+
+#define LOGCAPABILITY(myCap, C) logCapability(myCap, (C), STRINGIFY(C))
+
+  static void listCapabilities(cap_t myCap) {
+
+#ifdef CAP_CHOWN
+    LOGCAPABILITY(myCap, CAP_CHOWN);
+#endif
+#ifdef CAP_DAC_OVERRIDE
+    LOGCAPABILITY(myCap, CAP_DAC_OVERRIDE);
+#endif
+#ifdef CAP_DAC_READ_SEARCH
+    LOGCAPABILITY(myCap, CAP_DAC_READ_SEARCH);
+#endif
+#ifdef CAP_FOWNER
+    LOGCAPABILITY(myCap, CAP_FOWNER);
+#endif
+#ifdef CAP_FSETID
+    LOGCAPABILITY(myCap, CAP_FSETID);
+#endif
+#ifdef CAP_KILL
+    LOGCAPABILITY(myCap, CAP_KILL);
+#endif
+#ifdef CAP_SETGID
+    LOGCAPABILITY(myCap, CAP_SETGID);
+#endif
+#ifdef CAP_SETUID
+    LOGCAPABILITY(myCap, CAP_SETUID);
+#endif
+#ifdef CAP_SETPCAP
+    LOGCAPABILITY(myCap, CAP_SETPCAP);
+#endif
+#ifdef CAP_LINUX_IMMUTABLE
+    LOGCAPABILITY(myCap, CAP_LINUX_IMMUTABLE);
+#endif
+#ifdef CAP_NET_BIND_SERVICE
+    LOGCAPABILITY(myCap, CAP_NET_BIND_SERVICE);
+#endif
+#ifdef CAP_NET_BROADCAST
+    LOGCAPABILITY(myCap, CAP_NET_BROADCAST);
+#endif
+#ifdef CAP_NET_ADMIN
+    LOGCAPABILITY(myCap, CAP_NET_ADMIN);
+#endif
+#ifdef CAP_NET_RAW
+    LOGCAPABILITY(myCap, CAP_NET_RAW);
+#endif
+#ifdef CAP_IPC_LOCK
+    LOGCAPABILITY(myCap, CAP_IPC_LOCK);
+#endif
+#ifdef CAP_IPC_OWNER
+    LOGCAPABILITY(myCap, CAP_IPC_OWNER);
+#endif
+#ifdef CAP_SYS_MODULE
+    LOGCAPABILITY(myCap, CAP_SYS_MODULE);
+#endif
+#ifdef CAP_SYS_RAWIO
+    LOGCAPABILITY(myCap, CAP_SYS_RAWIO);
+#endif
+#ifdef CAP_SYS_CHROOT
+    LOGCAPABILITY(myCap, CAP_SYS_CHROOT);
+#endif
+#ifdef CAP_SYS_PTRACE
+    LOGCAPABILITY(myCap, CAP_SYS_PTRACE);
+#endif
+#ifdef CAP_SYS_PACCT
+    LOGCAPABILITY(myCap, CAP_SYS_PACCT);
+#endif
+#ifdef CAP_SYS_ADMIN
+    LOGCAPABILITY(myCap, CAP_SYS_ADMIN);
+#endif
+#ifdef CAP_SYS_BOOT
+    LOGCAPABILITY(myCap, CAP_SYS_BOOT);
+#endif
+#ifdef CAP_SYS_NICE
+    LOGCAPABILITY(myCap, CAP_SYS_NICE);
+#endif
+#ifdef CAP_SYS_RESOURCE
+    LOGCAPABILITY(myCap, CAP_SYS_RESOURCE);
+#endif
+#ifdef CAP_SYS_TIME
+    LOGCAPABILITY(myCap, CAP_SYS_TIME);
+#endif
+#ifdef CAP_SYS_TTY_CONFIG
+    LOGCAPABILITY(myCap, CAP_SYS_TTY_CONFIG);
+#endif
+#ifdef CAP_MKNOD
+    LOGCAPABILITY(myCap, CAP_MKNOD);
+#endif
+#ifdef CAP_LEASE
+    LOGCAPABILITY(myCap, CAP_LEASE);
+#endif
+#ifdef CAP_AUDIT_WRITE
+    LOGCAPABILITY(myCap, CAP_AUDIT_WRITE);
+#endif
+#ifdef CAP_AUDIT_CONTROL
+    LOGCAPABILITY(myCap, CAP_AUDIT_CONTROL);
+#endif
+#ifdef CAP_SETFCAP
+    LOGCAPABILITY(myCap, CAP_SETFCAP);
+#endif
+#ifdef CAP_MAC_OVERRIDE
+    LOGCAPABILITY(myCap, CAP_MAC_OVERRIDE);
+#endif
+#ifdef CAP_MAC_ADMIN
+    LOGCAPABILITY(myCap, CAP_MAC_ADMIN);
+#endif
+#ifdef CAP_SYSLOG
+    LOGCAPABILITY(myCap, CAP_SYSLOG);
+#endif
+
+#if 0
+#ifdef CAP_WAKE_ALARM
+    LOGCAPABILITY(myCap, CAP_WAKE_ALARM);
+#endif
+#ifdef CAP_BLOCK_SUSPEND
+    LOGCAPABILITY(myCap, CAP_BLOCK_SUSPEND);
+#endif
+#endif
+
+  }
+
+  static void passCapabilities(void) {
+    if(debug) myLog(LOG_INFO, "passCapabilities(): getuid=%u", getuid());
+
+    cap_t myCap = cap_get_proc();
+    if(myCap == NULL) {
+      myLog(LOG_ERR, "cap_get_proc() failed : %s", strerror(errno));
+      return;
+    }
+
+    if(debug) {
+      myLog(LOG_INFO, "listCapabilities(): getuid=%u BEFORE", getuid());
+      listCapabilities(myCap);
+    }
+
+    cap_value_t desired_caps[] = {
+      CAP_DAC_OVERRIDE,
+      CAP_NET_ADMIN,
+      CAP_SYS_ADMIN,
+    };
+    if(cap_set_flag(myCap, (cap_flag_t)CAP_EFFECTIVE, 3, desired_caps, CAP_SET) == -1 ||
+       cap_set_flag(myCap, (cap_flag_t)CAP_PERMITTED, 3, desired_caps, CAP_SET) == -1 ||
+       cap_set_flag(myCap, (cap_flag_t)CAP_INHERITABLE, 3, desired_caps, CAP_SET) == -1) {
+      myLog(LOG_ERR, "cap_set_flag() failed : %s", strerror(errno));
+    }
+    else {
+      if(cap_set_proc(myCap) == -1) {
+	myLog(LOG_ERR, "cap_set_proc() failed : %s", strerror(errno));
+      }
+    }
+
+    if(prctl(PR_SET_KEEPCAPS, 1,0,0,0) == -1) {
+	myLog(LOG_ERR, "prctl(KEEPCAPS) failed : %s", strerror(errno));
+    }
+
+    if(debug) {
+      myLog(LOG_INFO, "listCapabilities(): getuid=%u AFTER", getuid());
+      listCapabilities(myCap);
+    }
+
+    cap_free(myCap);
+  }
+#endif /*HSF_CAPABILITIES */
 
   static void drop_privileges(int requestMemLockBytes) {
-    
+    if(debug) myLog(LOG_INFO, "drop_priviliges: getuid=%d", getuid());
+
     if(getuid() != 0) return;
-    
+
+#ifdef HSF_CAPABILITIES
+    passCapabilities();
+#endif
+						    
     if(requestMemLockBytes) {
       // Request to lock this process in memory so that we don't get
       // swapped out. It's probably less than 100KB,  and this way
@@ -2136,52 +2644,56 @@ extern "C" {
       SETMYLIMIT(RLIMIT_DATA, requestMemLockBytes);
 #endif
       
-      // set the real and effective group-id to 'nobody'
-      struct passwd *nobody = getpwnam("nobody");
-      if(nobody == NULL) {
-	myLog(LOG_ERR, "drop_privileges: user 'nobody' not found");
-	exit(EXIT_FAILURE);
-      }
-      if(setgid(nobody->pw_gid) != 0) {
-	myLog(LOG_ERR, "drop_privileges: setgid(%d) failed : %s", nobody->pw_gid, strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      
-      // It doesn't seem like this part is necessary(?)
-      // if(initgroups("nobody", nobody->pw_gid) != 0) {
-      //  myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno));
-      //  exit(EXIT_FAILURE);
-      // }
-      // endpwent();
-      // endgrent();
-      
-      // now change user
-      if(setuid(nobody->pw_uid) != 0) {
-	myLog(LOG_ERR, "drop_privileges: setuid(%d) failed : %s", nobody->pw_uid, strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      
-      if(debug) {
-	GETMYLIMIT(RLIMIT_MEMLOCK);
-	GETMYLIMIT(RLIMIT_NPROC);
-	GETMYLIMIT(RLIMIT_STACK);
-	GETMYLIMIT(RLIMIT_CORE);
-	GETMYLIMIT(RLIMIT_CPU);
-	GETMYLIMIT(RLIMIT_DATA);
-	GETMYLIMIT(RLIMIT_FSIZE);
-	GETMYLIMIT(RLIMIT_RSS);
-	GETMYLIMIT(RLIMIT_NOFILE);
-	GETMYLIMIT(RLIMIT_AS);
-	GETMYLIMIT(RLIMIT_LOCKS);
-      }
+    }
+    // set the real and effective group-id to 'nobody'
+    struct passwd *nobody = getpwnam("nobody");
+    if(nobody == NULL) {
+      myLog(LOG_ERR, "drop_privileges: user 'nobody' not found");
+      exit(EXIT_FAILURE);
+    }
+    if(setgid(nobody->pw_gid) != 0) {
+      myLog(LOG_ERR, "drop_privileges: setgid(%d) failed : %s", nobody->pw_gid, strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+    
+    // It doesn't seem like this part is necessary(?)
+    // if(initgroups("nobody", nobody->pw_gid) != 0) {
+    //  myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno));
+    //  exit(EXIT_FAILURE);
+    // }
+    // endpwent();
+    // endgrent();
+    
+    // now change user
+    if(setuid(nobody->pw_uid) != 0) {
+      myLog(LOG_ERR, "drop_privileges: setuid(%d) failed : %s", nobody->pw_uid, strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+
+#ifdef HSF_CAPABILITIES
+    passCapabilities();
+#endif
+
+    if(debug) {
+      GETMYLIMIT(RLIMIT_MEMLOCK);
+      GETMYLIMIT(RLIMIT_NPROC);
+      GETMYLIMIT(RLIMIT_STACK);
+      GETMYLIMIT(RLIMIT_CORE);
+      GETMYLIMIT(RLIMIT_CPU);
+      GETMYLIMIT(RLIMIT_DATA);
+      GETMYLIMIT(RLIMIT_FSIZE);
+      GETMYLIMIT(RLIMIT_RSS);
+      GETMYLIMIT(RLIMIT_NOFILE);
+      GETMYLIMIT(RLIMIT_AS);
+      GETMYLIMIT(RLIMIT_LOCKS);
     }
   }
-  
-  /*_________________---------------------------__________________
-    _________________         main              __________________
-    -----------------___________________________------------------
-  */
-  
+
+/*_________________---------------------------__________________
+  _________________         main              __________________
+  -----------------___________________________------------------
+*/
+
   int main(int argc, char *argv[])
   {
     HSP *sp = &HSPSamplingProbe;
@@ -2221,7 +2733,19 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-    if(debug == 0) {
+    if(debug == 0 || daemonize
+
+
+
+
+
+
+
+
+
+
+
+) {
       // fork to daemonize
       pid_t pid = fork();
       if(pid < 0) {
@@ -2310,7 +2834,7 @@ extern "C" {
     }
 #endif
     
-#if defined(HSF_XEN) || defined(HSF_VRT)
+#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
     // load the persistent state from last time
     readVMStore(sp);
     // open the vmStore file for writing while we still have root priviliges
@@ -2446,7 +2970,15 @@ extern "C" {
 		// Fedora 14 we needed to fork the DNSSD thread before dropping root
 		// priviliges (something to do with mlockall()). Anway, from now on
 		// we just don't want the responsibility...
+#ifdef HSF_DOCKER
+		// For now we can't drop privileges for docker because
+		// it somehow prevents us from connecting to another
+		// network namespace (even when we retain all known capabilities!).
+		// We can revist this if/when we find a better way to get the ifIndex
+		// numbers of container adaptors.
+#else
 		drop_privileges(HSP_RLIMIT_MEMLOCK);
+#endif
 	      }
 
 #ifdef HSP_SWITCHPORT_REGEX

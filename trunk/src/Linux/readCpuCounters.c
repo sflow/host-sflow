@@ -7,7 +7,7 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
-#include <linux/param.h> // for HZ
+#include "cpu_utils.h"
 #include <sys/sysinfo.h> // for get_nprocs()
 
   /*_________________---------------------------__________________

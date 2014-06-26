@@ -204,7 +204,7 @@ approach seemed more stable and portable.
     }
   }
 
-#ifdef HSP_ETHTOOL_STATS
+#if (HSP_ETHTOOL_STATS || HSF_DOCKER)
 /*________________---------------------------__________________
   ________________  staticStringsIndexOf     __________________
   ----------------___________________________------------------
@@ -257,7 +257,7 @@ approach seemed more stable and portable.
 	}
 	adaptor->ifSpeed = ifSpeed_bps;
       }
-#ifdef HSP_ETHTOOL_STATS
+#if (HSP_ETHTOOL_STATS || HSF_DOCKER)
       // see if the ethtool stats block can give us multicast/broadcast counters too
       HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
       adaptorNIO->et_nfound=0;
@@ -289,6 +289,7 @@ approach seemed more stable and portable.
 		if(debug) myLog(LOG_INFO, "ethtool counter %s is at index %d", cname, ii);
 		// then see if this is one of the ones we want,
 		// and record the index if it is.
+#ifdef HSP_ETHTOOL_STATS
 		if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
 		  adaptorNIO->et_idx_mcasts_in = ii+1;
 		  adaptorNIO->et_nfound++;
@@ -305,6 +306,23 @@ approach seemed more stable and portable.
 		  adaptorNIO->et_idx_bcasts_out = ii+1;
 		  adaptorNIO->et_nfound++;
 		}
+#endif
+#ifdef HSF_DOCKER
+		if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
+		  // Now go ahead and make the call to get the peer_ifindex.
+		  struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
+		  et_stats->cmd = ETHTOOL_GSTATS;
+		  et_stats->n_stats = adaptorNIO->et_nctrs;
+		  ifr->ifr_data = (char *)et_stats;
+		  if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+		    adaptorNIO->peer_ifIndex = et_stats->data[ii];
+		    if(debug) myLog(LOG_INFO, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
+				    adaptor->deviceName,
+				    adaptor->ifIndex,
+				    adaptorNIO->peer_ifIndex);
+		  }
+		}
+#endif
 	      }
 	    }
 	    my_free(ctrNames);
@@ -499,6 +517,136 @@ approach seemed more stable and portable.
 
   return sp->adaptorList->num_adaptors;
 }
+
+#ifdef HSF_DOCKER
+
+/*________________---------------------------__________________
+  ________________   containerLinkCB         __________________
+  ----------------___________________________------------------
+  
+expecting lines like this:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN mode DEFAULT group default \    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+4: eth0: <BROADCAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000\    link/ether 1a:14:6b:25:b2:82 brd ff:ff:ff:ff:ff:ff
+*/
+
+  static int containerLinkCB(void *magic, char *line) {
+    HSPVMState *vm = (HSPVMState *)magic;
+    if(debug) myLog(LOG_INFO, "containerLinkCB: line=<%s>", line);
+    char *p = line;
+    char *sep = " \t\n\\:";
+    int delim = NO;
+    int trim = NO;
+    char quote = '\0';
+    char buf[HSF_DOCKER_MAX_LINELEN];
+    char *ifIndexStr = parseNextTok(&p, sep, delim, quote, trim, buf, HSF_DOCKER_MAX_LINELEN);
+    if(ifIndexStr) {
+      if(debug) myLog(LOG_INFO, "containerLinkCB: ifIndex=%s", ifIndexStr);
+      uint32_t ifIndex = strtol(ifIndexStr, NULL, 0);
+      char dev_buf[HSF_DOCKER_MAX_LINELEN];
+      char *deviceName = parseNextTok(&p, sep, delim, quote, trim, dev_buf, HSF_DOCKER_MAX_LINELEN);
+      if(deviceName) {
+	if(debug) myLog(LOG_INFO, "containerLinkCB: deviceName=%s", deviceName);
+	// search forward for "link/ether"
+	char *search;
+	while ((search = parseNextTok(&p, sep, delim, quote, trim, buf, HSF_DOCKER_MAX_LINELEN)) != NULL) {
+	    if(my_strequal(search, "link/ether")) {
+	      sep = " \t\n\\"; // without ':'
+	      char *macStr = parseNextTok(&p, sep, delim, quote, trim, buf, HSF_DOCKER_MAX_LINELEN);
+	      if(macStr) {
+		if(debug) myLog(LOG_INFO, "containerLinkCB: mac=%s", macStr);
+		u_char mac[6];
+		if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
+		  SFLAdaptor *adaptor = adaptorListGet(vm->interfaces, deviceName);
+		  if(adaptor == NULL) {
+		    adaptor = adaptorListAdd(vm->interfaces, deviceName, mac, sizeof(HSPAdaptorNIO));
+		  }
+		  // set ifIndex
+		  adaptor->ifIndex = ifIndex;
+		  // clear the mark so we don't free it below
+		  adaptor->marked = NO;
+		}
+	      }
+	    }
+	}
+      }
+    }
+    return YES;
+  }
+
+/*________________---------------------------__________________
+  ________________   readContainerInterfaces __________________
+  ----------------___________________________------------------
+
+Use "ip netns exec <ns> ip link show" to get the ifIndex and MAC Address of the container.
+There must be a more direct way to do this with a system call.  (Probably just need to look at the
+source code behind "ip netns exec")
+*/
+
+  int readContainerInterfaces(HSP *sp, HSPVMState *vm)  {
+    if(!vm->container) return 0;
+    pid_t nspid = vm->container->pid;
+    if(debug) myLog(LOG_INFO, "readContainerInterfaces: pid=%u", nspid);
+    if(nspid == 0) return 0;
+
+    // create the netns dir if necessary
+    struct stat statBuf;
+    if(stat(HSF_NETNS_DIR, &statBuf) != 0) {
+      if(mkdir(HSF_NETNS_DIR, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH) == -1) {
+	if(errno != EEXIST) {
+	  myLog(LOG_ERR, "cannot create dir %s", HSF_NETNS_DIR);
+	  return 0;
+	}
+      }
+    }
+      
+    // symlink to /proc/<nspid>/ns/net
+    int symLinkPreExists = NO;
+    char frompath[HSF_DOCKER_MAX_FNAME_LEN+1];
+    char topath[HSF_DOCKER_MAX_FNAME_LEN+1];
+    snprintf(frompath, HSF_DOCKER_MAX_FNAME_LEN, HSF_NETNS_DIR "/%u", nspid);
+    snprintf(topath, HSF_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
+    if(symlink(topath, frompath) == -1) {
+      if(errno == EEXIST) {
+	symLinkPreExists = YES;
+      }
+      else {
+	myLog(LOG_ERR, "cannot add symlink %s", HSF_NETNS_DIR);
+	return 0;
+      }
+    }
+ 
+    // Now we can exec in the container
+    UTStringArray *ipnetns = strArrayNew();
+    strArrayAdd(ipnetns, HSF_IP_CMD);
+    strArrayAdd(ipnetns, "netns");
+    strArrayAdd(ipnetns, "exec");
+    char nspidstr[32];
+    sprintf(nspidstr, "%u", nspid);
+    strArrayAdd(ipnetns, nspidstr);
+    strArrayAdd(ipnetns, HSF_IP_CMD);
+    strArrayAdd(ipnetns, "-o"); // one line for each I/F
+    strArrayAdd(ipnetns, "link");
+    char ipLinkLine[HSF_DOCKER_MAX_LINELEN];
+    if(!myExec(vm,
+	       strArray(ipnetns),
+	       containerLinkCB,
+	       ipLinkLine,
+	       HSF_DOCKER_MAX_LINELEN)) {
+      myLog(LOG_ERR, "ipnetns exec failed : %s", strerror(errno));
+    }
+    strArrayFree(ipnetns);
+
+    if(!symLinkPreExists) {
+      // remove the symLink again so it doesn't hold anything up
+      if(unlink(frompath) == -1) {
+	myLog(LOG_ERR, "error unlinking %s : %s", frompath, strerror(errno));
+      }
+    }
+
+    return vm->interfaces->num_adaptors;
+  }
+
+#endif	
 
 #if defined(__cplusplus)
 } /* extern "C" */
