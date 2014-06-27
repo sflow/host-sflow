@@ -148,10 +148,13 @@ extern "C" {
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      uint32_t slave_aggID = strtol(tok_val, NULL, 0);
 	      if(slave_aggID != aggID) {
-		myLog(LOG_ERR, "updateBondCounters: slave %s aggID (%u) != bond aggID (%u)",
-		      currentSlave->deviceName,
-		      slave_aggID,
-		      aggID);
+		// This can happen when the LACP protocol has not fully established the LAG yet.
+		if(debug) {
+		  myLog(LOG_INFO, "updateBondCounters: warning slave %s aggID (%u) != bond aggID (%u)",
+			currentSlave->deviceName,
+			slave_aggID,
+			aggID);
+		}
 	      }
 	    }
 	  }
