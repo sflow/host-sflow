@@ -2511,7 +2511,14 @@ extern "C" {
     if(getuid() != 0) return;
 
 #ifdef HSF_DOCKER
-    // Make certain capabilities inheritable
+    /* Make certain capabilities inheritable.  CAP_SYS_PTRACE seems
+     * be required just to access /proc/<nspid>/ns/net.  I found
+     * some discussion of this here:
+     *  http://osdir.com/ml/linux.kernel.containers/2007-12/msg00069.html
+     * while CAP_SYS_ADMIN is required for the netns() and unshare()
+     * system calls.  Right now all this happens in 
+     * readInterfaces.c : readContainerInterfaces()
+    */
     cap_value_t desired_caps[] = {
       CAP_SYS_PTRACE,
       CAP_SYS_ADMIN,
