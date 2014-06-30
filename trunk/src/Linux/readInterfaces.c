@@ -364,11 +364,14 @@ approach seemed more stable and portable.
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));
     char line[MAX_PROC_LINE_CHARS];
+    int lineNo = 0;
     while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-      if(debug) myLog(LOG_INFO, "/proc/net/dev line: %s", line);
-      // the device name is always the token before the ":"
-      char *devName = strtok(line, ":");
-      if(devName) {
+      if(lineNo++ < 2) continue; // skip headers
+      // the device name is always the first token before the ":"
+      char buf[MAX_PROC_LINE_CHARS];
+      char *p = line;
+      char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
+      if(devName && my_strlen(devName) < IFNAMSIZ) {
 	devName = trimWhitespace(devName);
 	if(devName && strlen(devName) < IFNAMSIZ) {
 	  // we set the ifr_name field to make our queries
@@ -524,50 +527,27 @@ approach seemed more stable and portable.
   ________________   containerLinkCB         __________________
   ----------------___________________________------------------
   
-expecting lines like this:
-1: lo: <LOOPBACK,UP,LOWER_UP> mtu 1500 qdisc noqueue state UNKNOWN mode DEFAULT group default \    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
-4: eth0: <BROADCAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP mode DEFAULT group default qlen 1000\    link/ether 1a:14:6b:25:b2:82 brd ff:ff:ff:ff:ff:ff
+expecting lines of the form:
+VNIC: <ifindex> <device> <mac>
 */
 
   static int containerLinkCB(void *magic, char *line) {
     HSPVMState *vm = (HSPVMState *)magic;
     if(debug) myLog(LOG_INFO, "containerLinkCB: line=<%s>", line);
-    char *p = line;
-    char *sep = " \t\n\\:";
-    int delim = NO;
-    int trim = NO;
-    char quote = '\0';
-    char buf[HSF_DOCKER_MAX_LINELEN];
-    char *ifIndexStr = parseNextTok(&p, sep, delim, quote, trim, buf, HSF_DOCKER_MAX_LINELEN);
-    if(ifIndexStr) {
-      if(debug) myLog(LOG_INFO, "containerLinkCB: ifIndex=%s", ifIndexStr);
-      uint32_t ifIndex = strtol(ifIndexStr, NULL, 0);
-      char dev_buf[HSF_DOCKER_MAX_LINELEN];
-      char *deviceName = parseNextTok(&p, sep, delim, quote, trim, dev_buf, HSF_DOCKER_MAX_LINELEN);
-      if(deviceName) {
-	if(debug) myLog(LOG_INFO, "containerLinkCB: deviceName=%s", deviceName);
-	// search forward for "link/ether"
-	char *search;
-	while ((search = parseNextTok(&p, sep, delim, quote, trim, buf, HSF_DOCKER_MAX_LINELEN)) != NULL) {
-	    if(my_strequal(search, "link/ether")) {
-	      sep = " \t\n\\"; // without ':'
-	      char *macStr = parseNextTok(&p, sep, delim, quote, trim, buf, HSF_DOCKER_MAX_LINELEN);
-	      if(macStr) {
-		if(debug) myLog(LOG_INFO, "containerLinkCB: mac=%s", macStr);
-		u_char mac[6];
-		if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
-		  SFLAdaptor *adaptor = adaptorListGet(vm->interfaces, deviceName);
-		  if(adaptor == NULL) {
-		    adaptor = adaptorListAdd(vm->interfaces, deviceName, mac, sizeof(HSPAdaptorNIO));
-		  }
-		  // set ifIndex
-		  adaptor->ifIndex = ifIndex;
-		  // clear the mark so we don't free it below
-		  adaptor->marked = NO;
-		}
-	      }
-	    }
+    char deviceName[HSF_DOCKER_MAX_LINELEN];
+    char macStr[HSF_DOCKER_MAX_LINELEN];
+    uint32_t ifIndex;
+    if(sscanf(line, "VNIC: %u %s %s", &ifIndex, deviceName, macStr) == 3) {
+      u_char mac[6];
+      if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
+	SFLAdaptor *adaptor = adaptorListGet(vm->interfaces, deviceName);
+	if(adaptor == NULL) {
+	  adaptor = adaptorListAdd(vm->interfaces, deviceName, mac, sizeof(HSPAdaptorNIO));
 	}
+	// set ifIndex
+	adaptor->ifIndex = ifIndex;
+	// clear the mark so we don't free it below
+	adaptor->marked = NO;
       }
     }
     return YES;
@@ -576,11 +556,15 @@ expecting lines like this:
 /*________________---------------------------__________________
   ________________   readContainerInterfaces __________________
   ----------------___________________________------------------
-
-Use "ip netns exec <ns> ip link show" to get the ifIndex and MAC Address of the container.
-There must be a more direct way to do this with a system call.  (Probably just need to look at the
-source code behind "ip netns exec")
 */
+
+//#ifndef CLONE_NEWNET
+//#define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
+//#endif
+  
+  //  static int my_setns(int fd, int nstype) {
+  //    return syscall(__NR_setns, fd, nstype);
+  // }
 
   int readContainerInterfaces(HSP *sp, HSPVMState *vm)  {
     if(!vm->container) return 0;
@@ -588,59 +572,133 @@ source code behind "ip netns exec")
     if(debug) myLog(LOG_INFO, "readContainerInterfaces: pid=%u", nspid);
     if(nspid == 0) return 0;
 
-    // create the netns dir if necessary
-    struct stat statBuf;
-    if(stat(HSF_NETNS_DIR, &statBuf) != 0) {
-      if(mkdir(HSF_NETNS_DIR, S_IRWXU|S_IRGRP|S_IXGRP|S_IROTH|S_IXOTH) == -1) {
-	if(errno != EEXIST) {
-	  myLog(LOG_ERR, "cannot create dir %s", HSF_NETNS_DIR);
-	  return 0;
-	}
-      }
+    // do the dirty work after a fork, so we can just exit afterwards,
+    // same as they do in "ip netns exec"
+    int pfd[2];
+    if(pipe(pfd) == -1) {
+      myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
+      exit(EXIT_FAILURE);
     }
+    pid_t cpid;
+    if((cpid = fork()) == -1) {
+      myLog(LOG_ERR, "fork() failed : %s", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+    if(cpid == 0) {
+      // in child
+      close(pfd[0]);   // close read-end
+      dup2(pfd[1], 1); // stdout -> write-end
+      dup2(pfd[1], 2); // stderr -> write-end
+      close(pfd[1]);
       
-    // symlink to /proc/<nspid>/ns/net
-    int symLinkPreExists = NO;
-    char frompath[HSF_DOCKER_MAX_FNAME_LEN+1];
-    char topath[HSF_DOCKER_MAX_FNAME_LEN+1];
-    snprintf(frompath, HSF_DOCKER_MAX_FNAME_LEN, HSF_NETNS_DIR "/%u", nspid);
-    snprintf(topath, HSF_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
-    if(symlink(topath, frompath) == -1) {
-      if(errno == EEXIST) {
-	symLinkPreExists = YES;
+      // open /proc/<nspid>/ns/net
+      char topath[HSF_DOCKER_MAX_FNAME_LEN+1];
+      snprintf(topath, HSF_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
+      int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
+      if(nsfd < 0) {
+	fprintf(stderr, "cannot open %s : %s", topath, strerror(errno));
+	exit(EXIT_FAILURE);
       }
-      else {
-	myLog(LOG_ERR, "cannot add symlink %s", HSF_NETNS_DIR);
+      
+      /* set network namespace
+	 CLONE_NEWNET means nsfd must refer to a network namespace
+      */
+      if(setns(nsfd, CLONE_NEWNET) < 0) {
+	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      
+      /* From "man 2 unshare":  This flag has the same effect as the clone(2)
+	 CLONE_NEWNS flag. Unshare the mount namespace, so that the calling
+	 process has a private copy of its namespace which is not shared with
+	 any other process. Specifying this flag automatically implies CLONE_FS
+	 as well. Use of CLONE_NEWNS requires the CAP_SYS_ADMIN capability. */
+      if(unshare(CLONE_NEWNS) < 0) {
+	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+
+      int fd = socket(PF_INET, SOCK_DGRAM, 0);
+      if(fd < 0) {
+	fprintf(stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
 	return 0;
       }
-    }
- 
-    // Now we can exec in the container
-    UTStringArray *ipnetns = strArrayNew();
-    strArrayAdd(ipnetns, HSF_IP_CMD);
-    strArrayAdd(ipnetns, "netns");
-    strArrayAdd(ipnetns, "exec");
-    char nspidstr[32];
-    sprintf(nspidstr, "%u", nspid);
-    strArrayAdd(ipnetns, nspidstr);
-    strArrayAdd(ipnetns, HSF_IP_CMD);
-    strArrayAdd(ipnetns, "-o"); // one line for each I/F
-    strArrayAdd(ipnetns, "link");
-    char ipLinkLine[HSF_DOCKER_MAX_LINELEN];
-    if(!myExec(vm,
-	       strArray(ipnetns),
-	       containerLinkCB,
-	       ipLinkLine,
-	       HSF_DOCKER_MAX_LINELEN)) {
-      myLog(LOG_ERR, "ipnetns exec failed : %s", strerror(errno));
-    }
-    strArrayFree(ipnetns);
 
-    if(!symLinkPreExists) {
-      // remove the symLink again so it doesn't hold anything up
-      if(unlink(frompath) == -1) {
-	myLog(LOG_ERR, "error unlinking %s : %s", frompath, strerror(errno));
+      FILE *procFile = fopen("/proc/net/dev", "r");
+      if(procFile) {
+	struct ifreq ifr;
+	memset(&ifr, 0, sizeof(ifr));
+	char line[MAX_PROC_LINE_CHARS];
+	int lineNo = 0;
+	while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+	  if(lineNo++ < 2) continue; // skip headers
+	  char buf[MAX_PROC_LINE_CHARS];
+	  char *p = line;
+	  char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
+	  if(devName && my_strlen(devName) < IFNAMSIZ) {
+	    strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
+	    // Get the flags for this interface
+	    if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
+	      fprintf((stderr, "container device %s Get SIOCGIFFLAGS failed : %s",
+		       devName,
+		       strerror(errno));
+	    }
+	    else {
+	      int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
+	      int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
+
+	      if(up && !loopback) {
+		// try to get ifIndex next, because we only care about
+		// ifIndex and MAC when looking at container interfaces
+		if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
+		  // only complain about this if we are debugging
+		  if(debug) {
+		    fprintf(stderr, "container device %s Get SIOCGIFINDEX failed : %s",
+			  devName,
+			  strerror(errno));
+		  }
+		}
+		else {
+		  int ifIndex = ifr.ifr_ifindex;
+		  
+		  // Get the MAC Address for this interface
+		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
+		    if(debug) {
+		      fprint(stderr, "device %s Get SIOCGIFHWADDR failed : %s",
+			     devName,
+			     strerror(errno));
+		    }
+		  }
+		  else {
+		    u_char macStr[13];
+		    printHex((u_char *)&ifr.ifr_hwaddr.sa_data, 6, macStr, 12, NO);
+		    // send this info back up the pipe to my my parent
+		    printf("VNIC: %u %s %s\n", ifIndex, devName, macStr);
+		  }
+		}
+	      }
+	    }
+	  }
+	}
       }
+
+      // don't even bother to close file-descriptors,  just bail
+      exit(0);
+      
+    }
+    else {
+      // in parent
+      close(pfd[1]); // close write-end
+      // read from read-end
+      FILE *ovs;
+      if((ovs = fdopen(pfd[0], "r")) == NULL) {
+	myLog(LOG_ERR, "readContainerInterfaces: fdopen() failed : %s", strerror(errno));
+	return 0;
+      }
+      char line[MAX_PROC_LINE_CHARS];
+      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(vm, line);
+      fclose(ovs);
+      wait(NULL); // block here until child is done
     }
 
     return vm->interfaces->num_adaptors;
