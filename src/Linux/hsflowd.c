@@ -2431,145 +2431,30 @@ extern "C" {
 #define SETMYLIMIT(L,V) setMyLimit((L), STRINGIFY(L), (V))
 
 #ifdef HSF_CAPABILITIES
-  static void logCapability(cap_t myCap, cap_flag_t flag, char *capName) {
+  static void logCapability(cap_t myCap, cap_flag_t flag) {
     cap_flag_value_t flag_effective, flag_permitted, flag_inheritable;
     if(cap_get_flag(myCap, flag, CAP_EFFECTIVE, &flag_effective) == -1 ||
        cap_get_flag(myCap, flag, CAP_PERMITTED, &flag_permitted) == -1 ||
        cap_get_flag(myCap, flag, CAP_INHERITABLE, &flag_inheritable) == -1) {
-      myLog(LOG_ERR, "cap_get_flag(%s) failed : %s", capName, strerror(errno));
+      myLog(LOG_ERR, "cap_get_flag(cap=%u) failed : %s", flag, strerror(errno));
     }
     else {
-      myLog(LOG_INFO, "capability:%s (effective,permitted,inheritable) = (%u, %u, %u)",
-	    capName,
+      myLog(LOG_INFO, "capability:%u (eff,per,inh) = (%u, %u, %u)",
+	    flag,
 	    flag_effective,
 	    flag_permitted,
 	    flag_inheritable);
     }
   }
 
-#define LOGCAPABILITY(myCap, C) logCapability(myCap, (C), STRINGIFY(C))
-
-  static void listCapabilities(cap_t myCap) {
-
-#ifdef CAP_CHOWN
-    LOGCAPABILITY(myCap, CAP_CHOWN);
-#endif
-#ifdef CAP_DAC_OVERRIDE
-    LOGCAPABILITY(myCap, CAP_DAC_OVERRIDE);
-#endif
-#ifdef CAP_DAC_READ_SEARCH
-    LOGCAPABILITY(myCap, CAP_DAC_READ_SEARCH);
-#endif
-#ifdef CAP_FOWNER
-    LOGCAPABILITY(myCap, CAP_FOWNER);
-#endif
-#ifdef CAP_FSETID
-    LOGCAPABILITY(myCap, CAP_FSETID);
-#endif
-#ifdef CAP_KILL
-    LOGCAPABILITY(myCap, CAP_KILL);
-#endif
-#ifdef CAP_SETGID
-    LOGCAPABILITY(myCap, CAP_SETGID);
-#endif
-#ifdef CAP_SETUID
-    LOGCAPABILITY(myCap, CAP_SETUID);
-#endif
-#ifdef CAP_SETPCAP
-    LOGCAPABILITY(myCap, CAP_SETPCAP);
-#endif
-#ifdef CAP_LINUX_IMMUTABLE
-    LOGCAPABILITY(myCap, CAP_LINUX_IMMUTABLE);
-#endif
-#ifdef CAP_NET_BIND_SERVICE
-    LOGCAPABILITY(myCap, CAP_NET_BIND_SERVICE);
-#endif
-#ifdef CAP_NET_BROADCAST
-    LOGCAPABILITY(myCap, CAP_NET_BROADCAST);
-#endif
-#ifdef CAP_NET_ADMIN
-    LOGCAPABILITY(myCap, CAP_NET_ADMIN);
-#endif
-#ifdef CAP_NET_RAW
-    LOGCAPABILITY(myCap, CAP_NET_RAW);
-#endif
-#ifdef CAP_IPC_LOCK
-    LOGCAPABILITY(myCap, CAP_IPC_LOCK);
-#endif
-#ifdef CAP_IPC_OWNER
-    LOGCAPABILITY(myCap, CAP_IPC_OWNER);
-#endif
-#ifdef CAP_SYS_MODULE
-    LOGCAPABILITY(myCap, CAP_SYS_MODULE);
-#endif
-#ifdef CAP_SYS_RAWIO
-    LOGCAPABILITY(myCap, CAP_SYS_RAWIO);
-#endif
-#ifdef CAP_SYS_CHROOT
-    LOGCAPABILITY(myCap, CAP_SYS_CHROOT);
-#endif
-#ifdef CAP_SYS_PTRACE
-    LOGCAPABILITY(myCap, CAP_SYS_PTRACE);
-#endif
-#ifdef CAP_SYS_PACCT
-    LOGCAPABILITY(myCap, CAP_SYS_PACCT);
-#endif
-#ifdef CAP_SYS_ADMIN
-    LOGCAPABILITY(myCap, CAP_SYS_ADMIN);
-#endif
-#ifdef CAP_SYS_BOOT
-    LOGCAPABILITY(myCap, CAP_SYS_BOOT);
-#endif
-#ifdef CAP_SYS_NICE
-    LOGCAPABILITY(myCap, CAP_SYS_NICE);
-#endif
-#ifdef CAP_SYS_RESOURCE
-    LOGCAPABILITY(myCap, CAP_SYS_RESOURCE);
-#endif
-#ifdef CAP_SYS_TIME
-    LOGCAPABILITY(myCap, CAP_SYS_TIME);
-#endif
-#ifdef CAP_SYS_TTY_CONFIG
-    LOGCAPABILITY(myCap, CAP_SYS_TTY_CONFIG);
-#endif
-#ifdef CAP_MKNOD
-    LOGCAPABILITY(myCap, CAP_MKNOD);
-#endif
-#ifdef CAP_LEASE
-    LOGCAPABILITY(myCap, CAP_LEASE);
-#endif
-#ifdef CAP_AUDIT_WRITE
-    LOGCAPABILITY(myCap, CAP_AUDIT_WRITE);
-#endif
-#ifdef CAP_AUDIT_CONTROL
-    LOGCAPABILITY(myCap, CAP_AUDIT_CONTROL);
-#endif
-#ifdef CAP_SETFCAP
-    LOGCAPABILITY(myCap, CAP_SETFCAP);
-#endif
-#ifdef CAP_MAC_OVERRIDE
-    LOGCAPABILITY(myCap, CAP_MAC_OVERRIDE);
-#endif
-#ifdef CAP_MAC_ADMIN
-    LOGCAPABILITY(myCap, CAP_MAC_ADMIN);
-#endif
-#ifdef CAP_SYSLOG
-    LOGCAPABILITY(myCap, CAP_SYSLOG);
-#endif
-
-#if 0
-#ifdef CAP_WAKE_ALARM
-    LOGCAPABILITY(myCap, CAP_WAKE_ALARM);
-#endif
-#ifdef CAP_BLOCK_SUSPEND
-    LOGCAPABILITY(myCap, CAP_BLOCK_SUSPEND);
-#endif
-#endif
-
+  static void logCapabilities(cap_t myCap) {
+    for(int cc = 0; cc <= CAP_LAST_CAP; cc++) {
+      logCapability(myCap, cc);
+    }
   }
 
-  static void passCapabilities(void) {
-    if(debug) myLog(LOG_INFO, "passCapabilities(): getuid=%u", getuid());
+  static void passCapabilities(int parent, cap_value_t *desired_caps, int ncaps) {
+    if(debug) myLog(LOG_INFO, "passCapabilities(): getuid=%u parent=%d", getuid(), parent);
 
     cap_t myCap = cap_get_proc();
     if(myCap == NULL) {
@@ -2577,34 +2462,43 @@ extern "C" {
       return;
     }
 
-    if(debug) {
-      myLog(LOG_INFO, "listCapabilities(): getuid=%u BEFORE", getuid());
-      listCapabilities(myCap);
+    if(debug > 1) {
+      myLog(LOG_INFO, "logCapabilities(): getuid=%u BEFORE", getuid());
+      logCapabilities(myCap);
     }
 
-    cap_value_t desired_caps[] = {
-      CAP_DAC_OVERRIDE,
-      CAP_NET_ADMIN,
-      CAP_SYS_ADMIN,
-    };
-    if(cap_set_flag(myCap, (cap_flag_t)CAP_EFFECTIVE, 3, desired_caps, CAP_SET) == -1 ||
-       cap_set_flag(myCap, (cap_flag_t)CAP_PERMITTED, 3, desired_caps, CAP_SET) == -1 ||
-       cap_set_flag(myCap, (cap_flag_t)CAP_INHERITABLE, 3, desired_caps, CAP_SET) == -1) {
-      myLog(LOG_ERR, "cap_set_flag() failed : %s", strerror(errno));
+    /* identified these capabilities as being necessary for setns() system call */
+    if(cap_set_flag(myCap, (cap_flag_t)CAP_EFFECTIVE, ncaps, desired_caps, CAP_SET) == -1) {
+      myLog(LOG_ERR, "cap_set_flag(EFFECTIVE) failed : %s", strerror(errno));
     }
-    else {
-      if(cap_set_proc(myCap) == -1) {
-	myLog(LOG_ERR, "cap_set_proc() failed : %s", strerror(errno));
+
+    if(parent) {
+      // only the parent needs to set permitted and inheritable
+      if(cap_set_flag(myCap, (cap_flag_t)CAP_PERMITTED, ncaps, desired_caps, CAP_SET) == -1) {
+	myLog(LOG_ERR, "cap_set_flag(PERMITTED) failed : %s", strerror(errno));
+      }
+
+      if(cap_set_flag(myCap, (cap_flag_t)CAP_INHERITABLE, ncaps, desired_caps, CAP_SET) == -1) {
+	myLog(LOG_ERR, "cap_set_flag(INHERITABLE) failed : %s", strerror(errno));
       }
     }
 
-    if(prctl(PR_SET_KEEPCAPS, 1,0,0,0) == -1) {
-	myLog(LOG_ERR, "prctl(KEEPCAPS) failed : %s", strerror(errno));
+    if(cap_set_proc(myCap) == -1) {
+      myLog(LOG_ERR, "cap_set_proc() failed : %s", strerror(errno));
     }
 
-    if(debug) {
-      myLog(LOG_INFO, "listCapabilities(): getuid=%u AFTER", getuid());
-      listCapabilities(myCap);
+    if(parent) {
+      // only the parent needs to set KEEPCAPS.  This is how the
+      // inheritable capabilities are made avaiable to the child
+      // (where 'child' here means after the setuid)
+      if(prctl(PR_SET_KEEPCAPS, 1,0,0,0) == -1) {
+	myLog(LOG_ERR, "prctl(KEEPCAPS) failed : %s", strerror(errno));
+      }
+    }
+
+    if(debug > 1) {
+      myLog(LOG_INFO, "logCapabilities(): getuid=%u AFTER", getuid());
+      logCapabilities(myCap);
     }
 
     cap_free(myCap);
@@ -2616,8 +2510,13 @@ extern "C" {
 
     if(getuid() != 0) return;
 
-#ifdef HSF_CAPABILITIES
-    passCapabilities();
+#ifdef HSF_DOCKER
+    // Make certain capabilities inheritable
+    cap_value_t desired_caps[] = {
+      CAP_SYS_PTRACE,
+      CAP_SYS_ADMIN,
+    };
+    passCapabilities(YES, desired_caps, 2);
 #endif
 						    
     if(requestMemLockBytes) {
@@ -2670,8 +2569,9 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-#ifdef HSF_CAPABILITIES
-    passCapabilities();
+#ifdef HSF_DOCKER
+    // claim my inheritance
+    passCapabilities(NO, desired_caps, 2);
 #endif
 
     if(debug) {
@@ -2970,7 +2870,7 @@ extern "C" {
 		// Fedora 14 we needed to fork the DNSSD thread before dropping root
 		// priviliges (something to do with mlockall()). Anway, from now on
 		// we just don't want the responsibility...
-#ifdef HSF_DOCKER
+#if 0 /*HSF_DOCKER*/
 		// For now we can't drop privileges for docker because
 		// it somehow prevents us from connecting to another
 		// network namespace (even when we retain all known capabilities!).

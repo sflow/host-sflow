@@ -63,8 +63,11 @@ extern "C" {
 #endif
 
 #ifdef HSF_DOCKER
+#define HSF_CAPABILITIES
+/* Typically need libcap-dev[el] package */
 #include <sys/capability.h>
 #include <sys/prctl.h>
+#include <sched.h>
 
 #include "cJSON.h"
   typedef struct _HSFNameVal {
@@ -575,6 +578,7 @@ extern "C" {
   int readContainerCounters(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
   int readContainerCountersMulti(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
   int readContainerInterfaces(HSP *sp, HSPVMState *vm);
+  int readContainerInterfaces2(HSP *sp, HSPVMState *vm);
 #endif
 
 #if defined(__cplusplus)
