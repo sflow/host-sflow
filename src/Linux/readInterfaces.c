@@ -639,9 +639,9 @@ VNIC: <ifindex> <device> <mac>
 	    strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
 	    // Get the flags for this interface
 	    if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
-	      fprintf((stderr, "container device %s Get SIOCGIFFLAGS failed : %s",
-		       devName,
-		       strerror(errno));
+	      fprintf(stderr, "container device %s Get SIOCGIFFLAGS failed : %s",
+		      devName,
+		      strerror(errno));
 	    }
 	    else {
 	      int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
@@ -664,9 +664,9 @@ VNIC: <ifindex> <device> <mac>
 		  // Get the MAC Address for this interface
 		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
 		    if(debug) {
-		      fprint(stderr, "device %s Get SIOCGIFHWADDR failed : %s",
-			     devName,
-			     strerror(errno));
+		      fprintf(stderr, "device %s Get SIOCGIFHWADDR failed : %s",
+			      devName,
+			      strerror(errno));
 		    }
 		  }
 		  else {
