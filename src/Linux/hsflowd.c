@@ -278,7 +278,7 @@ extern "C" {
     return myAdaptors;
   }
 
-#endif
+#endif /* HSF_XEN */
 
 #ifdef HSF_DOCKER
 
@@ -414,7 +414,9 @@ extern "C" {
     myAdaptors.num_adaptors = 0;
     adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, XEN_DOMID_PHYSICAL, &myAdaptors);
 #else
-    // collect list of host adaptors that are up, and have non-zero MACs
+    // collect list of host adaptors that are up, and have non-zero MACs.  This
+    // also leaves out interfaces that have a peer (type=veth),  so it works for
+    // KVM/libvirt and Docker too.
     SFLAdaptorList myAdaptors;
     SFLAdaptor *adaptors[HSP_MAX_VIFS];
     myAdaptors.adaptors = adaptors;
@@ -422,25 +424,27 @@ extern "C" {
     myAdaptors.num_adaptors = 0;
     adaptorsElem.counterBlock.adaptors = host_adaptors(sp, &myAdaptors);
 #endif
-    // TODO: what about KVM/libvirt
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
     // hypervisor node stats
+#if defined(HSF_XEN) || defined(HSF_DOCKER) || defined(HSF_VRT)
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
-#ifdef HSF_XEN
+#if defined(HSF_XEN)
     if(readVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
       SFLADD_ELEMENT(cs, &vnodeElem);
     }
-#endif
-#if defined(HSF_DOCKER) || defined(HSF_VRT)
+#else
+    // Populate the vnode struct with metrics for the
+    // physical host that we kept from above.
     vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
     vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
     vnodeElem.counterBlock.host_vrt_node.num_domains = sp->num_domains;
     vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
     vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
     SFLADD_ELEMENT(cs, &vnodeElem);
-#endif
+#endif /* HSF_XEN */
+#endif /* HSF_XEN || HSF_DOCKER || HSF_VRT */
 
     sfl_poller_writeCountersSample(poller, cs);
   }
@@ -551,7 +555,7 @@ extern "C" {
 
     HSP *sp = (HSP *)poller->magic;
 
-#ifdef HSF_XEN
+#if defined(HSF_XEN)
     if(xenHandlesOK(sp)) {
 
       xc_domaininfo_t domaininfo;
@@ -709,8 +713,7 @@ extern "C" {
       sfl_poller_writeCountersSample(poller, cs);
     }
 
-#endif /* HSF_XEN */
-#ifdef HSF_VRT
+#elif defined(HSF_VRT)
     if(sp->virConn) {
       virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
       if(domainPtr == NULL) {
@@ -855,9 +858,9 @@ extern "C" {
 	virDomainFree(domainPtr);
       }
     }
-#endif /* HSF_VRT */
 
-#ifdef HSF_DOCKER
+#elif defined(HSF_DOCKER)
+
     HSPContainer *container = state->container;
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
@@ -1058,7 +1061,7 @@ extern "C" {
     return sp->maxDsIndex;
   }
 
-#endif /* HSF_XEN || HSF_VRT */
+#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
 
 
   /*_________________---------------------------__________________
@@ -1241,7 +1244,7 @@ extern "C" {
       }
       
       // 2. create new VM pollers, or clear the mark on existing ones
-#ifdef HSF_XEN
+#if defined(HSF_XEN)
       
       if(xenHandlesOK(sp)) {
 #define DOMAIN_CHUNK_SIZE 256
@@ -1327,9 +1330,9 @@ extern "C" {
 	// remember the number of domains we found
 	sp->num_domains = num_domains - duplicate_domains;
       }
-#endif
 
-#ifdef HSF_VRT
+#elif defined(HSF_VRT)
+
       if(sp->virConn == NULL) {
 	// no libvirt connection
 	return;
@@ -1414,9 +1417,9 @@ extern "C" {
       // remember the number of domains we found
       sp->num_domains = num_domains;
       my_free(domainIds);
-#endif
 
-#ifdef HSF_DOCKER
+#elif defined(HSF_DOCKER)
+
       static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", "-a", NULL };
       char dockerLine[HSF_DOCKER_MAX_LINELEN];
       if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN)) {
@@ -1544,7 +1547,8 @@ extern "C" {
 	// we are using sp->num_domains as the portable field across Xen, KVM, Docker
 	sp->num_domains = sp->num_containers;
       }
-#endif
+
+#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
       
       // 3. remove any that don't exist any more
       for(SFLPoller *pl = sf->agent->pollers; pl; ) {
@@ -2740,12 +2744,10 @@ extern "C" {
     nvml_init(sp);
 #endif
     
-#ifdef HSF_XEN
+#if defined(HSF_XEN)
     // open Xen handles while we still have root privileges
     openXenHandles(sp);
-#endif
-
-#ifdef HSF_VRT
+#elif defined(HSF_VRT)
     // open the libvirt connection
     int virErr = virInitialize();
     if(virErr != 0) {
@@ -2782,7 +2784,6 @@ extern "C" {
     // again immediately. Otherwise if anything else goes wrong with the config
     // then we will have truncated the file and lost the persistent state. 
     writeVMStore(sp);
-
 #endif
 
     myLog(LOG_INFO, "started");
@@ -3052,11 +3053,9 @@ extern "C" {
     closelog();
     myLog(LOG_INFO,"stopped");
     
-#ifdef HSF_XEN
+#if defined(HSF_XEN)
     closeXenHandles(sp);
-#endif
-
-#ifdef HSF_VRT
+#elif defined(HSF_VRT)
     virConnectClose(sp->virConn);
 #endif
 

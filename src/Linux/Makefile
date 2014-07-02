@@ -17,7 +17,7 @@ endif
 # base CFLAGS and LIBS
 SFLOWDIR=../sflow
 CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread -lcap
+LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
 # if ULOG is not set, assume it should be "yes".
 # (So you can use "make ULOG=no" to compile without this feature)
@@ -57,7 +57,7 @@ endif
 # Docker containers
 ifeq ($(DOCKER),yes)
 	CFLAGS += -DHSF_DOCKER -I$(JSONDIR)
-	LIBS += $(JSONDIR)/libjson.a -lm
+	LIBS += $(JSONDIR)/libjson.a -lm -lcap
 endif
 
 # The options LIBVIRT=yes, XEN_DDK=yes and XEN_ROOT=<path> should be mutually exclusive.
