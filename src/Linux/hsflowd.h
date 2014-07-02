@@ -481,7 +481,12 @@ extern "C" {
 #ifdef HSF_VRT
     virConnectPtr virConn;
 #endif
+    // physical host / hypervisor characteristics
     uint32_t num_domains;
+    uint32_t cpu_mhz;
+    uint32_t cpu_cores;
+    uint64_t mem_total;
+    uint64_t mem_free;
     // persistent state
     uint32_t maxDsIndex;
     char *vmStoreFile;

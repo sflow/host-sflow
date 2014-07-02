@@ -371,6 +371,9 @@ extern "C" {
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_CPU;
     if(readCpuCounters(&cpuElem.counterBlock.host_cpu)) {
+      // remember speed and nprocs for other purposes
+      sp->cpu_cores = cpuElem.counterBlock.host_cpu.cpu_num;
+      sp->cpu_mhz = cpuElem.counterBlock.host_cpu.cpu_speed;
       SFLADD_ELEMENT(cs, &cpuElem);
     }
 
@@ -386,6 +389,9 @@ extern "C" {
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_MEM;
     if(readMemoryCounters(&memElem.counterBlock.host_mem)) {
+      // remember mem_total and mem_free for other purposes
+      sp->mem_total = memElem.counterBlock.host_mem.mem_total;
+      sp->mem_free = memElem.counterBlock.host_mem.mem_free;
       SFLADD_ELEMENT(cs, &memElem);
     }
 
@@ -419,13 +425,21 @@ extern "C" {
     // TODO: what about KVM/libvirt
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
-#ifdef HSF_XEN
     // hypervisor node stats
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
+#ifdef HSF_XEN
     if(readVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
       SFLADD_ELEMENT(cs, &vnodeElem);
     }
+#endif
+#if defined(HSF_DOCKER) || defined(HSF_VRT)
+    vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
+    vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
+    vnodeElem.counterBlock.host_vrt_node.num_domains = sp->num_domains;
+    vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
+    vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
+    SFLADD_ELEMENT(cs, &vnodeElem);
 #endif
 
     sfl_poller_writeCountersSample(poller, cs);
@@ -1435,6 +1449,10 @@ extern "C" {
 	  if(jtop) {
 	    // top-level should be array
 	    int nc = cJSON_GetArraySize(jtop);
+	    if(debug && nc != sp->num_containers) {
+	      // cross-check
+	      myLog(LOG_INFO, "warning docker-ps returned %u containers but docker-inspect returned %u", sp->num_containers, nc);
+	    }
 	    for(int ii = 0; ii < nc; ii++) {
 	      cJSON *jcont = cJSON_GetArrayItem(jtop, ii);
 	      if(jcont) {
@@ -1523,6 +1541,8 @@ extern "C" {
 	}
 	readContainerInterfaces(sp, state);
 	adaptorListFreeMarked(state->interfaces);
+	// we are using sp->num_domains as the portable field across Xen, KVM, Docker
+	sp->num_domains = sp->num_containers;
       }
 #endif
       
