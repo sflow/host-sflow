@@ -2575,6 +2575,11 @@ extern "C" {
 #endif
       
     }
+
+#if defined(HSF_CUMULUS)
+    // For now we have to retain root privileges on Cumulus Linux because
+    // we need to open netfilter/ULOG and to run the portsamp program.
+#else
     // set the real and effective group-id to 'nobody'
     struct passwd *nobody = getpwnam("nobody");
     if(nobody == NULL) {
@@ -2599,6 +2604,8 @@ extern "C" {
       myLog(LOG_ERR, "drop_privileges: setuid(%d) failed : %s", nobody->pw_uid, strerror(errno));
       exit(EXIT_FAILURE);
     }
+
+#endif /* (not) HSF_CUMULUS */
 
 #ifdef HSF_DOCKER
     // claim my inheritance
@@ -2664,19 +2671,7 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-    if(debug == 0 || daemonize
-
-
-
-
-
-
-
-
-
-
-
-) {
+    if(debug == 0 || daemonize) {
       // fork to daemonize
       pid_t pid = fork();
       if(pid < 0) {
@@ -2898,15 +2893,7 @@ extern "C" {
 		// Fedora 14 we needed to fork the DNSSD thread before dropping root
 		// priviliges (something to do with mlockall()). Anway, from now on
 		// we just don't want the responsibility...
-#if 0 /*HSF_DOCKER*/
-		// For now we can't drop privileges for docker because
-		// it somehow prevents us from connecting to another
-		// network namespace (even when we retain all known capabilities!).
-		// We can revist this if/when we find a better way to get the ifIndex
-		// numbers of container adaptors.
-#else
 		drop_privileges(HSP_RLIMIT_MEMLOCK);
-#endif
 	      }
 
 #ifdef HSP_SWITCHPORT_REGEX
