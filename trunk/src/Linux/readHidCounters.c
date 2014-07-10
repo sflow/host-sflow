@@ -69,6 +69,9 @@ extern "C" {
     hid->machine_type = SFLMT_s390;
 #endif
 
+    // remember it globally too
+    sp->machine_type = hid->machine_type;
+
     // os name
     hid->os_name = SFLOS_linux;
 
