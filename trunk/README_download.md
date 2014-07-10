@@ -1,5 +1,6 @@
 Which Download?
 ==============
+
 XenServer
 ---------
 *   **XenServer 6.2**: hsflowd-xenserver62-<version>.iso
@@ -20,6 +21,10 @@ For release 1.22.1, all of the Windows builds have been migrated to use an MSI
 installer rather than an exe. If you have an old version installed with the exe
 installer, it will prompt you to first uninstall it. You will need to re-enter
 the sFlow settings for this time only.
+
+Docker Cotainers
+----------------
+please build from sources using: **make DOCKER=yes**
 
 Red Hat KVM
 -----------
