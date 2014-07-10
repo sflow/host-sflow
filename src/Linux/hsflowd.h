@@ -81,11 +81,13 @@ extern "C" {
     char *id;
     char *longId;
     char *name;
+    char *hostname;
     char uuid[16];
     uint32_t dsIndex;
     time_t lastActive;
     pid_t pid;
     int running;
+    uint64_t memoryLimit;
   } HSPContainer;
 #define HSF_DOCKER_CMD "/usr/bin/docker"
 #define HSF_NETNS_DIR "/var/run/netns"
@@ -442,6 +444,7 @@ extern "C" {
     // Identity
     char hostname[SFL_MAX_HOSTNAME_CHARS+1];
     char os_release[SFL_MAX_OSRELEASE_CHARS+1];
+    uint32_t machine_type;
     char uuid[16];
     // interfaces and MACs
     SFLAdaptorList *adaptorList;

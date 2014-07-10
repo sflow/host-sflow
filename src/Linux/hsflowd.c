@@ -865,15 +865,16 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    hidElem.counterBlock.host_hid.hostname.str = container->name;
-    hidElem.counterBlock.host_hid.hostname.len = my_strlen(container->name);
+    char *hname = my_strequal(container->hostname, container->id) ? container->name : container->hostname;
+    hidElem.counterBlock.host_hid.hostname.str = hname;
+    hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, container->uuid, 16);
-
-    // char *osType = virDomainGetOSType(domainPtr); $$$
-    hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
-    hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
-    //hidElem.counterBlock.host_hid.os_release.str = NULL;
-    //hidElem.counterBlock.host_hid.os_release.len = 0;
+ 
+    // for containers we can show the same OS attributes as the parent
+    hidElem.counterBlock.host_hid.machine_type = sp->machine_type;
+    hidElem.counterBlock.host_hid.os_name = SFLOS_linux;
+    hidElem.counterBlock.host_hid.os_release.str = sp->os_release;
+    hidElem.counterBlock.host_hid.os_release.len = my_strlen(sp->os_release);
     SFLADD_ELEMENT(cs, &hidElem);
       
     // host parent
@@ -932,7 +933,15 @@ extern "C" {
         memElem.counterBlock.host_vrt_mem.memory = memVals[0].nv_val64;
       }
       if(memVals[1].nv_found && memVals[1].nv_val64 != (uint64_t)-1) {
-	memElem.counterBlock.host_vrt_mem.maxMemory = memVals[1].nv_val64;
+	uint64_t maxMem = memVals[1].nv_val64;
+	memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
+	// Apply simple sanity check to see if this matches the
+	// container->memoryLimit number that we got from docker-inspect
+	if(debug && maxMem != container->memoryLimit) {
+	  myLog(LOG_INFO, "warning: container %s memoryLimit=%"PRIu64" but readContainerCounters shows %"PRIu64,
+		container->memoryLimit,
+		maxMem);
+	}
       }
       SFLADD_ELEMENT(cs, &memElem);
     }
@@ -1485,21 +1494,22 @@ extern "C" {
 		      	}
 		      	cJSON *jrun = cJSON_GetObjectItem(jstate, "Running");
 		      	if(jrun) {
-			  /* assume 'true' maps to to positive int $$$*/
-			  container->running = jpid->valueint;
+			  container->running = (jrun->type == cJSON_True);
 		      	}
 		      }
-		      /*cJSON *jconfig = cJSON_GetObjectItem(jcont, "Config"); */
-		      /* if(jConfig) { */
-		      /* 	cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname"); */
-		      /* 	if(jhn) { */
-		      /* 	  // hostname $$$ */
-		      /* 	} */
-		      /* 	cJSON *jdn = cJSON_GetObjectItem(jconfig, "Domainname"); */
-		      /* 	if(jdn) { */
-		      /* 	  // domainname $$$ */
-		      /* 	} */
-		      /* } */
+		      cJSON *jconfig = cJSON_GetObjectItem(jcont, "Config");
+		      if(jconfig) {
+		      	cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname");
+		      	if(jhn) {
+			  if(container->hostname) my_free(container->hostname);
+			  container->hostname = my_strdup(jhn->valuestring);
+		      	}
+		      	// cJSON *jdn = cJSON_GetObjectItem(jconfig, "Domainname");
+		      	cJSON *jmem = cJSON_GetObjectItem(jconfig, "Memory");
+		      	if(jmem) {
+			  container->memoryLimit = (uint64_t)jmem->valuedouble;
+		      	}
+		      }
 		    }
 		  }
 		}
