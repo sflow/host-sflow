@@ -1,0 +1,5 @@
+#!/bin/bash
+update-rc.d hsflowd defaults
+# only schedule sflowovsd if ovs-vsctl is present (and sflowovsd was included in the package)
+test -e /usr/bin/ovs-vsctl && test -e /etc/init.d/sflowovsd && update-rc.d sflowovsd defaults
+exit 0
