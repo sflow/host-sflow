@@ -224,6 +224,35 @@ approach seemed more stable and portable.
   ----------------___________________________------------------
   return true if something changed
 */
+
+  static int ethtool_num_counters(struct ifreq *ifr, int fd)
+  {
+#ifdef ETHTOOL_GSSET_INFO
+    struct {
+      struct ethtool_sset_info ssi;
+      uint32_t data;
+    } sset_info;
+    memset(&sset_info, 0, sizeof(sset_info));
+    sset_info.ssi.cmd = ETHTOOL_GSSET_INFO;
+    sset_info.ssi.sset_mask = (uint64_t)1 << ETH_SS_STATS;
+    ifr->ifr_data = (char *)&sset_info;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      if(sset_info.ssi.sset_mask) {
+	return sset_info.data > 0 ? sset_info.data : 0;
+      }
+    }
+#else
+    struct ethtool_drvinfo drvinfo;
+    drvinfo.cmd = ETHTOOL_GDRVINFO;
+    ifr->ifr_data = (char *)&drvinfo;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      return drvinfo.n_stats > 0 ? drvinfo.n_stats : 0;
+    }
+#endif
+    return 0;
+  }
+
+
   static int read_ethtool_info(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
     // Try to get the ethtool info for this interface so we can infer the
@@ -261,76 +290,64 @@ approach seemed more stable and portable.
       // see if the ethtool stats block can give us multicast/broadcast counters too
       HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
       adaptorNIO->et_nfound=0;
-      struct {
-	struct ethtool_sset_info ssi;
-	uint32_t data;
-      } sset_info;
-      memset(&sset_info, 0, sizeof(sset_info));
-      sset_info.ssi.cmd = ETHTOOL_GSSET_INFO;
-      sset_info.ssi.sset_mask = (uint64_t)1 << ETH_SS_STATS;
-      ifr->ifr_data = (char *)&sset_info;
-      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-	if(sset_info.ssi.sset_mask) {
-	  adaptorNIO->et_nctrs = sset_info.data;
-	  if(adaptorNIO->et_nctrs) {
-	    struct ethtool_gstrings *ctrNames;
-	    uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
-	    ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
-	    ctrNames->cmd = ETHTOOL_GSTRINGS;
-	    ctrNames->string_set = ETH_SS_STATS;
-	    ctrNames->len = adaptorNIO->et_nctrs;
-	    ifr->ifr_data = (char *)ctrNames;
-	    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-	      // copy out one at a time to make sure we have null-termination
-	      char cname[ETH_GSTRING_LEN+1];
-	      cname[ETH_GSTRING_LEN] = '\0';
-	      for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
-		memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
-		if(debug) myLog(LOG_INFO, "ethtool counter %s is at index %d", cname, ii);
-		// then see if this is one of the ones we want,
-		// and record the index if it is.
+      adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
+      if(adaptorNIO->et_nctrs) {
+	struct ethtool_gstrings *ctrNames;
+	uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
+	ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
+	ctrNames->cmd = ETHTOOL_GSTRINGS;
+	ctrNames->string_set = ETH_SS_STATS;
+	ctrNames->len = adaptorNIO->et_nctrs;
+	ifr->ifr_data = (char *)ctrNames;
+	if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+	  // copy out one at a time to make sure we have null-termination
+	  char cname[ETH_GSTRING_LEN+1];
+	  cname[ETH_GSTRING_LEN] = '\0';
+	  for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
+	    memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
+	    if(debug) myLog(LOG_INFO, "ethtool counter %s is at index %d", cname, ii);
+	    // then see if this is one of the ones we want,
+	    // and record the index if it is.
 #ifdef HSP_ETHTOOL_STATS
-		if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
-		  adaptorNIO->et_idx_mcasts_in = ii+1;
-		  adaptorNIO->et_nfound++;
-		}
-		else if(staticStringsIndexOf(HSP_ethtool_mcasts_out_names, cname) != -1) {
-		  adaptorNIO->et_idx_mcasts_out = ii+1;
-		  adaptorNIO->et_nfound++;
-		}
-		else if(staticStringsIndexOf(HSP_ethtool_bcasts_in_names, cname) != -1) {
-		  adaptorNIO->et_idx_bcasts_in = ii+1;
-		  adaptorNIO->et_nfound++;
-		}
-		else if(staticStringsIndexOf(HSP_ethtool_bcasts_out_names, cname) != -1) {
-		  adaptorNIO->et_idx_bcasts_out = ii+1;
-		  adaptorNIO->et_nfound++;
-		}
+	    if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
+	      adaptorNIO->et_idx_mcasts_in = ii+1;
+	      adaptorNIO->et_nfound++;
+	    }
+	    else if(staticStringsIndexOf(HSP_ethtool_mcasts_out_names, cname) != -1) {
+	      adaptorNIO->et_idx_mcasts_out = ii+1;
+	      adaptorNIO->et_nfound++;
+	    }
+	    else if(staticStringsIndexOf(HSP_ethtool_bcasts_in_names, cname) != -1) {
+	      adaptorNIO->et_idx_bcasts_in = ii+1;
+	      adaptorNIO->et_nfound++;
+	    }
+	    else if(staticStringsIndexOf(HSP_ethtool_bcasts_out_names, cname) != -1) {
+	      adaptorNIO->et_idx_bcasts_out = ii+1;
+	      adaptorNIO->et_nfound++;
+	    }
 #endif
 #ifdef HSF_DOCKER
-		if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
-		  // Now go ahead and make the call to get the peer_ifindex.
-		  struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
-		  et_stats->cmd = ETHTOOL_GSTATS;
-		  et_stats->n_stats = adaptorNIO->et_nctrs;
-		  ifr->ifr_data = (char *)et_stats;
-		  if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-		    adaptorNIO->peer_ifIndex = et_stats->data[ii];
-		    if(debug) myLog(LOG_INFO, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
-				    adaptor->deviceName,
-				    adaptor->ifIndex,
-				    adaptorNIO->peer_ifIndex);
-		  }
-		}
-#endif
+	    if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
+	      // Now go ahead and make the call to get the peer_ifindex.
+	      struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
+	      et_stats->cmd = ETHTOOL_GSTATS;
+	      et_stats->n_stats = adaptorNIO->et_nctrs;
+	      ifr->ifr_data = (char *)et_stats;
+	      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+		adaptorNIO->peer_ifIndex = et_stats->data[ii];
+		if(debug) myLog(LOG_INFO, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
+				adaptor->deviceName,
+				adaptor->ifIndex,
+				adaptorNIO->peer_ifIndex);
 	      }
 	    }
-	    my_free(ctrNames);
+#endif
 	  }
 	}
+	my_free(ctrNames);
       }
-#endif
     }
+#endif
     return changed;
   }
 
@@ -558,13 +575,16 @@ VNIC: <ifindex> <device> <mac>
   ----------------___________________________------------------
 */
 
-//#ifndef CLONE_NEWNET
-//#define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
-//#endif
+#include <linux/version.h>
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0)
+#ifndef CLONE_NEWNET
+#define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
+#endif
   
-  //  static int my_setns(int fd, int nstype) {
-  //    return syscall(__NR_setns, fd, nstype);
-  // }
+#define MY_SETNS(fd, nstype) syscall(__NR_setns, fd, nstype)
+#else
+#define MY_SETNS(fd, nstype) setns(fd, nstype)
+#endif
 
   int readContainerInterfaces(HSP *sp, HSPVMState *vm)  {
     if(!vm->container) return 0;
@@ -603,7 +623,7 @@ VNIC: <ifindex> <device> <mac>
       /* set network namespace
 	 CLONE_NEWNET means nsfd must refer to a network namespace
       */
-      if(setns(nsfd, CLONE_NEWNET) < 0) {
+      if(MY_SETNS(nsfd, CLONE_NEWNET) < 0) {
 	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
 	exit(EXIT_FAILURE);
       }
