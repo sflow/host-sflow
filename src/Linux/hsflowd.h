@@ -65,6 +65,7 @@ extern "C" {
 #ifdef HSF_DOCKER
 #define HSF_CAPABILITIES
 /* Typically need libcap-dev[el] package */
+#include <linux/types.h>
 #include <sys/capability.h>
 #include <sys/prctl.h>
 #include <sched.h>
