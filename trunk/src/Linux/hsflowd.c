@@ -2192,15 +2192,20 @@ extern "C" {
 	   && !niostate->loopback
 	   && !niostate->bond_master) {
 	  niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
-	  strArrayInsert(cmdline, 1, adaptor->deviceName);
-	  char srate[HSP_MAX_TOK_LEN];
-	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-	  if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
-	  if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
-	  if(!myExec("Switchport config output", strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
-	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
-		  strArrayAt(cmdline, 0),
-		  strArrayAt(cmdline, 1));
+	  if(niostate->sampling_n != niostate->sampling_n_set) {
+	    strArrayInsert(cmdline, 1, adaptor->deviceName);
+	    char srate[HSP_MAX_TOK_LEN];
+	    snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
+	    if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
+	    if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
+	    if(myExec("Switchport config output", strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
+	      niostate->sampling_n_set = niostate->sampling_n;
+	    }
+	    else {
+	      myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
+		    strArrayAt(cmdline, 0),
+		    strArrayAt(cmdline, 1));
+	    }
 	  }
 	}
       }

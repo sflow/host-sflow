@@ -411,6 +411,9 @@ extern "C" {
     // and those sending packet-samples will have a sampler.
     SFLSampler *sampler;
     uint32_t sampling_n;
+#ifdef HSP_SWITCHPORT_CONFIG
+    uint32_t sampling_n_set;
+#endif
     uint32_t ulog_drops;
   } HSPAdaptorNIO;
 
