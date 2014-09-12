@@ -346,8 +346,8 @@ approach seemed more stable and portable.
 	}
 	my_free(ctrNames);
       }
-    }
 #endif
+    }
     return changed;
   }
 
