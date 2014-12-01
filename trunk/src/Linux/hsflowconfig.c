@@ -261,6 +261,25 @@ extern int debug;
     }
     return t;
   }
+  
+  // expectFile
+  
+  static HSPToken *expectFile(HSP *sp, HSPToken *tok, char **p_fileName)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && t->str) {
+      struct stat statBuf;
+      if(stat(t->str, &statBuf) != 0) {
+	parseError(sp, tok, "WARNING:", "file does not exist");
+	// not a show-stopper. Let it go through.
+      }
+      *p_fileName = my_strdup(t->str);
+      return t;
+    }
+    parseError(sp, tok, "expected file name", "");
+    return NULL;
+  }
 
   /*_________________---------------------------__________________
     _________________     new object fns        __________________
@@ -293,6 +312,7 @@ extern int debug;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
     st->jsonPort = HSP_DEFAULT_JSON_PORT;
+    st->jsonFIFO = NULL;
     st->xen_update_dominfo = 0;
     st->xen_dsk = 1;
     st->samplingDirection = HSF_DIRN_IN;
@@ -850,6 +870,10 @@ extern int debug;
 	    break;
 	  case HSPTOKEN_JSONPORT:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_JSONFIFO:
+	    // expect a file name such as "/tmp/hsflowd_json_fifo" that was created using mkfifo(1)
+	    if((tok = expectFile(sp, tok, &sp->sFlow->sFlowSettings_file->jsonFIFO)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_SAMPLINGDIRECTION:
 	    if((tok = expectDirection(sp, tok, &sp->sFlow->sFlowSettings_file->samplingDirection)) == NULL) return NO;
