@@ -427,7 +427,7 @@ extern int debug;
     if(prefix) {
       search_len = my_strlen(app) + my_strlen(prefix) + 1;
       search = my_calloc(search_len + 1);
-      snprintf(search, search_len, "%s.%s", prefix, app);
+      snprintf(search, search_len + 1, "%s.%s", prefix, app);
     }
     // the top level settings are the defaults
     if(p_polling) *p_polling = settings->pollingInterval;
