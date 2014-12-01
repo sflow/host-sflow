@@ -520,8 +520,8 @@ static void putAPP(SFLReceiver *receiver, SFLSampled_APP *app)
   putString(receiver, &app->status_descr);
   putNet64(receiver, app->req_bytes);
   putNet64(receiver, app->resp_bytes);
-  putNet32(receiver, app->status);
   putNet32(receiver, app->duration_uS);
+  putNet32(receiver, app->status);
 }
 
 static uint32_t appEncodingLength(SFLSampled_APP *app) {
@@ -529,8 +529,8 @@ static uint32_t appEncodingLength(SFLSampled_APP *app) {
   elemSiz += appContextLength(&app->context);
   elemSiz += stringEncodingLength(&app->status_descr);
   elemSiz += 16; // req/resp bytes
-  elemSiz += 4; // status
   elemSiz += 4; // duration_uS
+  elemSiz += 4; // status
   return elemSiz;
 }
 
