@@ -607,12 +607,8 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     if(soc) {
       for( ; batch < HSP_READJSON_BATCH; batch++) {
 	char buf[HSP_MAX_JSON_MSG_BYTES];
-	int len = recvfrom(soc,
-			   buf,
-			   HSP_MAX_JSON_MSG_BYTES,
-			   0,
-			   NULL, /* peer */
-			   0 /* peerlen */);
+	// use read() so that it works for both UDP and FIFO inputs
+	int len = read(soc, buf, HSP_MAX_JSON_MSG_BYTES);
 	if(len <= 0) break;
 	if(debug > 1) myLog(LOG_INFO, "got JSON msg: %u bytes", len);
 	cJSON *top = cJSON_Parse(buf);
