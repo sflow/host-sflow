@@ -281,6 +281,7 @@ extern "C" {
 #ifndef HSP_DEFAULT_JSON_PORT
 #define HSP_DEFAULT_JSON_PORT 0
 #endif
+    char *jsonFIFO;
     HSPCIDR *agentCIDRs;
   } HSPSFlowSettings;
 
@@ -530,6 +531,7 @@ extern "C" {
 #ifdef HSF_JSON
     int json_soc;
     int json_soc6;
+    int json_fifo;
     HSPApplication **applicationHT;
     uint32_t applicationHT_size;
 #define HSP_INITIAL_JSON_APP_HT_SIZE 16

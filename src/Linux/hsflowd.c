@@ -1934,9 +1934,19 @@ extern "C" {
 
 #ifdef HSF_JSON
     uint16_t jsonPort = sp->sFlow->sFlowSettings_file->jsonPort;
-    if(jsonPort != 0) {
-      sp->json_soc = openUDPListenSocket("127.0.0.1", PF_INET, jsonPort, HSP_JSON_RCV_BUF);
-      sp->json_soc6 = openUDPListenSocket("::1", PF_INET6, jsonPort, HSP_JSON_RCV_BUF);
+    char *jsonFIFO = sp->sFlow->sFlowSettings_file->jsonFIFO;
+    if(jsonPort || jsonFIFO) {
+      if(jsonPort) {
+	sp->json_soc = openUDPListenSocket("127.0.0.1", PF_INET, jsonPort, HSP_JSON_RCV_BUF);
+	sp->json_soc6 = openUDPListenSocket("::1", PF_INET6, jsonPort, HSP_JSON_RCV_BUF);
+      }
+      if(jsonFIFO) {
+	// This makes it possible to use hsflowd from a container whose networking may be
+	// virtualized but where a directory such as /tmp is still accessible and shared.
+	if((sp->json_fifo = open(jsonFIFO, O_RDONLY|O_NONBLOCK)) == -1) {
+	  myLog(LOG_ERR, "json fifo open(%s, O_RDONLY|O_NONBLOCK) failed: %s", jsonFIFO, strerror(errno));
+	}
+      }
       cJSON_Hooks hooks;
       hooks.malloc_fn = my_calloc;
       hooks.free_fn = my_free;
@@ -2988,19 +2998,23 @@ extern "C" {
 #if (HSF_ULOG || HSF_JSON)
       int max_fd = 0;
 #ifdef HSF_ULOG
-      if(sp->ulog_soc) {
+      if(sp->ulog_soc > 0) {
 	if(sp->ulog_soc > max_fd) max_fd = sp->ulog_soc;
 	FD_SET(sp->ulog_soc, &readfds);
       }
 #endif
 #ifdef HSF_JSON
-      if(sp->json_soc) {
+      if(sp->json_soc > 0) {
 	if(sp->json_soc > max_fd) max_fd = sp->json_soc;
 	FD_SET(sp->json_soc, &readfds);
       }
-      if(sp->json_soc6) {
+      if(sp->json_soc6 > 0) {
 	if(sp->json_soc6 > max_fd) max_fd = sp->json_soc6;
 	FD_SET(sp->json_soc6, &readfds);
+      }
+      if(sp->json_fifo > 0) {
+	if(sp->json_fifo > max_fd) max_fd = sp->json_fifo;
+	FD_SET(sp->json_fifo, &readfds);
       }
 #endif
       if(!configOK) {
@@ -3028,7 +3042,7 @@ extern "C" {
       // may get here just because a signal was caught so these
       // callbacks need to be non-blocking when they read from the socket
 #ifdef HSF_ULOG
-      if(sp->ulog_soc && FD_ISSET(sp->ulog_soc, &readfds)) {
+      if(sp->ulog_soc > 0 && FD_ISSET(sp->ulog_soc, &readfds)) {
         int batch = readPackets(sp);
         if(debug) {
           if(debug > 1) myLog(LOG_INFO, "readPackets batch=%d", batch);
@@ -3037,8 +3051,15 @@ extern "C" {
       }
 #endif
 #ifdef HSF_JSON
-      if(sp->json_soc && FD_ISSET(sp->json_soc, &readfds)) readJSON(sp, sp->json_soc);
-      if(sp->json_soc6 && FD_ISSET(sp->json_soc6, &readfds)) readJSON(sp, sp->json_soc6);
+      if(sp->json_soc > 0 && FD_ISSET(sp->json_soc, &readfds)) {
+	readJSON(sp, sp->json_soc);
+      }
+      if(sp->json_soc6 > 0 && FD_ISSET(sp->json_soc6, &readfds)) {
+	readJSON(sp, sp->json_soc6);
+      }
+      if(sp->json_fifo > 0 && FD_ISSET(sp->json_fifo, &readfds)) {
+	readJSON(sp, sp->json_fifo);
+      }
 #endif
 
 #else /* (HSF_ULOG || HSF_JSON) */
