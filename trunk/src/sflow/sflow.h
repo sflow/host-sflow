@@ -764,6 +764,9 @@ typedef struct _SFLHost_cpu_counters {
   uint32_t cpu_sintr;  /* time servicing softirqs (ms) */
   uint32_t interrupts; /* interrupt count */
   uint32_t contexts;   /* context switch count */
+  uint32_t cpu_steal;  /* time spent in other OS instances (virtual env) (ms) */
+  uint32_t cpu_guest;  /* time spent running vcpu for guest OS */
+  uint32_t cpu_guest_nice;  /* time spent running vcpu for "niced" guest OS */
 } SFLHost_cpu_counters;
 
 typedef struct _SFLHost_mem_counters {
