@@ -57,6 +57,9 @@ extern "C" {
       uint64_t cpu_sintr=0;
       uint64_t cpu_interrupts=0;
       uint64_t cpu_contexts=0;
+      uint64_t cpu_steal=0;
+      uint64_t cpu_guest=0;
+      uint64_t cpu_guest_nice=0;
 
 #define JIFFY_TO_MS(i) (((i) * 1000L) / HZ)
 
@@ -67,14 +70,17 @@ extern "C" {
       uint32_t lineNo = 0;
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
 	if(++lineNo == 1) {
-	  if(sscanf(line, "cpu %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+	  if(sscanf(line, "cpu %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
 		    &cpu_user,
 		    &cpu_nice,
 		    &cpu_system,
 		    &cpu_idle,
 		    &cpu_wio,
 		    &cpu_intr,
-		    &cpu_sintr) >= 4) {
+		    &cpu_sintr,
+		    &cpu_steal,
+		    &cpu_guest,
+		    &cpu_guest_nice) >= 4) {
 	    gotData = YES;
 	    cpu->cpu_user = (uint32_t)(JIFFY_TO_MS(cpu_user));
 	    cpu->cpu_nice = (uint32_t)(JIFFY_TO_MS(cpu_nice));
@@ -83,6 +89,9 @@ extern "C" {
 	    cpu->cpu_wio = (uint32_t)(JIFFY_TO_MS(cpu_wio));
 	    cpu->cpu_intr = (uint32_t)(JIFFY_TO_MS(cpu_intr));
 	    cpu->cpu_sintr = (uint32_t)(JIFFY_TO_MS(cpu_sintr));
+	    cpu->cpu_steal = (uint32_t)(JIFFY_TO_MS(cpu_steal));
+	    cpu->cpu_guest = (uint32_t)(JIFFY_TO_MS(cpu_guest));
+	    cpu->cpu_guest_nice = (uint32_t)(JIFFY_TO_MS(cpu_guest_nice));
 	  }
 	}
 	else {
