@@ -24,14 +24,21 @@ extern "C" {
     int found = 0;
 
     char statsFileName[HSF_DOCKER_MAX_FNAME_LEN+1];
+#ifdef HSF_SYSTEM_SLICE
     snprintf(statsFileName, HSF_DOCKER_MAX_FNAME_LEN, "/sys/fs/cgroup/%s/system.slice/docker-%s.scope/%s",
 	     cgroup,
 	     longId,
 	     fname);
+#else
+    snprintf(statsFileName, HSF_DOCKER_MAX_FNAME_LEN, "/sys/fs/cgroup/%s/docker/%s/%s",
+	     cgroup,
+	     longId,
+	     fname);
+#endif
     FILE *statsFile = fopen(statsFileName, "r");
     if(statsFile == NULL) {
       if(debug > 1) {
-	myLog(LOG_INFO, "cannot open %s : %s", fname, strerror(errno));
+	myLog(LOG_INFO, "cannot open %s : %s", statsFileName, strerror(errno));
       }
     }
     else {

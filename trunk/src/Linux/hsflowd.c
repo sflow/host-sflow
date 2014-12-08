@@ -909,17 +909,17 @@ extern "C" {
       { NULL,0,0},
     };
     if(readContainerCounters("cpuacct", container->longId, "cpuacct.stat", 2, cpuVals)) {
-    uint64_t cpu_total = 0;
-    if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
-    if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
-
-    cpuElem.counterBlock.host_vrt_cpu.state = container->running ? 
-      SFL_VIR_DOMAIN_RUNNING :
-      SFL_VIR_DOMAIN_PAUSED;
-    cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
-    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
-    SFLADD_ELEMENT(cs, &cpuElem);
-  }
+      uint64_t cpu_total = 0;
+      if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
+      if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
+      
+      cpuElem.counterBlock.host_vrt_cpu.state = container->running ? 
+	SFL_VIR_DOMAIN_RUNNING :
+	SFL_VIR_DOMAIN_PAUSED;
+      cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
+      cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
+      SFLADD_ELEMENT(cs, &cpuElem);
+    }
       
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
