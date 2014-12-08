@@ -774,8 +774,16 @@ extern "C" {
 	for(i=getdtablesize(); i >= 0; --i) close(i);
 	// create stdin/out/err
 	i = open("/dev/null",O_RDWR); // stdin
-	dup(i);                       // stdout
-	dup(i);                       // stderr
+	// stdout
+	if(dup(i) == -1) {
+	  myLog(LOG_ERR,"dup() failed: %s", strerror(errno));
+	  exit(EXIT_FAILURE);
+	}
+	// stderr
+	if(dup(i) == -1) {
+	  myLog(LOG_ERR,"dup() failed: %s", strerror(errno));
+	  exit(EXIT_FAILURE);
+	}
       }
     }
 
