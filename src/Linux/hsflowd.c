@@ -1202,8 +1202,6 @@ extern "C" {
       memcpy(container->uuid, id, (id_len > 16) ? 16 : id_len);
       // and assign a dsIndex that will be persistent across restarts
       container->dsIndex = assignVM_dsIndex(sp, container->uuid);
-      // this indicates that the container is currently running
-      container->lastActive = sp->clk;
       // add to list
       container->nxt = sp->containers;
       sp->containers = container;
@@ -1211,7 +1209,15 @@ extern "C" {
     }
     return container;
   }
-  
+
+  static void freeContainer(HSPContainer *container) {
+      if(container->id) my_free(container->id);
+      if(container->longId) my_free(container->longId);
+      if(container->name) my_free(container->name);
+      if(container->hostname) my_free(container->hostname);
+      my_free(container);
+  }
+
   static int dockerContainerCB(void *magic, char *line) {
     HSP *sp = (HSP *)magic;
     char id[HSF_DOCKER_MAX_LINELEN];
@@ -1429,7 +1435,7 @@ extern "C" {
 
 #elif defined(HSF_DOCKER)
 
-      static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", "-a", NULL };
+      static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", NULL };
       char dockerLine[HSF_DOCKER_MAX_LINELEN];
       if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN)) {
 	// successful, now gather data for each one
@@ -1437,8 +1443,8 @@ extern "C" {
 	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
 	strArrayAdd(dockerInspect, "inspect");
 	for(HSPContainer *container = sp->containers; container; container=container->nxt) {
-	  // could age them out here based on container->lastActive, because it will reduce
-	  // the size of the JSON data $$$
+	  // mark for removal, in case it is no longer current
+	  container->marked = YES;
 	  strArrayAdd(dockerInspect, container->id);
 	  if(debug) {
 	    char *idlist =  strArrayStr(dockerInspect, NULL, NULL, " ", NULL);
@@ -1477,6 +1483,8 @@ extern "C" {
 		    shortId[HSF_DOCKER_SHORTID_LEN] = '\0';
 		    HSPContainer *container = getContainer(sp, shortId, NO);
 		    if(container) {
+		      // Clear the mark - this container is still current
+		      container->marked = NO;
 		      if(my_strequal(jid->valuestring, container->longId) == NO) {
 			if(container->longId) my_free(container->longId);
 			container->longId = my_strdup(jid->valuestring);
@@ -1521,41 +1529,54 @@ extern "C" {
 	my_free(ibuf);
       }
 
-      for(HSPContainer *container = sp->containers; container; container=container->nxt) {
-	SFLDataSource_instance dsi;
-	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
-	SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + container->dsIndex, 0);
-	SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-	HSPVMState *state = (HSPVMState *)vpoller->userData;
-	if(state) {
-	  // it was already there, just clear the mark.
-	  state->marked = NO;
-	  // and reset the information that we are about to refresh
-	  adaptorListMarkAll(state->interfaces);
-	  strArrayReset(state->volumes);
-	  strArrayReset(state->disks);
+      for(HSPContainer *prev=NULL, *container = sp->containers; container; ) {
+        HSPContainer *next_container = container->nxt;
+	if(container->marked) {
+	  // remove and free container - no longer current
+	  if(prev == NULL) sp->containers = next_container;
+	  else prev->nxt = next_container;
+	  freeContainer(container);
+	  sp->num_containers--;
 	}
 	else {
-	  // new one - tell it what to do.
-	  myLog(LOG_INFO, "configVMs: new container=%u", container->dsIndex);
-	  uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-	  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-	  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-	  // hang a new HSPVMState object on the userData hook
-	  state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
-	  state->container = container;
-	  state->network_count = 0;
-	  state->marked = NO;
-	  vpoller->userData = state;
-	  state->interfaces = adaptorListNew();
-	  state->volumes = strArrayNew();
-	  state->disks = strArrayNew();
-	  sp->refreshAdaptorList = YES;
+	  // container still current - look up state
+	  SFLDataSource_instance dsi;
+	  // ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+	  SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + container->dsIndex, 0);
+	  SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
+	  HSPVMState *state = (HSPVMState *)vpoller->userData;
+	  if(state) {
+	    // it was already there, just clear the mark.
+	    state->marked = NO;
+	    // and reset the information that we are about to refresh
+	    adaptorListMarkAll(state->interfaces);
+	    strArrayReset(state->volumes);
+	    strArrayReset(state->disks);
+	  }
+	  else {
+	    // new one - tell it what to do.
+	    myLog(LOG_INFO, "configVMs: new container=%u", container->dsIndex);
+	    uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+	    sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
+	    sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
+	    // hang a new HSPVMState object on the userData hook
+	    state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
+	    state->container = container;
+	    state->network_count = 0;
+	    state->marked = NO;
+	    vpoller->userData = state;
+	    state->interfaces = adaptorListNew();
+	    state->volumes = strArrayNew();
+	    state->disks = strArrayNew();
+	    sp->refreshAdaptorList = YES;
+	  }
+	  readContainerInterfaces(sp, state);
+	  adaptorListFreeMarked(state->interfaces);
+	  // we are using sp->num_domains as the portable field across Xen, KVM, Docker
+	  sp->num_domains = sp->num_containers;
+	  prev = container;
 	}
-	readContainerInterfaces(sp, state);
-	adaptorListFreeMarked(state->interfaces);
-	// we are using sp->num_domains as the portable field across Xen, KVM, Docker
-	sp->num_domains = sp->num_containers;
+	container = next_container;
       }
 
 #endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
@@ -2567,6 +2588,8 @@ extern "C" {
      * while CAP_SYS_ADMIN is required for the netns() and unshare()
      * system calls.  Right now all this happens in 
      * readInterfaces.c : readContainerInterfaces()
+     * Not yet sure what is required for "docker ps" and
+     * "docker inspect",  so this is still a work in progress.
     */
     cap_value_t desired_caps[] = {
       CAP_SYS_PTRACE,
@@ -2601,11 +2624,17 @@ extern "C" {
       
     }
 
-#if defined(HSF_CUMULUS)
+#if defined(HSF_CUMULUS) || defined(HSF_DOCKER)
     // For now we have to retain root privileges on Cumulus Linux because
     // we need to open netfilter/ULOG and to run the portsamp program.
+
+    // Similarly, when running Docker containers we still need more
+    // capabilities to be passed down so that we can run "docker ps -q"
+    // and "docker inspect <id>" successfully.
 #else
     // set the real and effective group-id to 'nobody'
+    // (Might have to make this configurable so we can become a user 
+    // that has been set up with the right permissions, e.g. for Docker)
     struct passwd *nobody = getpwnam("nobody");
     if(nobody == NULL) {
       myLog(LOG_ERR, "drop_privileges: user 'nobody' not found");

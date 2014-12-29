@@ -85,9 +85,9 @@ extern "C" {
     char *hostname;
     char uuid[16];
     uint32_t dsIndex;
-    time_t lastActive;
     pid_t pid;
-    int running;
+      int running:1;
+      int marked:1;
     uint64_t memoryLimit;
   } HSPContainer;
 #define HSF_DOCKER_CMD "/usr/bin/docker"
@@ -117,7 +117,6 @@ extern "C" {
 #define HSP_MAX_ULOG_MSG_BYTES 10000
 #define HSP_READPACKET_BATCH 10000
 #define HSP_ULOG_RCV_BUF 8000000
-#define HSP_SFLOW_SND_BUF 2000000
 
 #ifndef HSP_DEFAULT_ULOG_GROUP
 #define HSP_DEFAULT_ULOG_GROUP 0
@@ -195,8 +194,11 @@ extern "C" {
 // set to 0 to disable the memlock feature
 #define HSP_RLIMIT_MEMLOCK 0
 
-  // only one receiver, so the receiverIndex is a constant
+// only one receiver, so the receiverIndex is a constant
 #define HSP_SFLOW_RECEIVER_INDEX 1
+
+// space to ask for in output sockets
+#define HSP_SFLOW_SND_BUF 2000000
 
 // just assume the sector size is 512 bytes
 #define HSP_SECTOR_BYTES 512
