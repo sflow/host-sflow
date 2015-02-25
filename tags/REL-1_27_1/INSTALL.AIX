@@ -1,0 +1,46 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+To compile and install, try this:
+
+root> gmake
+root> gmake install
+
+Edit /etc/hsflowd.conf for configuration.  The options are
+described in the comments there.
+
+To test-run with full logging to stdout/stderr:
+
+root> hsflowd -ddd
+
+To schedule the daemon, it is recommended that you use the mkssys(1) command
+to turn the hsflowd executable directly into a daemon service.  However
+you can also opt for the init-scripts approach.   The daemon can be started
+using this script:
+
+root> /etc/rc.d/init.d/hsflowd start
+
+and check the syslog (view or edit /etc/syslog.conf for details) for errors.
+
+If Open VSwitch is running, starting sflowovsd will propagate
+sFlow configuration to the switch via ovs-vsctl(1):
+
+root> /etc/rc.d/init.d/sflowovsd start
+
+To run in the debugger, recompile with:
+
+root> gmake OPT=-g
+
+and then run with the "-d" command line option to
+prevent daemonization:
+
+% gdb hsflowd
+gdb> set args -d
+gdb> r
+
+To build an rpm, try:
+
+% gmake aixrpm
+
+Subject to the rpm package configuration, the rpm is likely be written to /opt/freeware/src/packages/RPMS/ppc/
+
