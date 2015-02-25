@@ -193,7 +193,9 @@ READ_OBJS=readInterfaces.o \
           readNioCounters.o \
 	  readPackets.o \
 	  readJSON.o \
-	  readContainerCounters.o
+	  readContainerCounters.o \
+	  readBroadcomCounters.o \
+	  readTcpipCounters.o
 
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
@@ -296,4 +298,5 @@ readPackets.o: readPackets.c $(HEADERS)
 readJSON.o: readJSON.c $(HEADERS)
 sflowovsd.o: sflowovsd.c $(HEADERS)
 readContainerCounters.o: readContainerCounters.c $(HEADERS)
+readAsicCounters.o: readAsicCounters.c $(HEADERS)
 

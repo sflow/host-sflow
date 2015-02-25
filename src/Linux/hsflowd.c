@@ -385,6 +385,14 @@ extern "C" {
     }
 #endif
 
+#ifdef HSF_CUMULUS
+    SFLCounters_sample_element bcmElem = { 0 };
+    bcmElem.tag = SFLCOUNTERS_BCM_TABLES;
+    if(readBroadcomCounters(sp, &bcmElem.counterBlock.bcm_tables)) {
+      SFLADD_ELEMENT(cs, &bcmElem);
+    }
+#endif
+
     // host memory counters
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_MEM;
@@ -401,6 +409,27 @@ extern "C" {
     if(readDiskCounters(sp, &dskElem.counterBlock.host_dsk)) {
       SFLADD_ELEMENT(cs, &dskElem);
     }
+
+#ifdef HSF_CUMULUS
+    // don't send L4 stats from switches.  Save the space for other things.
+#else
+    // host TCP/IP counters
+    SFLCounters_sample_element ipElem = { 0 }, icmpElem = { 0 }, tcpElem = { 0 }, udpElem = { 0 };
+    ipElem.tag = SFLCOUNTERS_HOST_IP;
+    icmpElem.tag = SFLCOUNTERS_HOST_ICMP;
+    tcpElem.tag = SFLCOUNTERS_HOST_TCP;
+    udpElem.tag = SFLCOUNTERS_HOST_UDP;
+    if(readTcpipCounters(sp,
+			 &ipElem.counterBlock.host_ip,
+			 &icmpElem.counterBlock.host_icmp,
+			 &tcpElem.counterBlock.host_tcp,
+			 &udpElem.counterBlock.host_udp)) {
+      SFLADD_ELEMENT(cs, &ipElem);
+      SFLADD_ELEMENT(cs, &icmpElem);
+      SFLADD_ELEMENT(cs, &tcpElem);
+      SFLADD_ELEMENT(cs, &udpElem);
+    }
+#endif
 
     // include the adaptor list
     SFLCounters_sample_element adaptorsElem = { 0 };
@@ -1443,6 +1472,9 @@ extern "C" {
 	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
 	strArrayAdd(dockerInspect, "inspect");
 	for(HSPContainer *container = sp->containers; container; container=container->nxt) {
+	  if((sp->clk - container->lastActive) > sp->forgetVMSecs) {
+	    continue;
+	  }
 	  // mark for removal, in case it is no longer current
 	  container->marked = YES;
 	  strArrayAdd(dockerInspect, container->id);
@@ -1994,6 +2026,7 @@ extern "C" {
     sp->dropPriv = YES;
     sp->refreshAdaptorListSecs = HSP_REFRESH_ADAPTORS;
     sp->refreshVMListSecs = HSP_REFRESH_VMS;
+    sp->forgetVMSecs = HSP_FORGET_VMS;
   }
 
   /*_________________---------------------------__________________

@@ -180,6 +180,7 @@ extern "C" {
 #define HSP_DEFAULT_DNSSD_MINDELAY 10
 #define HSP_DNSSD_STACKSIZE 2000000
 #define HSP_REFRESH_VMS 60
+#define HSP_FORGET_VMS 180
 #define HSP_REFRESH_ADAPTORS 180
 
 // set to 1 to allow agent.cidr setting in DNSSD TXT record.
@@ -470,6 +471,7 @@ extern "C" {
     uint32_t refreshAdaptorListSecs; // poll interval
     int refreshVMList; // request flag
     uint32_t refreshVMListSecs; // poll interval
+    uint32_t forgetVMSecs; // age-out idle VM or container
 
     // 64-bit diskIO accumulators
     HSPDiskIO diskIO;
@@ -582,12 +584,17 @@ extern "C" {
   int configSwitchPorts(HSP *sp);
   int readJSON(HSP *sp, int soc);
   void json_app_timeout_check(HSP *sp);
+  int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp);
 
 #ifdef HSF_NVML
   void nvml_init(HSP *sp);
   void nvml_stop(HSP *sp);
   void nvml_tick(HSP *sp);
   int readNvmlCounters(HSP *sp, SFLHost_gpu_nvml *nvml);
+#endif
+
+#ifdef HSF_CUMULUS
+  int readBroadcomCounters(HSP *sp, SFLBCM_tables *bcm);
 #endif
 
 #ifdef HSF_DOCKER

@@ -816,6 +816,10 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_HOST_MEM: elemSiz = 72 /*sizeof(elem->counterBlock.host_mem)*/ ;  break;
     case SFLCOUNTERS_HOST_DSK: elemSiz = 52 /*sizeof(elem->counterBlock.host_dsk)*/;  break;
     case SFLCOUNTERS_HOST_NIO: elemSiz = 40 /*sizeof(elem->counterBlock.host_nio)*/;  break;
+    case SFLCOUNTERS_HOST_IP: elemSiz = XDRSIZ_IP_COUNTERS;  break;
+    case SFLCOUNTERS_HOST_ICMP: elemSiz = XDRSIZ_ICMP_COUNTERS;  break;
+    case SFLCOUNTERS_HOST_TCP: elemSiz = XDRSIZ_TCP_COUNTERS;  break;
+    case SFLCOUNTERS_HOST_UDP: elemSiz = XDRSIZ_UDP_COUNTERS;  break;
     case SFLCOUNTERS_HOST_VRT_NODE: elemSiz = 28 /*sizeof(elem->counterBlock.host_vrt_node)*/;  break;
     case SFLCOUNTERS_HOST_VRT_CPU: elemSiz = 12 /*sizeof(elem->counterBlock.host_vrt_cpu)*/;  break;
     case SFLCOUNTERS_HOST_VRT_MEM: elemSiz = 16 /*sizeof(elem->counterBlock.host_vrt_mem)*/;  break;
@@ -826,6 +830,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_APP_RESOURCES:  elemSiz = appResourcesEncodingLength(&elem->counterBlock.appResources); break;
     case SFLCOUNTERS_APP_WORKERS:  elemSiz = appWorkersEncodingLength(&elem->counterBlock.appWorkers); break;
     case SFLCOUNTERS_PORTNAME:  elemSiz = stringEncodingLength(&elem->counterBlock.portName.portName); break;
+    case SFLCOUNTERS_BCM_TABLES: elemSiz = XDRSIZ_BCM_TABLES;  break;
     default:
       {
 	char errm[128];
@@ -1068,6 +1073,20 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.host_gpu_nvml.temperature);
       putNet32(receiver, elem->counterBlock.host_gpu_nvml.fan_speed);
       break;
+
+    case SFLCOUNTERS_HOST_IP:
+      putNet32_run(receiver, &elem->counterBlock.host_ip, XDRSIZ_IP_COUNTERS / 4);
+      break;
+    case SFLCOUNTERS_HOST_ICMP:
+      putNet32_run(receiver, &elem->counterBlock.host_icmp, XDRSIZ_ICMP_COUNTERS / 4);
+      break;
+    case SFLCOUNTERS_HOST_TCP:
+      putNet32_run(receiver, &elem->counterBlock.host_tcp, XDRSIZ_TCP_COUNTERS / 4);
+      break;
+    case SFLCOUNTERS_HOST_UDP:
+      putNet32_run(receiver, &elem->counterBlock.host_udp, XDRSIZ_UDP_COUNTERS / 4);
+      break;
+
     case SFLCOUNTERS_APP:
       putString(receiver, &elem->counterBlock.app.application);
       putNet32(receiver, elem->counterBlock.app.status_OK);
@@ -1102,6 +1121,10 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_PORTNAME: 
       putString(receiver, &elem->counterBlock.portName.portName);
       break;
+    case SFLCOUNTERS_BCM_TABLES:
+      putNet32_run(receiver, &elem->counterBlock.bcm_tables, XDRSIZ_BCM_TABLES / 4);
+      break;
+
     default:
       {
 	char errm[128];
