@@ -1472,9 +1472,6 @@ extern "C" {
 	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
 	strArrayAdd(dockerInspect, "inspect");
 	for(HSPContainer *container = sp->containers; container; container=container->nxt) {
-	  if((sp->clk - container->lastActive) > sp->forgetVMSecs) {
-	    continue;
-	  }
 	  // mark for removal, in case it is no longer current
 	  container->marked = YES;
 	  strArrayAdd(dockerInspect, container->id);
