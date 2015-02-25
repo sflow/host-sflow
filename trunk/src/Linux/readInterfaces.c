@@ -216,8 +216,6 @@ approach seemed more stable and portable.
     }
     return -1;
   }
-#endif
-	    
 
 /*________________---------------------------__________________
   ________________    read_ethtool_info      __________________
@@ -251,6 +249,8 @@ approach seemed more stable and portable.
 #endif
     return 0;
   }
+
+#endif /* (HSP_ETHTOOL_STATS || HSF_DOCKER) */
 
 
   static int read_ethtool_info(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
