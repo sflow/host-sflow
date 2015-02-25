@@ -154,11 +154,20 @@ ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
 endif
 
+# detect Red Hat systems
+ifeq ($(REDHAT),)
+	REDHAT=$(shell if [ -r /etc/redhat-release ]; then echo "yes"; else echo "no"; fi)
+endif
+
 HSFLOWD_INITSCRIPT=scripts/hsflowd
 SFLOWOVSD_INITSCRIPT=scripts/sflowovsd
 ifeq ($(DEBIAN),yes)
 	HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
 	SFLOWOVSD_INITSCRIPT=scripts/sflowovsd.deb
+endif
+ifeq ($(REDHAT),yes)
+	HSFLOWD_INITSCRIPT=scripts/hsflowd.redhat
+	SFLOWOVSD_INITSCRIPT=scripts/sflowovsd.redhat
 endif
 
 ifeq ($(BINDIR),)
