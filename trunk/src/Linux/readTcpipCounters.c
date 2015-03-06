@@ -71,6 +71,7 @@ extern "C" {
 	  count += parseCounterArray(p, (uint32_t *)c_udp, SFLHOST_NUM_UDP_COUNTERS);
 	}
       }
+      fclose(procFile);
     }
     return (count > 0);
 #endif
