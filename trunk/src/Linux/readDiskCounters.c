@@ -26,10 +26,17 @@ extern "C" {
 
 int remote_mount(const char *device, const char *type)
 {
-  return ((strchr(device,':') != 0)
+  /* need to allow "ubi:" to be considered local as an exception
+     -- otherwise it would be marked as remote by the logic below
+     because it has a ':' in it. */
+  if(!strncmp(device, "ubi:", 4)) return NO;
+  
+  return ((strchr(device,':') != NULL)
 	  || (!strcmp(type, "smbfs") && device[0]=='/' && device[1]=='/')
-	  || (!strncmp(type, "nfs", 3)) || (!strcmp(type, "autofs"))
-	  || (!strcmp(type,"gfs")) || (!strcmp(type,"none")) );
+	  || (!strncmp(type, "nfs", 3))
+	  || (!strcmp(type, "autofs"))
+	  || (!strcmp(type,"gfs"))
+	  || (!strcmp(type,"none")) );
 }
 
 
@@ -124,9 +131,10 @@ int remote_mount(const char *device, const char *type)
       void *treeRoot = NULL;
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
 	if(sscanf(line, "%s %s %s %s", device, mount, type, mode) == 4) {
-	  // must start with /dev/ or /dev2/
+	  // must start with /dev/ or /dev2/ or ubi:
 	  if(strncmp(device, "/dev/", 5) == 0 ||
-	     strncmp(device, "/dev2/", 6) == 0) {
+	     strncmp(device, "/dev2/", 6) == 0 ||
+	     strncmp(device, "ubi:", 4) == 0) {
 	    // must be read-write
 	    if(strncmp(mode, "ro", 2) != 0) {
 	      // must be local
