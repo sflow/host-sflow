@@ -726,7 +726,14 @@ extern int debug;
 	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
 	if(adaptor && adaptor->userData) {
 	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	  if(adaptorNIO->ipPriority > ipPriority) {
+	  // take the highest priority one,  but if we have more than one with the same
+	  // priority then choose the one with the lowest (non-zero) ifIndex number:
+	  if(adaptorNIO->ipPriority > ipPriority
+	     || (adaptorNIO->ipPriority == ipPriority
+		 && adaptor->ifIndex
+		 && selectedAdaptor
+		 && (selectedAdaptor->ifIndex == 0
+		     || adaptor->ifIndex < selectedAdaptor->ifIndex))) {
 	    selectedAdaptor = adaptor;
 	    ipPriority = adaptorNIO->ipPriority;
 	  }
