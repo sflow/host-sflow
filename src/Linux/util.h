@@ -177,6 +177,7 @@ extern "C" {
   int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare);
   int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits);
 
+  int isAllZero(u_char *buf, int len);
   int isZeroMAC(SFLMacAddress *mac);
 
 #if defined(__cplusplus)

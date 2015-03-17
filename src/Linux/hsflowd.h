@@ -408,6 +408,7 @@ extern "C" {
     // namespace.  The names can be anything, but the
     // but the ifIndex is globally unique (and accessible)
     int peer_ifIndex;
+    // LACP/bonding data
     SFLLACP_counters lacp;
     // switch ports that are sending individual interface
     // counters will keep a pointer to their sflow poller.

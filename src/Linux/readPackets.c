@@ -89,10 +89,12 @@ extern "C" {
 	pn_elem.counterBlock.portName.portName.str = devName;
 	SFLADD_ELEMENT(cs, &pn_elem);
 
-	// possibly include LACP struct for bond master or slave
+	// possibly include LACP struct for bond slave
+	// (used to send for bond-master too,  but that
+	// was a mis-reading of the standard).
 	SFLCounters_sample_element lacp_elem = { 0 };
-	if(adaptorNIO->bond_master
-	   || adaptorNIO->bond_slave) {
+	if(/*adaptorNIO->bond_master
+	     ||*/ adaptorNIO->bond_slave) {
 	  updateBondCounters(sp, adaptor);
 	  lacp_elem.tag = SFLCOUNTERS_LACP;
 	  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
