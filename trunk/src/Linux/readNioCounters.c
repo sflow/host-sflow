@@ -20,6 +20,26 @@ extern "C" {
   extern int debug;
 
   /*_________________---------------------------__________________
+    _________________ shareActorIDFromSlave     __________________
+    -----------------___________________________------------------
+  */
+
+  static void shareActorIDFromSlave(HSP *sp, HSPAdaptorNIO *bond_nio, HSPAdaptorNIO *aggregator_slave_nio) {
+    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
+      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+      if(adaptor && adaptor->ifIndex) {
+	HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
+	if(nio
+	   && nio->bond_slave
+	   && nio != aggregator_slave_nio
+	   && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
+	  memcpy(nio->lacp.actorSystemID, aggregator_slave_nio->lacp.actorSystemID, 6);
+	}
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________    updateBondCounters     __________________
     -----------------___________________________------------------
   */
@@ -36,9 +56,15 @@ extern "C" {
       SFLAdaptor *currentSlave = NULL;
       HSPAdaptorNIO *slave_nio = NULL;
       HSPAdaptorNIO *bond_nio = (HSPAdaptorNIO *)bond->userData;
+      HSPAdaptorNIO *aggregator_slave_nio = NULL;
       bond_nio->lacp.attachedAggID = bond->ifIndex;
       uint32_t aggID = 0;
+      // make sure we don't hold on to stale data - may need
+      // to pick up actorSystemID from a slave port.
+      memset(bond_nio->lacp.actorSystemID, 0, 6);
+      memset(bond_nio->lacp.partnerSystemID, 0, 6);
       int readingMaster = YES; // bond master data comes first
+      int gotActorID = NO;
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
 	char buf_var[MAX_PROC_LINE_CHARS];
 	char buf_val[MAX_PROC_LINE_CHARS];
@@ -46,7 +72,7 @@ extern "C" {
 	if(sscanf(line, "%[^:]:%[^\n]", buf_var, buf_val) == 2) {
 	  char *tok_var = trimWhitespace(buf_var);
 	  char *tok_val = trimWhitespace(buf_val);
-
+	  
 	  if(readingMaster) {
 	    if(my_strequal(tok_var, "MII Status")) {
 	      if(my_strequal(tok_val, "up")) {
@@ -59,7 +85,25 @@ extern "C" {
 		bond_nio->lacp.portState.all = 0;
 	      }
 	    }
-
+	    
+	    if(my_strequal(tok_var, "System Identification")) {
+	      if(debug) {
+		myLog(LOG_INFO, "updateBondCounters: %s system identification %s",
+		      bond->deviceName,
+		      tok_val);
+	      }
+	      char sys_mac[MAX_PROC_LINE_CHARS];
+	      uint64_t code;
+	      if(sscanf(tok_val, "%"SCNu64"  %s", &code, sys_mac) == 2) {
+		if(hexToBinary((u_char *)sys_mac,bond_nio->lacp.actorSystemID, 6) != 6) {
+		  myLog(LOG_ERR, "updateBondCounters: system mac read error: %s", sys_mac);
+		}
+		else if(!isAllZero(bond_nio->lacp.actorSystemID, 6)) {
+		  gotActorID = YES;
+		}
+	      }
+	    }
+	    
 	    if(my_strequal(tok_var, "Partner Mac Address")) {
 	      if(debug) {
 		myLog(LOG_INFO, "updateBondCounters: %s partner mac is %s",
@@ -69,10 +113,8 @@ extern "C" {
 	      if(hexToBinary((u_char *)tok_val,bond_nio->lacp.partnerSystemID, 6) != 6) {
 		myLog(LOG_ERR, "updateBondCounters: partner mac read error: %s", tok_val);
 	      }
-	      // Assume actorSystemID should be set to bond's MAC
-	      memcpy(bond_nio->lacp.actorSystemID, bond->macs[0].mac, 6);
 	    }
-
+	    
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      aggID = strtol(tok_val, NULL, 0);
 	      if(debug) {
@@ -80,7 +122,7 @@ extern "C" {
 	      }
 	    }
 	  }
-
+	  
 	  // initially the data is for the bond, but subsequently
 	  // we get info about each slave. So we started with
 	  // (readingMaster=YES,currentSlave=NULL), and now we
@@ -96,9 +138,11 @@ extern "C" {
 		    currentSlave ? "found" : "not found");
 	    }
 	    if(slave_nio) {
+	      // initialize from bond
 	      slave_nio->lacp.attachedAggID = bond->ifIndex;
 	      memcpy(slave_nio->lacp.partnerSystemID, bond_nio->lacp.partnerSystemID, 6);
 	      memcpy(slave_nio->lacp.actorSystemID, bond_nio->lacp.actorSystemID, 6);
+	      
 	      // make sure the parent is going to export separate
 	      // counters if the slave is going to (because it was
 	      // marked as a switchPort):
@@ -111,7 +155,7 @@ extern "C" {
 	      }
 	    }
 	  }
-
+	  
 	  if(readingMaster == NO && slave_nio) {
 	    if(my_strequal(tok_var, "MII Status")) {
 	      if(my_strequal(tok_val, "up")) {
@@ -124,42 +168,34 @@ extern "C" {
 		slave_nio->lacp.portState.all = 0;
 	      }
 	    }
-
+	    
 	    if(my_strequal(tok_var, "Permanent HW addr")) {
-	      // not sure what this is - may just be the interface MAC that we
-	      // already know. Log a warning if it's not.  Currently seeing a
-	      // case where the first LAG component has his own MAC here but then
-	      // the second one logs a discrepancy because although a unique mac
-	      // shows up here, the interface mac has been set equal to that of
-	      // the first slave.
-	      u_char hwaddr[6];
-	      if(hexToBinary((u_char *)tok_val,hwaddr, 6) != 6) {
-		myLog(LOG_ERR, "updateBondCounters: permanent HW addr read error: %s", tok_val);
-	      }
-	      if(memcmp(hwaddr, currentSlave->macs[0].mac, 6) != 0) {
-		if(debug) {
-		  myLog(LOG_INFO, "updateBondCounters: warning: %s permanent HW addr: %s != slave MAC",
-			currentSlave->deviceName,
-			tok_val);
+	      if(!gotActorID) {
+		// Still looking for our actorSystemID, so capture this here in case we
+		// decide below that it is the one we want.  Note that this mac may not be the
+		// same as the mac associated with this port that we read back in readInterfaces.c.
+		if(hexToBinary((u_char *)tok_val,slave_nio->lacp.actorSystemID, 6) != 6) {
+		  myLog(LOG_ERR, "updateBondCounters: permanent HW addr read error: %s", tok_val);
 		}
 	      }
 	    }
-
+	    
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      uint32_t slave_aggID = strtol(tok_val, NULL, 0);
-	      if(slave_aggID != aggID) {
-		// This can happen when the LACP protocol has not fully established the LAG yet.
-		if(debug) {
-		  myLog(LOG_INFO, "updateBondCounters: warning slave %s aggID (%u) != bond aggID (%u)",
-			currentSlave->deviceName,
-			slave_aggID,
-			aggID);
-		}
+	      if(slave_aggID == aggID) {
+		// remember that is the slave port that has the same aggregator ID as the bond
+		aggregator_slave_nio = slave_nio;
 	      }
 	    }
 	  }
 	}
       }
+      
+      if(aggregator_slave_nio && !gotActorID) {
+	// go back and fill in the actorSystemID on all the slave ports
+	shareActorIDFromSlave(sp, bond_nio, aggregator_slave_nio);
+      }
+      
       fclose(procFile);
     }
   }

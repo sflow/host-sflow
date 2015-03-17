@@ -1161,13 +1161,15 @@ extern "C" {
     return YES;
   }
 
+  int isAllZero(u_char *buf, int len) {
+    for(int ii = 0; ii < len; ii++) {
+      if(buf[len] != 0) return NO;
+    }
+    return YES;
+  }
+
   int isZeroMAC(SFLMacAddress *mac) {
-    return (mac->mac[0] == 0
-	    && mac->mac[1] == 0
-	    && mac->mac[2] == 0
-	    && mac->mac[3] == 0
-	    && mac->mac[4] == 0
-	    && mac->mac[5] == 0);
+    return isAllZero(mac->mac, 6);
   }
 
 
