@@ -57,7 +57,7 @@ aixrpm:
 	cp -r . $$MYSRCDIR; \
 	tar cf $$MYSRCDIR.tar -C $$SOURCES $(PROG)-$$MYVER; \
         gzip -f $$MYSRCDIR.tar; \
-	rpm -ba $(PROG)_aix.spec
+	rpm -ba $(PROG).spec.aix
 
 pkg:
 	PLATFORM=`uname`; \
