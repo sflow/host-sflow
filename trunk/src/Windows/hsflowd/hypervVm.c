@@ -981,8 +981,9 @@ void readVms(HSP *sp)
 		} else {
 			BSTR queryLang = SysAllocString(L"WQL");
 			//libvirt uses EnabledState!=0 AND EnabledState!=3 and EnabledState!=32768 (!unknown !disabled !suspended)
-			//use Description since this is locale independent
-			wchar_t *query1 = L"SELECT * FROM Msvm_ComputerSystem WHERE Description=\"Microsoft Virtual Machine\" AND EnabledState=2";
+			//Could filter on description since it is supposed to be locale independent, but apparently not!
+			//wchar_t *query1 = L"SELECT * FROM Msvm_ComputerSystem WHERE Description=\"Microsoft Virtual Machine\" AND EnabledState=2";
+			wchar_t *query1 = L"SELECT * FROM Msvm_ComputerSystem WHERE EnabledState=2";
 			IEnumWbemClassObject *vmEnum = NULL;
 			hr = pNamespace->ExecQuery(queryLang, query1, WBEM_FLAG_FORWARD_ONLY, NULL, &vmEnum);
 			if (!SUCCEEDED(hr)) {
@@ -991,14 +992,12 @@ void readVms(HSP *sp)
 			} else {
 				//current settings: settingType=3, snapshot settings settingType=5 not supported in virtualizationv2 namespace
 				//wchar_t *query2 = L"SELECT * FROM Msvm_VirtualSystemSettingData WHERE SettingType=3 AND InstanceID=\"Microsoft:%s\"";
-				IWbemClassObject *vmObj = NULL;
-				IEnumWbemClassObject *vssdEnum = NULL;
-				IWbemClassObject *vssdObj = NULL;
 				time_t now = time(NULL);
 				uint32_t numPartitions = 0;
 
 				hr = WBEM_S_NO_ERROR;
 				while (WBEM_S_NO_ERROR == hr) {
+					IWbemClassObject *vmObj = NULL;
 					ULONG vmCount = 1;
 					hr = vmEnum->Next(WBEM_INFINITE, 1, &vmObj, &vmCount);
 					if (0 == vmCount) {
@@ -1008,19 +1007,23 @@ void readVms(HSP *sp)
 					wchar_t *vmName = stringFromWMIProperty(vmObj, PROP_NAME);
 					if (vmName != NULL) {
 						//get the adaptor and switch port info for the vm
-						readVmAdaptors(sp, pNamespace, vmName);
+						IEnumWbemClassObject *vssdEnum = NULL;
 						//Association Msvm_SettingsDefineState gives VSSD for current config
-						//for virtualization namespace v1 and v2
-						hr = associatorsOf(pNamespace, vmObj, 
+						//for virtualization namespace v1 and v2.
+						//There will only be VSSD for vms (not host system)
+						HRESULT vmHr;
+						vmHr = associatorsOf(pNamespace, vmObj, 
 										L"Msvm_SettingsDefineState", 
 										L"Msvm_VirtualSystemSettingData", 
 										L"SettingData", &vssdEnum);
-						if (!SUCCEEDED(hr)) {
-							myLog(LOG_ERR,"readVms: associatorsOf() failed getting VSSD for: %S error=0x%x", vmName, hr);
+						if (!SUCCEEDED(vmHr)) {
+							myLog(LOG_ERR,"readVms: associatorsOf() failed getting VSSD for: %S error=0x%x", vmName, vmHr);
 						} else {
+							IWbemClassObject *vssdObj = NULL;
 							ULONG settingCount;
-							hr = vssdEnum->Next(WBEM_INFINITE, 1, &vssdObj, &settingCount);
+							vmHr = vssdEnum->Next(WBEM_INFINITE, 1, &vssdObj, &settingCount);
 							if (0 != settingCount) {
+								readVmAdaptors(sp, pNamespace, vmName);
 								BOOL noUUID = true;
 								wchar_t *biosGuidString = NULL;
 								while (vssdObj && noUUID) {
@@ -1037,8 +1040,8 @@ void readVms(HSP *sp)
 									wchar_t *friendlyName = stringFromWMIProperty(vmObj, PROP_ELEMENT_NAME);
 									VARIANT processVal;
 									uint32_t processId = 0;
-									hr = vmObj->Get(PROP_PROCESS, 0, &processVal, 0, 0);
-									if (WBEM_S_NO_ERROR == hr && 
+									vmHr = vmObj->Get(PROP_PROCESS, 0, &processVal, 0, 0);
+									if (WBEM_S_NO_ERROR == vmHr && 
 										(V_VT(&processVal) == VT_I4 || V_VT(&processVal) == VT_UI4)) {
 										processId = processVal.ulVal;
 									}
@@ -1095,7 +1098,7 @@ void readVms(HSP *sp)
 								} //got biosGuid
 							} //settingCount != 0
 							vssdEnum->Release();
-						} //finished with vssdEnum
+						} //vssd assoc succeeded
 					} //vmName != NULL
 					vmObj->Release();
 					vmObj = NULL;
