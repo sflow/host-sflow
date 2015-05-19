@@ -52,7 +52,6 @@ static void setPortCountersInstance(SFLAdaptor *switchPort)
  */
 void readWMISwitchPorts(HSP *sp)
 {
-	myLog(LOG_INFO, "entering readWMISwitchPorts");
 	BSTR path = SysAllocString(WMI_VIRTUALIZATION_NS_V2);
 	HRESULT hr = S_FALSE;
 	IWbemServices *pNamespace = NULL;
