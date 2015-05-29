@@ -748,7 +748,7 @@ SFLAdaptor *updateVmAdaptor(HSP *sp, IWbemServices *pNamespace, IWbemClassObject
 				if (SUCCEEDED(assocHr)) {
 					epCount = 0;
 					assocHr = lanEpEnum2->Next(WBEM_INFINITE, 1, &lanEpObj2, &epCount);
-					if (epCount == 1) {
+					if (SUCCEEDED(assocHr) && epCount == 1) {
 						assocHr = associatorsOf(pNamespace, lanEpObj2,
 											L"Msvm_EthernetDeviceSAPImplementation",
 											L"Msvm_EthernetSwitchPort",
@@ -756,7 +756,7 @@ SFLAdaptor *updateVmAdaptor(HSP *sp, IWbemServices *pNamespace, IWbemClassObject
 					}
 				}
 			}
-			if (SUCCEEDED(assocHr)) {
+			if (SUCCEEDED(assocHr) && swPortEnum != NULL) {
 				IWbemClassObject *swPortObj = NULL;
 				ULONG swPortCount = 0;
 				assocHr = swPortEnum->Next(WBEM_INFINITE, 1, &swPortObj, &swPortCount);
