@@ -1,0 +1,128 @@
+#!/bin/bash
+
+PROGRAM=hsflowd
+PIDFILE=/var/run/$PROGRAM.pid
+AUTOFILE=/etc/hsflowd.auto
+
+EXECPREFIX=/usr/sbin
+
+inm_running() {
+	kill -0 $1 >/dev/null 2>&1
+}
+
+inm_pid() {
+	if [ -f "$PIDFILE" ]; then
+		pid=`head -1 $PIDFILE`
+		if [ "$pid" != "" ]; then
+			if inm_running $pid; then
+				echo $pid
+				return 0
+			fi
+		fi
+	fi
+}
+
+# A function to test the form of a UUID string
+is_uuid() {
+	local UUID_REGEX;
+	UUID_REGEX='^[0-9A-Fa-f]\{8\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{4\}-[0-9A-Fa-f]\{12\}$'
+	# newer bash supports the =~ operator but for backwards compatibility we use grep
+	echo $1 | grep $UUID_REGEX >/dev/null;
+}
+
+inm_uuid() {
+	local MYUUID;
+
+	if [ -f $AUTOFILE ]; then
+		MYUUID=`grep "uuid=" $AUTOFILE | awk -F= '{ print $2 }'`
+		if is_uuid $MYUUID; then
+			echo $MYUUID
+			return 0
+		fi
+	fi
+
+	zone=`/usr/bin/zonename`
+	MYUUID=`/usr/sbin/zoneadm -z $zone list -p | awk -F: '{ print $5 }'`
+	if is_uuid $MYUUID; then
+		echo $MYUUID
+		return 0
+	fi 
+
+	if MYUUID=`/usr/bin/makeuuid`; then
+		if is_uuid $MYUUID; then
+			echo $MYUUID
+			return 0
+		fi
+	fi	
+
+	echo "not found"
+	return 1
+}
+
+inm_daemon() {
+	if [ $# = 0 ] ; then
+		echo "Usage: inm_daemon $PROGRAM"
+		return 1
+	fi
+
+	pid=`inm_pid $1`
+	if [ -n "$pid" ]; then
+		echo -n "already running (pid = $pid) "
+		return 1
+	fi
+
+	if UUID=`inm_uuid`; then
+		su - root -c "$EXECPREFIX/$PROGRAM -u '${UUID}'"
+	else
+		su - root -c "$EXECPREFIX/$PROGRAM"
+	fi
+}
+
+inm_kill() {
+	pid=`inm_pid $1`
+	if [ -n "$pid" ]; then
+		if inm_running $pid; then
+			kill -TERM $pid
+			sleep 1
+			if inm_running $pid; then
+				sleep 1
+				if inm_running $pid; then
+					sleep 5
+					if inm_running $pid; then
+						sleep 10
+						if inm_running $pid; then
+							kill -KILL $pid
+						fi
+					fi
+				fi
+			fi
+		fi
+	fi
+
+	# Remove pid file if any.
+	rm -f $PIDFILE
+
+	if [ -n "$pid" ]; then
+		return 0
+	else
+		return 1
+	fi
+}
+
+case "$1" in
+	start)
+		echo -n "$PROGRAM start: "
+		inm_daemon $PROGRAM && echo "OK" || echo "FAILED"
+	;;
+	stop)
+		echo -n "$PROGRAM stop: "
+		inm_kill hsflowd && echo "OK" || echo "FAILED"
+	;;
+	restart)
+		$0 stop
+		$0 start
+	;;
+*)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac

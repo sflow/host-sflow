@@ -1,0 +1,61 @@
+#!/bin/sh
+#
+# init(1) startup script for sflowovsd daemon
+#
+# chkconfig: 345 85 15
+# description: Host sFlow Daemon
+# processname: sflowovsd
+# pidfile: /var/run/sflowovsd.pid
+
+### BEGIN INIT INFO
+# Provides:          sflowovsd
+# Required-Start:    $syslog $network $named
+# Required-Stop:     $syslog
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Short-Description: Host sFlow Daemon
+# Description:       Host sFlow Daemon
+### END INIT INFO
+
+. /etc/init.d/functions
+
+SFLOWOVSD=/usr/sbin/sflowovsd
+PIDFILE=/var/run/sflowovsd.pid
+
+#########################################################################################
+#########################################################################################
+
+RETVAL=0
+
+case "$1" in
+       start)
+	daemon $SFLOWOVSD;
+	RETVAL=$?
+	;;
+
+        stop)
+	killproc sflowovsd
+	RETVAL=$?
+        [ $RETVAL -eq 0 ] && rm -f $PIDFILE
+	;;
+
+      status)
+	status sflowovsd
+	RETVAL=$?
+	;;
+
+     restart)
+	$0 stop
+	$0 start
+	;;
+
+force-reload)
+	$0 stop
+	$0 start
+	;;
+  *)
+	echo "Usage: $0 {start|stop|status|restart|force-reload}"
+	exit 1
+esac
+
+exit $RETVAL
