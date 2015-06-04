@@ -109,13 +109,16 @@ extern "C" {
 #define HSP_DEFAULT_ULOG_GROUP 1
 #endif
 
-#ifdef HSF_ULOG
+#if (HSF_ULOG || HSF_NFLOG)
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <net/if.h>
+#define HSP_READPACKET_BATCH 10000
+#endif
+
+#ifdef HSF_ULOG
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
 #define HSP_MAX_ULOG_MSG_BYTES 10000
-#define HSP_READPACKET_BATCH 10000
 #define HSP_ULOG_RCV_BUF 8000000
 
 #ifndef HSP_DEFAULT_ULOG_GROUP
@@ -123,6 +126,13 @@ extern "C" {
 #endif
 
 #endif /* HSF_ULOG */
+
+#ifdef HSF_NFLOG
+#define HSP_MAX_NFLOG_MSG_BYTES 10000
+#define HSP_NFLOG_RCV_BUF 8000000
+#include <linux/netfilter/nfnetlink_log.h>
+#include <libnfnetlink.h>
+#endif
 
 #ifdef HSF_JSON
 #include "cJSON.h"
@@ -280,6 +290,13 @@ extern "C" {
     uint32_t ulogSamplingRate;
     uint32_t ulogSubSamplingRate;
     uint32_t ulogActualSamplingRate;
+
+    uint32_t nflogGroup;
+    double nflogProbability;
+    uint32_t nflogSamplingRate;
+    uint32_t nflogSubSamplingRate;
+    uint32_t nflogActualSamplingRate;
+
     uint32_t jsonPort;
 #ifndef HSP_DEFAULT_JSON_PORT
 #define HSP_DEFAULT_JSON_PORT 0
@@ -419,7 +436,7 @@ extern "C" {
 #ifdef HSP_SWITCHPORT_CONFIG
     uint32_t sampling_n_set;
 #endif
-    uint32_t ulog_drops;
+    uint32_t netlink_drops;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -529,6 +546,15 @@ extern "C" {
     struct sockaddr_nl ulog_bind;
     struct sockaddr_nl ulog_peer;
 #endif
+#ifdef HSF_NFLOG
+    // nflog packet sampling
+    struct nfnl_handle *nfnl;
+    int nflog_soc;
+    uint32_t nflog_seqno;
+    uint32_t nflog_drops;
+    struct sockaddr_nl nflog_peer;
+#endif // HSG_NFLOG
+
 #ifdef HSP_SWITCHPORT_REGEX
     regex_t swp_regex;
 #endif
@@ -581,7 +607,12 @@ extern "C" {
   void syncBondPolling(HSP *sp);
   void updateNioCounters(HSP *sp);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
-  int readPackets(HSP *sp);
+#ifdef HSF_ULOG
+  int readPackets_ulog(HSP *sp);
+#endif
+#ifdef HSF_NFLOG
+  int readPackets_nflog(HSP *sp);
+#endif
   int configSwitchPorts(HSP *sp);
   int readJSON(HSP *sp, int soc);
   void json_app_timeout_check(HSP *sp);

@@ -919,6 +919,17 @@ extern "C" {
     }
     return NULL;
   }
+  
+  SFLAdaptor *adaptorListGet_ifIndex(SFLAdaptorList *adList, uint32_t ifIndex)
+  {
+    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
+      SFLAdaptor *ad = adList->adaptors[i];
+      if(ad && ifIndex == ad->ifIndex) {
+	return ad;
+      }
+    }
+    return NULL;
+  }
 
   SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize)
   {

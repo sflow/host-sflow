@@ -210,10 +210,9 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________   json_app_timeout_check  __________________
     -----------------___________________________------------------
-    called every HSP_JSON_APP_TIMEOUT seconds.  Use it to check if we should
-    free an idle application that has stopped sending. This allows applications
-    to be fairly numerous and transient without causing this program to grow
-    too large.
+    Check to see if we should free an idle application that has stopped sending.
+    This allows applications to be fairly numerous and transient without causing
+    this program to grow too large.
   */
 
   void json_app_timeout_check(HSP *sp)
@@ -339,6 +338,9 @@ extern "C" {
     app->sampler->samplePool += sampling_n;
     // override the sampler's sampling_rate by filling it in here:
     fs.sampling_rate = sampling_n;
+    if(debug > 1) {
+      myLog(LOG_INFO, "sendAppSample (sampling_n=%d)", sampling_n);
+    }
     // and send it out
     sfl_sampler_writeFlowSample(app->sampler, &fs);
   }

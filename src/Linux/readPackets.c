@@ -11,7 +11,7 @@ extern "C" {
 
   extern int debug;
 
-#ifdef HSF_ULOG
+#if (HSF_ULOG || HSF_NFLOG)
 
 
   /*_________________-----------------------------------__________________
@@ -147,10 +147,8 @@ extern "C" {
 	SFLDataSource_instance dsi;
 	SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
 	HSPSFlow *sf = sp->sFlow;
-	// add sampler (with sub-sampling rate)
-	uint32_t samplingRate = sf->sFlowSettings->ulogSubSamplingRate;
+	// add sampler
 	adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
-	sfl_sampler_set_sFlowFsPacketSamplingRate(adaptorNIO->sampler, samplingRate);
 	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
 	// and make sure we have a poller too
 	getPoller(sp, adaptor);
@@ -160,12 +158,160 @@ extern "C" {
     return NULL;
   }
 
+
+
+  /*_________________---------------------------__________________
+    _________________    takeSample             __________________
+    -----------------___________________________------------------
+  */
+
+  static void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, uint32_t hook, u_char *mac_hdr, uint32_t mac_len, u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
+  {
+
+    if(debug > 1) {
+      myLog(LOG_INFO, "hook=%u in=%s out=%s pkt_len=%u cap_len=%u mac_len=%u",
+	    hook,
+	    ad_in ? ad_in->deviceName : "<not found>",
+	    ad_out ? ad_out->deviceName : "<not found>",
+	    pkt_len,
+	    cap_len,
+	    mac_len);
+      if(mac_len == 14) {
+	u_char macdst[12], macsrc[12];
+	printHex(mac_hdr+6,6,macsrc,12,NO);
+	printHex(mac_hdr+0,6,macdst,12,NO);
+	uint16_t ethtype = (mac_hdr[12] << 8) + mac_hdr[13];
+	myLog(LOG_INFO, "%s -> %s (ethertype=0x%04X)", macsrc, macdst, ethtype);
+      }
+    }
+    
+    SFL_FLOW_SAMPLE_TYPE fs = { 0 };
+ 
+    // set the ingress and egress ifIndex numbers.
+    // Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
+    fs.input = ad_in ? ad_in->ifIndex : SFL_INTERNAL_INTERFACE;
+    fs.output = ad_out ? ad_out->ifIndex : SFL_INTERNAL_INTERFACE;
+
+    SFLAdaptor *sampler_dev = ad_in ?: ad_out;
+
+    // detect egress sampling
+#ifdef HSF_CUMULUS
+    // On Cumulus Linux the sampling direction is indicated in the low
+    // bit of the pkt->hook field: 0==ingress,1==egress
+    if((hook & 1) == 1) {
+      sampler_dev = ad_out;
+    }
+#else
+    if(ad_in && ad_out) {
+      // If the ingress was a loopback and the egress is not -- and the
+      // egress has an ifIndex,  then switch this over to indicate egress
+      // sampling.  In a typical host scenario most samples will be
+      // "lo" -> "eth0" or "eth0" -> "lo", so this ensures that
+      // that we present it as bidirectional sampling on eth0.
+      HSPAdaptorNIO *inNIO = (HSPAdaptorNIO *)ad_in->userData;
+      if(inNIO->loopback) {
+	HSPAdaptorNIO *outNIO = (HSPAdaptorNIO *)ad_out->userData;
+	if(!outNIO->loopback
+	   && ad_out->ifIndex) {
+	  sampler_dev = ad_out;
+	}
+      }
+    }
+#endif
+
+    // must have a sampler_dev with an ifIndex
+    if(sampler_dev && sampler_dev->ifIndex) {
+      HSPAdaptorNIO *samplerNIO = (HSPAdaptorNIO *)sampler_dev->userData;
+
+      if(debug > 2) {
+	myLog(LOG_INFO, "selected sampler %s ifIndex=%u",
+	      sampler_dev->deviceName,
+	      sampler_dev->ifIndex);
+      }
+
+      SFLSampler *sampler = getSampler(sp, sampler_dev);
+		  
+      if(sampler) {
+	SFLFlow_sample_element hdrElem = { 0 };
+	hdrElem.tag = SFLFLOW_HEADER;
+	uint32_t FCS_bytes = 4;
+	uint32_t maxHdrLen = sampler->sFlowFsMaximumHeaderSize;
+	hdrElem.flowType.header.frame_length = pkt_len + FCS_bytes;
+	hdrElem.flowType.header.stripped = FCS_bytes;
+		    
+	u_char hdr[HSP_MAX_HEADER_BYTES];
+	
+	uint64_t mac_hdr_test=0;
+	if(mac_hdr && mac_len > 8) {
+	  memcpy(&mac_hdr_test, mac_hdr, 8);
+	}
+
+	if(mac_len == 14
+	   && mac_hdr_test != 0) {
+	  // set the header_protocol to ethernet and
+	  // reunite the mac header and payload in one buffer
+	  hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+	  memcpy(hdr, mac_hdr, mac_len);
+	  maxHdrLen -= mac_len;
+	  uint32_t payloadBytes = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
+	  memcpy(hdr + mac_len, cap_hdr, payloadBytes);
+	  hdrElem.flowType.header.header_length = payloadBytes + mac_len;
+	  hdrElem.flowType.header.header_bytes = hdr;
+	  hdrElem.flowType.header.frame_length += mac_len;
+	}
+	else {
+	  // no need to copy - just point at the captured header
+	  u_char ipversion = cap_hdr[0] >> 4;
+	  if(ipversion != 4 && ipversion != 6) {
+	    if(debug) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
+	  }
+	  else {
+	    if(mac_len == 0) {
+	      // assume ethernet was (or will be) the framing
+	      mac_len = 14;
+	    }
+	    hdrElem.flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
+	    hdrElem.flowType.header.stripped += mac_len;
+	    hdrElem.flowType.header.header_length = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
+	    hdrElem.flowType.header.header_bytes = cap_hdr;
+	    hdrElem.flowType.header.frame_length += mac_len;
+	  }
+	}
+		    
+	SFLADD_ELEMENT(&fs, &hdrElem);
+	// submit the actual sampling rate so it goes out with the sFlow feed
+	// otherwise the sampler object would fill in his own (sub-sampling) rate.
+	// If it's a switch port then samplerNIO->sampling_n will be set, so that
+	// takes precendence (allows different ports to have different sampling
+	// settings).
+	uint32_t actualSamplingRate = samplerNIO->sampling_n ?: sampling_n;
+	fs.sampling_rate = actualSamplingRate;
+		    
+	// estimate the sample pool from the samples.  Could maybe do this
+	// above with the (possibly more granular) ulogSamplingRate, but then
+	// we would have to look up the sampler object every time, which
+	// might be too expensive in the case where ulogSamplingRate==1.
+	sampler->samplePool += actualSamplingRate;
+		    
+	// accumulate any dropped-samples we detected against whichever sampler
+	// sends the next sample. This is not perfect,  but is likely to accrue
+	// drops against the point whose sampling-rate needs to be adjusted.
+	samplerNIO->netlink_drops += drops;
+	fs.drops = samplerNIO->netlink_drops;
+	sfl_sampler_writeFlowSample(sampler, &fs);
+      }
+    }
+  }
+
+
   /*_________________---------------------------__________________
     _________________      readPackets          __________________
     -----------------___________________________------------------
   */
 
-  int readPackets(HSP *sp)
+#ifdef HSF_ULOG
+
+  int readPackets_ulog(HSP *sp)
   {
     int batch = 0;
     static uint32_t MySkipCount=1;
@@ -175,10 +321,15 @@ extern "C" {
       return 0;
     }
 
+#ifdef HSP_SWITCHPORT_CONFIG
+    // assume sampling is always-on and ignore the
+    // subSamplingRate field.
+#else
     if(sp->sFlow->sFlowSettings->ulogSubSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
       return 0;
     }
+#endif
 
     if(sp->ulog_soc) {
       for( ; batch < HSP_READPACKET_BATCH; batch++) {
@@ -226,7 +377,11 @@ extern "C" {
 
 	      if(--MySkipCount == 0) {
 		/* reached zero. Set the next skip */
+#ifdef HSP_SWITCHPORT_CONFIG
+		MySkipCount = 1;
+#else
 		MySkipCount = sfl_random((2 * sp->sFlow->sFlowSettings->ulogSubSamplingRate) - 1);
+#endif
 
 		/* and take a sample */
 
@@ -238,163 +393,186 @@ extern "C" {
 		ulog_packet_msg_t *pkt = NLMSG_DATA(msg);
 		
 		if(debug > 1) {
-		  myLog(LOG_INFO, "mark=%u ts=%s hook=%u in=%s out=%s len=%u prefix=%s maclen=%u",
+		  myLog(LOG_INFO, "ULOG mark=%u ts=%s prefix=%s",
 			pkt->mark,
 			ctime(&pkt->timestamp_sec),
-			pkt->hook,
-			pkt->indev_name,
-			pkt->outdev_name,
-			pkt->data_len,
-			pkt->prefix,
-			pkt->mac_len);
-		  if(pkt->mac_len == 14) {
-		    u_char macdst[12], macsrc[12];
-		    printHex(pkt->mac+6,6,macsrc,12,NO);
-		    printHex(pkt->mac+0,6,macdst,12,NO);
-		    uint16_t ethtype = (pkt->mac[12] << 8) + pkt->mac[13];
-		    myLog(LOG_INFO, "%s -> %s (ethertype=0x%04X)", macsrc, macdst, ethtype);
-		  }
+			pkt->prefix);
 		}
 
-		
-		SFL_FLOW_SAMPLE_TYPE fs = { 0 };
-	
-		SFLAdaptor *sampler_dev = NULL;
-                int inIsLoopback=0, outIsLoopback=0;
- 
-		// set the ingress and egress ifIndex numbers.
-		// Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
+
+
+		SFLAdaptor *dev_in = NULL;
+		SFLAdaptor *dev_out = NULL;
+
 		if(pkt->indev_name[0]) {
-		  SFLAdaptor *in = adaptorListGet(sp->adaptorList, pkt->indev_name);
-		  if(in) {
-		    fs.input = in->ifIndex;
-                    // record whether this was a loopback or not - used below
-                    HSPAdaptorNIO *inNIO = (HSPAdaptorNIO *)in->userData;
-                    inIsLoopback = inNIO->loopback;
-#ifdef HSF_CUMULUS
-                    // On Cumulus Linux the sampling direction is indicated in the low
-                    // bit of the pkt->hook field: 0==ingress,1==egress
-                    if((pkt->hook & 1) == 0) {
-                      sampler_dev = in;
-                    }
-#else
-                    // set this provisionally - may be overidden below
-	            sampler_dev = in;
-#endif
-		  }
-		}
-		else {
-		  fs.input = SFL_INTERNAL_INTERFACE;
+		  dev_in = adaptorListGet(sp->adaptorList, pkt->indev_name);
 		}
 		if(pkt->outdev_name[0]) {
-		  SFLAdaptor *out = adaptorListGet(sp->adaptorList, pkt->outdev_name);
-		  if(out && out->ifIndex) {
-		    fs.output = out->ifIndex;
-                    HSPAdaptorNIO *outNIO = (HSPAdaptorNIO *)out->userData;
-                    outIsLoopback = outNIO->loopback;
-#ifdef HSF_CUMULUS
-                    // On Cumulus Linux the sampling direction is indicated in the low
-                    // bit of the pkt->hook field: 0==ingress,1==egress
-                    if((pkt->hook & 1) == 1) {
-                      sampler_dev = out;
-                    }
-#else
-                    // If one of them is not a loopback interface, then assume the
-                    // sample was taken there.  In a typical scenario most samples
-	            // will be "lo" -> "eth0" or "eth0" -> "lo", so this ensures that
-                    // that we make that look like bidirectional sampling on eth0.
-                    if(sampler_dev == NULL
-                       || (inIsLoopback && !outIsLoopback)) {
-		      sampler_dev = out;
-                    }
-#endif
-		  }
-		}
-		else {
-		  fs.output = SFL_INTERNAL_INTERFACE;
+		  dev_out = adaptorListGet(sp->adaptorList, pkt->outdev_name);
 		}
 
-		// must have a sampler_dev with an ifIndex
-		if(sampler_dev && sampler_dev->ifIndex) {
-                  HSPAdaptorNIO *samplerNIO = (HSPAdaptorNIO *)sampler_dev->userData;
-
-                  if(debug > 2) {
-                    myLog(LOG_INFO, "selected sampler %s (loopback in=%d out=%d)",
-                          sampler_dev->deviceName, 
-                          inIsLoopback,
-                          outIsLoopback);
-                  }
-
-		  SFLSampler *sampler = getSampler(sp, sampler_dev);
-		  
-		  if(sampler) {
-		    SFLFlow_sample_element hdrElem = { 0 };
-		    hdrElem.tag = SFLFLOW_HEADER;
-		    uint32_t FCS_bytes = 4;
-		    uint32_t maxHdrLen = sampler->sFlowFsMaximumHeaderSize;
-		    hdrElem.flowType.header.frame_length = pkt->data_len + FCS_bytes;
-		    hdrElem.flowType.header.stripped = FCS_bytes;
-		    
-		    u_char hdr[HSP_MAX_HEADER_BYTES];
-		    
-		    if(pkt->mac_len == 14) {
-		      // set the header_protocol to ethernet and
-		      // reunite the mac header and payload in one buffer
-		      hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
-		      memcpy(hdr, pkt->mac, 14);
-		      maxHdrLen -= 14;
-		      uint32_t payloadBytes = (pkt->data_len < maxHdrLen) ? pkt->data_len : maxHdrLen;
-		      memcpy(hdr+14, pkt->payload, payloadBytes);
-		      hdrElem.flowType.header.header_length = payloadBytes + 14;
-		      hdrElem.flowType.header.header_bytes = hdr;
-		      hdrElem.flowType.header.frame_length += 14;
-		    }
-		    else {
-		      // no need to copy - just point at the payload
-		      u_char ipversion = pkt->payload[0] >> 4;
-		      if(ipversion != 4 && ipversion != 6) {
-			if(debug) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
-		      }
-		      else {
-			hdrElem.flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
-			hdrElem.flowType.header.stripped += 14; // assume ethernet was (or will be) the framing
-			hdrElem.flowType.header.header_length = (pkt->data_len < maxHdrLen) ? pkt->data_len : maxHdrLen;
-			hdrElem.flowType.header.header_bytes = pkt->payload;
-		      }
-		    }
-		    
-		    SFLADD_ELEMENT(&fs, &hdrElem);
-		    // submit the actual sampling rate so it goes out with the sFlow feed
-		    // otherwise the sampler object would fill in his own (sub-sampling) rate.
-		    // If it's a switch port then samplerNIO->sampling_n will be set, so that
-		    // takes precendence (allows different ports to have different sampling
-		    // settings).
-		    uint32_t actualSamplingRate = samplerNIO->sampling_n ?: sp->sFlow->sFlowSettings->ulogActualSamplingRate;
-		    fs.sampling_rate = actualSamplingRate;
-		    
-		    // estimate the sample pool from the samples.  Could maybe do this
-		    // above with the (possibly more granular) ulogSamplingRate, but then
-		    // we would have to look up the sampler object every time, which
-		    // might be too expensive in the case where ulogSamplingRate==1.
-		    sampler->samplePool += actualSamplingRate;
-		    
-                    // accumulate any dropped-samples we detected against whichever sampler
-                    // sends the next sample. This is not perfect,  but is likely to accrue
-                    // drops against the point whose sampling-rate needs to be adjusted.
-                    samplerNIO->ulog_drops += droppedSamples;
-                    fs.drops = samplerNIO->ulog_drops;
-		    sfl_sampler_writeFlowSample(sampler, &fs);
-		  }
-		}
+		takeSample(sp,
+			   dev_in,
+			   dev_out,
+			   pkt->hook,
+			   pkt->mac,
+			   pkt->mac_len,
+			   pkt->payload,
+			   pkt->data_len, /* length of captured payload */
+			   pkt->data_len, /* length of packet (pdu) */
+			   droppedSamples,
+			   sp->sFlow->sFlowSettings->ulogActualSamplingRate);
 	      }
 	    }
-	  } 
+	  }
 	}
       }
     }
     return batch;
   }
 
+#endif
+
+#ifdef HSF_NFLOG
+
+  int readPackets_nflog(HSP *sp)
+  {
+    int batch = 0;
+    static uint32_t MySkipCount=1;
+    
+    if(sp->sFlow->sFlowSettings == NULL) {
+      // config was turned off
+      return 0;
+    }
+
+
+#ifdef HSP_SWITCHPORT_CONFIG
+    // assume sampling is always-on and ignore the
+    // subSamplingRate field.
+#else
+    if(sp->sFlow->sFlowSettings->nflogSubSamplingRate == 0) {
+      // packet sampling was disabled by setting desired rate to 0
+      return 0;
+    }
+#endif
+    
+    if(sp->nflog_soc) {
+      for( ; batch < HSP_READPACKET_BATCH; batch++) {
+	u_char buf[HSP_MAX_NFLOG_MSG_BYTES];
+	int len = nfnl_recv(sp->nfnl,
+			    buf,
+			    HSP_MAX_NFLOG_MSG_BYTES);
+	if(len <= 0) break;
+	if(debug > 1) myLog(LOG_INFO, "got NFLOG msg: %u bytes", len);
+	for(struct nlmsghdr *msg = (struct nlmsghdr *)buf; NLMSG_OK(msg, len); msg=NLMSG_NEXT(msg, len)) {
+	  if(debug > 1) {
+	    myLog(LOG_INFO, "netlink (%u bytes left) msg [len=%u type=%u flags=0x%x seq=%u pid=%u]",
+		  len,
+		  msg->nlmsg_len,
+		  msg->nlmsg_type,
+		  msg->nlmsg_flags,
+		  msg->nlmsg_seq,
+		  msg->nlmsg_pid);
+	  }
+
+          // check for drops indicated by sequence no
+          uint32_t droppedSamples = 0;
+          if(sp->nflog_seqno) {
+            droppedSamples = msg->nlmsg_seq - sp->nflog_seqno - 1;
+            if(droppedSamples) {
+              sp->nflog_drops += droppedSamples;
+            }
+          }
+          sp->nflog_seqno = msg->nlmsg_seq;
+
+	  switch(msg->nlmsg_type) {
+	  case NLMSG_NOOP:
+	  case NLMSG_ERROR:
+	  case NLMSG_OVERRUN:
+	    // ignore these
+	    break;
+	  case NLMSG_DONE: // last in multi-part
+	  default:
+	    {
+	      struct nfgenmsg *genmsg;
+	      struct nfattr *attr = nfnl_parse_hdr(sp->nfnl, msg, &genmsg);
+	      if(attr == NULL) {
+		continue;
+	      }
+	      int min_len = NLMSG_SPACE(sizeof(struct nfgenmsg));
+	      int attr_len = msg->nlmsg_len - NLMSG_ALIGN(min_len);
+	      struct nfattr *tb[NFULA_MAX] = { 0 };
+
+	      while (NFA_OK(attr, attr_len)) {
+		if (NFA_TYPE(attr) <= NFULA_MAX) {
+		  tb[NFA_TYPE(attr)-1] = attr;
+		  if(debug > 2) myLog(LOG_INFO, "found attr %d\n", NFA_TYPE(attr));
+		}
+                attr = NFA_NEXT(attr,attr_len);
+	      }
+	      // get the essential fields so we know this is really a packet we can sample
+	      struct nfulnl_msg_packet_hdr *msg_pkt_hdr = nfnl_get_pointer_to_data(tb, NFULA_PACKET_HDR, struct nfulnl_msg_packet_hdr);
+	      u_char *cap_hdr = nfnl_get_pointer_to_data(tb, NFULA_PAYLOAD, u_char);
+	      int cap_len = NFA_PAYLOAD(tb[NFULA_PAYLOAD-1]);
+	      if(msg_pkt_hdr == NULL
+		 || cap_hdr == NULL
+		 || cap_len <= 0) {
+		// not a packet header msg, or no captured payload found
+		continue;
+	      }
+
+	      if(--MySkipCount == 0) {
+		/* reached zero. Set the next skip */
+#ifdef HSP_SWITCHPORT_CONFIG
+		MySkipCount = 1;
+#else
+		MySkipCount = sfl_random((2 * sp->sFlow->sFlowSettings->nflogSubSamplingRate) - 1);
+#endif
+		
+		/* and take a sample */
+		char *prefix = nfnl_get_pointer_to_data(tb, NFULA_PREFIX, char);
+		uint32_t ifin_phys = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_PHYSINDEV, uint32_t));
+		uint32_t ifout_phys = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_PHYSOUTDEV, uint32_t));
+		uint32_t ifin = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_INDEV, uint32_t));
+		uint32_t ifout = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_OUTDEV, uint32_t));
+		u_char *mac_hdr = nfnl_get_pointer_to_data(tb, NFULA_HWHEADER, u_char);
+		uint16_t mac_len = ntohs(nfnl_get_data(tb, NFULA_HWLEN, uint16_t));
+		uint32_t mark = ntohl(nfnl_get_data(tb, NFULA_MARK, uint32_t));
+		uint32_t seq = ntohl(nfnl_get_data(tb, NFULA_SEQ, uint32_t));
+		uint32_t seq_global = ntohl(nfnl_get_data(tb, NFULA_SEQ_GLOBAL, uint32_t));
+
+		if(debug > 1) { 
+		  myLog(LOG_INFO, "NFLOG prefix: %s in: %u (phys=%u) out: %u (phys=%u) seq: %u seq_global: %u mark: %u\n",
+			prefix,
+			ifin,
+			ifin_phys,
+			ifout,
+			ifout_phys,
+			seq,
+			seq_global,
+			mark);
+		}
+
+		takeSample(sp,
+			   adaptorListGet_ifIndex(sp->adaptorList, (ifin_phys ?: ifin)),
+			   adaptorListGet_ifIndex(sp->adaptorList, (ifout_phys ?: ifout)),
+			   msg_pkt_hdr->hook,
+			   mac_hdr,
+			   mac_len,
+			   cap_hdr,
+			   cap_len, /* length of captured payload */
+			   cap_len, /* length of packet (pdu) */
+			   droppedSamples,
+			   sp->sFlow->sFlowSettings->nflogActualSamplingRate);
+	      }
+	    }
+	  }
+	}
+      }
+    }
+    return batch;
+  }
+#endif
 
   /*_________________---------------------------__________________
     _________________   configSwitchPorts       __________________
@@ -444,7 +622,7 @@ extern "C" {
   }
 
 
-#endif /* HSF_ULOG */
+#endif /* HSF_ULOG || HSF_NFLOG */
   
 #if defined(__cplusplus)
 } /* extern "C" */

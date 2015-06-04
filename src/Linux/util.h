@@ -161,6 +161,7 @@ extern "C" {
   void adaptorListMarkAll(SFLAdaptorList *adList);
   int adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
+  SFLAdaptor *adaptorListGet_ifIndex(SFLAdaptorList *adList, uint32_t ifIndex);
   SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
 
   // file utils
