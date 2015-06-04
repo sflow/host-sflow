@@ -552,7 +552,6 @@ extern "C" {
     int nflog_soc;
     uint32_t nflog_seqno;
     uint32_t nflog_drops;
-    struct sockaddr_nl nflog_peer;
 #endif // HSG_NFLOG
 
 #ifdef HSP_SWITCHPORT_REGEX
