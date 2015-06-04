@@ -101,8 +101,9 @@ else
 	XEN_DDK=no
 endif
 
-# if LIBVIRT is not set, then assume it should be "yes" if we find the include file.
-# it would be stronger to test for the libvirt-devel rpm? or look for /usr/include/libvirt/libvirt.h?
+# if LIBVIRT is not set, then assume it should be "yes" if we find the library.
+# Could test for the include file too,  but somtimes it is there even if the
+# library is not.  Testing for libvirt-dev[el] might be better.
 ifeq ($(LIBVIRT),)
 	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
 endif
