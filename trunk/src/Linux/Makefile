@@ -19,13 +19,25 @@ SFLOWDIR=../sflow
 CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
 LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 
-# if ULOG is not set, assume it should be "yes".
+# if ULOG is not set, assume it should be "yes" if the include file is present
 # (So you can use "make ULOG=no" to compile without this feature)
 ifeq ($(ULOG),)
-	ULOG=yes
+	ULOG=$(shell if test -r /usr/include/linux/netfilter_ipv4/ipt_ULOG.h; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(ULOG),yes)
 	CFLAGS += -DHSF_ULOG
+endif
+
+# if NFLOG is not set, assume it should be "yes" if the include file is present
+# (So you can use "make NFLOG=no" to compile without this feature)
+ifeq ($(NFLOG),)
+	NFLOG=$(shell if test -r /usr/include/libnfnetlink/libnfnetlink.h; then echo "yes"; else echo "no"; fi)
+endif
+ifeq ($(NFLOG),yes)
+#	CFLAGS += -I/usr/include/libnl3 -DHSF_NFLOG
+#	LIBS += -lnl-3 -lnl-nf-3
+	CFLAGS += -I/usr/include/libnfnetlink -DHSF_NFLOG
+	LIBS += -lnfnetlink
 endif
 
 # make the inclusion of sflowovsd options
@@ -89,7 +101,7 @@ else
 	XEN_DDK=no
 endif
 
-# if LIBVIRT is not set, then assume it should be "yes" if we find the /usr/lib/libvirt.so library. Maybe
+# if LIBVIRT is not set, then assume it should be "yes" if we find the include file.
 # it would be stronger to test for the libvirt-devel rpm? or look for /usr/include/libvirt/libvirt.h?
 ifeq ($(LIBVIRT),)
 	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)

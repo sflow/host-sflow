@@ -875,8 +875,14 @@ extern int debug;
 	  case HSPTOKEN_ULOGGROUP:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
 	    break;
+	  case HSPTOKEN_NFLOGGROUP:
+	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->nflogGroup, 1, 0xFFFFFFFF)) == NULL) return NO;
+	    break;
 	  case HSPTOKEN_ULOGPROBABILITY:
 	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
+	    break;
+	  case HSPTOKEN_NFLOGPROBABILITY:
+	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->nflogProbability, 0.0, 1.0)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_JSONPORT:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
@@ -959,6 +965,9 @@ extern int debug;
     
     if(sp->sFlow->sFlowSettings_file->ulogProbability > 0) {
       sp->sFlow->sFlowSettings_file->ulogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->ulogProbability);
+    }
+    if(sp->sFlow->sFlowSettings_file->nflogProbability > 0) {
+      sp->sFlow->sFlowSettings_file->nflogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->nflogProbability);
     }
     
     return parseOK;

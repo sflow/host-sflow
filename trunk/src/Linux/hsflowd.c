@@ -20,7 +20,7 @@ extern "C" {
   extern int daemonize;
 
   static void installSFlowSettings(HSPSFlow *sf, HSPSFlowSettings *settings);
-  static void setUlogSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings);
+  static void setPacketSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings);
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -1734,7 +1734,7 @@ extern "C" {
 	}
 	if(ad_added || ad_cameup || ad_wentdown || ad_changed) {
 	  // set sampling rates again because ifSpeeds may have changed
-	  setUlogSamplingRates(sp->sFlow, sp->sFlow->sFlowSettings);
+	  setPacketSamplingRates(sp->sFlow, sp->sFlow->sFlowSettings);
 	}
       }
 
@@ -1814,6 +1814,79 @@ extern "C" {
     }
   }
 #endif
+
+#ifdef HSF_NFLOG
+
+  /*_________________---------------------------__________________
+    _________________     openNFLOG             __________________
+    -----------------___________________________------------------
+  */
+
+  static int bind_group_nflog(struct nfnl_handle *nfnl, uint32_t group)
+  {
+    // need a sub-system handle too.  Seems odd that it's still called NFNL_SUBSYS_ULOG,  but this
+    // works so I'm not arguing:
+    struct nfnl_subsys_handle *subsys = nfnl_subsys_open(nfnl, NFNL_SUBSYS_ULOG, NFULNL_MSG_MAX, 0);
+    if(!subsys) {
+      myLog(LOG_ERR, "NFLOG nfnl_subsys_open() failed: %s", strerror(errno));
+      return NO;
+    }
+    /* These details were borrowed from libnetfilter_log.c */
+    union {
+      char buf[NFNL_HEADER_LEN
+	       +NFA_LENGTH(sizeof(struct nfulnl_msg_config_cmd))];
+      struct nlmsghdr nmh;
+    } u;
+    struct nfulnl_msg_config_cmd cmd;
+    nfnl_fill_hdr(subsys, &u.nmh, 0, 0, group,
+		  NFULNL_MSG_CONFIG, NLM_F_REQUEST|NLM_F_ACK);
+    cmd.command =  NFULNL_CFG_CMD_BIND;
+    nfnl_addattr_l(&u.nmh, sizeof(u), NFULA_CFG_CMD, &cmd, sizeof(cmd));
+    if(nfnl_query(nfnl, &u.nmh) < 0) {
+      myLog(LOG_ERR, "NFLOG bind group failed: %s", strerror(errno));
+      return NO;
+    }
+    return YES;
+  }
+
+  static void openNFLOG(HSP *sp)
+  {
+    // open the netfilter socket to ULOG
+    sp->nfnl = nfnl_open();
+    if(sp->nfnl == NULL) {
+      myLog(LOG_ERR, "nfnl_open() failed: %s\n", strerror(errno));
+      return;
+    }
+
+    /* subscribe to group  */
+    if(!bind_group_nflog(sp->nfnl, sp->sFlow->sFlowSettings_file->nflogGroup)) {
+      myLog(LOG_ERR, "bind_group_nflog() failed\n");
+      return;
+    }      
+ 
+    // increase receiver buffer size
+    nfnl_set_rcv_buffer_size(sp->nfnl, HSP_NFLOG_RCV_BUF);
+
+    // get the fd
+    sp->nflog_soc = nfnl_fd(sp->nfnl);
+    if(debug) myLog(LOG_INFO, "NFLOG socket fd=%d", sp->nflog_soc);
+ 
+    // set the socket to non-blocking
+    int fdFlags = fcntl(sp->nflog_soc, F_GETFL);
+    fdFlags |= O_NONBLOCK;
+    if(fcntl(sp->nflog_soc, F_SETFL, fdFlags) < 0) {
+      myLog(LOG_ERR, "NFLOG fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+    }
+      
+    // make sure it doesn't get inherited, e.g. when we fork a script
+    fdFlags = fcntl(sp->nflog_soc, F_GETFD);
+    fdFlags |= FD_CLOEXEC;
+    if(fcntl(sp->nflog_soc, F_SETFD, fdFlags) < 0) {
+      myLog(LOG_ERR, "NFLOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
+    }
+  }
+
+#endif // HSF_NFLOG
 
 #ifdef HSF_JSON
   /*_________________---------------------------__________________
@@ -1979,6 +2052,13 @@ extern "C" {
       // ULOG group is set, so open the netfilter
       // socket to ULOG while we are still root
       openULOG(sp);
+    }
+#endif
+#ifdef HSF_NFLOG
+    if(sp->sFlow->sFlowSettings_file->nflogGroup != 0) {
+      // ULOG group is set, so open the netfilter
+      // socket to ULOG while we are still root
+      openNFLOG(sp);
     }
 #endif
 
@@ -2213,34 +2293,31 @@ extern "C" {
     return UTStrBuf_unwrap(buf);
   }
 
-  /*_________________---------------------------__________________
-    _________________   setUlogSamplingRates    __________________
-    -----------------___________________________------------------
+
+#ifdef HSP_SWITCHPORT_CONFIG
+  /*_________________-------------------------------__________________
+    _________________   setSwitchPortSamplingRates  __________________
+    -----------------_______________________________------------------
   */
   
-#ifdef HSP_SWITCHPORT_CONFIG
   static int execOutputLine(void *magic, char *line) {
     char *prefix = (char *)magic;
     if(debug) myLog(LOG_INFO, "%s: %s", prefix, line);
     return YES;
   }
-#endif
   
-  static void setUlogSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings)
+  static void setSwitchPortSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings, uint32_t logGroup)
   {
-#ifdef HSP_SWITCHPORT_CONFIG
-    // We get to set the hardware sampling rate here, so do that and then force
-    // the ulog settings to reflect it (so that the sub-sampling rate is 1:1)
     UTStringArray *cmdline = strArrayNew();
     strArrayAdd(cmdline, HSP_SWITCHPORT_CONFIG_PROG);
-    // usage:  <prog> <interface> <ingress-rate> <egress-rate> <ulogGroup>
+    // usage:  <prog> <interface> <ingress-rate> <egress-rate> <logGroup>
 #define HSP_MAX_TOK_LEN 16
     strArrayAdd(cmdline, NULL); // placeholder for port name in slot 1
     strArrayAdd(cmdline, "0");  // placeholder for ingress sampling
     strArrayAdd(cmdline, "0");  // placeholder for egress sampling
-    char uloggrp[HSP_MAX_TOK_LEN];
-    snprintf(uloggrp, HSP_MAX_TOK_LEN, "%u", sf->sFlowSettings_file->ulogGroup);
-    strArrayAdd(cmdline, uloggrp);
+    char loggrp[HSP_MAX_TOK_LEN];
+    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", logGroup);
+    strArrayAdd(cmdline, loggrp);
 #define HSP_MAX_EXEC_LINELEN 1024
     char outputLine[HSP_MAX_EXEC_LINELEN];
     SFLAdaptorList *adaptorList = sf->myHSP->adaptorList;
@@ -2272,9 +2349,21 @@ extern "C" {
       }
     }
     strArrayFree(cmdline);
+  }
+#endif // HSP_SWITCHPORT_CONFIG
 
-    // now force the ulogSamplingRate setting,  then drop into the normal logic below
-    sf->sFlowSettings_file->ulogSamplingRate = settings->samplingRate;
+
+  /*_________________---------------------------__________________
+    _________________   setPacketSamplingRates    __________________
+    -----------------___________________________------------------
+  */
+  
+  static void setPacketSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings)
+  {
+#ifdef HSP_SWITCHPORT_CONFIG
+    // We get to set the hardware sampling rate here, so do that and then force
+    // the ulog settings to reflect it (so that the sub-sampling rate is 1:1)
+    setSwitchPortSamplingRates(sf, settings, sf->sFlowSettings_file->ulogGroup);
 #endif // HSP_SWITCHPORT_CONFIG
 
     // calculate the ULOG sub-sampling rate to use.  We may get the local ULOG sampling-rate
@@ -2291,6 +2380,20 @@ extern "C" {
       // and pre-calculate the actual sampling rate that we will end up applying
       settings->ulogActualSamplingRate = settings->ulogSubSamplingRate * ulogsr;
     }
+
+    // repeat for nflog settings
+    uint32_t nflogsr = sf->sFlowSettings_file->nflogSamplingRate;
+    if(nflogsr == 0) {
+      // assume we have to do all sampling in user-space
+      settings->nflogSubSamplingRate = settings->nflogActualSamplingRate = settings->samplingRate;
+    }
+    else {
+      // use an integer divide to get the sub-sampling rate, but make sure we round up
+      settings->nflogSubSamplingRate = (settings->samplingRate + nflogsr - 1) / nflogsr;
+      // and pre-calculate the actual sampling rate that we will end up applying
+      settings->nflogActualSamplingRate = settings->nflogSubSamplingRate * nflogsr;
+    }
+
   }
 
   /*_________________---------------------------__________________
@@ -2311,7 +2414,7 @@ extern "C" {
     // the point where the config is settled (otherwise we could have moved
     // this into the block below and only executed it when the config changed).
     if(settings && sf->sFlowSettings_file) {
-      setUlogSamplingRates(sf, settings);
+      setPacketSamplingRates(sf, settings);
     }
     
     char *settingsStr = sFlowSettingsString(sf, settings);
@@ -2720,7 +2823,7 @@ extern "C" {
   {
     HSP *sp = &HSPSamplingProbe;
     
-#if (HSF_ULOG || HSF_JSON)
+#if (HSF_ULOG || HSF_NFLOG || HSF_JSON)
     fd_set readfds;
     FD_ZERO(&readfds);
 #endif
@@ -3066,12 +3169,18 @@ extern "C" {
       // around and check for ticks/signals several times per second
 #define HSP_SELECT_TIMEOUT_uS 200000
 
-#if (HSF_ULOG || HSF_JSON)
+#if (HSF_ULOG || HSF_NFLOG || HSF_JSON)
       int max_fd = 0;
 #ifdef HSF_ULOG
       if(sp->ulog_soc > 0) {
 	if(sp->ulog_soc > max_fd) max_fd = sp->ulog_soc;
 	FD_SET(sp->ulog_soc, &readfds);
+      }
+#endif
+#ifdef HSF_NFLOG
+      if(sp->nflog_soc > 0) {
+	if(sp->nflog_soc > max_fd) max_fd = sp->nflog_soc;
+	FD_SET(sp->nflog_soc, &readfds);
       }
 #endif
 #ifdef HSF_JSON
@@ -3114,11 +3223,21 @@ extern "C" {
       // callbacks need to be non-blocking when they read from the socket
 #ifdef HSF_ULOG
       if(sp->ulog_soc > 0 && FD_ISSET(sp->ulog_soc, &readfds)) {
-        int batch = readPackets(sp);
+        int batch = readPackets_ulog(sp);
         if(debug) {
-          if(debug > 1) myLog(LOG_INFO, "readPackets batch=%d", batch);
-          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets got max batch (%d)", batch);
+          if(debug > 1) myLog(LOG_INFO, "readPackets_ulog batch=%d", batch);
+          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_ulog got max batch (%d)", batch);
         }
+      }
+#endif
+#ifdef HSF_NFLOG
+      if(sp->nflog_soc > 0 && FD_ISSET(sp->nflog_soc, &readfds)) {
+        int batch = readPackets_nflog(sp);
+        if(debug) {
+          if(debug > 1) myLog(LOG_INFO, "readPackets_nflog batch=%d", batch);
+          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_nflog got max batch (%d)", batch);
+	}
+
       }
 #endif
 #ifdef HSF_JSON
@@ -3133,9 +3252,9 @@ extern "C" {
       }
 #endif
 
-#else /* (HSF_ULOG || HSF_JSON) */
+#else /* (HSF_ULOG || HSF_NFLOG || HSF_JSON) */
       my_usleep(HSP_SELECT_TIMEOUT_uS);
-#endif /* (HSF_ULOG || HSF_JSON) */
+#endif /* (HSF_ULOG || HSF_NFLOG || HSF_JSON) */
     }
 
     // get here if a signal kicks the state to HSPSTATE_END
