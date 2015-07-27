@@ -114,8 +114,9 @@ else
   # if XEN_DDK is not set, then assume it should be "yes" if we are on a Xenserver DDK (or equivalent) system.
   # Just test if the xenstore and xenctrl libs are present.
   ifeq ($(XEN_DDK),)
-	XEN_DDK=$(shell if ls /usr/lib/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib/libxenstore.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+	XEN_DDK=$(shell if ls /usr/lib*/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib*/libxenstore.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
   endif
+
   # to compile with xen-sources instead, specify XEN_ROOT.  e.g. XEN_ROOT=/root/xen-3.2.0
   ifeq ($(XEN_ROOT),)
   else
@@ -137,6 +138,15 @@ else
 	CFLAGS += -DHSF_XEN_VBD_PATH=$(HSF_XEN_VBD_PATH)
 endif
 
+# xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
+# /etc/redhat-release to get the version number as in xenserver-ddk/Makefile,  but then it
+# might not work properly for a XenSource build.  Seems safer to just check for the file:
+ifeq ($(XENSTORE_H),)
+	XENSTORE_H=$(shell if ls /usr/include/xenstore.h >/dev/null; then echo "yes"; else echo "no"; fi)
+endif
+ifeq ($(XENSTORE_H),yes)
+	CFLAGS += -DHSF_XENSTORE_H
+endif
 
 # control how to read disk info from libvirt
 ifeq ($(VRTDSKPATH),yes)

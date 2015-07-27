@@ -208,7 +208,7 @@ extern "C" {
 
     for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
       SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+      HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
       if(niostate->up
 	 && (niostate->switchPort == NO)
 	 && myAdaptors->num_adaptors < HSP_MAX_VIFS) {
@@ -531,7 +531,10 @@ extern "C" {
   {
     DIR *sysfsvbd = opendir(STRINGIFY_DEF(HSF_XEN_VBD_PATH));
     if(sysfsvbd == NULL) {
-      myLog(LOG_ERR, "opendir %s failed : %s", STRINGIFY_DEF(HSF_XEN_VBD_PATH), strerror(errno));
+      static int logcount = 0;
+      if(logcount++ < 3) {
+	myLog(LOG_ERR, "opendir %s failed : %s", STRINGIFY_DEF(HSF_XEN_VBD_PATH), strerror(errno));
+      }
       return 0;
     }
     int found = 0;

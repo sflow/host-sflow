@@ -43,7 +43,12 @@ extern "C" {
 #include "sflow_api.h"
 
 #ifdef HSF_XEN
+// xs.h because xenstore.h
+#ifdef HSF_XENSTORE_H
+#include "xenstore.h"
+#else
 #include "xs.h"
+#endif
 #include "xenctrl.h"
 #include "dirent.h"
 #include "regex.h" // for vif detection

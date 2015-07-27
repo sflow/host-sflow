@@ -15,7 +15,7 @@ RPM_RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC))
 
 # no changes below here
 RPMROOT := /usr/src/redhat
-ARCH := i386
+ARCH := $(shell uname -i)
 XENSERVER_VERSION := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$4)
 XENSERVER_BUILD := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$5)
 PACKAGE_NAME := $(shell sed -ne 's/^Name: *//p' $(SPEC))
