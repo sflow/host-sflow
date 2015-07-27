@@ -1,0 +1,14 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+Host sFlow Probe
+================
+hsflowtokens.h	        - keywords for the config file
+hsflowconfig.c	        - parser for the config file
+hsflowd.h		- structure definitions
+read*.c 		- code to read OS-specific counters
+hsflowd.c		- the Host sFlow daemon (main() is here)
+scripts/hsflowd         - script used by init(1) for starting/stopping daemon
+scripts/hsflowd.conf    - seed configuration file. "make install" will copy
+                          this to /etc/hsflowd.conf
+

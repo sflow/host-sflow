@@ -1,0 +1,47 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+To compile and install, try this:
+
+root> make
+root> make install
+
+Edit /etc/hsflowd.conf for configuration.  The options are
+described in the comments there.
+
+To start the daemon, run:
+
+root> /etc/init.d/hsflowd start
+
+and check the syslog (e.g. /var/log/messages) for errors.
+
+If Open VSwitch is running, starting sflowovsd will propagate
+sFlow configuration to the switch via ovs-vsctl(1):
+
+root> /etc/init.d/sflowovsd start
+
+To schedule these daemon(s) to start automatically on a reboot, try:
+
+% make schedule
+
+To run in the debugger, change the Makefile to compile with -g,
+recompile, and then run with the "-d" command line option to
+prevent daemonization:
+
+% gdb hsflowd
+gdb> set args -d
+gdb> r
+
+To build an rpm, try:
+
+% make rpm
+
+The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
+(where <ARCH> is i386 or x86_64 or ...)
+
+To build a Debian package, try:
+
+% make deb
+
+The hsflowd-<version>-<release>.deb package should appear
+in the current directory.
