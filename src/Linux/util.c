@@ -779,7 +779,7 @@ extern "C" {
     to "reimagine" the args.
   */
 
-  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen)
+  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen, int *pstatus)
   {
     int ans = YES;
     int pfd[2];
@@ -823,7 +823,7 @@ extern "C" {
 	}
       }
       fclose(ovs);
-      wait(NULL); // block here until child is done
+      waitpid(cpid, pstatus, 0); // block here until child is done
     }
     return ans;
   }

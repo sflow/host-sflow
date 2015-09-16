@@ -198,7 +198,8 @@ extern "C" {
 #ifdef HSF_CUMULUS
     // On Cumulus Linux the sampling direction is indicated in the low
     // bit of the pkt->hook field: 0==ingress,1==egress
-    if((hook & 1) == 1) {
+    if(ad_out &&
+       (hook & 1) == 1) {
       sampler_dev = ad_out;
     }
 #else
@@ -281,10 +282,13 @@ extern "C" {
 	SFLADD_ELEMENT(&fs, &hdrElem);
 	// submit the actual sampling rate so it goes out with the sFlow feed
 	// otherwise the sampler object would fill in his own (sub-sampling) rate.
-	// If it's a switch port then samplerNIO->sampling_n will be set, so that
+	// If it's a switch port then samplerNIO->sampling_n may be set, so that
 	// takes precendence (allows different ports to have different sampling
 	// settings).
-	uint32_t actualSamplingRate = samplerNIO->sampling_n ?: sampling_n;
+	uint32_t actualSamplingRate = sampling_n;
+	if(samplerNIO->sampling_n_set && samplerNIO->sampling_n) {
+	  actualSamplingRate = samplerNIO->sampling_n;
+	}
 	fs.sampling_rate = actualSamplingRate;
 		    
 	// estimate the sample pool from the samples.  Could maybe do this
@@ -321,15 +325,10 @@ extern "C" {
       return 0;
     }
 
-#ifdef HSP_SWITCHPORT_CONFIG
-    // assume sampling is always-on and ignore the
-    // subSamplingRate field.
-#else
     if(sp->sFlow->sFlowSettings->ulogSubSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
       return 0;
     }
-#endif
 
     if(sp->ulog_soc) {
       for( ; batch < HSP_READPACKET_BATCH; batch++) {
@@ -377,11 +376,8 @@ extern "C" {
 
 	      if(--MySkipCount == 0) {
 		/* reached zero. Set the next skip */
-#ifdef HSP_SWITCHPORT_CONFIG
-		MySkipCount = 1;
-#else
-		MySkipCount = sfl_random((2 * sp->sFlow->sFlowSettings->ulogSubSamplingRate) - 1);
-#endif
+		uint32_t sr = sp->sFlow->sFlowSettings->ulogSubSamplingRate;
+		MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
 
 		/* and take a sample */
 
@@ -446,15 +442,10 @@ extern "C" {
     }
 
 
-#ifdef HSP_SWITCHPORT_CONFIG
-    // assume sampling is always-on and ignore the
-    // subSamplingRate field.
-#else
     if(sp->sFlow->sFlowSettings->nflogSubSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
       return 0;
     }
-#endif
     
     if(sp->nflog_soc) {
       for( ; batch < HSP_READPACKET_BATCH; batch++) {
@@ -463,7 +454,14 @@ extern "C" {
 			    buf,
 			    HSP_MAX_NFLOG_MSG_BYTES);
 	if(len <= 0) break;
-	if(debug > 1) myLog(LOG_INFO, "got NFLOG msg: %u bytes", len);
+	if(debug > 1) {
+	  struct nlmsghdr *msg = (struct nlmsghdr *)buf;
+	  myLog(LOG_INFO, "got NFLOG msg: bytes_read=%u nlmsg_len=%u nlmsg_type=%u OK=%s",
+		len,
+		msg->nlmsg_len,
+		msg->nlmsg_type,
+		NLMSG_OK(msg, len) ? "true" : "false");
+	}
 	for(struct nlmsghdr *msg = (struct nlmsghdr *)buf; NLMSG_OK(msg, len); msg=NLMSG_NEXT(msg, len)) {
 	  if(debug > 1) {
 	    myLog(LOG_INFO, "netlink (%u bytes left) msg [len=%u type=%u flags=0x%x seq=%u pid=%u]",
@@ -506,7 +504,9 @@ extern "C" {
 	      while (NFA_OK(attr, attr_len)) {
 		if (NFA_TYPE(attr) <= NFULA_MAX) {
 		  tb[NFA_TYPE(attr)-1] = attr;
-		  if(debug > 2) myLog(LOG_INFO, "found attr %d\n", NFA_TYPE(attr));
+		  if(debug > 2) {
+		    myLog(LOG_INFO, "found attr %d attr_len=%d\n", NFA_TYPE(attr), attr_len);
+		  }
 		}
                 attr = NFA_NEXT(attr,attr_len);
 	      }
@@ -521,13 +521,14 @@ extern "C" {
 		continue;
 	      }
 
+	      if(debug > 2) {
+		myLog(LOG_INFO, "capture payload (cap_len)=%d\n", cap_len);
+	      }
+
 	      if(--MySkipCount == 0) {
 		/* reached zero. Set the next skip */
-#ifdef HSP_SWITCHPORT_CONFIG
-		MySkipCount = 1;
-#else
-		MySkipCount = sfl_random((2 * sp->sFlow->sFlowSettings->nflogSubSamplingRate) - 1);
-#endif
+		uint32_t sr = sp->sFlow->sFlowSettings->nflogSubSamplingRate;
+		MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
 		
 		/* and take a sample */
 		char *prefix = nfnl_get_pointer_to_data(tb, NFULA_PREFIX, char);

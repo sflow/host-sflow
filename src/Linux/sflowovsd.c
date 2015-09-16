@@ -559,7 +559,7 @@ extern "C" {
 	// now run a command to check (and possible change) the bridge sFlow setting
 	char *bridge_get_sflow_cmd[] = { SFVS_OVS_CMD, "get", "bridge", br, "sflow", NULL };
 	char line[SFVS_MAX_LINELEN];
-	if(myExec(sv, bridge_get_sflow_cmd, bridgeGetSFlow, line, SFVS_MAX_LINELEN) == NO) return NO;
+	if(myExec(sv, bridge_get_sflow_cmd, bridgeGetSFlow, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
       }
     }
     return YES;
@@ -627,7 +627,7 @@ extern "C" {
     // callback from myExec)
     sv->ovs10 = NO; // assume newer version
     sv->usingAtVar = NO;
-    myExec((void *)sv, version_cmd, readVersion, line, SFVS_MAX_LINELEN);
+    myExec((void *)sv, version_cmd, readVersion, line, SFVS_MAX_LINELEN, NULL);
     // adapt if OVS is upgraded under our feet
     if(sv->ovs10 == NO) sv->useAtVar = YES; 
     if(sv->config.error
@@ -646,7 +646,7 @@ extern "C" {
     }
     if(debug) myLog(LOG_INFO, "==== list sflow ====");
     char *list_sflow_cmd[] = { SFVS_OVS_CMD, "list", "sflow", NULL };
-    if(myExec((void *)sv, list_sflow_cmd, sFlowList, line, SFVS_MAX_LINELEN) == NO) return NO;
+    if(myExec((void *)sv, list_sflow_cmd, sFlowList, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
 
     if(sv->useAtVar) {
       // we can add the create at the end
@@ -659,7 +659,7 @@ extern "C" {
 	addCreateSFlow(sv);
 	logCmd(sv);
 	strArrayAdd(sv->cmd, NULL); // for execve(2)
-	if(myExec((void *)sv, strArray(sv->cmd), submitCreate, line, SFVS_MAX_LINELEN) == NO) return NO;
+	if(myExec((void *)sv, strArray(sv->cmd), submitCreate, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
 	resetCmd(sv);
       }
     }
@@ -667,7 +667,7 @@ extern "C" {
     // make sure every bridge is using this sFlow entry
     if(debug) myLog(LOG_INFO, "==== list bridge ====");
     char *list_bridge_cmd[] = { SFVS_OVS_CMD, "list", "bridge", NULL};
-    if(myExec((void *)sv, list_bridge_cmd, bridgeList, line, SFVS_MAX_LINELEN) == NO) return NO;
+    if(myExec((void *)sv, list_bridge_cmd, bridgeList, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
 
     // now it's safe to delete any extras that we found
     for(int ex = strArrayN(sv->extras); --ex >= 0; ) {
@@ -688,7 +688,7 @@ extern "C" {
     if(strArrayN(sv->cmd) > 1) {
       logCmd(sv);
       strArrayAdd(sv->cmd, NULL); // for execve(2)
-      if(myExec((void *)sv, strArray(sv->cmd), submitChanges, line, SFVS_MAX_LINELEN) == NO) return NO;
+      if(myExec((void *)sv, strArray(sv->cmd), submitChanges, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
       if(sv->usingAtVar && sv->cmdFailed == NO) {
         // remember that it worked at least once
         sv->usedAtVarOK = YES;

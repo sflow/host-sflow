@@ -142,7 +142,7 @@ endif
 # /etc/redhat-release to get the version number as in xenserver-ddk/Makefile,  but then it
 # might not work properly for a XenSource build.  Seems safer to just check for the file:
 ifeq ($(XENSTORE_H),)
-	XENSTORE_H=$(shell if ls /usr/include/xenstore.h >/dev/null; then echo "yes"; else echo "no"; fi)
+	XENSTORE_H=$(shell if ls /usr/include/xenstore.h 2>&1 >/dev/null; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(XENSTORE_H),yes)
 	CFLAGS += -DHSF_XENSTORE_H

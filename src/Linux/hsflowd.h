@@ -109,9 +109,11 @@ extern "C" {
 #define HSP_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
 #include "regex.h" // for switchport detection
 #define HSP_SWITCHPORT_REGEX "^swp[0-9s]+$"
-// uses ULOG (netlink) channel, so make sure that is enabled:
+  // uses ULOG (netlink) channel, so make sure that is enabled:
 #define HSF_ULOG 1
 #define HSP_DEFAULT_ULOG_GROUP 1
+  // starting in CL 2.5, uses NFLOG, also defaulting to group==1
+#define HSP_DEFAULT_NFLOG_GROUP 1
 #endif
 
 #if (HSF_ULOG || HSF_NFLOG)
@@ -125,19 +127,18 @@ extern "C" {
 #include <linux/netfilter_ipv4/ipt_ULOG.h>
 #define HSP_MAX_ULOG_MSG_BYTES 10000
 #define HSP_ULOG_RCV_BUF 8000000
-
-#ifndef HSP_DEFAULT_ULOG_GROUP
-#define HSP_DEFAULT_ULOG_GROUP 0
-#endif
-
 #endif /* HSF_ULOG */
 
 #ifdef HSF_NFLOG
-#define HSP_MAX_NFLOG_MSG_BYTES 10000
+/* Set this to 65K+ to make sure we handle the
+   case where virtual port TSOs coallesce packets
+   (ignoring MTU constraints). */
+#define HSP_MAX_NFLOG_MSG_BYTES 65536 + 128
 #define HSP_NFLOG_RCV_BUF 8000000
+
 #include <linux/netfilter/nfnetlink_log.h>
 #include <libnfnetlink.h>
-#endif
+#endif /* HSF_NFLOG */
 
 #ifdef HSF_JSON
 #include "cJSON.h"
@@ -182,6 +183,14 @@ extern "C" {
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
 #define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
 #define HSP_DEFAULT_CRASH_FILE "/etc/hsflowd.crash"
+
+#ifndef HSP_DEFAULT_ULOG_GROUP
+#define HSP_DEFAULT_ULOG_GROUP 0
+#endif
+#ifndef HSP_DEFAULT_NFLOG_GROUP
+#define HSP_DEFAULT_NFLOG_GROUP 0
+#endif
+#define HSP_DEFAULT_JSON_PORT 0
 
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
@@ -288,9 +297,6 @@ extern "C" {
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     uint32_t ulogGroup;
-#ifndef HSP_DEFAULT_ULOG_GROUP
-#define HSP_DEFAULT_ULOG_GROUP 0
-#endif
     double ulogProbability;
     uint32_t ulogSamplingRate;
     uint32_t ulogSubSamplingRate;
@@ -303,9 +309,6 @@ extern "C" {
     uint32_t nflogActualSamplingRate;
 
     uint32_t jsonPort;
-#ifndef HSP_DEFAULT_JSON_PORT
-#define HSP_DEFAULT_JSON_PORT 0
-#endif
     char *jsonFIFO;
     HSPCIDR *agentCIDRs;
   } HSPSFlowSettings;
@@ -438,9 +441,7 @@ extern "C" {
     // and those sending packet-samples will have a sampler.
     SFLSampler *sampler;
     uint32_t sampling_n;
-#ifdef HSP_SWITCHPORT_CONFIG
     uint32_t sampling_n_set;
-#endif
     uint32_t netlink_drops;
   } HSPAdaptorNIO;
 

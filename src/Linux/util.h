@@ -152,7 +152,7 @@ extern "C" {
 
   // calling execve()
   typedef int (*UTExecCB)(void *magic, char *line);
-  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen);
+  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen, int *pstatus);
 
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew(void);

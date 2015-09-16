@@ -7,6 +7,8 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
+
+  extern int debug;
   
 #ifdef HSF_CUMULUS
   /*_________________---------------------------__________________
@@ -37,6 +39,13 @@ extern "C" {
 
 #define HSF_BCM_FILES "/cumulus/switchd/run/"
 
+    struct stat statBuf;
+    if(stat(HSF_BCM_FILES, &statBuf) == -1) {
+      // don't include this structure at all if none of the data is there,
+      // which happens on "VX" virtual switches.
+      return NO;
+    }
+
     // hosts
     if(readOneIntFile(HSF_BCM_FILES "route_info/host/count", &scratch64)) bcm->bcm_host_entries = scratch64;
     if(readOneIntFile(HSF_BCM_FILES "route_info/host/max", &scratch64)) bcm->bcm_host_entries_max = scratch64;
@@ -45,7 +54,7 @@ extern "C" {
 
     // routing tables
     if(!readOneIntFile(HSF_BCM_FILES "route_info/route/mode", &mode)) {
-      myLog(LOG_ERR, "cannot read route-rable mode");
+      if(debug) myLog(LOG_INFO, "cannot read route-table mode");
     }
     if(mode == 1) {
       // (v4-v6, long-v6)

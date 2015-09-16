@@ -1469,7 +1469,7 @@ extern "C" {
 
       static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", NULL };
       char dockerLine[HSF_DOCKER_MAX_LINELEN];
-      if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN)) {
+      if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN, NULL)) {
 	// successful, now gather data for each one
 	UTStringArray *dockerInspect = strArrayNew();
 	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
@@ -1490,7 +1490,8 @@ extern "C" {
 			       strArray(dockerInspect),
 			       dockerInspectCB,
 			       dockerLine,
-			       HSF_DOCKER_MAX_LINELEN);
+			       HSF_DOCKER_MAX_LINELEN,
+			       NULL);
 	strArrayFree(dockerInspect);
 	char *ibuf = UTStrBuf_unwrap(inspectBuf);
 	if(inspectOK) {
@@ -2301,16 +2302,18 @@ extern "C" {
   /*_________________-------------------------------__________________
     _________________   setSwitchPortSamplingRates  __________________
     -----------------_______________________________------------------
+    return YES = hardware/kernel sampling configured OK
+    return NO  = hardware/kernel sampling not set - assume 1:1 on ULOG/NFLOG
   */
   
   static int execOutputLine(void *magic, char *line) {
-    char *prefix = (char *)magic;
-    if(debug) myLog(LOG_INFO, "%s: %s", prefix, line);
+    if(debug) myLog(LOG_INFO, "execOutputLine: %s", line);
     return YES;
   }
   
-  static void setSwitchPortSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings, uint32_t logGroup)
+  static int setSwitchPortSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings, uint32_t logGroup)
   {
+    int hw_sampling = YES;
     UTStringArray *cmdline = strArrayNew();
     strArrayAdd(cmdline, HSP_SWITCHPORT_CONFIG_PROG);
     // usage:  <prog> <interface> <ingress-rate> <egress-rate> <logGroup>
@@ -2339,8 +2342,21 @@ extern "C" {
 	    snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
 	    if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
 	    if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
-	    if(myExec("Switchport config output", strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN)) {
-	      niostate->sampling_n_set = niostate->sampling_n;
+	    int status;
+	    if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+	      if(WEXITSTATUS(status) != 0) {
+
+		myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
+		      HSP_SWITCHPORT_CONFIG_PROG,
+		      WEXITSTATUS(status));
+
+		hw_sampling = NO;
+		break;
+	      }
+	      else {
+		// hardware or kernel sampling was successfully configured
+		niostate->sampling_n_set = niostate->sampling_n;
+	      }
 	    }
 	    else {
 	      myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
@@ -2352,6 +2368,7 @@ extern "C" {
       }
     }
     strArrayFree(cmdline);
+    return hw_sampling;
   }
 #endif // HSP_SWITCHPORT_CONFIG
 
@@ -2363,21 +2380,26 @@ extern "C" {
   
   static void setPacketSamplingRates(HSPSFlow *sf, HSPSFlowSettings *settings)
   {
+    // set defaults assuming we will get 1:1 on ULOG or NFLOG and do our own sampling.
+    settings->ulogSubSamplingRate = settings->nflogSubSamplingRate = settings->samplingRate;
+    settings->ulogActualSamplingRate = settings->nflogActualSamplingRate = settings->samplingRate;
+
 #ifdef HSP_SWITCHPORT_CONFIG
     // We get to set the hardware sampling rate here, so do that and then force
     // the ulog settings to reflect it (so that the sub-sampling rate is 1:1)
-    setSwitchPortSamplingRates(sf, settings, sf->sFlowSettings_file->ulogGroup);
+    if(setSwitchPortSamplingRates(sf, settings, sf->sFlowSettings_file->ulogGroup)) {
+      // all sampling is done in the hardware
+      settings->ulogSubSamplingRate = settings->nflogSubSamplingRate = 1;
+      return;
+    }
+
 #endif // HSP_SWITCHPORT_CONFIG
 
     // calculate the ULOG sub-sampling rate to use.  We may get the local ULOG sampling-rate
     // from the probability setting in the config file and the desired sampling rate from DNS-SD,
     // so that's why we have to reconcile the two here.
     uint32_t ulogsr = sf->sFlowSettings_file->ulogSamplingRate;
-    if(ulogsr == 0) {
-      // assume we have to do all sampling in user-space
-      settings->ulogSubSamplingRate = settings->ulogActualSamplingRate = settings->samplingRate;
-    }
-    else {
+    if(ulogsr > 1) {
       // use an integer divide to get the sub-sampling rate, but make sure we round up
       settings->ulogSubSamplingRate = (settings->samplingRate + ulogsr - 1) / ulogsr;
       // and pre-calculate the actual sampling rate that we will end up applying
@@ -2386,11 +2408,7 @@ extern "C" {
 
     // repeat for nflog settings
     uint32_t nflogsr = sf->sFlowSettings_file->nflogSamplingRate;
-    if(nflogsr == 0) {
-      // assume we have to do all sampling in user-space
-      settings->nflogSubSamplingRate = settings->nflogActualSamplingRate = settings->samplingRate;
-    }
-    else {
+    if(nflogsr > 1) {
       // use an integer divide to get the sub-sampling rate, but make sure we round up
       settings->nflogSubSamplingRate = (settings->samplingRate + nflogsr - 1) / nflogsr;
       // and pre-calculate the actual sampling rate that we will end up applying

@@ -311,6 +311,7 @@ extern int debug;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
+    st->nflogGroup = HSP_DEFAULT_NFLOG_GROUP;
     st->jsonPort = HSP_DEFAULT_JSON_PORT;
     st->jsonFIFO = NULL;
     st->xen_update_dominfo = 0;
