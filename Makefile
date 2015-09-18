@@ -5,9 +5,10 @@
 # between GNU and BSD make
 
 PROG=hsflowd
-RPM_SOURCES_DIR=/usr/src/redhat/SOURCES
+MY_RPM_TOP=/tmp/HSFLOWD_RPM_TOP
+MY_RPM_BUILDROOT=/tmp/HSFLOWD_RPM_BUILD_ROOT
 
-all: $(PROG) 
+all: $(PROG)
 
 $(PROG):
 	cd src/sflow; $(MAKE)
@@ -39,13 +40,19 @@ schedule:
 
 rpm:
 	PLATFORM=`uname`; \
+	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
-	MYSRCDIR=$(RPM_SOURCES_DIR)/$(PROG)-$$MYVER; \
+	MYSRCDIR=$(MY_RPM_TOP)/SOURCES; \
 	rm -rf $$MYSRCDIR; \
-	cp -r . $$MYSRCDIR; \
-	tar cz -C $(RPM_SOURCES_DIR) -f $$MYSRCDIR.tar.gz $(PROG)-$$MYVER; \
-	rpmbuild -ba $(PROG).spec
+	mkdir -p $$MYSRCDIR; \
+	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYSRCDIR/$(PROG)-$$MYVER.tar.gz; \
+	rpmbuild --define "_topdir $(MY_RPM_TOP)" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG).spec; \
+	echo "==============="; \
+	MYRPM="$(MY_RPM_TOP)/RPMS/$$MYARCH/$(PROG)-$$MYVER-$$MYREL.$$MYARCH.rpm"; \
+	MYSRPM="$(MY_RPM_TOP)/SRPMS/$(PROG)-$$MYVER-$$MYREL.src.rpm"; \
+	echo "copying new RPMs $$MYRPM and $$MYSRPM back to current directory"; \
+	cp $$MYRPM $$MYSRPM .
 
 aixrpm:
 	PLATFORM=`uname`; \
