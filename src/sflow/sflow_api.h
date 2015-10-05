@@ -328,6 +328,8 @@ void sfl_sampler_tick(SFLSampler *sampler, time_t now);
 
 int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs);
 int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_TYPE *cs);
+int sfl_receiver_writeEncoded(SFLReceiver *receiver, uint32_t samples, uint32_t *data, int packedSize);
+void sfl_receiver_flush(SFLReceiver *receiver);
 
 void sfl_agent_resetReceiver(SFLAgent *agent, SFLReceiver *receiver);
 

@@ -132,14 +132,24 @@ void sfl_receiver_set_sFlowRcvrPort(SFLReceiver *receiver, uint32_t sFlowRcvrPor
 }
 
 /*_________________---------------------------__________________
+  _________________   sfl_receiver_flush      __________________
+  -----------------___________________________------------------
+*/
+
+void sfl_receiver_flush(SFLReceiver *receiver)
+{
+  // if there are any samples to send, flush them now
+  if(receiver->sampleCollector.numSamples > 0) sendSample(receiver);
+}
+
+/*_________________---------------------------__________________
   _________________   sfl_receiver_tick       __________________
   -----------------___________________________------------------
 */
 
 void sfl_receiver_tick(SFLReceiver *receiver, time_t now)
 {
-  // if there are any samples to send, flush them now
-  if(receiver->sampleCollector.numSamples > 0) sendSample(receiver);
+  sfl_receiver_flush(receiver);
   // check the timeout
   if(receiver->sFlowRcvrTimeout && (uint32_t)receiver->sFlowRcvrTimeout != 0xFFFFFFFF) {
     // count down one tick and reset if we reach 0
@@ -1142,6 +1152,44 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
 
   // update the pktlen
   receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  return packedSize;
+}
+
+/*_________________-------------------------------__________________
+  _________________ sfl_receiver_writeEncoded     __________________
+  -----------------_______________________________------------------
+  write a pre-encoded block of XDR
+*/
+
+int sfl_receiver_writeEncoded(SFLReceiver *receiver, uint32_t samples, uint32_t *xdr, int packedSize)
+{
+  // check in case this one sample alone is too big for the datagram
+  // in fact - if it is even half as big then we should ditch it. Very
+  // important to avoid overruning the packet buffer.
+  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize)) {
+    sflError(receiver, "pre-encoded sample too big for datagram");
+    return -1;
+  }
+
+  // if the sample pkt is full enough so that this sample might put
+  // it over the limit, then we should send it now before going on.
+  if((receiver->sampleCollector.pktlen + packedSize) >= receiver->sFlowRcvrMaximumDatagramSize)
+    sendSample(receiver);
+    
+  receiver->sampleCollector.numSamples += samples;
+  
+  memcpy(receiver->sampleCollector.datap, xdr, packedSize);
+  int quads = (packedSize + 3) / 4;
+  receiver->sampleCollector.datap += quads;
+
+  // sanity check
+  assert(((u_char *)receiver->sampleCollector.datap
+	  - (u_char *)receiver->sampleCollector.data
+	  - receiver->sampleCollector.pktlen)  == (uint32_t)packedSize);
+
+  // update the pktlen
+  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+
   return packedSize;
 }
 

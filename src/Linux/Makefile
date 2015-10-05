@@ -66,6 +66,15 @@ ifeq ($(JSON),yes)
 	LIBS += $(JSONDIR)/libjson.a -lm
 endif
 
+# if RTMETRIC is not set, assume it should be "yes".
+# (So you can use "make RTMETRIC=no" to compile without this feature)
+ifeq ($(RTMETRIC),)
+	RTMETRIC=yes
+endif
+ifeq ($(RTMETRIC),yes)
+	CFLAGS += -DHSF_RTMETRIC
+endif
+
 # Docker containers
 ifeq ($(DOCKER),yes)
 	CFLAGS += -DHSF_DOCKER -I$(JSONDIR)
