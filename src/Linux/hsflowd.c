@@ -2012,7 +2012,7 @@ extern "C" {
       }
     }
 
-    time_t now = time(NULL);
+    time_t now = UTClockSeconds();
     sf->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
     sfl_agent_init(sf->agent,
 		   &sf->agentIP,
@@ -2549,10 +2549,10 @@ extern "C" {
   static void *runDNSSD(void *magic) {
     HSP *sp = (HSP *)magic;
     sp->DNSSD_countdown = sfl_random(sp->DNSSD_startDelay);
-    time_t clk = time(NULL);
+    time_t clk = UTClockSeconds();
     while(1) {
       my_usleep(999983); // just under a second
-      time_t test_clk = time(NULL);
+      time_t test_clk = UTClockSeconds();
       if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
 	// avoid a flurry of ticks if the clock jumps
 	myLog(LOG_INFO, "time jump detected (DNSSD) %ld->%ld", clk, test_clk);
@@ -3004,7 +3004,7 @@ extern "C" {
     myLog(LOG_INFO, "started");
     
     // initialize the clock so we can detect second boundaries
-    sp->clk = time(NULL);
+    sp->clk = UTClockSeconds();
 
     // semaphore to protect config shared with DNSSD thread
     sp->config_mut = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
@@ -3094,6 +3094,11 @@ extern "C" {
 	    else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
 	    sfl_random_init(seed);
 
+	    // desync the clock so we don't detect second rollovers
+	    // at the same time as other hosts no matter what clock
+	    // source we use...
+	    UTClockDesync_uS(sfl_random(1000000));
+
 	    // initialize the faster polling of NIO counters
 	    // to avoid undetected 32-bit wraps
 	    sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
@@ -3141,7 +3146,7 @@ extern "C" {
       case HSPSTATE_RUN:
 	{
 	  // check for second boundaries and generate ticks for the sFlow library
-	  time_t test_clk = time(NULL);
+	  time_t test_clk = UTClockSeconds();
 	  if((test_clk < sp->clk) || (test_clk - sp->clk) > HSP_MAX_TICKS) {
 	    // avoid a busy-loop of ticks
 	    myLog(LOG_INFO, "time jump detected");

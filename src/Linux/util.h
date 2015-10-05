@@ -29,6 +29,8 @@ extern "C" {
 #include <ctype.h> // for isspace() etc.
 #include "pthread.h"
 
+#include <sys/time.h> // for timeradd()
+
 #include "sys/syscall.h" /* just for gettid() */
 #define MYGETTID (pid_t)syscall(SYS_gettid)
 
@@ -74,6 +76,10 @@ extern "C" {
 #define my_realloc my_os_realloc
 #define my_free my_os_free
 #endif
+
+  // desync'd timer-tick support
+  void UTClockDesync_uS(uint32_t uS);
+  time_t UTClockSeconds(void);
 
   // safer string fns
   uint32_t my_strnlen(const char *s, uint32_t max);
