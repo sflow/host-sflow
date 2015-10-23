@@ -30,11 +30,11 @@ extern "C" {
       cpu->load_fifteen = (float)cpu_total.loadavg[2]/(float)(1<<SBITS);
       cpu->cpu_num = cpu_total.ncpus;
       cpu->cpu_speed = cpu_total.processorHZ / (1024 * 1024); /* MHz */
-      cpu->cpu_user = (cpu_total.user * 1000) / cpu_total.processorHZ;
+      cpu->cpu_user = (cpu_total.puser * 1000) / cpu_total.processorHZ;
       SFL_UNDEF_COUNTER(cpu->cpu_nice);
-      cpu->cpu_system = (cpu_total.sys * 1000) / cpu_total.processorHZ;
-      cpu->cpu_idle = (cpu_total.idle * 1000) / cpu_total.processorHZ;
-      cpu->cpu_wio = (cpu_total.wait * 1000) / cpu_total.processorHZ;
+      cpu->cpu_system = (cpu_total.psys * 1000) / cpu_total.processorHZ;
+      cpu->cpu_idle = (cpu_total.pidle * 1000) / cpu_total.processorHZ;
+      cpu->cpu_wio = (cpu_total.pwait * 1000) / cpu_total.processorHZ;
       cpu->proc_run = cpu_total.runque /* + cpu_total.swpque */;
       if(cpu->proc_run > 0) {
 	// subtract myself from the running process count,
