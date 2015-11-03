@@ -16,7 +16,7 @@ endif
 
 # base CFLAGS and LIBS
 SFLOWDIR=../sflow
-CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
+CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) # -DUTHEAP
 #LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread
 LIBS += $(SFLOWDIR)/libsflow.a -lpthread -lperfstat
 
@@ -38,6 +38,15 @@ ifeq ($(JSON),yes)
 	JSONDIR=../json
 	CFLAGS += -DHSF_JSON -I$(JSONDIR)
 	LIBS += $(JSONDIR)/libjson.a -lm
+endif
+
+# if RTMETRIC is not set, assume it should be "yes".                                                                                                         
+# (So you can use "make RTMETRIC=no" to compile without this feature)                                                                                        
+ifeq ($(RTMETRIC),)
+        RTMETRIC=yes
+endif
+ifeq ($(RTMETRIC),yes)
+        CFLAGS += -DHSF_RTMETRIC
 endif
 
 # The options LIBVIRT=yes, XEN_DDK=yes and XEN_ROOT=<path> should be mutually exclusive.

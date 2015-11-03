@@ -13,6 +13,38 @@ extern "C" {
 
 #ifdef HSF_JSON
 
+
+#ifdef HSF_RTMETRIC
+  
+  typedef enum {
+    RTMetricType_string = 0,
+    RTMetricType_counter32,
+    RTMetricType_counter64,
+    RTMetricType_gauge32,
+    RTMetricType_gauge64,
+    RTMetricType_gaugeFloat,
+    RTMetricType_gaugeDouble
+  } EnumRTMetricType;
+
+  typedef enum {
+    RTFlowType_string = 0,
+    RTFlowType_mac,
+    RTFlowType_ip,
+    RTFlowType_ip6,
+    RTFlowType_int32,
+    RTFlowType_int64,
+    RTFlowType_float,
+    RTFlowType_double
+  } EnumRTFlowType;
+  
+#define HSP_MAX_RTMETRIC_KEY_LEN 64
+#define HSP_MAX_RTMETRIC_VAL_LEN 255
+
+#define TAG_RTMETRIC ((4300 << 12) + 1002)
+#define TAG_RTFLOW ((4300 << 12) + 1003)
+
+#endif /* HSF_RTMETRIC */
+
   /*_________________---------------------------__________________
     _________________  int counters and gauges  __________________
     -----------------___________________________------------------
@@ -68,6 +100,7 @@ extern "C" {
       // app_operations counter block that we have been maintaining.
       SFLADD_ELEMENT(cs, &application->counters);
       sfl_poller_writeCountersSample(poller, cs);
+      // and any rtcount metrics that we have been collecting
     }
   }
 
@@ -210,10 +243,9 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________   json_app_timeout_check  __________________
     -----------------___________________________------------------
-    called every HSP_JSON_APP_TIMEOUT seconds.  Use it to check if we should
-    free an idle application that has stopped sending. This allows applications
-    to be fairly numerous and transient without causing this program to grow
-    too large.
+    Check to see if we should free an idle application that has stopped sending.
+    This allows applications to be fairly numerous and transient without causing
+    this program to grow too large.
   */
 
   void json_app_timeout_check(HSP *sp)
@@ -339,6 +371,9 @@ extern "C" {
     app->sampler->samplePool += sampling_n;
     // override the sampler's sampling_rate by filling it in here:
     fs.sampling_rate = sampling_n;
+    if(debug > 1) {
+      myLog(LOG_INFO, "sendAppSample (sampling_n=%d)", sampling_n);
+    }
     // and send it out
     sfl_sampler_writeFlowSample(app->sampler, &fs);
   }
@@ -437,16 +472,16 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	      soc4.local_port = json_uint32(extended_socket_ipv4, "local_port");
 	      soc4.remote_port = json_uint32(extended_socket_ipv4, "remote_port");
 	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv4, "local_ip");
-	      if(local_ip) {
+	      if(local_ip && my_strlen(local_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET)) {
+		if(parseNumericAddress(local_ip->valuestring, NULL, &addr, PF_INET)) {
 		  soc4.local_ip = addr.address.ip_v4;
 		}
 	      }
 	      cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv4, "remote_ip");
-	      if(remote_ip) {
+	      if(remote_ip && my_strlen(remote_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET)) {
+		if(parseNumericAddress(remote_ip->valuestring, NULL, &addr, PF_INET)) {
 		  soc4.remote_ip = addr.address.ip_v4;
 		}
 	      }
@@ -459,16 +494,16 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
 	      soc6.local_port = json_uint32(extended_socket_ipv6, "local_port");
 	      soc6.remote_port = json_uint32(extended_socket_ipv6, "remote_port");
 	      cJSON *local_ip = cJSON_GetObjectItem(extended_socket_ipv6, "local_ip");
-	      if(local_ip) {
+	      if(local_ip && my_strlen(local_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(local_ip->valuestring, NULL, &addr, PF_INET6)) {
+		if(parseNumericAddress(local_ip->valuestring, NULL, &addr, PF_INET6)) {
 		  soc6.local_ip = addr.address.ip_v6;
 		}
 	      }
 	      cJSON *remote_ip = cJSON_GetObjectItem(extended_socket_ipv6, "remote_ip");
-	      if(remote_ip) {
+	      if(remote_ip && my_strlen(remote_ip->valuestring)) {
 		SFLAddress addr = { 0 };
-		if(lookupAddress(remote_ip->valuestring, NULL, &addr, PF_INET6)) {
+		if(parseNumericAddress(remote_ip->valuestring, NULL, &addr, PF_INET6)) {
 		  soc6.remote_ip = addr.address.ip_v6;
 		}
 	      }
@@ -531,7 +566,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	if(json_ops) {
 	  c_ops.tag = SFLCOUNTERS_APP;
 	  c_ops.counterBlock.app.application.str = app_name->valuestring;
-	  c_ops.counterBlock.app.application.len = my_strlen(app_name->valuestring);
+	  c_ops.counterBlock.app.application.len = my_strnlen(app_name->valuestring, SFLAPP_MAX_APPLICATION_LEN);
 	  c_ops.counterBlock.app.status_OK = json_counter32(ops, "success");
 	  c_ops.counterBlock.app.errors_OTHER = json_counter32(ops, "other");
 	  c_ops.counterBlock.app.errors_TIMEOUT = json_counter32(ops, "timeout");
@@ -591,6 +626,529 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       }
     }
   }
+
+#ifdef HSF_RTMETRIC
+
+  /*_________________---------------------------__________________
+    _________________     XDR encoding          __________________
+    -----------------___________________________------------------
+  */
+
+  typedef struct {
+    int cursor;
+    uint32_t xdr[SFL_MAX_DATAGRAM_SIZE >> 2];
+  } XDRBuf;
+
+
+  static void xdr_init(XDRBuf *buf) {
+    buf->cursor = 0;
+  }
+
+  static uint32_t *xdr_ptr(XDRBuf *buf) {
+    return (buf->xdr + buf->cursor);
+  }
+
+  static void xdr_enc_int32(XDRBuf *buf, uint32_t val32) {
+    buf->xdr[buf->cursor++] = htonl(val32);
+  }
+
+  static void xdr_enc_int64(XDRBuf *buf, uint64_t val64) {
+    uint32_t hi = (val64 >> 32);
+    uint32_t lo = val64;
+    xdr_enc_int32(buf, hi);
+    xdr_enc_int32(buf, lo);
+  }
+
+  static void xdr_enc_float(XDRBuf *buf, float valf) {
+    uint32_t val;
+    memcpy(&val, &valf, 4);
+    xdr_enc_int32(buf, val);
+  }
+
+  static void xdr_enc_dbl(XDRBuf *buf, double vald) {
+    uint64_t val64;
+    memcpy(&val64, &vald, 8);
+    xdr_enc_int64(buf, val64);
+  }
+
+  static void xdr_enc_bytes(XDRBuf *buf, u_char *data, uint32_t len) {
+    uint32_t quads = (len + 3) >> 2;
+    u_char *ptr = (u_char *)xdr_ptr(buf);
+    memset(ptr, 0, (quads << 2));
+    memcpy(ptr, data, len);
+    buf->cursor += quads;
+  }
+
+  static void xdr_enc_str(XDRBuf *buf, char *str, uint32_t len) {
+    xdr_enc_int32(buf, len);
+    xdr_enc_bytes(buf, (u_char *)str, len);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    rtmetric types         __________________
+    -----------------___________________________------------------
+  */
+
+  static int rtmetric_type(char *str) {
+    if(my_strequal(str, "string")) return (int)RTMetricType_string;
+    if(my_strequal(str, "counter32")) return (int)RTMetricType_counter32;
+    if(my_strequal(str, "counter64")) return (int)RTMetricType_counter64;
+    if(my_strequal(str, "gauge32")) return (int)RTMetricType_gauge32;
+    if(my_strequal(str, "gauge64")) return (int)RTMetricType_gauge64;
+    if(my_strequal(str, "gaugeFloat")) return (int)RTMetricType_gaugeFloat;
+    if(my_strequal(str, "gaugeDouble")) return (int)RTMetricType_gaugeDouble;
+    return -1;
+  }
+
+  static void xdr_enc_metric(XDRBuf *buf, char *mname, uint32_t mname_len, int mtype, cJSON *field, uint32_t field_len)
+  {
+    xdr_enc_str(buf, mname, mname_len);
+    xdr_enc_int32(buf, mtype);
+
+    if(field->type == cJSON_String) {
+      // string input
+      uint32_t val32;
+      uint64_t val64;
+      float valf;
+      double vald;
+      char *instr = field->valuestring;
+      // string input
+      switch(mtype) {
+      case RTMetricType_counter32:
+      case RTMetricType_gauge32:
+	val32 = strtoul(instr, NULL, 0);
+	xdr_enc_int32(buf, val32);
+	break;
+      case RTMetricType_counter64:
+      case RTMetricType_gauge64:
+	val64 = strtoull(instr, NULL, 0);
+	xdr_enc_int64(buf, val64);
+	break;
+      case RTMetricType_gaugeFloat:
+	valf = strtof(instr, NULL);
+	xdr_enc_float(buf, valf);
+	break;
+      case RTMetricType_gaugeDouble:
+	vald = strtod(instr, NULL);
+	xdr_enc_dbl(buf, vald);
+      break;
+      case RTMetricType_string:
+	xdr_enc_str(buf, instr, field_len);
+      break;
+      }
+    }
+    else if(field->type == cJSON_Number) {
+      // numeric input - only certain types expressible
+      // because JSON only offers number as type==double
+      double indbl = field->valuedouble;
+      switch(mtype) {
+      case RTMetricType_counter32:
+      case RTMetricType_gauge32:
+	xdr_enc_int32(buf, (uint32_t)indbl);
+	break;
+      case RTMetricType_counter64: // this may go wrong (premature counter wrap?)
+      case RTMetricType_gauge64:
+	xdr_enc_int64(buf, (uint64_t)indbl);
+	break;
+      case RTMetricType_gaugeFloat:
+	xdr_enc_float(buf, (float)indbl);
+	break;
+      case RTMetricType_gaugeDouble:
+	xdr_enc_dbl(buf, indbl);
+      break;
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________  rtmetric_len_ok          __________________
+    -----------------___________________________------------------
+   combine the length-test of the key with a test for validity
+  */
+
+  static uint32_t rtmetric_len_ok(char *str) {
+    uint32_t len = 0;
+    int ch;
+    while((ch = str[len]) != '\0') {
+      if(ch != '-' &&
+	 ch != '_' &&
+	 !isalnum(ch)) {
+	// illegal character
+	return 0;
+      }
+      if(++len > HSP_MAX_RTMETRIC_KEY_LEN) {
+	// too long
+	return 0;
+      }
+    }
+    return len;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    dsname_len_ok          __________________
+    -----------------___________________________------------------
+   The dsname has the additional requirement that it cannot start
+   with a digit (to distinguish it from numeric sFlow datasources).
+  */
+
+  static uint32_t dsname_len_ok(char *str) {
+    if(isdigit(str[0]))
+      return 0;
+    return rtmetric_len_ok(str);
+  }
+
+  /*_________________---------------------------__________________
+    _________________  readJSON_rtmetric        __________________
+    -----------------___________________________------------------
+
+    {
+       "rtmetric": {
+         "datasource": "web1",
+         "metric1": { "type": "counter32",   "value": 777          },
+         "metric2": { "type": "string",      "value": "helloworld" },
+         "metric3": { "type": "gaugedouble", "value": 1.234        },
+       }
+    }
+  */
+
+  static void readJSON_rtmetric(HSP *sp, cJSON *rtmetric)
+  {
+    if(debug > 1) logJSON(rtmetric, "got rtmetric");
+
+    SFLReceiver *receiver = sp->sFlow->agent->receivers;
+    if(receiver == NULL)
+      return;
+
+    XDRBuf buf;
+    xdr_init(&buf);
+    uint32_t num_fields = 0;
+    char *dsname = NULL;
+    uint32_t dsname_len = 0;
+
+    // iterate to pull out datasource name first
+    for(cJSON *rtm = rtmetric->child; rtm; rtm = rtm->next) {
+      if(!rtm->string) {
+	if(debug) logJSON(rtm, "expected named field");
+	continue;
+      }
+      // pick up optional datasource
+      if(rtm->type == cJSON_String &&
+	 my_strequal(rtm->string, "datasource")) {
+	dsname = rtm->valuestring;
+	dsname_len = dsname_len_ok(dsname);
+	if(dsname_len == 0) {
+	  if(debug) myLog(LOG_ERR, "invalid datasource name: %s", dsname);
+	  return; // bail completely on bad dsname
+	}
+	continue;
+      }
+    }
+
+    xdr_enc_int32(&buf, TAG_RTMETRIC);
+    uint32_t *mstart = xdr_ptr(&buf);
+    xdr_enc_int32(&buf, 0); // will be rtmetric len
+    xdr_enc_str(&buf, dsname, dsname_len);
+    uint32_t *fstart = xdr_ptr(&buf);
+    xdr_enc_int32(&buf, 0); // will be num fields
+    
+    for(cJSON *rtm = rtmetric->child; rtm; rtm = rtm->next) {
+      // only want named objects now
+      if(rtm->string == NULL ||
+	 rtm->type != cJSON_Object) {
+	continue;
+      }
+      
+      uint32_t mname_len = rtmetric_len_ok(rtm->string);
+      if(mname_len == 0) {
+	if(debug) {
+	  myLog(LOG_ERR, "invalid rtmetric key: <%s>", rtm->string);
+	}
+	return; // bail on bad key
+      }
+
+      cJSON *field = cJSON_GetObjectItem(rtm, "value");
+      uint32_t field_len = sizeof(double);
+
+      if(field == NULL) {
+	if(debug) myLog(LOG_ERR, "rtmetric missing \"value\"");
+	return; // bail on missing value
+      }
+      if(field->type == cJSON_String) {
+	field_len = my_strlen(field->valuestring);
+	if(field_len > HSP_MAX_RTMETRIC_VAL_LEN) {
+	  if(debug) {
+	    myLog(LOG_ERR, "rtmetric field %s len(%u) > max(%u)",
+		  rtm->string,
+		  field_len,
+		  HSP_MAX_RTMETRIC_VAL_LEN);
+	  }
+	  return; // bail on field len error
+	}
+      }
+
+      cJSON *field_type = cJSON_GetObjectItem(rtm, "type");
+      if(field_type == NULL) {
+	if(debug) myLog(LOG_ERR, "rtflow missing \"type\"");
+	return; // bail on missing type
+      }
+
+      int rtmType = rtmetric_type(field_type->valuestring);
+      if(rtmType == -1) {
+	if(debug) myLog(LOG_ERR, "rtmetric bad type");
+	return; // bail on bad/missing type
+      }
+
+      num_fields++;
+      xdr_enc_metric(&buf, rtm->string, mname_len, rtmType, field, field_len);
+    }
+
+    if(num_fields) {
+      uint32_t len = (char *)xdr_ptr(&buf) - (char *)mstart - 4;
+      mstart[0] = htonl(len);
+      fstart[0] = htonl(num_fields);
+      sfl_receiver_writeEncoded(receiver,
+				1,
+				buf.xdr,
+				(buf.cursor << 2));
+    }
+    // don't flush: allow them to accumulate in the datagram
+    // sfl_receiver_flush(receiver);
+  }
+
+  /*_________________---------------------------__________________
+    _________________      rtflow types         __________________
+    -----------------___________________________------------------
+  */
+
+  static int rtflow_type(char *str) {
+    if(my_strequal(str, "string")) return (int)RTFlowType_string;
+    if(my_strequal(str, "mac")) return (int)RTFlowType_mac;
+    if(my_strequal(str, "ip")) return (int)RTFlowType_ip;
+    if(my_strequal(str, "ip6")) return (int)RTFlowType_ip6;
+    if(my_strequal(str, "int32")) return (int)RTFlowType_int32;
+    if(my_strequal(str, "int64")) return (int)RTFlowType_int64;
+    if(my_strequal(str, "float")) return (int)RTFlowType_float;
+    if(my_strequal(str, "double")) return (int)RTFlowType_double;
+    return -1;
+  }
+
+  static void xdr_enc_flow_field(XDRBuf *buf, char *mname, uint32_t mname_len, int mtype, cJSON *field, uint32_t field_len)
+  {
+    xdr_enc_str(buf, mname, mname_len);
+    xdr_enc_int32(buf, mtype);
+
+    if(field->type == cJSON_String) {
+      // string input
+      uint32_t val32;
+      uint64_t val64;
+      float valf;
+      double vald;
+      u_char mac[6];
+      SFLAddress addr;
+      char *instr = field->valuestring;
+      // string input
+      switch(mtype) {
+      case RTFlowType_string:
+	xdr_enc_str(buf, instr, field_len);
+      break;
+      case RTFlowType_mac:
+	if(hexToBinary((u_char *)instr, mac, 6) == 6) {
+	  xdr_enc_bytes(buf, mac, 6);
+	}
+	else {
+	  if(debug) logJSON(field, "failed to parse MAC address");
+	}
+	break;
+      case RTFlowType_ip:
+	if(parseNumericAddress(instr, NULL, &addr, AF_INET)) {
+	  xdr_enc_bytes(buf, (u_char *)&addr.address.ip_v4.addr, 4);
+	}
+	else {
+	  if(debug) logJSON(field, "failed to parse IP address");
+	}
+	break;
+      case RTFlowType_ip6:
+	if(parseNumericAddress(instr, NULL, &addr, AF_INET6)) {
+	  xdr_enc_bytes(buf, (u_char *)&addr.address.ip_v6.addr, 16);
+	}
+	else {
+	  if(debug) logJSON(field, "failed to parse IP address");
+	}
+	break;
+      case RTFlowType_int32:
+	val32 = strtoul(instr, NULL, 0);
+	xdr_enc_int32(buf, val32);
+	break;
+      case RTFlowType_int64:
+	val64 = strtoull(instr, NULL, 0);
+	xdr_enc_int64(buf, val64);
+	break;
+      case RTFlowType_float:
+	valf = strtof(instr, NULL);
+	xdr_enc_float(buf, valf);
+	break;
+      case RTFlowType_double:
+	vald = strtod(instr, NULL);
+	xdr_enc_dbl(buf, vald);
+      break;
+      }
+    }
+    else if(field->type == cJSON_Number) {
+      // numeric input - only certain types expressible
+      double indbl = field->valuedouble;
+      switch(mtype) {
+      case RTFlowType_int32:
+	xdr_enc_int32(buf, (uint32_t)indbl);
+	break;
+      case RTFlowType_int64:
+	xdr_enc_int64(buf, (uint64_t)indbl);
+	break;
+      case RTFlowType_float:
+	xdr_enc_float(buf, (float)indbl);
+	break;
+      case RTFlowType_double:
+	xdr_enc_dbl(buf, indbl);
+      break;
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________  readJSON_rtflow          __________________
+    -----------------___________________________------------------
+
+    rtflow messages can have multiple key/value fields, and an
+    optional sampling_rate=<integer> field.
+    {
+      "rtflow": {
+        "datasource": "web1",
+        "sampling_rate": 1,
+	"field1": { "type": "int32",  "value": 777            },
+	"field2": { "type": "string", "value": "helloworld"   },
+	"field3": { "type": "mac",    "value": "020304050607" }
+      }
+    }
+  */
+  
+  static void readJSON_rtflow(HSP *sp, cJSON *rtflow) {
+    if(debug > 1) logJSON(rtflow, "got rtflow");
+    SFLReceiver *receiver = sp->sFlow->agent->receivers;
+    if(receiver == NULL)
+      return;
+    
+    XDRBuf buf;
+    xdr_init(&buf);
+    uint32_t sampling_rate = 1;
+    uint32_t num_fields = 0;
+    char *dsname = NULL;
+    uint32_t dsname_len = 0;
+
+    // iterate to pull out sampling_rate and datasource name first
+    for(cJSON *rtf = rtflow->child; rtf; rtf = rtf->next) {
+      if(!rtf->string) {
+	if(debug) logJSON(rtf, "expected named field");
+	continue;
+      }
+      // pick up optional sampling_rate setting
+      if(rtf->type == cJSON_Number &&
+	 my_strequal(rtf->string, "sampling_rate")) {
+	sampling_rate = (uint32_t)rtf->valuedouble;
+	if(sampling_rate == 0) sampling_rate = 1;
+	continue;
+      }
+      // pick up optional datasource
+      if(rtf->type == cJSON_String &&
+	 my_strequal(rtf->string, "datasource")) {
+	dsname = rtf->valuestring;
+	dsname_len = dsname_len_ok(dsname);
+	if(dsname_len == 0) {
+	  if(debug) myLog(LOG_ERR, "invalid datasource name: %s", dsname);
+	  return; // bail completely on bad dsname
+	}
+	continue;
+      }
+      // all other fields must be objects
+      if(rtf->type != cJSON_Object) {
+	if(debug) logJSON(rtf, "expected object field");
+	continue;
+      }
+    }
+
+    xdr_enc_int32(&buf, TAG_RTFLOW);
+    uint32_t *mstart = xdr_ptr(&buf);
+    xdr_enc_int32(&buf, 0); // will be rtflow len
+    xdr_enc_str(&buf, dsname, dsname_len);
+    xdr_enc_int32(&buf, sampling_rate); // sampling_rate
+    xdr_enc_int32(&buf, 0); // reserved (e.g. for sample_pool)
+    uint32_t *fstart = xdr_ptr(&buf);
+    xdr_enc_int32(&buf, 0); // will be num fields
+
+    for(cJSON *rtf = rtflow->child; rtf; rtf = rtf->next) {
+      // only want named objects now
+      if(rtf->string == NULL ||
+	 rtf->type != cJSON_Object) {
+	continue;
+      }
+      
+      uint32_t fname_len = rtmetric_len_ok(rtf->string);
+      if(fname_len == 0) {
+	if(debug) {
+	  myLog(LOG_ERR, "invalid rtflow key: <%s>", rtf->string);
+	}
+	return; // bail on bad key
+      }
+
+      cJSON *field = cJSON_GetObjectItem(rtf, "value");
+      uint32_t field_len = sizeof(double);
+
+      if(field == NULL) {
+	if(debug) myLog(LOG_ERR, "rtflow missing \"value\"");
+	return; // bail on missing value
+      }
+
+      if(field->type == cJSON_String) {
+	field_len = my_strlen(field->valuestring);
+	if(field_len > HSP_MAX_RTMETRIC_VAL_LEN) {
+	  if(debug) {
+	    myLog(LOG_ERR, "rtflow field %s len(%u) > max(%u)",
+		  rtf->string,
+		  field_len,
+		  HSP_MAX_RTMETRIC_VAL_LEN);
+	  }
+	  return; // bail on field len error
+	}
+      }
+
+      cJSON *field_type = cJSON_GetObjectItem(rtf, "type");
+      if(field_type == NULL) {
+	if(debug) myLog(LOG_ERR, "rtflow missing \"type\"");
+	return; // bail on missing type
+      }
+
+      int rtfType = rtflow_type(field_type->valuestring);
+      if(rtfType == -1) {
+	if(debug) myLog(LOG_ERR, "rtflow field bad type <%s>", field_type->valuestring);
+	return; // bail on bad/missing type
+      }
+
+      num_fields++;
+      xdr_enc_flow_field(&buf, rtf->string, fname_len, rtfType, field, field_len);
+    }
+
+    if(num_fields) {
+      uint32_t len = (char *)xdr_ptr(&buf) - (char *)mstart - 4;
+      mstart[0] = htonl(len);
+      fstart[0] = htonl(num_fields);
+      sfl_receiver_writeEncoded(receiver,
+				1,
+				buf.xdr,
+				(buf.cursor << 2));
+    }
+    // don't flush: allow them to accumulate in the datagram
+    // sfl_receiver_flush(receiver);
+  }
+
+#endif /* HSF_RTMETRIC */
   
   /*_________________---------------------------__________________
     _________________      readJSON             __________________
@@ -607,12 +1165,8 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     if(soc) {
       for( ; batch < HSP_READJSON_BATCH; batch++) {
 	char buf[HSP_MAX_JSON_MSG_BYTES];
-	int len = recvfrom(soc,
-			   buf,
-			   HSP_MAX_JSON_MSG_BYTES,
-			   0,
-			   NULL, /* peer */
-			   0 /* peerlen */);
+	// use read() so that it works for both UDP and FIFO inputs
+	int len = read(soc, buf, HSP_MAX_JSON_MSG_BYTES);
 	if(len <= 0) break;
 	if(debug > 1) myLog(LOG_INFO, "got JSON msg: %u bytes", len);
 	cJSON *top = cJSON_Parse(buf);
@@ -622,6 +1176,12 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  if(fs) readJSON_flowSample(sp, fs);
 	  cJSON *cs = cJSON_GetObjectItem(top, "counter_sample");
 	  if(cs) readJSON_counterSample(sp, cs);
+#ifdef HSF_RTMETRIC
+	  cJSON *rtmetric = cJSON_GetObjectItem(top, "rtmetric");
+	  if(rtmetric) readJSON_rtmetric(sp, rtmetric);
+	  cJSON *rtflow = cJSON_GetObjectItem(top, "rtflow");
+	  if(rtflow) readJSON_rtflow(sp, rtflow);
+#endif /* HSF_RTMETRIC */
 	  cJSON_Delete(top);
 	}
       }

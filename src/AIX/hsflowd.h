@@ -9,6 +9,7 @@
 extern "C" {
 #endif
 
+#include <sys/types.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -17,7 +18,6 @@ extern "C" {
 #include <time.h>
 #include <errno.h>
 #include <netdb.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <syslog.h>

@@ -27,11 +27,13 @@ extern "C" {
 #endif
 
 #include <inttypes.h> // for PRIu64 etc.
-#include "malloc.h" // for malloc_stats()
+// #include "malloc.h" // for malloc_stats()
 
 #include <sys/wait.h>
 #include <ctype.h> // for isspace() etc.
 #include "pthread.h"
+
+#include <sys/time.h> // for timeradd()
 
 //#include "sys/syscall.h" /* just for gettid() */
 //#define MYGETTID (pid_t)syscall(SYS_gettid)
@@ -44,10 +46,12 @@ extern "C" {
 
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
+  int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen);
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
   int parseUUID(char *str, char *uuid);
   int printUUID(const u_char *a, u_char *buf, int bufLen);
+  int printSpeed(const uint64_t speed, char *buf, int bufLen);
   
   // logger
   void myLog(int syslogType, char *fmt, ...);
@@ -77,6 +81,10 @@ extern "C" {
 #define my_realloc my_os_realloc
 #define my_free my_os_free
 #endif
+
+  // desync'd timer-tick support
+  void UTClockDesync_uS(uint32_t uS);
+  time_t UTClockSeconds(void);
 
   // safer string fns
   uint32_t my_strnlen(const char *s, uint32_t max);
@@ -136,6 +144,7 @@ extern "C" {
 
   UTStringArray *strArrayNew(void);
   void strArrayAdd(UTStringArray *ar, char *str);
+  void strArrayInsert(UTStringArray *ar, int i, char *str);
   void strArrayReset(UTStringArray *ar);
   void strArrayFree(UTStringArray *ar);
   char **strArray(UTStringArray *ar);
@@ -146,20 +155,24 @@ extern "C" {
   int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
   int strArrayIndexOf(UTStringArray *ar, char *str);
 
+  // tokenizer
+  char *parseNextTok(char **str, char *sep, int delim, char quot, int trim, char *buf, int buflen);
+
   // sleep
   void my_usleep(uint32_t microseconds);
 
   // calling execve()
   typedef int (*UTExecCB)(void *magic, char *line);
-  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen);
+  int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen, int *pstatus);
 
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew(void);
   void adaptorListReset(SFLAdaptorList *adList);
   void adaptorListFree(SFLAdaptorList *adList);
   void adaptorListMarkAll(SFLAdaptorList *adList);
-  void adaptorListFreeMarked(SFLAdaptorList *adList);
+  int adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
+  SFLAdaptor *adaptorListGet_ifIndex(SFLAdaptorList *adList, uint32_t ifIndex);
   SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
 
   // file utils
@@ -175,6 +188,9 @@ extern "C" {
   void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask);  
   int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare);
   int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits);
+
+  int isAllZero(u_char *buf, int len);
+  int isZeroMAC(SFLMacAddress *mac);
 
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -21,6 +21,9 @@ extern "C" {
 #include <sys/ndd_var.h>
 #include <sys/kinfo.h>
 
+// extract declaration for getkerninfo from net/proto_uipc.c
+int getkerninfo(int, char *, int *, int32long64_t);
+
 extern int debug;
 
 
@@ -233,13 +236,13 @@ int readInterfaces(HSP *sp)
   }
 
 // just need to get the device names a different way...
-int nddsize = getkerninfo(KINFO_NDD,0,0,0);
+int nddsize = getkerninfo(KINFO_NDD,NULL,0,0);
 if(nddsize <= 0) {
 close(fd);
 return 0;
 }
 struct kinfo_ndd *ndd = my_calloc(nddsize);
-if(getkerninfo(KINFO_NDD, ndd, &nddsize, 0) < 0) {
+if(getkerninfo(KINFO_NDD, (char *)ndd, &nddsize, 0) < 0) {
  my_free(ndd);
 close(fd);
 return  0;
