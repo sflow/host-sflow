@@ -110,8 +110,10 @@ extern "C" {
 #include "regex.h" // for switchport detection
 #define HSP_SWITCHPORT_REGEX "^swp[0-9s]+$"
   // uses ULOG (netlink) channel, so make sure that is enabled:
+#ifndef HSF_NFLOG
 #define HSF_ULOG 1
 #define HSP_DEFAULT_ULOG_GROUP 1
+#endif
   // starting in CL 2.5, uses NFLOG, also defaulting to group==1
 #define HSP_DEFAULT_NFLOG_GROUP 1
 #endif
