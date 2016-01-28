@@ -1979,7 +1979,8 @@ extern "C" {
     }
     
     if(sf->sFlowSettings->collectors == NULL) {
-      myLog(LOG_ERR, "No collectors defined");
+      if(!sp->DNSSD)
+	myLog(LOG_ERR, "No collectors defined");
       return NO;
     }
 
@@ -2479,10 +2480,12 @@ extern "C" {
       myLog(LOG_ERR, "myDNSCB: string too long");
       return;
     }
-    // null terminate
-    memcpy(keyBuf, (char *)key, keyLen);
+    // make a null-terminated copy of key and value
+    // and be careful to avoid memcpy(<target>, 0, 0) because it seems to break
+    // things horribly when the gcc optimizer is on.
+    if(key && keyLen) memcpy(keyBuf, (char *)key, keyLen);
     keyBuf[keyLen] = '\0';
-    memcpy(valBuf, (char *)val, valLen);
+    if(val && valLen) memcpy(valBuf, (char *)val, valLen);
     valBuf[valLen] = '\0';
 
     if(debug) {
@@ -3136,8 +3139,17 @@ extern "C" {
 	      setState(sp, HSPSTATE_RUN);
 	    }
 	    else {
-	      exitStatus = EXIT_FAILURE;
-	      setState(sp, HSPSTATE_END);
+	      if(sp->DNSSD) {
+		// if using DNS-SD we can just wait here in this state
+		// until someone adds a collector to the SRV record
+		if(debug) myLog(LOG_INFO, "failed to init agent - waiting for config change");
+	      }
+	      else {
+		// otherwise a failure to initAgent is fatal
+		myLog(LOG_ERR, "failed to init agent");
+		exitStatus = EXIT_FAILURE;
+		setState(sp, HSPSTATE_END);
+	      }
 	    }
 	  }
 	} // config_mut
