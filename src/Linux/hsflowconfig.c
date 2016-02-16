@@ -52,6 +52,7 @@ extern int debug;
     HSPOBJ_HSP=0,
     HSPOBJ_SFLOW,
     HSPOBJ_COLLECTOR,
+    HSPOBJ_PCAP
   } EnumHSPObject;
 
 
@@ -304,6 +305,23 @@ extern int debug;
     settings->collectors = NULL;
   }
 
+  HSPPcap *newPcap(HSPSFlowSettings *sFlowSettings) {
+    HSPPcap *col = (HSPPcap *)my_calloc(sizeof(HSPPcap));
+    ADD_TO_LIST(sFlowSettings->pcaps, col);
+    sFlowSettings->numPcaps++;
+    return col;
+  }
+
+  void clearPcaps(HSPSFlowSettings *settings) 
+  {
+    for(HSPPcap *pc = settings->pcaps; pc; ) {
+      HSPPcap *nextPc = pc->nxt;
+      my_free(pc);
+      pc = nextPc;
+    }
+    settings->pcaps = NULL;
+  }
+
   HSPSFlowSettings *newSFlowSettings(void) {
     HSPSFlowSettings *st = (HSPSFlowSettings *)my_calloc(sizeof(HSPSFlowSettings));
     // initialize defaults
@@ -325,6 +343,7 @@ extern int debug;
       clearApplicationSettings(sFlowSettings);
       clearAgentCIDRs(sFlowSettings);
       clearCollectors(sFlowSettings);
+      clearPcaps(sFlowSettings);
       my_free(sFlowSettings);
     }
   }
@@ -473,7 +492,7 @@ extern int debug;
     uint32_t sampling_n = settings->samplingRate;
     char *method = "global_default";
     if(adaptor) {
-      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       
       if(adaptorNIO->up == NO) {
 	sampling_n = 0;
@@ -707,10 +726,9 @@ extern int debug;
     }
     else if(sp->sFlow->explicitAgentDevice && sp->sFlow->agentDevice) {
       // it may have been defined as agent=<device>
-      SFLAdaptor *ad = adaptorListGet(sp->adaptorList, sp->sFlow->agentDevice);
-      if(ad && ad->userData) {
-	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)ad->userData;
-	sp->sFlow->agentIP = adaptorNIO->ipAddr;
+      SFLAdaptor *ad = UTHashGet(sp->adaptorsByName, sp->sFlow->agentDevice);
+      if(ad) {
+	sp->sFlow->agentIP = ADAPTOR_NIO(ad)->ipAddr;
 	if(debug) myLog(LOG_INFO, "selectAgentAddress pegged to device in config file");
 	selected = YES;
       }
@@ -722,27 +740,25 @@ extern int debug;
       // the best candidate to represent the whole agent:
       SFLAdaptor *selectedAdaptor = NULL;
       EnumIPSelectionPriority ipPriority = IPSP_NONE;
-      
-      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	if(adaptor && adaptor->userData) {
-	  HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	  // take the highest priority one,  but if we have more than one with the same
-	  // priority then choose the one with the lowest (non-zero) ifIndex number:
-	  if(adaptorNIO->ipPriority > ipPriority
-	     || (adaptorNIO->ipPriority == ipPriority
-		 && adaptor->ifIndex
-		 && selectedAdaptor
-		 && (selectedAdaptor->ifIndex == 0
-		     || adaptor->ifIndex < selectedAdaptor->ifIndex))) {
-	    selectedAdaptor = adaptor;
-	    ipPriority = adaptorNIO->ipPriority;
-	  }
-	}	    
+
+      SFLAdaptor *adaptor;
+      UTHASH_WALK(sp->adaptorsByName, adaptor) {
+	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+	// take the highest priority one,  but if we have more than one with the same
+	// priority then choose the one with the lowest (non-zero) ifIndex number:
+	if(adaptorNIO->ipPriority > ipPriority
+	   || (adaptorNIO->ipPriority == ipPriority
+	       && adaptor->ifIndex
+	       && selectedAdaptor
+	       && (selectedAdaptor->ifIndex == 0
+		   || adaptor->ifIndex < selectedAdaptor->ifIndex))) {
+	  selectedAdaptor = adaptor;
+	  ipPriority = adaptorNIO->ipPriority;
+	}
       }
-      if(selectedAdaptor && selectedAdaptor->userData) {
+      if(selectedAdaptor) {
 	// crown the winner
-	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)selectedAdaptor->userData;
+	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(selectedAdaptor);
 	sp->sFlow->agentIP = adaptorNIO->ipAddr;
 	sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
 	if(debug) myLog(LOG_INFO, "selectAgentAddress selected agentIP with highest priority");
@@ -831,6 +847,11 @@ extern int debug;
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    newCollector(sp->sFlow->sFlowSettings_file);
 	    level[++depth] = HSPOBJ_COLLECTOR;
+	    break;
+	  case HSPTOKEN_PCAP:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    newPcap(sp->sFlow->sFlowSettings_file);
+	    level[++depth] = HSPOBJ_PCAP;
 	    break;
 	  case HSPTOKEN_SAMPLING:
 	  case HSPTOKEN_PACKETSAMPLINGRATE:
@@ -929,6 +950,21 @@ extern int debug;
 	      break;
 	    default:
 	      parseError(sp, tok, "unexpected collector setting", "");
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_PCAP:
+	  {
+	    HSPPcap *pc = sp->sFlow->sFlowSettings_file->pcaps;
+	    switch(tok->stok) {
+	    case HSPTOKEN_DEV:
+	      if((tok = expectDevice(sp, tok, &pc->dev)) == NULL) return NO;
+	      break;
+	    default:
+	      parseError(sp, tok, "unexpected pcap setting", "");
 	      return NO;
 	      break;
 	    }

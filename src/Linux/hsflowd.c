@@ -12,6 +12,17 @@ extern "C" {
 #include "hsflowd.h"
 #include "cpu_utils.h"
 
+#ifdef HSF_BPF
+#include <sys/ioctl.h>
+#include <net/if.h>
+#include <net/ethernet.h>
+#include <linux/types.h>
+#include <linux/if_ether.h>
+#include <linux/sockios.h>
+#include <linux/if_packet.h>
+#include <linux/filter.h>
+#endif
+  
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
@@ -97,6 +108,84 @@ extern "C" {
       }
     }
   }
+
+  /*_________________---------------------------__________________
+    _________________   adaptor utils           __________________
+    -----------------___________________________------------------
+  */
+
+  SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex) {
+    return adaptorNew(dev, macBytes, sizeof(HSPAdaptorNIO), ifIndex);
+  }
+			    
+  SFLAdaptor *adaptorByName(HSP *sp, char *dev) {
+    SFLAdaptor ad = { .deviceName = dev };
+    return UTHashGet(sp->adaptorsByName, &ad);
+  }
+  
+  SFLAdaptor *adaptorByMac(HSP *sp, SFLMacAddress *mac) {
+    SFLAdaptor ad = { .macs[0] = (*mac) };
+    return UTHashGet(sp->adaptorsByMac, &ad);
+  }
+
+  SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex) {
+    SFLAdaptor ad = { .ifIndex = ifIndex };
+    return UTHashGet(sp->adaptorsByIndex, &ad);
+  }
+
+  SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex) {
+    SFLAdaptor ad = { .peer_ifIndex = ifIndex };
+    return UTHashGet(sp->adaptorsByPeerIndex, &ad);
+  }
+
+  void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag) {
+    UTHashDel(sp->adaptorsByName, ad);
+    UTHashDel(sp->adaptorsByIndex, ad);
+    UTHashDel(sp->adaptorsByPeerIndex, ad);
+    UTHashDel(sp->adaptorsByMac, ad);
+    if(freeFlag) adaptorFree(ad);
+  }
+    
+  int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag) {
+    int found = 0;
+    SFLAdaptor *ad;
+    UTHASH_WALK(adaptorHT, ad) if(ad->marked) {
+      deleteAdaptor(sp, ad, freeFlag);
+      found++;
+    }
+    return found;
+  }
+
+  int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList) {
+    int found = 0;
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(adList, ad) if(ad->marked) {
+      deleteAdaptor(sp, ad, NO);
+      found++;
+    }
+    return found;
+  }
+
+  void adaptorHTPrint(UTHash *ht, char *prefix) {
+    SFLAdaptor *ad;
+    UTHASH_WALK(ht, ad) {
+      u_char macstr[13];
+      macstr[0] = '\0';
+      if(ad->num_macs) printHex(ad->macs[0].mac, 6, macstr, 13, NO);
+      myLog(LOG_INFO, "%s: ifindex: %u peer: %u nmacs: %u mac0: %s name: %s",
+	    prefix,
+	    ad->ifIndex,
+	    ad->peer_ifIndex,
+	    ad->num_macs,
+	    macstr,
+	    ad->deviceName);
+    }
+  }
+	    
+  /*_________________---------------------------__________________
+    _________________     Xen Handles           __________________
+    -----------------___________________________------------------
+  */
 
 #ifdef HSF_XEN
 
@@ -199,19 +288,21 @@ extern "C" {
 /* For convenience, define a domId to mean "the physical host" */
 #define XEN_DOMID_PHYSICAL (uint32_t)-1
 
-  static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
+  static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors, int capacity)
   {
     if(debug > 3) {
       if(dom_id == XEN_DOMID_PHYSICAL) myLog(LOG_INFO, "xenstat_adaptors(): looking for physical host interfaces");
       else myLog(LOG_INFO, "xenstat_adaptors(): looking for vif with domId=%"PRIu32, dom_id);
     }
 
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(niostate->up
 	 && (niostate->switchPort == NO)
-	 && myAdaptors->num_adaptors < HSP_MAX_VIFS) {
+	 && adaptor->num_macs
+	 && !isZeroMAC(&adaptor->macs[0])) {
+	if(myAdaptors->num_adaptors >= capacity) break;
 	uint32_t vif_domid=0;
 	uint32_t vif_netid=0;
 	uint32_t xapi_index=0;
@@ -248,28 +339,28 @@ extern "C" {
 	}
 	if((isVirtual && dom_id == vif_domid) ||
 	   (!isVirtual && !isXapi && dom_id == XEN_DOMID_PHYSICAL)) {
-	  // include this one (if we have room)
-	  if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
-	    myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
-	    if(isVirtual) {
-	      // for virtual interfaces we need to query for the MAC address
-	      char macQuery[256];
-	      snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	      char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
-	      if(macStr == NULL) {
-		myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
-	      }
-	      else{
-		if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
-		// got it - but make sure there is a place to write it
-		if(adaptor->num_macs > 0) {
-		  // OK, just overwrite the 'dummy' one that was there
-		  if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
-		    myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
-		  }
+	  // include this one
+	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
+	  // mark it as a vm/container device
+	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
+	  if(isVirtual) {
+	    // for virtual interfaces we need to query for the MAC address
+	    char macQuery[256];
+	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
+	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
+	    if(macStr == NULL) {
+	      myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
+	    }
+	    else{
+	      if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
+	      // got it - but make sure there is a place to write it
+	      if(adaptor->num_macs > 0) {
+		// OK, just overwrite the 'dummy' one that was there
+		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
+		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
 		}
-		free(macStr); // allocated by xs_read()
 	      }
+	      free(macStr); // allocated by xs_read()
 	    }
 	  }
 	}
@@ -282,26 +373,22 @@ extern "C" {
 
 #ifdef HSF_DOCKER
 
-  static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors)
+  static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors, int capacity)
   {
     // we want the slice of global-namespace adaptors that are veth peers of the adaptors
     // that belong to this container.
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-      if(niostate->up
-	 && niostate->peer_ifIndex
-	 && (niostate->switchPort == NO)
-	 && (niostate->loopback == NO)
-	 && peerAdaptors->num_adaptors < HSP_MAX_VIFS) {
-
-	for(uint32_t j=0; j < vm->interfaces->num_adaptors; j++) {
-	  SFLAdaptor *vm_adaptor = vm->interfaces->adaptors[j];
-	  if(niostate->peer_ifIndex == vm_adaptor->ifIndex) {
-	    // include this one (if we have room)
-	    if(peerAdaptors->num_adaptors < HSP_MAX_VIFS) {
-	      peerAdaptors->adaptors[peerAdaptors->num_adaptors++] = adaptor;
-	    }
+    for(uint32_t j=0; j < vm->interfaces->num_adaptors; j++) {
+      SFLAdaptor *vm_adaptor = vm->interfaces->adaptors[j];
+      SFLAdaptor *adaptor = adaptorByPeerIndex(sp, vm_adaptor->ifIndex);
+      if(adaptor) {
+	HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+	if(niostate->up
+	   && (niostate->switchPort == NO)
+	   && (niostate->loopback == NO)
+	   && peerAdaptors->num_adaptors < capacity) {
+	  // include this one (if we have room)
+	  if(peerAdaptors->num_adaptors < capacity) {
+	    peerAdaptors->adaptors[peerAdaptors->num_adaptors++] = adaptor;
 	  }
 	}
       }
@@ -323,21 +410,22 @@ extern "C" {
   }
 #endif
   
-  static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors)
+  static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors, int capacity)
   {
     // build the list of adaptors that are up and have non-empty MACs,
     // and are not veth connectors to peers inside containers,
-    // but stop if we hit the HSP_MAX_PHYSICAL_ADAPTORS limit
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-      if(niostate->up
-	 && (niostate->switchPort == NO)
-	 && (niostate->peer_ifIndex == 0)
-	 && myAdaptors->num_adaptors < HSP_MAX_PHYSICAL_ADAPTORS
-	 && adaptor->macs
-	 && !isZeroMAC(&adaptor->macs[0])) {
-	myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
+    // but stop if we hit the capacity
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      if(adaptor->peer_ifIndex == 0) {
+	HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+	if(niostate->up
+	   && (niostate->switchPort == NO)
+	   && adaptor->num_macs
+	   && !isZeroMAC(&adaptor->macs[0])) {
+	  if(myAdaptors->num_adaptors >= capacity) break;
+	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
+	}
       }
     }
     return myAdaptors;
@@ -441,17 +529,17 @@ extern "C" {
     myAdaptors.adaptors = adaptors;
     myAdaptors.capacity = HSP_MAX_VIFS;
     myAdaptors.num_adaptors = 0;
-    adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, XEN_DOMID_PHYSICAL, &myAdaptors);
+    adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, XEN_DOMID_PHYSICAL, &myAdaptors, HSP_MAX_VIFS);
 #else
     // collect list of host adaptors that are up, and have non-zero MACs.  This
     // also leaves out interfaces that have a peer (type=veth),  so it works for
     // KVM/libvirt and Docker too.
     SFLAdaptorList myAdaptors;
-    SFLAdaptor *adaptors[HSP_MAX_VIFS];
+    SFLAdaptor *adaptors[HSP_MAX_PHYSICAL_ADAPTORS];
     myAdaptors.adaptors = adaptors;
     myAdaptors.capacity = HSP_MAX_PHYSICAL_ADAPTORS;
     myAdaptors.num_adaptors = 0;
-    adaptorsElem.counterBlock.adaptors = host_adaptors(sp, &myAdaptors);
+    adaptorsElem.counterBlock.adaptors = host_adaptors(sp, &myAdaptors, HSP_MAX_PHYSICAL_ADAPTORS);
 #endif
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
@@ -738,7 +826,7 @@ extern "C" {
       myAdaptors.adaptors = adaptors;
       myAdaptors.capacity = HSP_MAX_VIFS;
       myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, state->domId, &myAdaptors);
+      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, state->domId, &myAdaptors, HSP_MAX_VIFS);
       SFLADD_ELEMENT(cs, &adaptorsElem);
 
       
@@ -927,7 +1015,7 @@ extern "C" {
     peerAdaptors.adaptors = adaptors;
     peerAdaptors.capacity = HSP_MAX_VIFS;
     peerAdaptors.num_adaptors = 0;
-    if(getContainerPeerAdaptors(sp, state, &peerAdaptors) > 0) {
+    if(getContainerPeerAdaptors(sp, state, &peerAdaptors, HSP_MAX_VIFS) > 0) {
       readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, &peerAdaptors);
       SFLADD_ELEMENT(cs, &nioElem);
     }
@@ -969,8 +1057,11 @@ extern "C" {
 	memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
 	// Apply simple sanity check to see if this matches the
 	// container->memoryLimit number that we got from docker-inspect
-	if(debug && maxMem != container->memoryLimit) {
+	if(debug
+	   && container->memoryLimit != 0
+	   && maxMem != container->memoryLimit) {
 	  myLog(LOG_INFO, "warning: container %s memoryLimit=%"PRIu64" but readContainerCounters shows %"PRIu64,
+		container->name,
 		container->memoryLimit,
 		maxMem);
 	}
@@ -1016,6 +1107,11 @@ extern "C" {
     SFLCounters_sample_element adaptorsElem = { 0 };
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
     adaptorsElem.counterBlock.adaptors = state->interfaces;
+    { // $$$$
+      SFLAdaptor *ad;
+      ADAPTORLIST_WALK(state->interfaces, ad) assert(ad->num_macs == 1);
+    }
+    
     SFLADD_ELEMENT(cs, &adaptorsElem);
     sfl_poller_writeCountersSample(poller, cs);
     
@@ -1191,15 +1287,23 @@ extern "C" {
     if(node->children) domain_xml_disk(node->children, disk_path, disk_dev);
   }
   
-  void domain_xml_node(xmlNode *node, HSPVMState *state) {
+  void domain_xml_node(HSP *sp, xmlNode *node, HSPVMState *state) {
     for(xmlNode *n = node; n; n = n->next) {
       if(domain_xml_path_equal(n, "interface", "devices", "domain", NULL)) {
 	char *ifname=NULL,*ifmac=NULL;
 	domain_xml_interface(n, &ifname, &ifmac);
 	if(ifname && ifmac) {
-	  u_char macBytes[6];
-	  if(hexToBinary((u_char *)ifmac, macBytes, 6) == 6) {
-	    SFLAdaptor *ad = adaptorListAdd(state->interfaces, ifname, macBytes, 0);
+	  SFLMacAddress mac;
+	  memset(&mac, 0, sizeof(mac));
+	  if(hexToBinary((u_char *)ifmac, mac.mac, 6) == 6) {
+	    SFLAdaptor *ad = adaptorByMac(sp, &mac);
+	    if(ad == NULL) {
+	      ad = nioAdaptorNew(ifname, mac.mac, 0);
+	      UTHashAdd(sp->adaptorsByMac, ad, NO);
+	    }
+	    adaptorListAdd(state->interfaces, ad);
+	    // mark it as a vm/container device
+	    ADAPTOR_NIO(ad)->vm_or_container = YES;
 	    // clear the mark so we don't free it
 	    ad->marked = NO;
 	  }
@@ -1214,7 +1318,7 @@ extern "C" {
 	  strArrayAdd(state->disks, (char *)disk_dev);
 	}
       }
-      else if(n->children) domain_xml_node(n->children, state);
+      else if(n->children) domain_xml_node(sp, n->children, state);
     }
   }
 
@@ -1451,13 +1555,18 @@ extern "C" {
 	    xmlDoc *doc = xmlParseMemory(xmlstr, strlen(xmlstr));
 	    if(doc) {
 	      xmlNode *rootNode = xmlDocGetRootElement(doc);
-	      domain_xml_node(rootNode, state);
+	      domain_xml_node(sp, rootNode, state);
 	      xmlFreeDoc(doc);
 	    }
 	    free(xmlstr); // allocated by virDomainGetXMLDesc()
 	  }
 	  xmlCleanupParser();
 	  virDomainFree(domainPtr);
+	  // fully delete and free the marked adaptors - some may return if
+	  // they are still present in the global-namespace list,  but
+	  // we have to do this here in case one of these was discovered
+	  // and allocated just for this VM.
+	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
 	  adaptorListFreeMarked(state->interfaces);
 	}
       }
@@ -1604,6 +1713,7 @@ extern "C" {
 	    sp->refreshAdaptorList = YES;
 	  }
 	  readContainerInterfaces(sp, state);
+	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
 	  adaptorListFreeMarked(state->interfaces);
 	  // we are using sp->num_domains as the portable field across Xen, KVM, Docker
 	  sp->num_domains = sp->num_containers;
@@ -1627,7 +1737,13 @@ extern "C" {
 		  state->domId);
 	    if(state->disks) strArrayFree(state->disks);
 	    if(state->volumes) strArrayFree(state->volumes);
-	    if(state->interfaces) adaptorListFree(state->interfaces);
+	    if(state->interfaces) {
+	      adaptorListMarkAll(state->interfaces);
+	      // delete any hash-table references to these adaptors
+	      deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
+	      // then free them along with the adaptorList itself
+	      adaptorListFree(state->interfaces);
+	    }
 	    my_free(state);
 	    pl->userData = NULL;
 	    sfl_agent_removePoller(sf->agent, &pl->dsi);
@@ -2066,7 +2182,7 @@ extern "C" {
       openNFLOG(sp);
     }
 #endif
-
+      
 #ifdef HSF_JSON
     uint16_t jsonPort = sp->sFlow->sFlowSettings_file->jsonPort;
     char *jsonFIFO = sp->sFlow->sFlowSettings_file->jsonFIFO;
@@ -2088,6 +2204,90 @@ extern "C" {
       cJSON_InitHooks(&hooks);
     }
 #endif
+
+#if ( HSF_BPF || HSF_PCAP )
+    for(HSPPcap *pcap = sp->sFlow->sFlowSettings_file->pcaps; pcap; pcap = pcap->nxt) {
+      BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
+      bpfs->nxt = sp->bpf_socs;
+      sp->bpf_socs = bpfs;
+      bpfs->myHSP = sp;
+      SFLAdaptor *adaptor = adaptorByName(sp, pcap->dev);
+      if(adaptor == NULL) {
+	myLog(LOG_ERR, "BPF/PCAP: device not found: %s", pcap->dev);
+      }
+      else {
+	bpfs->deviceName = strdup(pcap->dev);
+	bpfs->isBridge = (ADAPTOR_NIO(adaptor)->devType == HSPDEV_BRIDGE);
+	bpfs->sampling_rate = lookupPacketSamplingRate(adaptor, sp->sFlow->sFlowSettings);
+	bpfs->bpf_ok = NO;
+	bpfs->pcap_ok = NO;
+#ifdef HSF_BPF
+	bpfs->soc = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+	if(debug) myLog(LOG_INFO, "BPF: PF_PACKET socket is %d", bpfs->soc);
+	if(bpfs->soc < 0) {
+	  if(debug) myLog(LOG_ERR, "BPF: PF_PACKET socket open error: %s", strerror(errno));
+	}
+	else {
+	  struct sockaddr_ll sll = { 0 };
+	  sll.sll_family = AF_PACKET;
+	  sll.sll_ifindex = adaptor->ifIndex;
+	  sll.sll_protocol = htons(ETH_P_ALL);
+	  int status = bind(bpfs->soc, (struct sockaddr *) &sll, sizeof(sll));
+	  if(debug) myLog(LOG_INFO, "BPF: bind status=%d", status);
+	  if(status == -1) {
+	    myLog(LOG_ERR, "BPF: bind status=%d : %s", status, strerror(errno));
+	  }
+	  else {
+	    struct sock_filter code[] = {
+	      { 0x20,  0,  0, 0xfffff038 },
+	      { 0x94,  0,  0, 0x00000100 }, // 0100 = 1-in-256
+	      { 0x15,  0,  1, 0x00000001 },
+	      { 0x06,  0,  0, 0xffffffff },
+	      { 0x06,  0,  0, 0000000000 },
+	    };
+	    // overwrite the sampling-rate
+	    code[1].k = bpfs->sampling_rate;
+	    if(debug) myLog(LOG_INFO, "BPF: sampling rate set to %u for dev=%s", code[1].k, pcap->dev);
+	    struct sock_fprog bpf = {
+	      .len = 5, // ARRAY_SIZE(code),
+	      .filter = code,
+	    };
+	    status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
+	    if(debug) myLog(LOG_INFO, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d", status);
+	    if(status == -1) {
+	      myLog(LOG_ERR, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
+	    }
+	    else {
+	      bpfs->bpf_ok = YES;
+	    }
+	  }
+	}
+#endif
+	if(bpfs->bpf_ok == NO) {
+#ifdef HSF_PCAP
+	  // Fall back on libpcap interface.  Could possibly use PF_RING
+	  // here but (1) we don't want to run hot and (2) the newer kernels
+	  // that support PF_PING are also likely to support the preferred BPF
+	  // sampling option above.
+	  bpfs->pcap = pcap_open_live(pcap->dev,
+				      SFL_DEFAULT_HEADER_SIZE,
+				      NO, /* promisc */
+				      0, /* timeout==poll */
+				      bpfs->pcap_err);
+	  if(bpfs->pcap) {
+	    if(debug) myLog(LOG_INFO, "PCAP: device %s opened OK", pcap->dev);
+	    bpfs->soc = pcap_fileno(bpfs->pcap);
+	    bpfs->pcap_ok = YES;
+	  }
+	  else {
+	    if(debug) myLog(LOG_ERR, "PCAP: device %s open failed", pcap->dev);
+	  }
+#endif
+	}
+      }
+    }
+#endif
+
     return YES;
   }
 
@@ -2293,8 +2493,11 @@ extern "C" {
       UTStrBuf_printf(buf, "%s", arrayStr);
       my_free(arrayStr);
       strArrayFree(iplist);
+      // optional pcap settings
+      for(HSPPcap *pcap = settings->pcaps; pcap; pcap = pcap->nxt) {
+	UTStrBuf_printf(buf, "pcap=%s\n", pcap->dev);
+      }
     }
-
     return UTStrBuf_unwrap(buf);
   }
 
@@ -2327,43 +2530,39 @@ extern "C" {
     strArrayAdd(cmdline, loggrp);
 #define HSP_MAX_EXEC_LINELEN 1024
     char outputLine[HSP_MAX_EXEC_LINELEN];
-    SFLAdaptorList *adaptorList = sf->myHSP->adaptorList;
-    for(uint32_t i = 0; i < adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = adaptorList->adaptors[i];
-      if(adaptor && adaptor->ifIndex) {
-	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-	if(niostate
-	   && niostate->switchPort
-	   && !niostate->loopback
-	   && !niostate->bond_master) {
-	  niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
-	  if(niostate->sampling_n != niostate->sampling_n_set) {
-	    strArrayInsert(cmdline, 1, adaptor->deviceName);
-	    char srate[HSP_MAX_TOK_LEN];
-	    snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-	    if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
-	    if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
-	    int status;
-	    if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
-	      if(WEXITSTATUS(status) != 0) {
-
-		myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
-		      HSP_SWITCHPORT_CONFIG_PROG,
-		      WEXITSTATUS(status));
-
-		hw_sampling = NO;
-		break;
-	      }
-	      else {
-		// hardware or kernel sampling was successfully configured
-		niostate->sampling_n_set = niostate->sampling_n;
-	      }
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sf->myHSP->adaptorDB->byIndex, adaptor) {
+      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+      if(niostate->switchPort
+	 && !niostate->loopback
+	 && !niostate->bond_master) {
+	niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
+	if(niostate->sampling_n != niostate->sampling_n_set) {
+	  strArrayInsert(cmdline, 1, adaptor->deviceName);
+	  char srate[HSP_MAX_TOK_LEN];
+	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
+	  if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
+	  if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
+	  int status;
+	  if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+	    if(WEXITSTATUS(status) != 0) {
+	      
+	      myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
+		    HSP_SWITCHPORT_CONFIG_PROG,
+		    WEXITSTATUS(status));
+	      
+	      hw_sampling = NO;
+	      break;
 	    }
 	    else {
-	      myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
-		    strArrayAt(cmdline, 0),
-		    strArrayAt(cmdline, 1));
+	      // hardware or kernel sampling was successfully configured
+	      niostate->sampling_n_set = niostate->sampling_n;
 	    }
+	  }
+	  else {
+	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
+		  strArrayAt(cmdline, 0),
+		  strArrayAt(cmdline, 1));
 	  }
 	}
       }
@@ -3012,6 +3211,12 @@ extern "C" {
     // semaphore to protect config shared with DNSSD thread
     sp->config_mut = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(sp->config_mut, NULL);
+
+    // allocate device tables
+    sp->adaptorsByName = UTHASH_NEW(SFLAdaptor, deviceName, YES);
+    sp->adaptorsByIndex = UTHASH_NEW(SFLAdaptor, ifIndex, NO);
+    sp->adaptorsByPeerIndex = UTHASH_NEW(SFLAdaptor, peer_ifIndex, NO);
+    sp->adaptorsByMac = UTHASH_NEW(SFLAdaptor, macs[0], NO);
     
     setState(sp, HSPSTATE_READCONFIG);
     
@@ -3045,44 +3250,50 @@ extern "C" {
 	  myLog(LOG_ERR, "failed to read config file\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
+	  break;
 	}
-	else if(readInterfaces(sp, NULL, NULL, NULL, NULL, NULL) == 0) {
+
+	// must be able to read interfaces
+	if(readInterfaces(sp, NULL, NULL, NULL, NULL, NULL) == 0) {
 	  myLog(LOG_ERR, "failed to read interfaces\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
+	  break;
 	}
-	else if(selectAgentAddress(sp, NULL) == NO) {
+
+	// must be able to choose an agent address
+	if(selectAgentAddress(sp, NULL) == NO) {
 	  myLog(LOG_ERR, "failed to select agent address\n");
 	  exitStatus = EXIT_FAILURE;
 	  setState(sp, HSPSTATE_END);
+	  break;
+	}
+
+	if(sp->DNSSD) {
+	  // launch dnsSD thread.  It will now be responsible for
+	  // the sFlowSettings,  and the current thread will loop
+	  // in the HSPSTATE_WAITCONFIG state until that pointer
+	  // has been set (sp->sFlow.sFlowSettings)
+	  // Set a more conservative stacksize here - partly because
+	  // we don't need more,  but mostly because Debian was refusing
+	  // to create the thread - I guess because it was enough to
+	  // blow through our mlockall() allocation.
+	  // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
+	  pthread_attr_t attr;
+	  pthread_attr_init(&attr);
+	  pthread_attr_setstacksize(&attr, HSP_DNSSD_STACKSIZE);
+	  sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
+	  int err = pthread_create(sp->DNSSD_thread, &attr, runDNSSD, sp);
+	  if(err != 0) {
+	    myLog(LOG_ERR, "pthread_create() failed: %s\n", strerror(err));
+	    exit(EXIT_FAILURE);
+	  }
 	}
 	else {
-	  if(sp->DNSSD) {
-	    // launch dnsSD thread.  It will now be responsible for
-	    // the sFlowSettings,  and the current thread will loop
-	    // in the HSPSTATE_WAITCONFIG state until that pointer
-	    // has been set (sp->sFlow.sFlowSettings)
-	    // Set a more conservative stacksize here - partly because
-	    // we don't need more,  but mostly because Debian was refusing
-	    // to create the thread - I guess because it was enough to
-	    // blow through our mlockall() allocation.
-	    // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
-	    pthread_attr_t attr;
-	    pthread_attr_init(&attr);
-	    pthread_attr_setstacksize(&attr, HSP_DNSSD_STACKSIZE);
-	    sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
-	    int err = pthread_create(sp->DNSSD_thread, &attr, runDNSSD, sp);
-	    if(err != 0) {
-	      myLog(LOG_ERR, "pthread_create() failed: %s\n", strerror(err));
-	      exit(EXIT_FAILURE);
-	    }
-	  }
-	  else {
-	    // just use the config from the file
-	    installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
-	  }
-	  setState(sp, HSPSTATE_WAITCONFIG);
+	  // just use the config from the file
+	  installSFlowSettings(sp->sFlow, sp->sFlow->sFlowSettings_file);
 	}
+	setState(sp, HSPSTATE_WAITCONFIG);
 	break;
 	
       case HSPSTATE_WAITCONFIG:
@@ -3235,6 +3446,18 @@ extern "C" {
 	FD_SET(sp->json_fifo, &readfds);
       }
 #endif
+
+
+#if ( HSF_BPF || HSF_PCAP)
+      for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
+	if((bpfs->bpf_ok || bpfs->pcap_ok)
+	   && bpfs->soc > 0) {
+	  if(bpfs->soc > max_fd) max_fd = bpfs->soc;
+	  FD_SET(bpfs->soc, &readfds);
+	}
+      }
+#endif
+      
       if(!configOK) {
 	// no config (may be temporary condition caused by DNS-SD),
 	// so disable the socket polling - just use select() to sleep
@@ -3254,7 +3477,7 @@ extern "C" {
 	myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      if(debug > 1 && nfds > 0) {
+      if(debug > 2 && nfds > 0) {
 	myLog(LOG_INFO, "select returned %d", nfds);
       }
       // may get here just because a signal was caught so these
@@ -3263,7 +3486,7 @@ extern "C" {
       if(sp->ulog_soc > 0 && FD_ISSET(sp->ulog_soc, &readfds)) {
         int batch = readPackets_ulog(sp);
         if(debug) {
-          if(debug > 1) myLog(LOG_INFO, "readPackets_ulog batch=%d", batch);
+          if(debug > 2) myLog(LOG_INFO, "readPackets_ulog batch=%d", batch);
           if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_ulog got max batch (%d)", batch);
         }
       }
@@ -3272,10 +3495,9 @@ extern "C" {
       if(sp->nflog_soc > 0 && FD_ISSET(sp->nflog_soc, &readfds)) {
         int batch = readPackets_nflog(sp);
         if(debug) {
-          if(debug > 1) myLog(LOG_INFO, "readPackets_nflog batch=%d", batch);
+          if(debug > 2) myLog(LOG_INFO, "readPackets_nflog batch=%d", batch);
           if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_nflog got max batch (%d)", batch);
 	}
-
       }
 #endif
 #ifdef HSF_JSON
@@ -3287,6 +3509,27 @@ extern "C" {
       }
       if(sp->json_fifo > 0 && FD_ISSET(sp->json_fifo, &readfds)) {
 	readJSON(sp, sp->json_fifo);
+      }
+#endif
+
+#if ( HSF_BPF || HSF_PCAP )
+      for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
+	if(bpfs->soc > 0
+	   && FD_ISSET(bpfs->soc, &readfds)) {
+	  int batch = 0;
+#ifdef HSF_BPF	    
+	  if(bpfs->bpf_ok)
+	    batch = readPackets_bpf(sp, bpfs);
+#endif
+#ifdef HSF_PCAP
+	  if(bpfs->pcap_ok)
+	    batch = readPackets_pcap(sp, bpfs);
+#endif
+	  if(debug) {
+	    if(debug > 2) myLog(LOG_INFO, "BPF/PCAP: readPackets batch=%d", batch);
+	    if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "BPF/PCAP: readPackets got max batch (%d)", batch);
+	  }
+	}
       }
 #endif
 

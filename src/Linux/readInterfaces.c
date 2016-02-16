@@ -91,11 +91,10 @@ approach seemed more stable and portable.
 	int vlan;
 	++lineNo;
 	if(lineNo > 1 && sscanf(line, "%s | %d", devName, &vlan) == 2) {
-	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(devName));
-	  if(adaptor && adaptor->userData &&
+	  SFLAdaptor *adaptor = adaptorByName(sp,  trimWhitespace(devName));
+	  if(adaptor &&
 	     vlan >= 0 && vlan < 4096) {
-	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-	    niostate->vlan = vlan;
+	    ADAPTOR_NIO(adaptor)->vlan = vlan;
 	    if(debug) myLog(LOG_INFO, "adaptor %s has 802.1Q vlan %d", devName, vlan);
 	  }
 	}
@@ -114,18 +113,16 @@ approach seemed more stable and portable.
   void setAddressPriorities(HSP *sp)
   {
     if(debug) myLog(LOG_INFO, "setAddressPriorities");
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      if(adaptor && adaptor->userData) {
-	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	adaptorNIO->ipPriority = agentAddressPriority(sp,
-						      &adaptorNIO->ipAddr,
-						      adaptorNIO->vlan,
-						      adaptorNIO->loopback);
-      }
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      adaptorNIO->ipPriority = agentAddressPriority(sp,
+						    &adaptorNIO->ipAddr,
+						    adaptorNIO->vlan,
+						    adaptorNIO->loopback);
     }
   }
-
+  
 /*________________---------------------------__________________
   ________________  readIPv6Addresses        __________________
   ----------------___________________________------------------
@@ -179,9 +176,9 @@ approach seemed more stable and portable.
 		  addr,
 		  scope);
 	  }
-	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(devName));
-	  if(adaptor && adaptor->userData) {
-	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	  SFLAdaptor *adaptor = adaptorByName(sp, trimWhitespace(devName));
+	  if(adaptor) {
+	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
 	    SFLAddress v6addr;
 	    v6addr.type = SFLADDRESSTYPE_IP_V6;
 	    if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
@@ -253,8 +250,31 @@ approach seemed more stable and portable.
 #endif /* (HSP_ETHTOOL_STATS || HSF_DOCKER) */
 
 
-  static int read_ethtool_info(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  static int read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
+    // set device type from ethtool driver info - could also have gone
+    // to /sys/class/net/<device>/.
+    struct ethtool_drvinfo drvinfo;
+    drvinfo.cmd = ETHTOOL_GDRVINFO;
+    ifr->ifr_data = (char *)&drvinfo;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
+	adaptorNIO->devType = HSPDEV_BRIDGE;
+      else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
+	adaptorNIO->devType = HSPDEV_VETH;
+      else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
+	adaptorNIO->devType = HSPDEV_VIF;
+      else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
+	adaptorNIO->devType = HSPDEV_OVS;
+      else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
+	adaptorNIO->devType = HSPDEV_PHYSICAL;
+      else if(my_strlen(drvinfo.bus_info))
+	adaptorNIO->devType = HSPDEV_PHYSICAL;
+      else
+	adaptorNIO->devType = HSPDEV_OTHER;
+    }
+    
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
     int changed = NO;
@@ -288,7 +308,7 @@ approach seemed more stable and portable.
       }
 #if (HSP_ETHTOOL_STATS || HSF_DOCKER)
       // see if the ethtool stats block can give us multicast/broadcast counters too
-      HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       adaptorNIO->et_nfound=0;
       adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
       if(adaptorNIO->et_nctrs) {
@@ -328,17 +348,26 @@ approach seemed more stable and portable.
 #endif
 #ifdef HSF_DOCKER
 	    if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
-	      // Now go ahead and make the call to get the peer_ifindex.
+	      // Now go ahead and make the call to get the peer_ifindex. This should
+	      // work for veth pairs. If the container's device is a macvlan then it's
+	      // peer ifIndex will be reported as 0.
+	      // Understanding where a macvlan connects to can be
+	      // gleaned from a netlink call to RTM_GETLINK,  where the IFLA_LINK
+	      // attribute should have the ifIndex of the interface that the macvlan
+	      // is on.  See https://github.com/jbenc/plotnetcfg.  However we don't
+	      // really need that information to correctly model a macvlan setup as
+	      // an sFlow bridge,  so we don't even try to get it here.
 	      struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
 	      et_stats->cmd = ETHTOOL_GSTATS;
 	      et_stats->n_stats = adaptorNIO->et_nctrs;
 	      ifr->ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-		adaptorNIO->peer_ifIndex = et_stats->data[ii];
+		adaptor->peer_ifIndex = et_stats->data[ii];
+		UTHashAdd(sp->adaptorsByPeerIndex, adaptor, YES);
 		if(debug) myLog(LOG_INFO, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
 				adaptor->deviceName,
 				adaptor->ifIndex,
-				adaptorNIO->peer_ifIndex);
+				adaptor->peer_ifIndex);
 	      }
 	    }
 #endif
@@ -359,8 +388,8 @@ approach seemed more stable and portable.
   int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed)
 {
   uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
-  if(sp->adaptorList == NULL) sp->adaptorList = adaptorListNew();
-  else adaptorListMarkAll(sp->adaptorList);
+  
+  { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
   // have a list of MAC addresses for each interface (usually only 1).
@@ -388,122 +417,146 @@ approach seemed more stable and portable.
       char buf[MAX_PROC_LINE_CHARS];
       char *p = line;
       char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
-      if(devName && my_strlen(devName) < IFNAMSIZ) {
-	devName = trimWhitespace(devName);
-	if(devName && strlen(devName) < IFNAMSIZ) {
-	  // we set the ifr_name field to make our queries
-	  strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
+      if(devName == NULL) continue;
+      devName = trimWhitespace(devName);
+      int devNameLen = my_strlen(devName);
+      if(devNameLen == 0 || devNameLen >= IFNAMSIZ) continue;
+      // we set the ifr_name field to make our queries
+      strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
+      
+      if(debug > 1) {
+	myLog(LOG_INFO, "reading interface %s", devName);
+      }
+      
+      // Get the flags for this interface
+      if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
+	myLog(LOG_ERR, "device %s Get SIOCGIFFLAGS failed : %s",
+	      devName,
+	      strerror(errno));
+	continue;
+      }
 
-	  if(debug > 1) {
-	    myLog(LOG_INFO, "reading interface %s", devName);
-	  }
-
-	  // Get the flags for this interface
-	  if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
-	    myLog(LOG_ERR, "device %s Get SIOCGIFFLAGS failed : %s",
-		  devName,
-		  strerror(errno));
-	  }
-	  else {
-	    int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
-	    int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
-	    int promisc =  (ifr.ifr_flags & IFF_PROMISC) ? YES : NO;
-	    int bond_master = (ifr.ifr_flags & IFF_MASTER) ? YES : NO;
-	    int bond_slave = (ifr.ifr_flags & IFF_SLAVE) ? YES : NO;
-	    //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
-	    //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
-
-	    // used to ignore loopback interfaces here, and interfaces
-	    // that are currently marked down, but now those are
-	    // filtered at the point where we roll together the
-	    // counters, or build the list for export
-	      
-	    // Get the MAC Address for this interface
-	    if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
-	      myLog(LOG_ERR, "device %s Get SIOCGIFHWADDR failed : %s",
-		    devName,
-		    strerror(errno));
-	    }
-	    
-	    // for now just assume that each interface has only one MAC.  It's not clear how we can
-	    // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
-	    // find or create a new "adaptor" entry
-	    SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, devName);
-	    if(adaptor == NULL) {
-	      ad_added++;
-	      adaptor = adaptorListAdd(sp->adaptorList, devName, (u_char *)&ifr.ifr_hwaddr.sa_data, sizeof(HSPAdaptorNIO));
-	    }
-	    
-	    // clear the mark so we don't free it below
-	    adaptor->marked = NO;
-	    
-	    // this flag might belong in the adaptorNIO struct
-	    adaptor->promiscuous = promisc;
-	    
-	    // remember some useful flags in the userData structure
-	    HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
-	    if(adaptorNIO->up != up) {
-	      if(up) ad_cameup++;
-	      else ad_wentdown++;
-	      if(debug) {
-		myLog(LOG_INFO, "adaptor %s %s",
-		      adaptor->deviceName,
-		      up ? "came up" : "went down");
-	      }
-	    }
-	    adaptorNIO->up = up;
-	    adaptorNIO->loopback = loopback;
-	    adaptorNIO->bond_master = bond_master;
-	    adaptorNIO->bond_slave = bond_slave;
-	    adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
-#ifdef HSP_SWITCHPORT_REGEX
-	    if(regexec(&sp->swp_regex, devName, 0, NULL, 0) == 0) {
-	      adaptorNIO->switchPort = YES;
-	    }
-#endif
-	    // Try and get the ifIndex for this interface
-	    if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
-	      // only complain about this if we are debugging
-	      if(debug) {
-		myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
-		      devName,
-		      strerror(errno));
-	      }
-	    }
-	    else {
-	      adaptor->ifIndex = ifr.ifr_ifindex;
-	    }
-	    
-	    // Try to get the IP address for this interface
-	    if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
-	      // only complain about this if we are debugging
-	      if(debug) {
-		myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s",
-		      devName,
-		      strerror(errno));
-	      }
-	    }
-	    else {
-	      if (ifr.ifr_addr.sa_family == AF_INET) {
-		struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
-		// IP addr is now s->sin_addr
-		adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
-		adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
-	      }
-	      //else if (ifr.ifr_addr.sa_family == AF_INET6) {
-	      // not sure this ever happens - on a linux system IPv6 addresses
-	      // are picked up from /proc/net/if_inet6
-	      // struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
-	      // IP6 addr is now s->sin6_addr;
-	      //}
-	    }
-
-	    // use ethtool to get info about direction/speed and more
-	    if(read_ethtool_info(&ifr, fd, adaptor) == YES) {
-	      ad_changed++;
-	    }
-	  }
+      int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
+      int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
+      int promisc =  (ifr.ifr_flags & IFF_PROMISC) ? YES : NO;
+      int bond_master = (ifr.ifr_flags & IFF_MASTER) ? YES : NO;
+      int bond_slave = (ifr.ifr_flags & IFF_SLAVE) ? YES : NO;
+      //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
+      //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
+      
+      // used to ignore loopback interfaces here, and interfaces
+      // that are currently marked down, but now those are
+      // filtered at the point where we roll together the
+      // counters, or build the list for export
+      
+      // Try and get the MAC Address for this interface
+      u_char macBytes[6];
+      int gotMac = NO;
+      if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
+	myLog(LOG_ERR, "device %s Get SIOCGIFHWADDR failed : %s",
+	      devName,
+	      strerror(errno));
+      }
+      else {
+	memcpy(macBytes, (u_char *)&ifr.ifr_hwaddr.sa_data, 6);
+	gotMac = YES;
+      }
+      
+      // Try and get the ifIndex for this interface
+      uint32_t ifIndex = 0;
+      if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
+	// only complain about this if we are debugging
+	if(debug) {
+	  myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
+		devName,
+		strerror(errno));
 	}
+      }
+      else {
+	ifIndex = ifr.ifr_ifindex;
+      }
+      
+      // for now just assume that each interface has only one MAC.  It's not clear how we can
+      // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
+      // find or create a new "adaptor" entry
+      SFLAdaptor *adaptor = nioAdaptorNew(devName, (gotMac ? macBytes : NULL), ifIndex);
+      SFLAdaptor *existing = adaptorByName(sp, devName);
+      if(existing) {
+	if(adaptorEqual(adaptor, existing)) {
+	  // no change - use existing object
+	  adaptorFree(adaptor);
+	  adaptor = existing;
+	}
+	else {
+	  // there was a change - we'll put in the new one
+	  UTHashDel(sp->adaptorsByName, existing);
+	  adaptorFree(existing);
+	  existing = NULL;
+	}
+      }
+      if(existing == NULL) {
+	ad_added++;
+	UTHashAdd(sp->adaptorsByName, adaptor, NO);
+	// add to "all namespaces" collections too
+	if(gotMac) UTHashAdd(sp->adaptorsByMac, adaptor, YES);
+	if(ifIndex) UTHashAdd(sp->adaptorsByIndex, adaptor, YES);
+      }
+      
+      // clear the mark so we don't free it below
+      adaptor->marked = NO;
+      
+      // this flag might belong in the adaptorNIO struct
+      adaptor->promiscuous = promisc;
+      
+      // remember some useful flags in the userData structure
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      if(adaptorNIO->up != up) {
+	if(up) ad_cameup++;
+	else ad_wentdown++;
+	if(debug) {
+	  myLog(LOG_INFO, "adaptor %s %s",
+		adaptor->deviceName,
+		up ? "came up" : "went down");
+	}
+      }
+      adaptorNIO->up = up;
+      adaptorNIO->loopback = loopback;
+      adaptorNIO->bond_master = bond_master;
+      adaptorNIO->bond_slave = bond_slave;
+      adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
+#ifdef HSP_SWITCHPORT_REGEX
+      if(regexec(&sp->swp_regex, devName, 0, NULL, 0) == 0) {
+	adaptorNIO->switchPort = YES;
+      }
+#endif
+      
+      // Try to get the IP address for this interface
+      if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
+	// only complain about this if we are debugging
+	if(debug) {
+	  myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s",
+		devName,
+		strerror(errno));
+	}
+      }
+      else {
+	if (ifr.ifr_addr.sa_family == AF_INET) {
+	  struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
+	  // IP addr is now s->sin_addr
+	  adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+	  adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+	}
+	//else if (ifr.ifr_addr.sa_family == AF_INET6) {
+	// not sure this ever happens - on a linux system IPv6 addresses
+	// are picked up from /proc/net/if_inet6
+	// struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr;
+	// IP6 addr is now s->sin6_addr;
+	//}
+      }
+      
+      // use ethtool to get info about direction/speed and more
+      if(read_ethtool_info(sp, &ifr, fd, adaptor) == YES) {
+	ad_changed++;
       }
     }
     fclose(procFile);
@@ -512,7 +565,7 @@ approach seemed more stable and portable.
   close (fd);
 
   // now remove and free any that are still marked
-  ad_removed = adaptorListFreeMarked(sp->adaptorList);
+  ad_removed = deleteMarkedAdaptors(sp, sp->adaptorsByName, YES);
 
   // check in case any of the survivors are specific
   // to a particular VLAN
@@ -535,7 +588,7 @@ approach seemed more stable and portable.
   if(p_wentdown) *p_wentdown = ad_wentdown;
   if(p_changed) *p_changed = ad_changed;
 
-  return sp->adaptorList->num_adaptors;
+  return sp->adaptorsByName->entries;
 }
 
 #ifdef HSF_DOCKER
@@ -548,8 +601,7 @@ expecting lines of the form:
 VNIC: <ifindex> <device> <mac>
 */
 
-  static int containerLinkCB(void *magic, char *line) {
-    HSPVMState *vm = (HSPVMState *)magic;
+  static int containerLinkCB(HSP *sp, HSPVMState *vm, char *line) {
     if(debug) myLog(LOG_INFO, "containerLinkCB: line=<%s>", line);
     char deviceName[HSF_DOCKER_MAX_LINELEN];
     char macStr[HSF_DOCKER_MAX_LINELEN];
@@ -559,10 +611,14 @@ VNIC: <ifindex> <device> <mac>
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
 	SFLAdaptor *adaptor = adaptorListGet(vm->interfaces, deviceName);
 	if(adaptor == NULL) {
-	  adaptor = adaptorListAdd(vm->interfaces, deviceName, mac, sizeof(HSPAdaptorNIO));
+	  adaptor = nioAdaptorNew(deviceName, mac, ifIndex);
+	  adaptorListAdd(vm->interfaces, adaptor);
+	  // add to "all namespaces" collections too
+	  UTHashAdd(sp->adaptorsByMac, adaptor, YES);
+	  UTHashAdd(sp->adaptorsByIndex, adaptor, YES);
+	  // mark it as a vm/container device
+	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
 	}
-	// set ifIndex
-	adaptor->ifIndex = ifIndex;
 	// clear the mark so we don't free it below
 	adaptor->marked = NO;
       }
@@ -716,7 +772,7 @@ VNIC: <ifindex> <device> <mac>
 	return 0;
       }
       char line[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(vm, line);
+      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(sp, vm, line);
       fclose(ovs);
       wait(NULL); // block here until child is done
     }

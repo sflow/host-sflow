@@ -707,6 +707,7 @@ typedef struct _SFLAdaptor {
 
   /* convenience hooks for clients */
   uint32_t marked;
+  uint32_t peer_ifIndex;
   void *userData;
 
   uint32_t num_macs;

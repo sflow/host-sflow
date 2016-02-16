@@ -11,7 +11,7 @@ extern "C" {
 
   extern int debug;
 
-#if (HSF_ULOG || HSF_NFLOG)
+#if (HSF_ULOG || HSF_NFLOG || HSF_BPF || HSF_PCAP)
 
 
   /*_________________-----------------------------------__________________
@@ -29,9 +29,9 @@ extern "C" {
     
     if(devName) {
       // look up the adaptor objects
-      SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, devName);
-      if(adaptor && adaptor->userData) {
-	HSPAdaptorNIO *adaptorNIO = (HSPAdaptorNIO *)adaptor->userData;
+      SFLAdaptor *adaptor = adaptorByName(sp, devName);
+      if(adaptor) {
+	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       
 	// make sure the counters are up to the second
 	updateNioCounters(sp);
@@ -82,6 +82,18 @@ extern "C" {
 	elem.counterBlock.generic.ifOutErrors = adaptorNIO->nio.errs_out;
 	SFLADD_ELEMENT(cs, &elem);
 
+	if(adaptorNIO->vm_or_container) {
+#define HSP_DIRECTION_SWAP(g,f) do {				\
+	    uint32_t _tmp = g.ifIn ## f;			\
+	    g.ifIn ## f = g.ifOut ## f;				\
+	    g.ifOut ## f = _tmp; } while(0)
+	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, UcastPkts);
+	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, MulticastPkts);
+	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, BroadcastPkts);
+	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, Discards);
+	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, Errors);
+	}
+	  
 	// add optional interface name struct
 	SFLCounters_sample_element pn_elem = { 0 };
 	pn_elem.tag = SFLCOUNTERS_PORTNAME;
@@ -112,26 +124,23 @@ extern "C" {
 
   static SFLPoller *getPoller(HSP *sp, SFLAdaptor *adaptor)
   {
-    HSPAdaptorNIO *adaptorNIO=(HSPAdaptorNIO *)adaptor->userData;
-    if(adaptorNIO) {
-      if(adaptorNIO->poller == NULL) {
-	SFLDataSource_instance dsi;
-	SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
-	HSPSFlow *sf = sp->sFlow;
-	uint32_t pollingInterval = sf->sFlowSettings ?
-	  sf->sFlowSettings->pollingInterval :
-	  SFL_DEFAULT_POLLING_INTERVAL;
-	adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
-	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
-	sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
-	// remember the device name to make the lookups easier later.
-	// Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
-	// in case it gets freed at some point.  The device name is enough.
-	adaptorNIO->poller->userData = (void *)my_strdup(adaptor->deviceName);
-      }
-      return adaptorNIO->poller;
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    if(adaptorNIO->poller == NULL) {
+      SFLDataSource_instance dsi;
+      SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
+      HSPSFlow *sf = sp->sFlow;
+      uint32_t pollingInterval = sf->sFlowSettings ?
+	sf->sFlowSettings->pollingInterval :
+	SFL_DEFAULT_POLLING_INTERVAL;
+      adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
+      sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
+      sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
+      // remember the device name to make the lookups easier later.
+      // Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
+      // in case it gets freed at some point.  The device name is enough.
+      adaptorNIO->poller->userData = (void *)my_strdup(adaptor->deviceName);
     }
-    return NULL;
+    return adaptorNIO->poller;
   }
 
   /*_________________---------------------------__________________
@@ -141,35 +150,30 @@ extern "C" {
 
   static SFLSampler *getSampler(HSP *sp, SFLAdaptor *adaptor)
   {
-    HSPAdaptorNIO *adaptorNIO=(HSPAdaptorNIO *)adaptor->userData;
-    if(adaptorNIO) {
-      if(adaptorNIO->sampler == NULL) {
-	SFLDataSource_instance dsi;
-	SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
-	HSPSFlow *sf = sp->sFlow;
-	// add sampler
-	adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
-	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
-	// and make sure we have a poller too
-	getPoller(sp, adaptor);
-      }
-      return adaptorNIO->sampler;
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    if(adaptorNIO->sampler == NULL) {
+      SFLDataSource_instance dsi;
+      SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
+      HSPSFlow *sf = sp->sFlow;
+      // add sampler
+      adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
+      sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
+      // and make sure we have a poller too
+      getPoller(sp, adaptor);
     }
-    return NULL;
+    return adaptorNIO->sampler;
   }
-
-
 
   /*_________________---------------------------__________________
     _________________    takeSample             __________________
     -----------------___________________________------------------
   */
 
-  static void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, uint32_t hook, u_char *mac_hdr, uint32_t mac_len, u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
+  static void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
   {
 
     if(debug > 1) {
-      myLog(LOG_INFO, "hook=%u in=%s out=%s pkt_len=%u cap_len=%u mac_len=%u",
+      myLog(LOG_INFO, "takeSample: hook=%u in=%s out=%s pkt_len=%u cap_len=%u mac_len=%u",
 	    hook,
 	    ad_in ? ad_in->deviceName : "<not found>",
 	    ad_out ? ad_out->deviceName : "<not found>",
@@ -184,13 +188,78 @@ extern "C" {
 	myLog(LOG_INFO, "%s -> %s (ethertype=0x%04X)", macsrc, macdst, ethtype);
       }
     }
+
+    int internal_in = NO;
+    int internal_out = NO;
+    int bridgeModel = isBridge;
+	
+    // If it is the container-end of a veth pair, then we want to
+    // map it back to the other end that is in the global-namespace,
+    // Since those are the bridge ports.
+    if(ad_in) {
+      if(ADAPTOR_NIO(ad_in)->vm_or_container)
+	bridgeModel = YES;
+      SFLAdaptor *ad_in_global = adaptorByPeerIndex(sp, ad_in->ifIndex);
+      if(ad_in_global) {
+	if(debug) {
+	  myLog(LOG_INFO, "  GlobalNS veth peer ad_in=%s(%u)",
+		ad_in_global->deviceName,
+		ad_in_global->ifIndex);
+	}
+	bridgeModel = YES;
+	ad_in = ad_in_global;
+      }
+    }
+    if(ad_out) {
+      if(ADAPTOR_NIO(ad_out)->vm_or_container)
+	bridgeModel = YES;
+      SFLAdaptor *ad_out_global = adaptorByPeerIndex(sp, ad_out->ifIndex);
+      if(ad_out_global) {
+	if(debug) {
+	  myLog(LOG_INFO, "  GlobalNS veth peer ad_out=%s(%u)",
+		ad_out_global->deviceName,
+		ad_out_global->ifIndex);
+	}
+	bridgeModel = YES;
+	ad_out = ad_out_global;
+      }
+    }
+	
+    // For a MAC that we don't recognize,  we will assume
+    // that it it's going out on the physical NIC.  That may
+    // be the device that we tapped here (bpfs->device) or
+    // if we tapped a bridge we should look for a physical
+    // device or bond that is also attached to the bridge.
+    // Of course, this host may itself be a VM so the
+    // "Physical" NIC may just be a virtual interface too.
+    // In that case we may have to fall back on a process of
+    // elimination and look for the one device on the bridge
+    // that is not either a loopback or veth or associated
+    // with a container or VM.  When readInterfaces() finds
+    // a bridge it could try to establish the "external"
+    // device for that bridge.
     
+    if(!bridgeModel) {
+      // model this as a standalone host, so that
+      // packets go to and from the "internal" interface.
+      if(ad_in) {
+	internal_in = YES;
+	ad_out = ad_in;
+	ad_in = NULL;
+      }
+      else if(ad_out) {
+	internal_out = YES;
+	ad_in = ad_out;
+	ad_out = NULL;
+      }
+    }
+
     SFL_FLOW_SAMPLE_TYPE fs = { 0 };
  
     // set the ingress and egress ifIndex numbers.
     // Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
-    fs.input = ad_in ? ad_in->ifIndex : SFL_INTERNAL_INTERFACE;
-    fs.output = ad_out ? ad_out->ifIndex : SFL_INTERNAL_INTERFACE;
+    fs.input = ad_in ? ad_in->ifIndex : (internal_in ? SFL_INTERNAL_INTERFACE : 0);
+    fs.output = ad_out ? ad_out->ifIndex : (internal_out ? SFL_INTERNAL_INTERFACE : 0);
 
     SFLAdaptor *sampler_dev = ad_in ?: ad_out;
 
@@ -209,10 +278,8 @@ extern "C" {
       // sampling.  In a typical host scenario most samples will be
       // "lo" -> "eth0" or "eth0" -> "lo", so this ensures that
       // that we present it as bidirectional sampling on eth0.
-      HSPAdaptorNIO *inNIO = (HSPAdaptorNIO *)ad_in->userData;
-      if(inNIO->loopback) {
-	HSPAdaptorNIO *outNIO = (HSPAdaptorNIO *)ad_out->userData;
-	if(!outNIO->loopback
+      if(ADAPTOR_NIO(ad_in)->loopback) {
+	if(!ADAPTOR_NIO(ad_out)->loopback
 	   && ad_out->ifIndex) {
 	  sampler_dev = ad_out;
 	}
@@ -222,7 +289,7 @@ extern "C" {
 
     // must have a sampler_dev with an ifIndex
     if(sampler_dev && sampler_dev->ifIndex) {
-      HSPAdaptorNIO *samplerNIO = (HSPAdaptorNIO *)sampler_dev->userData;
+      HSPAdaptorNIO *samplerNIO = ADAPTOR_NIO(sampler_dev);
 
       if(debug > 2) {
 	myLog(LOG_INFO, "selected sampler %s ifIndex=%u",
@@ -274,7 +341,7 @@ extern "C" {
 	    hdrElem.flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
 	    hdrElem.flowType.header.stripped += mac_len;
 	    hdrElem.flowType.header.header_length = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
-	    hdrElem.flowType.header.header_bytes = cap_hdr;
+	    hdrElem.flowType.header.header_bytes = (u_char *)cap_hdr;
 	    hdrElem.flowType.header.frame_length += mac_len;
 	  }
 	}
@@ -313,6 +380,154 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+#ifdef HSF_BPF
+
+  int readPackets_bpf(HSP *sp, BPFSoc *bpfs)
+  {
+    int batch = 0;
+    static uint32_t MySkipCount=1;
+    
+    if(sp->sFlow->sFlowSettings == NULL) {
+      // config was turned off
+      return 0;
+    }
+    
+    if(bpfs->sampling_rate == 0) {
+      // packet sampling was disabled by setting desired rate to 0
+      return 0;
+    }
+
+    for( ; batch < HSP_READPACKET_BATCH; batch++) {
+      u_char buf[HSP_MAX_BPF_MSG_BYTES];
+      int len = read(bpfs->soc, buf, HSP_MAX_BPF_MSG_BYTES);
+      if(len <= 0) break;
+      
+      if(debug > 1)
+	myLog(LOG_INFO, "got BPF msg: %u bytes", len);
+      
+      if(debug > 2) {
+	u_char hex[512];
+	printHex(buf, len, hex, 512, NO);
+	myLog(LOG_INFO, "got sampled header: <%s>", hex);
+      }
+
+      if(--MySkipCount == 0) {
+	/* reached zero. Set the next skip */
+	uint32_t sr = bpfs->sampling_rate;
+	MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
+	
+	// global MAC -> adaptor
+	SFLMacAddress macdst,macsrc;
+	memcpy(macdst.mac, buf, 6);
+	memcpy(macsrc.mac, buf+6, 6);
+	SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
+	SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
+	if(srcdev) myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
+			 srcdev->deviceName,
+			 srcdev->ifIndex,
+			 srcdev->peer_ifIndex);
+	if(dstdev) myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
+			 dstdev->deviceName,
+			 dstdev->ifIndex,
+			 dstdev->peer_ifIndex);
+	
+	if(debug > 3) {
+	  adaptorHTPrint(sp->adaptorsByPeerIndex, "peerHT");
+	  adaptorHTPrint(sp->adaptorsByIndex, "indexHT");
+	  adaptorHTPrint(sp->adaptorsByName, "nameHT");
+	  adaptorHTPrint(sp->adaptorsByMac, "macHT");
+	}
+	
+	takeSample(sp,
+		   srcdev,
+		   dstdev,
+		   bpfs->isBridge,
+		   0 /*hook*/,
+		   buf /* mac hdr*/,
+		   14 /* mac len */,
+		   buf + 14 /* payload */,
+		   len - 14, /* length of captured payload */
+		   len, /* length of packet (pdu) */
+		   0 /* droppedSamples */,
+		   bpfs->sampling_rate);
+      }
+    }
+    return batch;
+  }
+#endif
+
+#ifdef HSF_PCAP
+  // function of type pcap_handler
+
+  void readPackets_pcap_cb(u_char *user, const struct pcap_pkthdr *hdr, const u_char *buf)
+  {
+    static uint32_t MySkipCount=1;
+    BPFSoc *bpfs = (BPFSoc *)user;
+    uint32_t sr = bpfs->sampling_rate;
+
+    if(sr == 0) {
+      // sampling disabled by setting to 0
+      return;
+    }
+    
+    if(--MySkipCount == 0) {
+      /* reached zero. Set the next skip */
+      MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
+
+      HSP *sp = bpfs->myHSP;
+      
+      // global MAC -> adaptor
+      SFLMacAddress macdst,macsrc;
+      memcpy(macdst.mac, buf, 6);
+      memcpy(macsrc.mac, buf+6, 6);
+      SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
+      SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
+      if(srcdev) myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
+		       srcdev->deviceName,
+		       srcdev->ifIndex,
+		       srcdev->peer_ifIndex);
+      if(dstdev) myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
+		       dstdev->deviceName,
+		       dstdev->ifIndex,
+		       dstdev->peer_ifIndex);
+
+      if(debug > 1) {
+	adaptorHTPrint(sp->adaptorsByPeerIndex, "peerHT");
+	adaptorHTPrint(sp->adaptorsByIndex, "indexHT");
+	adaptorHTPrint(sp->adaptorsByName, "nameHT");
+	adaptorHTPrint(sp->adaptorsByMac, "macHT");
+      }
+      
+      takeSample(sp,
+		 srcdev,
+		 dstdev,
+		 bpfs->isBridge,
+		 0 /*hook*/,
+		 buf /* mac hdr*/,
+		 14 /* mac len */,
+		 buf + 14 /* payload */,
+		 hdr->caplen - 14, /* length of captured payload */
+		 hdr->len, /* length of packet (pdu) */
+		 0 /* droppedSamples */,
+		 bpfs->sampling_rate);
+    }
+  }
+  
+  int readPackets_pcap(HSP *sp, BPFSoc *bpfs)
+  {
+    int batch = pcap_dispatch(bpfs->pcap,
+			      HSP_READPACKET_BATCH,
+			      readPackets_pcap_cb,
+			      (u_char *)bpfs);
+    if(batch == -1) {
+      myLog(LOG_ERR, "pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
+      // close the pcap socket so we don't spin? $$$$
+    }
+    return batch;
+  }
+
+#endif
+  
 #ifdef HSF_ULOG
 
   int readPackets_ulog(HSP *sp)
@@ -401,15 +616,16 @@ extern "C" {
 		SFLAdaptor *dev_out = NULL;
 
 		if(pkt->indev_name[0]) {
-		  dev_in = adaptorListGet(sp->adaptorList, pkt->indev_name);
+		  dev_in = adaptorByName(sp, pkt->indev_name);
 		}
 		if(pkt->outdev_name[0]) {
-		  dev_out = adaptorListGet(sp->adaptorList, pkt->outdev_name);
+		  dev_out = adaptorByName(sp, pkt->outdev_name);
 		}
 
 		takeSample(sp,
 			   dev_in,
 			   dev_out,
+			   NO,
 			   pkt->hook,
 			   pkt->mac,
 			   pkt->mac_len,
@@ -555,8 +771,9 @@ extern "C" {
 		}
 
 		takeSample(sp,
-			   adaptorListGet_ifIndex(sp->adaptorList, (ifin_phys ?: ifin)),
-			   adaptorListGet_ifIndex(sp->adaptorList, (ifout_phys ?: ifout)),
+			   adaptorByIndex(sp, (ifin_phys ?: ifin)),
+			   adaptorByIndex(sp, (ifout_phys ?: ifout)),
+			   NO,
 			   msg_pkt_hdr->hook,
 			   mac_hdr,
 			   mac_len,
@@ -602,16 +819,11 @@ extern "C" {
     readBondState(sp);
 
     int count = 0;
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      if(adaptor && adaptor->ifIndex) {
-	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-	if(niostate) {
-	  if(niostate->switchPort) {
-	    count++;
-	    getPoller(sp, adaptor);
-	  }
-	}
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      if(ADAPTOR_NIO(adaptor)->switchPort) {
+	count++;
+	getPoller(sp, adaptor);
       }
     }
 
@@ -623,7 +835,7 @@ extern "C" {
   }
 
 
-#endif /* HSF_ULOG || HSF_NFLOG */
+#endif /* HSF_ULOG || HSF_NFLOG || HSF_BPF */
   
 #if defined(__cplusplus)
 } /* extern "C" */

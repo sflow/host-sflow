@@ -864,10 +864,46 @@ extern "C" {
 
     
   /*________________---------------------------__________________
-    ________________      adaptorList          __________________
+    ________________      adaptor              __________________
     ----------------___________________________------------------
   */
 
+  SFLAdaptor *adaptorNew(char *dev, u_char *macBytes, size_t userDataSize, uint32_t ifIndex) {
+    SFLAdaptor *ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
+    ad->deviceName = my_strdup(dev);
+    ad->ifIndex = ifIndex;
+    ad->userData = my_calloc(userDataSize);
+    if(macBytes) {
+      memcpy(ad->macs[0].mac, macBytes, 6);
+      ad->num_macs = 1;
+    }
+    return ad;
+  }
+
+  int adaptorEqual(SFLAdaptor *ad1, SFLAdaptor *ad2) {
+    // must have the same name, ifIndex and MAC
+    if(ad1 == ad2) return YES;
+    if(ad1 == NULL || ad2 == NULL) return NO;
+    if(ad1->ifIndex != ad2->ifIndex) return NO;
+    if(ad1->num_macs != ad2->num_macs) return NO;
+    if(ad1->num_macs && memcmp(ad1->macs[0].mac, ad2->macs[0].mac, 6)) return NO;
+    return (my_strequal(ad1->deviceName, ad2->deviceName));
+  }
+
+  void adaptorFree(SFLAdaptor *ad)
+  {
+    if(ad) {
+      if(ad->deviceName) my_free(ad->deviceName);
+      if(ad->userData) my_free(ad->userData);
+      my_free(ad);
+    }
+  }
+    
+  /*________________---------------------------__________________
+    ________________      adaptorList          __________________
+    ----------------___________________________------------------
+  */
+  
   SFLAdaptorList *adaptorListNew()
   {
     SFLAdaptorList *adList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
@@ -875,15 +911,6 @@ extern "C" {
     adList->adaptors = (SFLAdaptor **)my_calloc(adList->capacity * sizeof(SFLAdaptor *));
     adList->num_adaptors = 0;
     return adList;
-  }
-
-  static void adaptorFree(SFLAdaptor *ad)
-  {
-    if(ad) {
-      if(ad->deviceName) my_free(ad->deviceName);
-      if(ad->userData) my_free(ad->userData);
-      my_free(ad);
-    }
   }
 
   void adaptorListReset(SFLAdaptorList *adList)
@@ -906,10 +933,8 @@ extern "C" {
 
   void adaptorListMarkAll(SFLAdaptorList *adList)
   {
-    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
-      SFLAdaptor *ad = adList->adaptors[i];
-      if(ad) ad->marked = YES;
-    }
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(adList, ad) ad->marked = YES;
   }
 
   int adaptorListFreeMarked(SFLAdaptorList *adList)
@@ -944,47 +969,32 @@ extern "C" {
   
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
   {
-    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
-      SFLAdaptor *ad = adList->adaptors[i];
-      if(ad && my_strequal(ad->deviceName, dev)) {
-	// return the one that was already there
-	return ad;
-      }
-    }
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(adList, ad)
+      if(my_strequal(ad->deviceName, dev)) return ad;
     return NULL;
   }
   
   SFLAdaptor *adaptorListGet_ifIndex(SFLAdaptorList *adList, uint32_t ifIndex)
   {
-    for(uint32_t i = 0; i < adList->num_adaptors; i++) {
-      SFLAdaptor *ad = adList->adaptors[i];
-      if(ad && ifIndex == ad->ifIndex) {
-	return ad;
-      }
-    }
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(adList, ad)
+      if(ifIndex == ad->ifIndex) return ad;
     return NULL;
   }
 
-  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize)
+  void adaptorListAdd(SFLAdaptorList *adList, SFLAdaptor *adaptor)
   {
-    SFLAdaptor *ad = adaptorListGet(adList, dev);
-    if(ad == NULL) {
-      ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
-      ad->deviceName = my_strdup(dev);
-      ad->userData = my_calloc(userDataSize);
-      
-      if(adList->num_adaptors == adList->capacity) {
-	// grow
-	adList->capacity *= 2;
-	adList->adaptors = (SFLAdaptor **)my_realloc(adList->adaptors, adList->capacity * sizeof(SFLAdaptor *));
-      }
-      adList->adaptors[adList->num_adaptors++] = ad;
-      if(macBytes) {
-	memcpy(ad->macs[0].mac, macBytes, 6);
-	ad->num_macs = 1;
-      }
+    if(adaptorListGet(adList, adaptor->deviceName)) {
+      myLog(LOG_ERR, "ERROR: adaptor %s already in list", adaptor->deviceName);
+      return;
     }
-    return ad;
+    if(adList->num_adaptors == adList->capacity) {
+      // grow
+      adList->capacity *= 2;
+      adList->adaptors = (SFLAdaptor **)my_realloc(adList->adaptors, adList->capacity * sizeof(SFLAdaptor *));
+    }
+    adList->adaptors[adList->num_adaptors++] = adaptor;
   }
     
   /*________________---------------------------__________________
@@ -1217,7 +1227,128 @@ extern "C" {
     return isAllZero(mac->mac, 6);
   }
 
+  /*________________---------------------------__________________
+    ________________        UTHash             __________________
+    ----------------___________________________------------------
+    A simple open-hash for structures, where the key is a field
+    in the structure - either fixed-length (up to 64-bits) or
+    a null-terminated string.  Added this for looking up the
+    same SFLAdaptor objects by name, ifIndex peerIfIndex  and MAC.
+  */
+  
+#define UTHASH_INIT 8 // must be power of 2
 
+#define UTHASH_BYTES(oh) ((oh)->cap * sizeof(void *))
+  
+  UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, int stringKey) {
+    UTHash *oh = (UTHash *)my_calloc(sizeof(UTHash));
+    oh->cap = UTHASH_INIT;
+    oh->bins = my_calloc(UTHASH_BYTES(oh));
+    oh->f_offset = f_offset;
+    oh->f_len = (stringKey) ? 0 : f_len;
+    assert(f_len <= sizeof(uint64_t));
+    return oh;
+  }
+
+  void UTHashFree(UTHash *oh) {
+    if(oh == NULL) return;
+    my_free(oh->bins);
+    my_free(oh);
+  } 
+
+  void UTHashReset(UTHash *oh) {
+    if(oh == NULL) return;
+    memset(oh->bins, 0, UTHASH_BYTES(oh));
+    oh->entries = 0;
+  }
+ 
+  void UTHashGrow(UTHash *oh) {
+    uint32_t old_cap = oh->cap;
+    void **old_bins = oh->bins;
+    oh->cap *= 2;
+    oh->bins = my_calloc(UTHASH_BYTES(oh));
+    for(uint32_t ii = 0; ii < old_cap; ii++)
+      if(old_bins[ii]) UTHashAdd(oh, old_bins[ii], NO);
+    my_free(old_bins);
+  }
+  
+  // See "64-bit to 32-bit hash functions"
+  // https://gist.github.com/badboy/6267743
+  static uint32_t hash6432shift(uint64_t h) {
+    h = (~h) + (h << 18);
+    h ^= (h >> 31);
+    h *= 21;
+    h ^= (h >> 11);
+    h += (h << 6);
+    h ^= (h >> 22);
+    return (uint32_t) h;
+  }
+  
+  static uint32_t UTHashHash(UTHash *oh, void *obj) {
+    char *f = (char *)obj + oh->f_offset;
+    if(oh->f_len == 0) {
+      // field is a null-terminated string
+      return my_strhash(*(char **)f);
+    }
+    uint64_t hash = 0;
+    memcpy(&hash, f, oh->f_len);
+    return hash6432shift(hash);
+  }
+  
+  static uint32_t UTHashEqual(UTHash *oh, void *obj1, void *obj2) {
+    char *f1 = (char *)obj1 + oh->f_offset;
+    char *f2 = (char *)obj2 + oh->f_offset;
+    return (oh->f_len == 0)
+      ? my_strequal(*(char **)f1, *(char **)f2)
+      : (!memcmp(f1, f2, oh->f_len));
+  }
+
+  // oh->cap is always a power of 2, so we can just mask the bits
+#define UTHASH_WRAP(oh, pr) ((pr) & ((oh)->cap - 1))
+			     
+static uint32_t UTHashSearch(UTHash *oh, void *obj, void **found) {
+    uint32_t probe = UTHashHash(oh, obj);
+    probe = UTHASH_WRAP(oh, probe);
+    for( ; oh->bins[probe]; probe=UTHASH_WRAP(oh,probe+1)) {
+      void *entry = oh->bins[probe];
+      if(UTHashEqual(oh, obj, entry)) {
+	(*found) = entry;
+	return probe;
+      }
+    }
+    (*found) = NULL;
+    return probe;
+  }
+  
+  void UTHashAdd(UTHash *oh, void *obj, int overwrite_ok) {
+    // make sure there is room so the search cannot fail
+    if(oh->entries > (oh->cap >> 1))
+      UTHashGrow(oh);
+    // search for obj or empty slot
+    void *found = NULL;
+    uint32_t idx = UTHashSearch(oh, obj, &found);
+    if(!overwrite_ok)
+      assert(found==NULL);
+    // put it here
+    oh->bins[idx] = obj;
+    oh->entries++;
+  }
+  
+  void *UTHashGet(UTHash *oh, void *obj) {
+    void *found = NULL;
+    UTHashSearch(oh, obj, &found);
+    return found;
+  }
+
+  void UTHashDel(UTHash *oh, void *obj) {
+    void *found = NULL;
+    int idx = UTHashSearch(oh, obj, &found);
+    if (found) {
+      oh->bins[idx] = NULL;
+      oh->entries--;
+    }
+  }
+  
 #if defined(__cplusplus)
 }  /* extern "C" */
 #endif

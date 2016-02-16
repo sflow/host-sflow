@@ -75,7 +75,31 @@ ifeq ($(RTMETRIC),yes)
 	CFLAGS += -DHSF_RTMETRIC
 endif
 
+# if BPF is not set, assume it should be "yes".
+# (So you can use "make BPF=no" to compile without this feature)
+ifeq ($(BPF),)
+	BPF=yes
+endif
+ifeq ($(BPF),yes)
+	CFLAGS += -DHSF_BPF
+endif
+
+# if PCAP is not set, assume it should be "yes" if the include file is present
+# (So you can use "make PCAP=no" to compile without this feature)
+ifeq ($(PCAP),)
+	PCAP=$(shell if test -r /usr/include/pcap.h; then echo "yes"; else echo "no"; fi)
+endif
+ifeq ($(PCAP),yes)
+	CFLAGS += -DHSF_PCAP
+	LIBS += -lpcap
+endif
+
 # Docker containers
+# if DOCKER is not set, assume it should be "yes" if "docker ps" runs OK
+# (So you can use "make DOCKER=no" to compile without this feature)
+ifeq ($(DOCKER),)
+	DOCKER=$(shell if docker ps >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+endif
 ifeq ($(DOCKER),yes)
 	CFLAGS += -DHSF_DOCKER -I$(JSONDIR)
 	LIBS += $(JSONDIR)/libjson.a -lm -lcap

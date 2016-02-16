@@ -82,6 +82,10 @@ extern "C" {
     uint64_t nv_val64;
   } HSFNameVal;
 
+  // forward declarations
+  struct _HSPSFlow;
+  struct _HSP;
+
   typedef struct _HSPContainer {
     struct _HSPContainer *nxt;
     char *id;
@@ -118,7 +122,7 @@ extern "C" {
 #define HSP_DEFAULT_NFLOG_GROUP 1
 #endif
 
-#if (HSF_ULOG || HSF_NFLOG)
+#if (HSF_ULOG || HSF_NFLOG || HSF_BPF || HSF_PCAP)
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <net/if.h>
@@ -141,6 +145,27 @@ extern "C" {
 #include <linux/netfilter/nfnetlink_log.h>
 #include <libnfnetlink.h>
 #endif /* HSF_NFLOG */
+
+#if ( HSF_BPF || HSF_PCAP )
+#ifdef HSF_PCAP
+#include <pcap.h>
+#endif
+#define HSP_MAX_BPF_MSG_BYTES 65536
+  typedef struct _BPFSoc {
+    struct _BPFSoc *nxt;
+    struct _HSP *myHSP;
+    char *deviceName;
+    int soc;
+    uint32_t sampling_rate;
+    uint32_t isBridge:1;
+    uint32_t bpf_ok:1;
+    uint32_t pcap_ok:1;
+#ifdef HSF_PCAP
+    pcap_t *pcap;
+    char pcap_err[PCAP_ERRBUF_SIZE];
+#endif
+  } BPFSoc;
+#endif
 
 #ifdef HSF_JSON
 #include "cJSON.h"
@@ -245,16 +270,17 @@ extern "C" {
 #define HSP_SPEED_SAMPLING_RATIO 1000000
 #define HSP_SPEED_SAMPLING_MIN 100
 
-  // forward declarations
-  struct _HSPSFlow;
-  struct _HSP;
-
   typedef struct _HSPCollector {
     struct _HSPCollector *nxt;
     SFLAddress ipAddr;
     uint32_t udpPort;
     struct sockaddr_in6 sendSocketAddr;
   } HSPCollector;
+
+  typedef struct _HSPPcap {
+    struct _HSPPcap *nxt;
+    char *dev;
+  } HSPPcap;
 
   typedef struct _HSPCIDR {
     struct _HSPCIDR *nxt;
@@ -278,6 +304,8 @@ extern "C" {
   typedef struct _HSPSFlowSettings {
     HSPCollector *collectors;
     uint32_t numCollectors;
+    HSPPcap *pcaps;
+    uint32_t numPcaps;
     uint32_t samplingRate;
     uint32_t pollingInterval;
     uint32_t headerBytes;
@@ -399,15 +427,24 @@ extern "C" {
   } HSP_ethtool_counters;
 #endif
 
+  typedef enum { HSPDEV_OTHER=0,
+		 HSPDEV_PHYSICAL,
+		 HSPDEV_VETH,
+		 HSPDEV_VIF,
+		 HSPDEV_OVS,
+		 HSPDEV_BRIDGE } EnumHSPDevType;
+  
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
     uint32_t /*EnumIPSelectionPriority*/ ipPriority;
+    EnumHSPDevType devType;
     uint32_t up:1;
     uint32_t loopback:1;
     uint32_t bond_master:1;
     uint32_t bond_slave:1;
     uint32_t switchPort:1;
+    uint32_t vm_or_container:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -431,10 +468,6 @@ extern "C" {
     HSP_ethtool_counters et_last;
     HSP_ethtool_counters et_total;
 #endif
-    // veth interfaces have a peer - often in another
-    // namespace.  The names can be anything, but the
-    // but the ifIndex is globally unique (and accessible)
-    int peer_ifIndex;
     // LACP/bonding data
     SFLLACP_counters lacp;
     // switch ports that are sending individual interface
@@ -480,8 +513,12 @@ extern "C" {
     char os_release[SFL_MAX_OSRELEASE_CHARS+1];
     uint32_t machine_type;
     char uuid[16];
+
     // interfaces and MACs
-    SFLAdaptorList *adaptorList;
+    UTHash *adaptorsByName; // global namespace only
+    UTHash *adaptorsByIndex;
+    UTHash *adaptorsByPeerIndex;
+    UTHash *adaptorsByMac;
 
     // have to poll the NIO counters fast enough to avoid 32-bit rollover
     // of the bytes counters.  On a 10Gbps interface they can wrap in
@@ -562,6 +599,10 @@ extern "C" {
     uint32_t nflog_drops;
 #endif // HSG_NFLOG
 
+#if ( HSF_BPF || HSF_PCAP )
+    BPFSoc *bpf_socs;
+#endif
+    
 #ifdef HSP_SWITCHPORT_REGEX
     regex_t swp_regex;
 #endif
@@ -585,6 +626,8 @@ extern "C" {
   HSPSFlowSettings *newSFlowSettings(void);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
   void clearCollectors(HSPSFlowSettings *settings);
+  HSPPcap *newPcap(HSPSFlowSettings *sFlowSettings);
+  void clearPcaps(HSPSFlowSettings *settings);
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
@@ -620,6 +663,12 @@ extern "C" {
 #ifdef HSF_NFLOG
   int readPackets_nflog(HSP *sp);
 #endif
+#ifdef HSF_BPF
+  int readPackets_bpf(HSP *sp, BPFSoc *bpfs);
+#endif
+#ifdef HSF_PCAP
+  int readPackets_pcap(HSP *sp, BPFSoc *bpfs);
+#endif
   int configSwitchPorts(HSP *sp);
   int readJSON(HSP *sp, int soc);
   void json_app_timeout_check(HSP *sp);
@@ -642,6 +691,17 @@ extern "C" {
   int readContainerInterfaces(HSP *sp, HSPVMState *vm);
   int readContainerInterfaces2(HSP *sp, HSPVMState *vm);
 #endif
+
+  SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
+#define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)
+  SFLAdaptor *adaptorByName(HSP *sp, char *dev);
+  SFLAdaptor *adaptorByMac(HSP *sp, SFLMacAddress *mac);
+  SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex);
+  SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex);
+  void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
+  int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
+  int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
+  void adaptorHTPrint(UTHash *ht, char *prefix);
 
 #if defined(__cplusplus)
 } /* extern "C" */

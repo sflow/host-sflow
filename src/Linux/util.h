@@ -160,6 +160,11 @@ extern "C" {
   typedef int (*UTExecCB)(void *magic, char *line);
   int myExec(void *magic, char **cmd, UTExecCB lineCB, char *line, size_t lineLen, int *pstatus);
 
+  // SFLAdaptor
+  SFLAdaptor *adaptorNew(char *dev, u_char *macBytes, size_t userDataSize, uint32_t ifIndex);
+  int adaptorEqual(SFLAdaptor *ad1, SFLAdaptor *ad2);
+  void adaptorFree(SFLAdaptor *ad);
+  
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew(void);
   void adaptorListReset(SFLAdaptorList *adList);
@@ -168,7 +173,8 @@ extern "C" {
   int adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);
   SFLAdaptor *adaptorListGet_ifIndex(SFLAdaptorList *adList, uint32_t ifIndex);
-  SFLAdaptor *adaptorListAdd(SFLAdaptorList *adList, char *dev, u_char *macBytes, size_t userDataSize);
+  void adaptorListAdd(SFLAdaptorList *adList, SFLAdaptor *adaptor);
+#define ADAPTORLIST_WALK(al, ad) for(uint32_t _ii = 0; _ii < (al)->num_adaptors; _ii++) if(((ad)=(al)->adaptors[_ii]))
 
   // file utils
   int truncateOpenFile(FILE *fptr);
@@ -187,6 +193,24 @@ extern "C" {
   int isAllZero(u_char *buf, int len);
   int isZeroMAC(SFLMacAddress *mac);
 
+  // UTHash
+  typedef struct _UTHash {
+    uint32_t f_offset;
+    uint32_t f_len;
+    uint32_t cap;
+    uint32_t entries;
+    void **bins;
+  } UTHash;
+
+  UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, int stringKey);
+#define UTHASH_NEW(t,f,s) UTHashNew(offsetof(t, f), sizeof(((t *)0)->f), s)
+  void UTHashFree(UTHash *oh);
+  void UTHashAdd(UTHash *oh, void *obj, int overwrite_ok);
+  void *UTHashGet(UTHash *oh, void *obj);
+  void UTHashDel(UTHash *oh, void *obj);
+
+#define UTHASH_WALK(oh, obj) for(uint32_t ii=0; ii<oh->cap; ii++) if(((obj)=(typeof(obj))oh->bins[ii]))
+   
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

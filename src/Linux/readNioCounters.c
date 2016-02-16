@@ -25,16 +25,13 @@ extern "C" {
   */
 
   static void shareActorIDFromSlave(HSP *sp, HSPAdaptorNIO *bond_nio, HSPAdaptorNIO *aggregator_slave_nio) {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      if(adaptor && adaptor->ifIndex) {
-	HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
-	if(nio
-	   && nio->bond_slave
-	   && nio != aggregator_slave_nio
-	   && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
-	  memcpy(nio->lacp.actorSystemID, aggregator_slave_nio->lacp.actorSystemID, 6);
-	}
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      if(nio->bond_slave
+	 && nio != aggregator_slave_nio
+	 && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
+	memcpy(nio->lacp.actorSystemID, aggregator_slave_nio->lacp.actorSystemID, 6);
       }
     }
   }
@@ -55,7 +52,7 @@ extern "C" {
       char line[MAX_PROC_LINE_CHARS];
       SFLAdaptor *currentSlave = NULL;
       HSPAdaptorNIO *slave_nio = NULL;
-      HSPAdaptorNIO *bond_nio = (HSPAdaptorNIO *)bond->userData;
+      HSPAdaptorNIO *bond_nio = ADAPTOR_NIO(bond);
       HSPAdaptorNIO *aggregator_slave_nio = NULL;
       bond_nio->lacp.attachedAggID = bond->ifIndex;
       uint32_t aggID = 0;
@@ -129,8 +126,8 @@ extern "C" {
 	  // detect transitions to slave data:
 	  if(my_strequal(tok_var, "Slave Interface")) {
 	    readingMaster = NO;
-	    currentSlave = adaptorListGet(sp->adaptorList, trimWhitespace(tok_val));
-	    slave_nio = currentSlave ? (HSPAdaptorNIO *)currentSlave->userData : NULL;
+	    currentSlave = adaptorByName(sp, trimWhitespace(tok_val));
+	    slave_nio = currentSlave ? ADAPTOR_NIO(currentSlave) : NULL;
 	    if(debug) {
 	      myLog(LOG_INFO, "updateBondCounters: bond %s slave %s %s",
 		    bond->deviceName,
@@ -247,16 +244,10 @@ extern "C" {
   */
 
   void readBondState(HSP *sp) {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      if(adaptor && adaptor->ifIndex) {
-	HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
-	if(niostate) {
-	  if(niostate->bond_master) {
-	    updateBondCounters(sp, adaptor);
-	  }
-	}
-      }
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      if(ADAPTOR_NIO(adaptor)->bond_master)
+	updateBondCounters(sp, adaptor);
     }
   }
 
@@ -266,42 +257,33 @@ extern "C" {
   */
 
   static void syncSlavePolling(HSP *sp, SFLAdaptor *bond) {
-    HSPAdaptorNIO *bond_nio = (HSPAdaptorNIO *)bond->userData;
-    if(bond_nio) {
-      for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-	SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-	if(adaptor && adaptor->ifIndex) {
-	  HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
-	  if(nio
-	     && nio->bond_slave
-	     && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
-	    // put the slave on the same polling schedule as the master.
-	    // This isn't strictly necessary, but it will reduce the
-	    // frequency of access to th /proc/net/bonding file.
-	    if(bond_nio->poller
-	       && nio->poller) {
-	      if(debug) {
-		myLog(LOG_INFO, "sync polling so that slave %s goes with bond %s",
-		      adaptor->deviceName,
-		      bond->deviceName);
-	      }
-	      sfl_poller_synchronize_polling(nio->poller, bond_nio->poller);
-	    }
+    HSPAdaptorNIO *bond_nio = ADAPTOR_NIO(bond);
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      if(nio->bond_slave
+	 && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
+	// put the slave on the same polling schedule as the master.
+	// This isn't strictly necessary, but it will reduce the
+	// frequency of access to th /proc/net/bonding file.
+	if(bond_nio->poller
+	   && nio->poller) {
+	  if(debug) {
+	    myLog(LOG_INFO, "sync polling so that slave %s goes with bond %s",
+		  adaptor->deviceName,
+		  bond->deviceName);
 	  }
+	  sfl_poller_synchronize_polling(nio->poller, bond_nio->poller);
 	}
       }
     }
   }
   
   void syncBondPolling(HSP *sp) {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      if(adaptor && adaptor->ifIndex) {
-	HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
-	if(nio && nio->bond_master) {
-	  syncSlavePolling(sp, adaptor);
-	}
-      }
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      if(ADAPTOR_NIO(adaptor)->bond_master)
+	syncSlavePolling(sp, adaptor);
     }
   }
 
@@ -357,9 +339,9 @@ extern "C" {
 		  &pkts_out,
 		  &errs_out,
 		  &drops_out) == 9) {
-	  SFLAdaptor *adaptor = adaptorListGet(sp->adaptorList, trimWhitespace(deviceName));
-	  if(adaptor && adaptor->userData) {
-	    HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	  SFLAdaptor *adaptor = adaptorByName(sp, deviceName);
+	  if(adaptor) {
+	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
 #ifdef HSP_ETHTOOL_STATS
 	    HSP_ethtool_counters et_ctrs = { 0 }, et_delta = { 0 };
 	    if (niostate->et_nfound) {
@@ -527,12 +509,12 @@ extern "C" {
     // it here to make sure the data is up to the second.
     updateNioCounters(sp);
 
-    for(int i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
       // note that the devFilter here is a prefix-match
       if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
 	if(adList == NULL || adaptorListGet(adList, adaptor->deviceName) != NULL) {
-	  HSPAdaptorNIO *niostate = (HSPAdaptorNIO *)adaptor->userData;
+	  HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
 	  
 	  // in the case where we are adding up across all
 	  // interfaces, be careful to avoid double-counting.
