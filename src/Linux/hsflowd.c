@@ -2258,7 +2258,17 @@ extern "C" {
 	      myLog(LOG_ERR, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
 	    }
 	    else {
-	      bpfs->bpf_ok = YES;
+	      // make it non-blocking so we can poll in a tight loop for a burst of samples
+	      int fdFlags = fcntl(bpfs->soc, F_GETFL);
+	      fdFlags |= (O_NONBLOCK | O_CLOEXEC);
+	      status = fcntl(bpfs->soc, F_SETFL, fdFlags);
+	      if(status < 0) {
+		myLog(LOG_ERR, "BPF: fcntl() status=%d : %s", status, strerror(errno));
+	      }
+	      else {
+		myLog(LOG_INFO, "BPF: OK");
+		bpfs->bpf_ok = YES;
+	      }
 	    }
 	  }
 	}
