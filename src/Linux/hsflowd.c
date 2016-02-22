@@ -2241,7 +2241,7 @@ extern "C" {
 	  else {
 	    // make it non-blocking so we can poll in a tight loop for a burst
 	    int fdFlags = fcntl(bpfs->soc, F_GETFL);
-	    fdFlags |= (O_NONBLOCK | O_CLOEXEC);
+	    fdFlags |= (O_NONBLOCK | FD_CLOEXEC);
 	    status = fcntl(bpfs->soc, F_SETFL, fdFlags);
 	    if(status < 0) {
 	      myLog(LOG_ERR, "BPF: fcntl() status=%d : %s", status, strerror(errno));
