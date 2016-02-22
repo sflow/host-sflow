@@ -2218,7 +2218,8 @@ extern "C" {
       else {
 	bpfs->deviceName = strdup(pcap->dev);
 	bpfs->isBridge = (ADAPTOR_NIO(adaptor)->devType == HSPDEV_BRIDGE);
-	bpfs->sampling_rate = lookupPacketSamplingRate(adaptor, sp->sFlow->sFlowSettings);
+	bpfs->samplingRate = lookupPacketSamplingRate(adaptor, sp->sFlow->sFlowSettings);
+	bpfs->subSamplingRate = bpfs->samplingRate;
 	bpfs->bpf_ok = NO;
 	bpfs->pcap_ok = NO;
 #ifdef HSF_BPF
@@ -2238,36 +2239,46 @@ extern "C" {
 	    myLog(LOG_ERR, "BPF: bind status=%d : %s", status, strerror(errno));
 	  }
 	  else {
-	    struct sock_filter code[] = {
-	      { 0x20,  0,  0, 0xfffff038 },
-	      { 0x94,  0,  0, 0x00000100 }, // 0100 = 1-in-256
-	      { 0x15,  0,  1, 0x00000001 },
-	      { 0x06,  0,  0, 0xffffffff },
-	      { 0x06,  0,  0, 0000000000 },
-	    };
-	    // overwrite the sampling-rate
-	    code[1].k = bpfs->sampling_rate;
-	    if(debug) myLog(LOG_INFO, "BPF: sampling rate set to %u for dev=%s", code[1].k, pcap->dev);
-	    struct sock_fprog bpf = {
-	      .len = 5, // ARRAY_SIZE(code),
-	      .filter = code,
-	    };
-	    status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
-	    if(debug) myLog(LOG_INFO, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d", status);
-	    if(status == -1) {
-	      myLog(LOG_ERR, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
+	    // make it non-blocking so we can poll in a tight loop for a burst
+	    int fdFlags = fcntl(bpfs->soc, F_GETFL);
+	    fdFlags |= (O_NONBLOCK | O_CLOEXEC);
+	    status = fcntl(bpfs->soc, F_SETFL, fdFlags);
+	    if(status < 0) {
+	      myLog(LOG_ERR, "BPF: fcntl() status=%d : %s", status, strerror(errno));
 	    }
 	    else {
-	      // make it non-blocking so we can poll in a tight loop for a burst of samples
-	      int fdFlags = fcntl(bpfs->soc, F_GETFL);
-	      fdFlags |= (O_NONBLOCK | O_CLOEXEC);
-	      status = fcntl(bpfs->soc, F_SETFL, fdFlags);
-	      if(status < 0) {
-		myLog(LOG_ERR, "BPF: fcntl() status=%d : %s", status, strerror(errno));
+	      if(debug) myLog(LOG_INFO, "BPF: OK");
+	      bpfs->bpf_ok = YES;
+
+	      // but see if we can get the kernel to do all the heavy-lifting...
+	      struct sock_filter code[] = {
+		{ 0x20,  0,  0, 0xfffff038 },
+		{ 0x94,  0,  0, 0x00000100 }, // 0100 = 1-in-256
+		{ 0x15,  0,  1, 0x00000001 },
+		{ 0x06,  0,  0, 0xffffffff },
+		{ 0x06,  0,  0, 0000000000 },
+	      };
+
+	      // overwrite the sampling-rate
+	      code[1].k = bpfs->samplingRate;
+	      if(debug) myLog(LOG_INFO, "BPF: sampling rate set to %u for dev=%s", code[1].k, pcap->dev);
+	      struct sock_fprog bpf = {
+		.len = 5, // ARRAY_SIZE(code),
+		.filter = code,
+	      };
+	      status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
+	      if(debug) myLog(LOG_INFO, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d", status);
+	      if(status == -1) {
+		// BPF sampling not suported.  At this point it might have been more efficient
+		// to compile with BPF=no PCAP=yes so that the user-space sampling
+		// uses libpcap (below).  It depends on how libpcap is implemented
+		// on each particular OS.
+		myLog(LOG_ERR, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
 	      }
 	      else {
-		myLog(LOG_INFO, "BPF: OK");
-		bpfs->bpf_ok = YES;
+		// success - now we don't need to sub-sample in user-space
+		bpfs->subSamplingRate = 1;
+		if(debug) myLog(LOG_INFO, "BPF: kernel sampling OK");
 	      }
 	    }
 	  }
@@ -2278,7 +2289,7 @@ extern "C" {
 	  // Fall back on libpcap interface.  Could possibly use PF_RING
 	  // here but (1) we don't want to run hot and (2) the newer kernels
 	  // that support PF_PING are also likely to support the preferred BPF
-	  // sampling option above.
+	  // kernel sampling above.
 	  bpfs->pcap = pcap_open_live(pcap->dev,
 				      SFL_DEFAULT_HEADER_SIZE,
 				      NO, /* promisc */

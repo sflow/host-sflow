@@ -156,7 +156,8 @@ extern "C" {
     struct _HSP *myHSP;
     char *deviceName;
     int soc;
-    uint32_t sampling_rate;
+    uint32_t samplingRate;
+    uint32_t subSamplingRate;
     uint32_t isBridge:1;
     uint32_t bpf_ok:1;
     uint32_t pcap_ok:1;

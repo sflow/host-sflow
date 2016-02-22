@@ -392,7 +392,7 @@ extern "C" {
       return 0;
     }
     
-    if(bpfs->sampling_rate == 0) {
+    if(bpfs->subSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
       return 0;
     }
@@ -413,7 +413,7 @@ extern "C" {
 
       if(--MySkipCount == 0) {
 	/* reached zero. Set the next skip */
-	uint32_t sr = bpfs->sampling_rate;
+	uint32_t sr = bpfs->subSamplingRate;
 	MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
 	
 	// global MAC -> adaptor
@@ -449,7 +449,7 @@ extern "C" {
 		   len - 14, /* length of captured payload */
 		   len, /* length of packet (pdu) */
 		   0 /* droppedSamples */,
-		   bpfs->sampling_rate);
+		   bpfs->samplingRate);
       }
     }
     return batch;
@@ -463,7 +463,7 @@ extern "C" {
   {
     static uint32_t MySkipCount=1;
     BPFSoc *bpfs = (BPFSoc *)user;
-    uint32_t sr = bpfs->sampling_rate;
+    uint32_t sr = bpfs->samplingRate;
 
     if(sr == 0) {
       // sampling disabled by setting to 0
@@ -509,7 +509,7 @@ extern "C" {
 		 hdr->caplen - 14, /* length of captured payload */
 		 hdr->len, /* length of packet (pdu) */
 		 0 /* droppedSamples */,
-		 bpfs->sampling_rate);
+		 bpfs->samplingRate);
     }
   }
   
