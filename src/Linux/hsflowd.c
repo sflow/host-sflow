@@ -119,7 +119,7 @@ extern "C" {
   }
 			    
   SFLAdaptor *adaptorByName(HSP *sp, char *dev) {
-    SFLAdaptor ad = { .deviceName = dev };
+    SFLAdaptor ad = { .deviceName = trimWhitespace(dev) };
     return UTHashGet(sp->adaptorsByName, &ad);
   }
   
