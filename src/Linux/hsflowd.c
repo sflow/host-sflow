@@ -2115,8 +2115,40 @@ extern "C" {
     be offset=-56 (== 0xffffff038) and that the other opcodes
     will not change their values either.
   */
+
+  static uint64_t kernelVer64(HSP *sp) {
+    // return the kernel version as an integer,  so that
+    // for example "4.3.3" becomes 400030003000.  This
+    // makes it easier to test for kernel > x.y.z at
+    // runtime.
+    char buf[8];
+    char *p = sp->os_release;
+    uint64_t ver = 0;
+    for(int ii = 0; ii < 3; ii++) {
+      char *str = parseNextTok(&p, ".", NO, 0, NO, buf, 8);
+      if(str) ver = (ver * 1000) + strtol(str, NULL, 0);
+    }
+    return ver;
+  }
+    
   static int setKernelSampling(HSP *sp, BPFSoc *bpfs)
   {
+    if(debug) {
+      myLog(LOG_INFO, "PCAP: setKernelSampling() kernel version (as int) == %"PRIu64,
+	    kernelVer64(sp));
+    }
+    
+    if(kernelVer64(sp) < 3019000L) {
+      // kernel earlier than 3.19 == not new enough.
+      // This would fail silently,  so we have to bail
+      // here and rely on uesr-space sampling.  It may
+      // have come in before 3.19,  but this is the
+      // earliest version that I have tested on
+      // successfully.
+      myLog(LOG_ERR, "PCAP: warning: kernel too old for BPF sampling. Fall back on user-space sampling.");
+      return NO;
+    }
+    
     struct sock_filter code[] = {
       { 0x20,  0,  0, 0xfffff038 }, // ld rand
       { 0x94,  0,  0, 0x00000100 }, // mod #256
