@@ -1,0 +1,58 @@
+This software is distributed under the following license:
+http://host-sflow.sourceforge.net/license.html
+
+Compile/install
+===============
+
+root> make DOCKER=yes PCAP=yes
+root> make install
+
+Edit /etc/hsflowd.conf for configuration, then:
+
+root> service hsflowd start
+
+Dependencies
+============
+You may need to install the libpcap-dev(el) package, and
+if selinux is running you may also need to run:
+
+root> audit2allow -a -M hsflowd
+root> semodule -i hsflowd.pp
+
+Traffic Monitoring
+==================
+If the linux-bridge is being used for networking (e.g. with NAT
+networking or MACVLAN networking) then you can add a line like
+this to /etc/hsflowd.conf:
+
+pcap { dev = docker0 }
+
+so that the traffic to and from the docker containers is
+monitored with sFlow.  Alternatively, if Open VSwitch is running,
+then starting sflowovsd will propagate sFlow configuration to
+the v-switch via ovs-vsctl(1):
+
+root> service sflowovsd start
+
+Debugging
+=========
+To run in the debugger, compile with:
+
+root> make DOCKER=yes PCAP=yes OPT=-g
+
+and run with the "-d" or "-dd" command line option to
+prevent daemonization and increase logging:
+
+root> gdb hsflowd
+gdb> set args -dd
+gdb> r
+
+Packaging
+=========
+To build an rpm, try:
+
+% make DOCKER=yes PCAP=yes rpm
+
+To build a Debian package, try:
+
+% make DOCKER=yes PCAP=yes deb
