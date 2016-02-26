@@ -12,7 +12,8 @@ extern "C" {
 #include "hsflowd.h"
 #include "cpu_utils.h"
 
-#ifdef HSF_BPF
+#ifdef HSF_PCAP
+  // includes for setsockopt(SO_ATTACH_FILTER)
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <net/ethernet.h>
@@ -1804,6 +1805,17 @@ extern "C" {
        ((sp->clk % sp->nio_polling_secs) == 0)) {
       updateNioCounters(sp);
     }
+
+#ifdef HSF_PCAP
+    // read pcap stats to get drops - will go out with
+    // packet samples sent from readPackets.c
+    for(BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
+      struct pcap_stat stats;
+      if(pcap_stats(bpfs->pcap, &stats) == 0) {
+	bpfs->drops = stats.ps_drop;
+      }
+    }
+#endif
     
     // refresh the list of VMs periodically or on request
     if(sp->refreshVMList || (sp->clk % sp->refreshVMListSecs) == 0) {
@@ -2078,6 +2090,64 @@ extern "C" {
 
 #endif
 
+
+#ifdef HSF_PCAP
+  /*_________________---------------------------__________________
+    _________________   setKernelSampling       __________________
+    -----------------___________________________------------------
+
+    https://www.kernel.org/doc/Documentation/networking/filter.txt
+
+    Apply a packet-sampling BPF filter to the socket we are going
+    to read packets from.  We could possibly have expressed this
+    as a struct bpf_program and called the libpcap pcap_setfilter()
+    to set the filter,  but that would have involved re-casting the
+    instructions becuse the struct bpf_insn differs from the
+    from the kernel's struct sock_filter.  The only way this
+    makes sense is if the filter makes it all the way into the
+    kernel and works using the SKF_AD_RANDOM negative-offset hack,
+    so here we just try it directly.
+    (Since pcap_setfilter() calls fix_offset() to adust the width
+    of the offset fields there was a risk that putting in an
+    offset of, say,  -56 would come out differently in the
+    resulting sock_filter).
+    There is an assumption here that SF_AD_RANDOM will always
+    be offset=-56 (== 0xffffff038) and that the other opcodes
+    will not change their values either.
+  */
+  static int setKernelSampling(HSP *sp, BPFSoc *bpfs)
+  {
+    struct sock_filter code[] = {
+      { 0x20,  0,  0, 0xfffff038 }, // ld rand
+      { 0x94,  0,  0, 0x00000100 }, // mod #256
+      { 0x15,  0,  1, 0x00000001 }, // jneq #1, drop
+      { 0x06,  0,  0, 0xffffffff }, // ret #-1
+      { 0x06,  0,  0, 0000000000 }, // drop: ret #0
+    };
+    
+    // overwrite the sampling-rate
+    code[1].k = bpfs->samplingRate;
+    if(debug) myLog(LOG_INFO, "PCAP: sampling rate set to %u for dev=%s", code[1].k, bpfs->deviceName);
+    struct sock_fprog bpf = {
+      .len = 5, // ARRAY_SIZE(code),
+      .filter = code,
+    };
+    
+    // install the filter
+    int status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
+    if(debug) myLog(LOG_INFO, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d", status);
+    if(status == -1) {
+      myLog(LOG_ERR, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
+      return NO;
+    }
+
+    // success - now we don't need to sub-sample in user-space
+    bpfs->subSamplingRate = 1;
+    if(debug) myLog(LOG_INFO, "PCAP: kernel sampling OK");
+    return YES;
+  }
+#endif /* HSF_PCAP */
+  
   /*_________________---------------------------__________________
     _________________         initAgent         __________________
     -----------------___________________________------------------
@@ -2205,7 +2275,7 @@ extern "C" {
     }
 #endif
 
-#if ( HSF_BPF || HSF_PCAP )
+#ifdef HSF_PCAP
     for(HSPPcap *pcap = sp->sFlow->sFlowSettings_file->pcaps; pcap; pcap = pcap->nxt) {
       BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
       bpfs->nxt = sp->bpf_socs;
@@ -2213,97 +2283,25 @@ extern "C" {
       bpfs->myHSP = sp;
       SFLAdaptor *adaptor = adaptorByName(sp, pcap->dev);
       if(adaptor == NULL) {
-	myLog(LOG_ERR, "BPF/PCAP: device not found: %s", pcap->dev);
+	myLog(LOG_ERR, "PCAP: device not found: %s", pcap->dev);
       }
       else {
 	bpfs->deviceName = strdup(pcap->dev);
 	bpfs->isBridge = (ADAPTOR_NIO(adaptor)->devType == HSPDEV_BRIDGE);
 	bpfs->samplingRate = lookupPacketSamplingRate(adaptor, sp->sFlow->sFlowSettings);
 	bpfs->subSamplingRate = bpfs->samplingRate;
-	bpfs->bpf_ok = NO;
-	bpfs->pcap_ok = NO;
-#ifdef HSF_BPF
-	bpfs->soc = socket(PF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
-	if(debug) myLog(LOG_INFO, "BPF: PF_PACKET socket is %d", bpfs->soc);
-	if(bpfs->soc < 0) {
-	  if(debug) myLog(LOG_ERR, "BPF: PF_PACKET socket open error: %s", strerror(errno));
+	bpfs->pcap = pcap_open_live(pcap->dev,
+				    SFL_DEFAULT_HEADER_SIZE,
+				    NO, /* promisc */
+				    0, /* timeout==poll */
+				    bpfs->pcap_err);
+	if(bpfs->pcap) {
+	  if(debug) myLog(LOG_INFO, "PCAP: device %s opened OK", pcap->dev);
+	  bpfs->soc = pcap_fileno(bpfs->pcap);
+	  setKernelSampling(sp, bpfs);
 	}
 	else {
-	  struct sockaddr_ll sll = { 0 };
-	  sll.sll_family = AF_PACKET;
-	  sll.sll_ifindex = adaptor->ifIndex;
-	  sll.sll_protocol = htons(ETH_P_ALL);
-	  int status = bind(bpfs->soc, (struct sockaddr *) &sll, sizeof(sll));
-	  if(debug) myLog(LOG_INFO, "BPF: bind status=%d", status);
-	  if(status == -1) {
-	    myLog(LOG_ERR, "BPF: bind status=%d : %s", status, strerror(errno));
-	  }
-	  else {
-	    // make it non-blocking so we can poll in a tight loop for a burst
-	    int fdFlags = fcntl(bpfs->soc, F_GETFL);
-	    fdFlags |= (O_NONBLOCK | FD_CLOEXEC);
-	    status = fcntl(bpfs->soc, F_SETFL, fdFlags);
-	    if(status < 0) {
-	      myLog(LOG_ERR, "BPF: fcntl() status=%d : %s", status, strerror(errno));
-	    }
-	    else {
-	      if(debug) myLog(LOG_INFO, "BPF: OK");
-	      bpfs->bpf_ok = YES;
-
-	      // but see if we can get the kernel to do all the heavy-lifting...
-	      struct sock_filter code[] = {
-		{ 0x20,  0,  0, 0xfffff038 },
-		{ 0x94,  0,  0, 0x00000100 }, // 0100 = 1-in-256
-		{ 0x15,  0,  1, 0x00000001 },
-		{ 0x06,  0,  0, 0xffffffff },
-		{ 0x06,  0,  0, 0000000000 },
-	      };
-
-	      // overwrite the sampling-rate
-	      code[1].k = bpfs->samplingRate;
-	      if(debug) myLog(LOG_INFO, "BPF: sampling rate set to %u for dev=%s", code[1].k, pcap->dev);
-	      struct sock_fprog bpf = {
-		.len = 5, // ARRAY_SIZE(code),
-		.filter = code,
-	      };
-	      status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
-	      if(debug) myLog(LOG_INFO, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d", status);
-	      if(status == -1) {
-		// BPF sampling not suported.  At this point it might have been more efficient
-		// to compile with BPF=no PCAP=yes so that the user-space sampling
-		// uses libpcap (below).  It depends on how libpcap is implemented
-		// on each particular OS.
-		myLog(LOG_ERR, "BPF: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
-	      }
-	      else {
-		// success - now we don't need to sub-sample in user-space
-		bpfs->subSamplingRate = 1;
-		if(debug) myLog(LOG_INFO, "BPF: kernel sampling OK");
-	      }
-	    }
-	  }
-	}
-#endif
-	if(bpfs->bpf_ok == NO) {
-#ifdef HSF_PCAP
-	  // Fall back on libpcap interface.  Could possibly use PF_RING
-	  // here but (1) we don't want to run hot and (2) the newer kernels
-	  // that support PF_PING are also likely to support the preferred BPF
-	  // kernel sampling above.
-	  bpfs->pcap = pcap_open_live(pcap->dev,
-				      SFL_DEFAULT_HEADER_SIZE,
-				      NO, /* promisc */
-				      0, /* timeout==poll */
-				      bpfs->pcap_err);
-	  if(bpfs->pcap) {
-	    if(debug) myLog(LOG_INFO, "PCAP: device %s opened OK", pcap->dev);
-	    bpfs->soc = pcap_fileno(bpfs->pcap);
-	    bpfs->pcap_ok = YES;
-	  }
-	  else {
-	    if(debug) myLog(LOG_ERR, "PCAP: device %s open failed", pcap->dev);
-	  }
-#endif
+	  if(debug) myLog(LOG_ERR, "PCAP: device %s open failed", pcap->dev);
 	}
       }
     }
@@ -3469,10 +3467,9 @@ extern "C" {
 #endif
 
 
-#if ( HSF_BPF || HSF_PCAP)
+#ifdef HSF_PCAP
       for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
-	if((bpfs->bpf_ok || bpfs->pcap_ok)
-	   && bpfs->soc > 0) {
+	if(bpfs->soc > 0) {
 	  if(bpfs->soc > max_fd) max_fd = bpfs->soc;
 	  FD_SET(bpfs->soc, &readfds);
 	}
@@ -3533,22 +3530,14 @@ extern "C" {
       }
 #endif
 
-#if ( HSF_BPF || HSF_PCAP )
+#ifdef HSF_PCAP
       for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
 	if(bpfs->soc > 0
 	   && FD_ISSET(bpfs->soc, &readfds)) {
-	  int batch = 0;
-#ifdef HSF_BPF	    
-	  if(bpfs->bpf_ok)
-	    batch = readPackets_bpf(sp, bpfs);
-#endif
-#ifdef HSF_PCAP
-	  if(bpfs->pcap_ok)
-	    batch = readPackets_pcap(sp, bpfs);
-#endif
+	  int batch = readPackets_pcap(sp, bpfs);
 	  if(debug) {
-	    if(debug > 2) myLog(LOG_INFO, "BPF/PCAP: readPackets batch=%d", batch);
-	    if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "BPF/PCAP: readPackets got max batch (%d)", batch);
+	    if(debug > 2) myLog(LOG_INFO, "PCAP: readPackets batch=%d", batch);
+	    if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "PCAP: readPackets got max batch (%d)", batch);
 	  }
 	}
       }

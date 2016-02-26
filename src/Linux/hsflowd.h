@@ -122,7 +122,7 @@ extern "C" {
 #define HSP_DEFAULT_NFLOG_GROUP 1
 #endif
 
-#if (HSF_ULOG || HSF_NFLOG || HSF_BPF || HSF_PCAP)
+#if (HSF_ULOG || HSF_NFLOG || HSF_PCAP)
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <net/if.h>
@@ -146,11 +146,8 @@ extern "C" {
 #include <libnfnetlink.h>
 #endif /* HSF_NFLOG */
 
-#if ( HSF_BPF || HSF_PCAP )
 #ifdef HSF_PCAP
 #include <pcap.h>
-#endif
-#define HSP_MAX_BPF_MSG_BYTES 65536
   typedef struct _BPFSoc {
     struct _BPFSoc *nxt;
     struct _HSP *myHSP;
@@ -158,15 +155,12 @@ extern "C" {
     int soc;
     uint32_t samplingRate;
     uint32_t subSamplingRate;
+    uint32_t drops;
     uint32_t isBridge:1;
-    uint32_t bpf_ok:1;
-    uint32_t pcap_ok:1;
-#ifdef HSF_PCAP
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
-#endif
   } BPFSoc;
-#endif
+#endif /* HSF_PCAP */
 
 #ifdef HSF_JSON
 #include "cJSON.h"
@@ -600,7 +594,7 @@ extern "C" {
     uint32_t nflog_drops;
 #endif // HSG_NFLOG
 
-#if ( HSF_BPF || HSF_PCAP )
+#ifdef HSF_PCAP
     BPFSoc *bpf_socs;
 #endif
     
@@ -663,9 +657,6 @@ extern "C" {
 #endif
 #ifdef HSF_NFLOG
   int readPackets_nflog(HSP *sp);
-#endif
-#ifdef HSF_BPF
-  int readPackets_bpf(HSP *sp, BPFSoc *bpfs);
 #endif
 #ifdef HSF_PCAP
   int readPackets_pcap(HSP *sp, BPFSoc *bpfs);

@@ -11,7 +11,7 @@ extern "C" {
 
   extern int debug;
 
-#if (HSF_ULOG || HSF_NFLOG || HSF_BPF || HSF_PCAP)
+#if (HSF_ULOG || HSF_NFLOG || HSF_PCAP)
 
 
   /*_________________-----------------------------------__________________
@@ -380,82 +380,6 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-#ifdef HSF_BPF
-
-  int readPackets_bpf(HSP *sp, BPFSoc *bpfs)
-  {
-    int batch = 0;
-    static uint32_t MySkipCount=1;
-    
-    if(sp->sFlow->sFlowSettings == NULL) {
-      // config was turned off
-      return 0;
-    }
-    
-    if(bpfs->subSamplingRate == 0) {
-      // packet sampling was disabled by setting desired rate to 0
-      return 0;
-    }
-
-    for( ; batch < HSP_READPACKET_BATCH; batch++) {
-      u_char buf[HSP_MAX_BPF_MSG_BYTES];
-      int len = read(bpfs->soc, buf, HSP_MAX_BPF_MSG_BYTES);
-      if(len <= 0) break;
-      
-      if(debug > 1)
-	myLog(LOG_INFO, "got BPF msg: %u bytes", len);
-      
-      if(debug > 2) {
-	u_char hex[512];
-	printHex(buf, len, hex, 512, NO);
-	myLog(LOG_INFO, "got sampled header: <%s>", hex);
-      }
-
-      if(--MySkipCount == 0) {
-	/* reached zero. Set the next skip */
-	uint32_t sr = bpfs->subSamplingRate;
-	MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
-	
-	// global MAC -> adaptor
-	SFLMacAddress macdst,macsrc;
-	memcpy(macdst.mac, buf, 6);
-	memcpy(macsrc.mac, buf+6, 6);
-	SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
-	SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
-	if(srcdev) myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
-			 srcdev->deviceName,
-			 srcdev->ifIndex,
-			 srcdev->peer_ifIndex);
-	if(dstdev) myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
-			 dstdev->deviceName,
-			 dstdev->ifIndex,
-			 dstdev->peer_ifIndex);
-	
-	if(debug > 3) {
-	  adaptorHTPrint(sp->adaptorsByPeerIndex, "peerHT");
-	  adaptorHTPrint(sp->adaptorsByIndex, "indexHT");
-	  adaptorHTPrint(sp->adaptorsByName, "nameHT");
-	  adaptorHTPrint(sp->adaptorsByMac, "macHT");
-	}
-	
-	takeSample(sp,
-		   srcdev,
-		   dstdev,
-		   bpfs->isBridge,
-		   0 /*hook*/,
-		   buf /* mac hdr*/,
-		   14 /* mac len */,
-		   buf + 14 /* payload */,
-		   len - 14, /* length of captured payload */
-		   len, /* length of packet (pdu) */
-		   0 /* droppedSamples */,
-		   bpfs->samplingRate);
-      }
-    }
-    return batch;
-  }
-#endif
-
 #ifdef HSF_PCAP
   // function of type pcap_handler
 
@@ -463,7 +387,7 @@ extern "C" {
   {
     static uint32_t MySkipCount=1;
     BPFSoc *bpfs = (BPFSoc *)user;
-    uint32_t sr = bpfs->samplingRate;
+    uint32_t sr = bpfs->subSamplingRate;
 
     if(sr == 0) {
       // sampling disabled by setting to 0
@@ -482,20 +406,19 @@ extern "C" {
       memcpy(macsrc.mac, buf+6, 6);
       SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
       SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
-      if(srcdev) myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
-		       srcdev->deviceName,
-		       srcdev->ifIndex,
-		       srcdev->peer_ifIndex);
-      if(dstdev) myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
-		       dstdev->deviceName,
-		       dstdev->ifIndex,
-		       dstdev->peer_ifIndex);
-
-      if(debug > 1) {
-	adaptorHTPrint(sp->adaptorsByPeerIndex, "peerHT");
-	adaptorHTPrint(sp->adaptorsByIndex, "indexHT");
-	adaptorHTPrint(sp->adaptorsByName, "nameHT");
-	adaptorHTPrint(sp->adaptorsByMac, "macHT");
+      
+      if(srcdev) {
+	myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
+	      srcdev->deviceName,
+	      srcdev->ifIndex,
+	      srcdev->peer_ifIndex);
+      }
+      
+      if(dstdev) {
+	myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
+	      dstdev->deviceName,
+	      dstdev->ifIndex,
+	      dstdev->peer_ifIndex);
       }
       
       takeSample(sp,
@@ -508,7 +431,7 @@ extern "C" {
 		 buf + 14 /* payload */,
 		 hdr->caplen - 14, /* length of captured payload */
 		 hdr->len, /* length of packet (pdu) */
-		 0 /* droppedSamples */,
+		 bpfs->drops, /* droppedSamples */
 		 bpfs->samplingRate);
     }
   }
@@ -835,7 +758,7 @@ extern "C" {
   }
 
 
-#endif /* HSF_ULOG || HSF_NFLOG || HSF_BPF */
+#endif /* HSF_ULOG || HSF_NFLOG || HSF_PCAP */
   
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -75,15 +75,6 @@ ifeq ($(RTMETRIC),yes)
 	CFLAGS += -DHSF_RTMETRIC
 endif
 
-# if BPF is not set, assume it should be "yes".
-# (So you can use "make BPF=no" to compile without this feature)
-ifeq ($(BPF),)
-	BPF=yes
-endif
-ifeq ($(BPF),yes)
-	CFLAGS += -DHSF_BPF
-endif
-
 # if PCAP is not set, assume it should be "yes" if the include file is present
 # (So you can use "make PCAP=no" to compile without this feature)
 ifeq ($(PCAP),)
