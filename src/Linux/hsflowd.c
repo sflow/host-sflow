@@ -2582,7 +2582,7 @@ extern "C" {
 #define HSP_MAX_EXEC_LINELEN 1024
     char outputLine[HSP_MAX_EXEC_LINELEN];
     SFLAdaptor *adaptor;
-    UTHASH_WALK(sf->myHSP->adaptorDB->byIndex, adaptor) {
+    UTHASH_WALK(sf->myHSP->adaptorsByIndex, adaptor) {
       HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(niostate->switchPort
 	 && !niostate->loopback
