@@ -158,6 +158,7 @@ extern "C" {
       // add sampler
       adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
       sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
+      sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sf->sFlowSettings_file->headerBytes);
       // and make sure we have a poller too
       getPoller(sp, adaptor);
     }

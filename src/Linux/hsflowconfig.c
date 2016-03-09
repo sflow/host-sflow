@@ -328,6 +328,7 @@ extern int debug;
     st->samplingRate = SFL_DEFAULT_SAMPLING_RATE;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
+    st->datagramBytes = SFL_DEFAULT_DATAGRAM_SIZE;
     st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
     st->nflogGroup = HSP_DEFAULT_NFLOG_GROUP;
     st->jsonPort = HSP_DEFAULT_JSON_PORT;

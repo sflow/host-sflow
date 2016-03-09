@@ -2323,7 +2323,7 @@ extern "C" {
 	bpfs->samplingRate = lookupPacketSamplingRate(adaptor, sp->sFlow->sFlowSettings);
 	bpfs->subSamplingRate = bpfs->samplingRate;
 	bpfs->pcap = pcap_open_live(pcap->dev,
-				    SFL_DEFAULT_HEADER_SIZE,
+				    sp->sFlow->sFlowSettings_file->headerBytes,
 				    NO, /* promisc */
 				    0, /* timeout==poll */
 				    bpfs->pcap_err);
@@ -2501,7 +2501,8 @@ extern "C" {
     if(settings) {
       UTStrBuf_printf(buf, "hostname=%s\n", sf->myHSP->hostname);
       UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
-      UTStrBuf_printf(buf, "header=%u\n", SFL_DEFAULT_HEADER_SIZE);
+      UTStrBuf_printf(buf, "header=%u\n", settings->headerBytes);
+      UTStrBuf_printf(buf, "datagram=%u\n", settings->datagramBytes);
       UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
       // make sure the application specific ones always come after the general ones - to simplify the override logic there
       for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
