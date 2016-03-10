@@ -1334,9 +1334,8 @@ extern "C" {
     if(id && create) {
       container = (HSPContainer *)my_calloc(sizeof(HSPContainer));
       container->id = my_strdup(id);
-      // turn it into a UUID
-      int id_len = my_strlen(id);
-      memcpy(container->uuid, id, (id_len > 16) ? 16 : id_len);
+      // turn it into a UUID - just take the first 16 bytes of the id
+      parseUUID(id, container->uuid);
       // and assign a dsIndex that will be persistent across restarts
       container->dsIndex = assignVM_dsIndex(sp, container->uuid);
       // add to list
@@ -1577,7 +1576,7 @@ extern "C" {
 
 #elif defined(HSF_DOCKER)
 
-      static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", NULL };
+      static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", "--no-trunc=true", NULL };
       char dockerLine[HSF_DOCKER_MAX_LINELEN];
       if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN, NULL)) {
 	// successful, now gather data for each one
