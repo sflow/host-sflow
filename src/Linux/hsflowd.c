@@ -986,7 +986,7 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = my_strequal(container->hostname, container->id) ? container->name : container->hostname;
+    char *hname = my_strnequal(container->hostname, container->id, HSF_DOCKER_SHORTID_LEN) ? container->name : container->hostname;
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, container->uuid, 16);
@@ -1029,7 +1029,7 @@ extern "C" {
       { "system",0,0},
       { NULL,0,0},
     };
-    if(readContainerCounters("cpuacct", container->longId, "cpuacct.stat", 2, cpuVals)) {
+    if(readContainerCounters("cpuacct", container->id, "cpuacct.stat", 2, cpuVals)) {
       uint64_t cpu_total = 0;
       if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
       if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
@@ -1049,7 +1049,7 @@ extern "C" {
       { "hierarchical_memory_limit",0,0},
       { NULL,0,0},
     };
-    if(readContainerCounters("memory", container->longId, "memory.stat", 2, memVals)) {
+    if(readContainerCounters("memory", container->id, "memory.stat", 2, memVals)) {
       if(memVals[0].nv_found) {
         memElem.counterBlock.host_vrt_mem.memory = memVals[0].nv_val64;
       }
@@ -1078,7 +1078,7 @@ extern "C" {
       { "Write",0,0},
       { NULL,0,0},
     };
-    if(readContainerCountersMulti("blkio", container->longId, "blkio.io_service_bytes_recursive", 2, dskValsB)) {
+    if(readContainerCountersMulti("blkio", container->id, "blkio.io_service_bytes_recursive", 2, dskValsB)) {
       if(dskValsB[0].nv_found) {
         dskElem.counterBlock.host_vrt_dsk.rd_bytes += dskValsB[0].nv_val64;
       }
@@ -1093,7 +1093,7 @@ extern "C" {
       { NULL,0,0},
     };
     
-    if(readContainerCountersMulti("blkio", container->longId, "blkio.io_serviced_recursive", 2, dskValsO)) {
+    if(readContainerCountersMulti("blkio", container->id, "blkio.io_serviced_recursive", 2, dskValsO)) {
       if(dskValsO[0].nv_found) {
         dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
       }
@@ -1327,28 +1327,24 @@ extern "C" {
 
 #ifdef HSF_DOCKER
   static HSPContainer *getContainer(HSP *sp, char *id, int create) {
-    HSPContainer *container = sp->containers;
-    for(; container; container=container->nxt) {
-      if(my_strequal(id, container->id)) return container;
-    }
-    if(id && create) {
+    if(id == NULL) return NULL;
+    HSPContainer cont = { .id = id };
+    HSPContainer *container = UTHashGet(sp->containers, &cont);
+    if(container == NULL && create) {
       container = (HSPContainer *)my_calloc(sizeof(HSPContainer));
       container->id = my_strdup(id);
       // turn it into a UUID - just take the first 16 bytes of the id
       parseUUID(id, container->uuid);
       // and assign a dsIndex that will be persistent across restarts
       container->dsIndex = assignVM_dsIndex(sp, container->uuid);
-      // add to list
-      container->nxt = sp->containers;
-      sp->containers = container;
-      sp->num_containers++;
+      // add to collection
+      UTHashAdd(sp->containers, container, NO);
     }
     return container;
   }
 
   static void freeContainer(HSPContainer *container) {
       if(container->id) my_free(container->id);
-      if(container->longId) my_free(container->longId);
       if(container->name) my_free(container->name);
       if(container->hostname) my_free(container->hostname);
       my_free(container);
@@ -1583,7 +1579,8 @@ extern "C" {
 	UTStringArray *dockerInspect = strArrayNew();
 	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
 	strArrayAdd(dockerInspect, "inspect");
-	for(HSPContainer *container = sp->containers; container; container=container->nxt) {
+	HSPContainer *container;
+	UTHASH_WALK(sp->containers, container) {
 	  // mark for removal, in case it is no longer current
 	  container->marked = YES;
 	  strArrayAdd(dockerInspect, container->id);
@@ -1609,9 +1606,9 @@ extern "C" {
 	  if(jtop) {
 	    // top-level should be array
 	    int nc = cJSON_GetArraySize(jtop);
-	    if(debug && nc != sp->num_containers) {
+	    if(debug && nc != sp->containers->entries) {
 	      // cross-check
-	      myLog(LOG_INFO, "warning docker-ps returned %u containers but docker-inspect returned %u", sp->num_containers, nc);
+	      myLog(LOG_INFO, "warning docker-ps returned %u containers but docker-inspect returned %u", sp->containers->entries, nc);
 	    }
 	    for(int ii = 0; ii < nc; ii++) {
 	      cJSON *jcont = cJSON_GetArrayItem(jtop, ii);
@@ -1619,18 +1616,11 @@ extern "C" {
 
 		cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
 		if(jid) {
-		  char shortId[HSF_DOCKER_SHORTID_LEN+1];
 		  if(my_strlen(jid->valuestring) >= HSF_DOCKER_SHORTID_LEN) {
-		    memcpy(shortId, jid->valuestring, HSF_DOCKER_SHORTID_LEN);
-		    shortId[HSF_DOCKER_SHORTID_LEN] = '\0';
-		    HSPContainer *container = getContainer(sp, shortId, NO);
+		    HSPContainer *container = getContainer(sp, jid->valuestring, NO);
 		    if(container) {
 		      // Clear the mark - this container is still current
 		      container->marked = NO;
-		      if(my_strequal(jid->valuestring, container->longId) == NO) {
-			if(container->longId) my_free(container->longId);
-			container->longId = my_strdup(jid->valuestring);
-		      }
 		      cJSON *jname = cJSON_GetObjectItem(jcont, "Name");
 		      if(my_strequal(jname->valuestring, container->name) == NO) {
 			if(container->name) my_free(container->name);
@@ -1671,14 +1661,11 @@ extern "C" {
 	my_free(ibuf);
       }
 
-      for(HSPContainer *prev=NULL, *container = sp->containers; container; ) {
-        HSPContainer *next_container = container->nxt;
+      HSPContainer *container;
+      UTHASH_WALK(sp->containers, container) {
 	if(container->marked) {
-	  // remove and free container - no longer current
-	  if(prev == NULL) sp->containers = next_container;
-	  else prev->nxt = next_container;
+	  UTHashDel(sp->containers, container);
 	  freeContainer(container);
-	  sp->num_containers--;
 	}
 	else {
 	  // container still current - look up state
@@ -1716,10 +1703,8 @@ extern "C" {
 	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
 	  adaptorListFreeMarked(state->interfaces);
 	  // we are using sp->num_domains as the portable field across Xen, KVM, Docker
-	  sp->num_domains = sp->num_containers;
-	  prev = container;
+	  sp->num_domains = sp->containers->entries;
 	}
-	container = next_container;
       }
 
 #endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
@@ -3268,6 +3253,9 @@ extern "C" {
     sp->adaptorsByIndex = UTHASH_NEW(SFLAdaptor, ifIndex, NO);
     sp->adaptorsByPeerIndex = UTHASH_NEW(SFLAdaptor, peer_ifIndex, NO);
     sp->adaptorsByMac = UTHASH_NEW(SFLAdaptor, macs[0], NO);
+#ifdef HSF_DOCKER
+    sp->containers = UTHASH_NEW(HSPContainer, id, YES);
+#endif
     
     setState(sp, HSPSTATE_READCONFIG);
     

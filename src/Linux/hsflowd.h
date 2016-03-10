@@ -87,9 +87,7 @@ extern "C" {
   struct _HSP;
 
   typedef struct _HSPContainer {
-    struct _HSPContainer *nxt;
     char *id;
-    char *longId;
     char *name;
     char *hostname;
     char uuid[16];
@@ -564,8 +562,7 @@ extern "C" {
     int vmStoreInvalid;
     HSPVMStore *vmStore;
 #ifdef HSF_DOCKER
-    uint32_t num_containers;
-    HSPContainer *containers;
+    UTHash *containers;
 #endif
     // inter-thread communication
     pthread_mutex_t *config_mut;
