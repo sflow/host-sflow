@@ -93,6 +93,7 @@ deb: $(PROG)
 	sed -i -e s/_PACKAGE_/$(PROG)/g debian/DEBIAN/control; \
 	sed -i -e s/_VERSION_/$${MYVER}-$${MYREL}/g debian/DEBIAN/control; \
 	chmod 644 debian/DEBIAN/control; \
+	install -m 555 DEBIAN_build/conffiles debian/DEBIAN; \
 	install -m 555 DEBIAN_build/preinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/postinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/prerm debian/DEBIAN; \
