@@ -200,7 +200,7 @@ extern "C" {
     if(container->id) my_free(container->id);
     if(container->name) my_free(container->name);
     if(container->hostname) my_free(container->hostname);
-    if(container->vm) container->vm->container = NULL; // $$$
+    if(container->vm) container->vm->container = NULL;
     my_free(container);
   }
 
@@ -315,28 +315,23 @@ extern "C" {
     
     HSPContainer *container;
     UTHASH_WALK(sp->containers, container) {
-      HSPVMState *state = container->vm;
       if(container->marked) {
 	if(debug) myLog(LOG_INFO, "delete container: %s=%s", container->name, container->id);
-	if(UTHashDel(sp->containers, container) == NO) {
+	if(UTHashDel(sp->containers, container) == NO)
 	  myLog(LOG_ERR, "UTHashDel failed: container %s=%s", container->name, container->id);
-	}
-	if(state) {
-	  // mark the vm for removal too
-	  state->marked = YES;
-	}
 	freeContainer(container);
       }
       else {
 	// container still current
+	HSPVMState *state = container->vm;
 	if(state) {
 	  // clear the mark so it survives
 	  state->marked = NO;
 	  // and reset the information that we are about to refresh
 	  adaptorListMarkAll(state->interfaces);
-	  strArrayReset(state->volumes); // $$$ why here?
-	  strArrayReset(state->disks); // $$$
-	  // and refresh it
+	  // strArrayReset(state->volumes);
+	  // strArrayReset(state->disks);
+	  // then refresh it
 	  readContainerInterfaces(sp, state);
 	  // and clean up
 	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);

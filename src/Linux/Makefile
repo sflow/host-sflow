@@ -107,6 +107,20 @@ ifeq ($(SYSTEM_SLICE),yes)
 	CFLAGS += -DHSF_SYSTEM_SLICE
 endif
 
+# if LIBVIRT is not set, then assume it should be "yes" if we find the library.
+# Could test for the include file too,  but somtimes it is there even if the
+# library is not.  Testing for libvirt-dev[el] might be better.
+ifeq ($(LIBVIRT),)
+	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+endif
+
+# if XEN_DDK is not set, then assume it should be "yes" if we are on a Xenserver DDK (or equivalent) system.
+# Just test if the xenstore and xenctrl libs are present, and require the xenctrl.h include as well.
+ifeq ($(XEN_DDK),)
+	XEN_DDK=$(shell if ls /usr/lib*/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib*/libxenstore.* >/dev/null 2>&1 && ls /usr/include/xenctrl.h >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
+endif
+# to compile with xen-sources instead, specify XEN_ROOT.  e.g. XEN_ROOT=/root/xen-3.2.0
+
 # The options LIBVIRT=yes, XEN_DDK=yes and XEN_ROOT=<path> should be mutually exclusive.
 # Enforce that here, so that XEN_ROOT takes priority, then XEN_DDK, then LIBVIRT.  It might
 # work better to just have a TARGET=<xen|xensource|kvm|linux> options and insist that it be
@@ -125,36 +139,25 @@ else
 	XEN_DDK=no
 endif
 
-# if LIBVIRT is not set, then assume it should be "yes" if we find the library.
-# Could test for the include file too,  but somtimes it is there even if the
-# library is not.  Testing for libvirt-dev[el] might be better.
-ifeq ($(LIBVIRT),)
-	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-endif
+# translate the selection into compile flags
 ifeq ($(LIBVIRT),yes)
 	CFLAGS += -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
 	LIBS += -lvirt -lxml2
-else
-  # if XEN_DDK is not set, then assume it should be "yes" if we are on a Xenserver DDK (or equivalent) system.
-  # Just test if the xenstore and xenctrl libs are present.
-  ifeq ($(XEN_DDK),)
-	XEN_DDK=$(shell if ls /usr/lib*/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib*/libxenstore.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-  endif
+endif
 
-  # to compile with xen-sources instead, specify XEN_ROOT.  e.g. XEN_ROOT=/root/xen-3.2.0
-  ifeq ($(XEN_ROOT),)
-  else
-	XEN_DDK=no
+ifeq ($(XEN_ROOT),)
+else
 	include $(XEN_ROOT)/tools/Rules.mk
 	CFLAGS += -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
 	CFLAGS += -Wno-declaration-after-statement # turn off "mixed declarations and code" warning
 	LIBS += -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
-  endif
-  ifeq ($(XEN_DDK),yes)
+endif
+
+ifeq ($(XEN_DDK),yes)
 	CFLAGS += -DHSF_XEN
 	LIBS += -lxenstore -lxenctrl
-  endif
 endif
+
 
 # allow HSF_XEN_VBD_PATH to be overridden here.  For example: make HSF_XEN_VBD_PATH=/sys/devices
 ifeq ($(HSF_XEN_VBD_PATH),)
@@ -346,6 +349,9 @@ clean-sflowovsd:
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
 dnsSD.o: dnsSD.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
+hsflowd_xen.o: hsflowd_xen.c $(HEADERS)
+hsflowd_vrt.o: hsflowd_vrt.c $(HEADERS)
+hsflowd_docker.o: hsflowd_docker.c $(HEADERS)
 readInterfaces.o: readInterfaces.c $(HEADERS)
 readCpuCounters.o: readCpuCounters.c $(HEADERS)
 readNvmlCounters.o: readNvmlCounters.c $(HEADERS)
@@ -358,4 +364,6 @@ readJSON.o: readJSON.c $(HEADERS)
 sflowovsd.o: sflowovsd.c $(HEADERS)
 readContainerCounters.o: readContainerCounters.c $(HEADERS)
 readAsicCounters.o: readAsicCounters.c $(HEADERS)
+readBroadcomCounters.o: readBroadcomCounters.c $(HEADERS)
+readTcpipCounters.o: readTcpipCounters.c $(HEADERS)
 

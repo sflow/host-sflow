@@ -383,15 +383,15 @@ extern "C" {
     char uuid[16];
     EnumVMType vmType;
     uint32_t dsIndex;
-    uint32_t network_count;
+    uint32_t created:1;
     uint32_t marked:1;
-    uint32_t vm_index;
     uint32_t domId;
     SFLAdaptorList *interfaces;
     UTStringArray *volumes;
     UTStringArray *disks;
     SFLPoller *poller;
 #ifdef HSF_XEN
+    uint32_t network_count;
     xc_domaininfo_t domaininfo;
 #endif
 #ifdef HSF_DOCKER

@@ -315,16 +315,12 @@ extern "C" {
 	domaininfo = state->domaininfo; // struct copy
       }
       else {
-	// it seems that xc_domain_getinfolist takes the domId after all
-	// so state->vm_index is not actually needed any more
-	// int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
 	int32_t n = xc_domain_getinfolist(sp->xc_handle, state->domId, 1, &domaininfo);
 	if(n < 0 || domaininfo.domain != state->domId) {
 	  // Assume something changed under our feet.
 	  // Request a reload of the VM information and bail.
 	  // We'll try again next time.
-	  myLog(LOG_INFO, "request for vm_index %u (dom_id=%u) returned %d (with dom_id=%u)",
-		state->vm_index,
+	  myLog(LOG_INFO, "request for dom_id=%u returned %d (with dom_id=%u)",
 		state->domId,
 		n,
 		domaininfo.domain);
@@ -426,10 +422,9 @@ extern "C" {
       SFLCounters_sample_element memElem = { 0 };
       memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
 
-      if(debug) myLog(LOG_INFO, "vm domid=%u, dsIndex=%u, vm_index=%u, tot_pages=%u",
+      if(debug) myLog(LOG_INFO, "vm domid=%u, dsIndex=%u, tot_pages=%u",
 		      state->domId,
 		      SFL_DS_INDEX(poller->dsi),
-		      state->vm_index,
 		      domaininfo.tot_pages);
 
 		      
@@ -500,26 +495,29 @@ extern "C" {
 		    domaininfo[i].handle);
 	    }
 	    HSPVMState *state = getVM(sp, &domaininfo.handle, VMTYPE_XEN, agentCB_getCounters_XEN);
-	    state->marked = NO;
-	    // remember the index so we can access this individually later
-	    // (actually this was a misunderstanding - the vm_index is not
-	    // really needed at all.  Should take it out. Can still detect
-	    // duplicates using the 'marked' flag).
-	    if(state->vm_index) {
+	    if(state->marked == NO &&
+	       state->created == NO) {
 	      duplicate_domains++;
 	      if(debug) {
-		myLog(LOG_INFO, "duplicate entry for domId=%u vm_index %u repeated at %u (keep first one)", domId, state->vm_index, (num_domains + i));
+		myLog(LOG_INFO, "duplicate entry for domId=%u repeated at %u (keep first one)", domId, (num_domains + i));
 	      }
 	    }
 	    else {
-	      state->vm_index = num_domains + i;
-	      // and the domId, which might have changed (if vm rebooted)
+	      state->marked = NO;
+	      state->created = NO;
+	      // domId can change if VM is rebooted
 	      state->domId = domId;
-	      // pick up the list of block device numbers
+
+	      // reset information we are about to refresh
+	      // strArrayReset(state->interfaces);
 	      strArrayReset(state->volumes);
+	      // strArrayReset(state->disks);
+	      
 	      if(sp->sFlow->sFlowSettings_file->xen_dsk) {
+		// pick up the list of block device numbers
 		xen_collect_block_devices(sp, state);
 	      }
+
 	      // store state so we don't have to call xc_domain_getinfolist() again for every
 	      // VM when we are sending it's counter-sample in agentCB_getCountersVM
 	      state->domaininfo = domaininfo[i]; // structure copy

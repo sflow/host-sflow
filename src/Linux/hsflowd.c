@@ -412,6 +412,7 @@ extern "C" {
       // new vm or container
       vm = (HSPVMState *)my_calloc(sizeof(HSPVMState));
       memcpy(vm->uuid, uuid, 16);
+      vm->created = YES;
       vm->vmType = vmType;
       vm->volumes = strArrayNew();
       vm->disks = strArrayNew();
@@ -432,7 +433,7 @@ extern "C" {
 
 
   static void removeAndFreeVM(HSP *sp, HSPVMState *vm) {
-    myLog(LOG_INFO, "configVMs: removing vm with dsIndex=%u (domId=%u)",
+    myLog(LOG_INFO, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
 	  vm->dsIndex,
 	  vm->domId);
     UTHashDel(sp->vmsByUUID, vm);
@@ -468,7 +469,6 @@ extern "C" {
     HSPVMState *state;
     UTHASH_WALK(sp->vmsByUUID, state) {
       state->marked = YES;
-      state->vm_index = 0; // $$$
     }
     
     // 2. create new VM pollers, or clear the mark on existing ones

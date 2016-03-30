@@ -321,19 +321,13 @@ extern "C" {
 	virDomainGetUUID(domainPtr, (u_char *)uuid);
 	HSPVMState *state = getVM(sp, uuid, VMTYPE_VRT, agentCB_getCounters_VRT);
 	state->marked = NO;
+	state->created = NO;
+	// remember the domId, which might have changed (if vm rebooted)
+	state->domId = domId;
 	// reset the information that we are about to refresh
 	adaptorListMarkAll(state->interfaces);
 	strArrayReset(state->volumes);
 	strArrayReset(state->disks);
-	// remember the index so we can access this individually later
-	if(debug) {
-	  if(state->vm_index != i) {
-	    myLog(LOG_INFO, "domId=%u vm_index %u->%u", domId, state->vm_index, i);
-	  }
-	}
-	state->vm_index = i;
-	// and the domId, which might have changed (if vm rebooted)
-	state->domId = domId;
 	// get the XML descr - this seems more portable than some of
 	// the newer libvert API calls,  such as those to list interfaces
 	char *xmlstr = virDomainGetXMLDesc(domainPtr, 0 /*VIR_DOMAIN_XML_SECURE not allowed for read-only */);
