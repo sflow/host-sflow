@@ -279,7 +279,7 @@ approach seemed more stable and portable.
 #ifdef HSF_TEST_QSFP
       adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
       adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
-#else
+#elif HSP_ETHTOOL_STATS
       struct ethtool_modinfo modinfo = { 0 };
       modinfo.cmd = ETHTOOL_GMODULEINFO;
       ifr->ifr_data = (char *)&modinfo;
