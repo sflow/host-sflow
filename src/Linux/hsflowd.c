@@ -194,7 +194,8 @@ extern "C" {
     return YES;
   }
 #endif
-  
+
+#ifndef HSF_XEN
   static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors, int capacity)
   {
     // build the list of adaptors that are up and have non-empty MACs,
@@ -215,6 +216,7 @@ extern "C" {
     }
     return myAdaptors;
   }
+#endif
 
   void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
@@ -405,7 +407,8 @@ extern "C" {
   */
 
   HSPVMState *getVM(HSP *sp, char *uuid, EnumVMType vmType, getCountersFn_t getCountersFn) {
-    HSPVMState search = { 0 };
+    HSPVMState search;
+    memset(&search, 0, sizeof(search));
     memcpy(search.uuid, uuid, 16);
     HSPVMState *vm = UTHashGet(sp->vmsByUUID, &search);
     if(vm == NULL) {
@@ -2104,7 +2107,7 @@ extern "C" {
 #endif
 
 #ifdef HSF_XEN
-	      if(compile_vif_regex(sp) == NO) {
+	      if(xen_compile_vif_regex(sp) == NO) {
 		exit(EXIT_FAILURE);
 	      }
 #endif

@@ -60,6 +60,8 @@ extern "C" {
 // actually work for all xen variants.
 #define HSF_XEN_VIF_REGEX "vif[^0-9]*([0-9]+)\\.([0-9]+)$"
 #define HSF_XEN_VIF_REGEX_NMATCH 3 // fields-to-extract + 1
+// For convenience, define a domId to mean "the physical host"
+#define XEN_DOMID_PHYSICAL (uint32_t)-1
 #endif
 
 #ifdef HSF_VRT
@@ -655,6 +657,7 @@ extern "C" {
 #ifdef HSF_XEN
   void openXenHandles(HSP *sp);
   void closeXenHandles(HSP *sp);
+  int xen_compile_vif_regex(HSP *sp);
   SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors, int capacity);
   int readXenVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode);
   void configVMs_XEN(HSP *sp);

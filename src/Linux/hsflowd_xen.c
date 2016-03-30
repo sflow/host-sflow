@@ -88,7 +88,7 @@ extern "C" {
     return NO;
   }
 
-  static int compile_vif_regex(HSP *sp) {
+  int xen_compile_vif_regex(HSP *sp) {
     int err = regcomp(&sp->vif_regex, HSF_XEN_VIF_REGEX, REG_EXTENDED);
     if(err) {
       char errbuf[101];
@@ -111,9 +111,6 @@ extern "C" {
 	return -1;
       }
   }
-
-/* For convenience, define a domId to mean "the physical host" */
-#define XEN_DOMID_PHYSICAL (uint32_t)-1
 
   SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors, int capacity)
   {
@@ -494,7 +491,7 @@ extern "C" {
 		    domaininfo[i].ssidref,
 		    domaininfo[i].handle);
 	    }
-	    HSPVMState *state = getVM(sp, &domaininfo.handle, VMTYPE_XEN, agentCB_getCounters_XEN);
+	    HSPVMState *state = getVM(sp, (char *)&domaininfo[i].handle, VMTYPE_XEN, agentCB_getCounters_XEN);
 	    if(state->marked == NO &&
 	       state->created == NO) {
 	      duplicate_domains++;
