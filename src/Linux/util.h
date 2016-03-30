@@ -39,6 +39,8 @@ extern "C" {
 
 #include "sflow.h" // for SFLAddress, SFLAdaptorList...
 
+  extern int debug;
+  
   // addressing
   int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
   int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family);
@@ -46,6 +48,7 @@ extern "C" {
   int printHex(const u_char *a, int len, u_char *buf, int bufLen, int prefix);
   int parseUUID(char *str, char *uuid);
   int printUUID(const u_char *a, u_char *buf, int bufLen);
+  uint32_t hashUUID(char *uuid);
   int printSpeed(const uint64_t speed, char *buf, int bufLen);
   
   // logger
@@ -207,7 +210,7 @@ extern "C" {
   void UTHashFree(UTHash *oh);
   void UTHashAdd(UTHash *oh, void *obj, int overwrite_ok);
   void *UTHashGet(UTHash *oh, void *obj);
-  void UTHashDel(UTHash *oh, void *obj);
+  int UTHashDel(UTHash *oh, void *obj);
 
 #define UTHASH_WALK(oh, obj) for(uint32_t ii=0; ii<oh->cap; ii++) if(((obj)=(typeof(obj))oh->bins[ii]))
    

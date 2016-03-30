@@ -85,16 +85,18 @@ extern "C" {
   // forward declarations
   struct _HSPSFlow;
   struct _HSP;
-
+  struct _HSPVMState;
+  
   typedef struct _HSPContainer {
+    struct _HSPVMState *vm;
     char *id;
     char *name;
     char *hostname;
-    char uuid[16];
-    uint32_t dsIndex;
+    uint32_t dsIndex; // $$$
+    char uuid[16]; // $$$
     pid_t pid;
-      int running:1;
-      int marked:1;
+    uint32_t running:1;
+    uint32_t marked:1;
     uint64_t memoryLimit;
   } HSPContainer;
 #define HSF_DOCKER_CMD "/usr/bin/docker"
@@ -120,7 +122,7 @@ extern "C" {
 #define HSP_DEFAULT_NFLOG_GROUP 1
 #endif
 
-#if (HSF_ULOG || HSF_NFLOG || HSF_PCAP)
+#if (defined(HSF_ULOG) || defined(HSF_NFLOG) || defined(HSF_PCAP))
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <net/if.h>
@@ -370,26 +372,25 @@ extern "C" {
   };
 #endif
 
-  // persistent state for mapping VM domIds to
-  // sFlow datasource indices
-#define HSP_MAX_VMSTORE_LINELEN 100
-#define HSP_VMSTORE_SEPARATORS " \t\r\n="
-  typedef struct _HSPVMStore {
-    struct _HSPVMStore *nxt;
-    char uuid[16];
-    uint32_t dsIndex;
-  } HSPVMStore;
-  
-
   // userData structure to store state for VM data-sources
+  typedef enum {
+    VMTYPE_UNDEFINED=0,
+    VMTYPE_XEN,
+    VMTYPE_VRT,
+    VMTYPE_DOCKER} EnumVMType;
+  
   typedef struct _HSPVMState {
+    char uuid[16];
+    EnumVMType vmType;
+    uint32_t dsIndex;
     uint32_t network_count;
-    int32_t marked;
+    uint32_t marked:1;
     uint32_t vm_index;
     uint32_t domId;
     SFLAdaptorList *interfaces;
     UTStringArray *volumes;
     UTStringArray *disks;
+    SFLPoller *poller;
 #ifdef HSF_XEN
     xc_domaininfo_t domaininfo;
 #endif
@@ -447,7 +448,7 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
-#if (HSP_ETHTOOL_STATS || HSF_DOCKER)
+#if (defined(HSP_ETHTOOL_STATS) || defined(HSF_DOCKER))
     uint32_t et_nctrs; // how many in total
     uint32_t et_nfound; // how many of the ones we wanted
 #endif
@@ -555,14 +556,10 @@ extern "C" {
     uint32_t cpu_cores;
     uint64_t mem_total;
     uint64_t mem_free;
-    // persistent state
-    uint32_t maxDsIndex;
-    char *vmStoreFile;
-    FILE *f_vmStore;
-    int vmStoreInvalid;
-    HSPVMStore *vmStore;
+    UTHash *vmsByUUID; // HSPVMState
+    UTHash *vmsByDsIndex; // HSPVMState
 #ifdef HSF_DOCKER
-    UTHash *containers;
+    UTHash *containers; // can we access via vmsByDsIndex instead?
 #endif
     // inter-thread communication
     pthread_mutex_t *config_mut;
@@ -636,6 +633,26 @@ extern "C" {
 #define HSP_MAX_DNS_LEN 255
   typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *settings);
   int dnsSD(HSP *sp, HSPDnsCB callback, HSPSFlowSettings *settings);
+
+
+#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
+  HSPVMState *getVM(HSP *sp, char *uuid, EnumVMType vmType, getCountersFn_t getCountersFn);
+  
+#ifdef HSF_XEN
+  void openXenHandles(HSP *sp);
+  void closeXenHandles(HSP *sp);
+  SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors, int capacity);
+  int readXenVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode);
+  void configVMs_XEN(HSP *sp);
+#endif
+#ifdef HSF_VRT
+  void configVMs_VRT(HSP *sp);
+#endif
+#ifdef HSF_DOCKER
+  void configVMs_DOCKER(HSP *sp);
+#endif
+
+#endif /* defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER) */
 
   // read functions
   int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);

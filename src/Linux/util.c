@@ -281,6 +281,40 @@ extern "C" {
     return now.tv_sec;
   }
 
+  
+  /*_________________---------------------------__________________
+    _________________     hashing               __________________
+    -----------------___________________________------------------
+    Don't expose this directly, so we can swap them out easily for
+    alternatives if we want to.
+  */
+
+#define FNV_PRIME_32 16777619
+#define FNV_OFFSET_32 2166136261U
+  static uint32_t hash_fnv1a(const char *s, const uint32_t len)
+  {
+    uint32_t hash = FNV_OFFSET_32;
+    for(uint32_t i = 0; i < len; i++) {
+      hash ^= (s[i]);
+      hash *= FNV_PRIME_32;
+    }
+    return hash;
+  }
+
+  #if 0
+  // See "64-bit to 32-bit hash functions"
+  // https://gist.github.com/badboy/6267743
+  static uint32_t hash6432shift(uint64_t h) {
+    h = (~h) + (h << 18);
+    h ^= (h >> 31);
+    h *= 21;
+    h ^= (h >> 11);
+    h += (h << 6);
+    h ^= (h >> 22);
+    return (uint32_t) h;
+  }
+  #endif
+
   /*_________________---------------------------__________________
     _________________     safe string fns       __________________
     -----------------___________________________------------------
@@ -321,16 +355,10 @@ extern "C" {
     return my_strnequal(s1, s2, UT_DEFAULT_MAX_STRLEN);
   }
   
-  uint32_t my_strhash(char *str)
-  {
-    /* hash function from the great Dan Bernstein */
-    uint32_t hash = 5381;
-    if(str == NULL) return hash;
-    int c;
-    while ((c = *str++) != '\0') hash = hash * 33 ^ c;
-    return hash;
+  uint32_t my_strhash(char *str) {
+    return hash_fnv1a(str, my_strlen(str));
   }
-    
+  
   /*_________________---------------------------__________________
     _________________     setStr                __________________
     -----------------___________________________------------------
@@ -743,6 +771,10 @@ extern "C" {
     return b;
   }
 
+  uint32_t hashUUID(char *uuid) {
+    return hash_fnv1a(uuid, 16);
+  }
+  
   /*_________________---------------------------__________________
     _________________     printSpeed            __________________
     -----------------___________________________------------------
@@ -1246,7 +1278,6 @@ extern "C" {
     oh->bins = my_calloc(UTHASH_BYTES(oh));
     oh->f_offset = f_offset;
     oh->f_len = (stringKey) ? 0 : f_len;
-    assert(f_len <= sizeof(uint64_t));
     return oh;
   }
 
@@ -1272,27 +1303,14 @@ extern "C" {
     my_free(old_bins);
   }
   
-  // See "64-bit to 32-bit hash functions"
-  // https://gist.github.com/badboy/6267743
-  static uint32_t hash6432shift(uint64_t h) {
-    h = (~h) + (h << 18);
-    h ^= (h >> 31);
-    h *= 21;
-    h ^= (h >> 11);
-    h += (h << 6);
-    h ^= (h >> 22);
-    return (uint32_t) h;
-  }
-  
   static uint32_t UTHashHash(UTHash *oh, void *obj) {
     char *f = (char *)obj + oh->f_offset;
     if(oh->f_len == 0) {
-      // field is a null-terminated string
+      // field is ptr to null-terminated string
       return my_strhash(*(char **)f);
     }
-    uint64_t hash = 0;
-    memcpy(&hash, f, oh->f_len);
-    return hash6432shift(hash);
+    // field is fixed-len
+    return hash_fnv1a(f, oh->f_len);
   }
   
   static uint32_t UTHashEqual(UTHash *oh, void *obj1, void *obj2) {
@@ -1340,13 +1358,15 @@ static uint32_t UTHashSearch(UTHash *oh, void *obj, void **found) {
     return found;
   }
 
-  void UTHashDel(UTHash *oh, void *obj) {
+  int UTHashDel(UTHash *oh, void *obj) {
     void *found = NULL;
     int idx = UTHashSearch(oh, obj, &found);
     if (found) {
       oh->bins[idx] = NULL;
       oh->entries--;
+      return YES;
     }
+    return NO;
   }
   
 #if defined(__cplusplus)

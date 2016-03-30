@@ -182,222 +182,6 @@ extern "C" {
 	    ad->deviceName);
     }
   }
-	    
-  /*_________________---------------------------__________________
-    _________________     Xen Handles           __________________
-    -----------------___________________________------------------
-  */
-
-#ifdef HSF_XEN
-
-#ifdef XENCTRL_HAS_XC_INTERFACE
-#define HSF_XENCTRL_INTERFACE_OPEN() xc_interface_open(NULL /*logger*/, NULL/*dombuild_logger*/, XC_OPENFLAG_NON_REENTRANT);
-#define HSF_XENCTRL_HANDLE_OK(h) ((h) != NULL)
-#else
-#define HSF_XENCTRL_INTERFACE_OPEN() xc_interface_open()
-#define HSF_XENCTRL_HANDLE_OK(h) ((h) && (h) != -1)
-#endif
-
-  static void openXenHandles(HSP *sp)
-  {
-    // need to do this while we still have root privileges
-    if(sp->xc_handle == 0) {
-      sp->xc_handle = HSF_XENCTRL_INTERFACE_OPEN();
-      if(!HSF_XENCTRL_HANDLE_OK(sp->xc_handle)) {
-        myLog(LOG_ERR, "xc_interface_open() failed : %s", strerror(errno));
-      }
-      else {
-        sp->xs_handle = xs_daemon_open_readonly();
-        if(sp->xs_handle == NULL) {
-          myLog(LOG_ERR, "xs_daemon_open_readonly() failed : %s", strerror(errno));
-        }
-        // get the page size [ref xenstat.c]
-#if defined(PAGESIZE)
-        sp->page_size = PAGESIZE;
-#elif defined(PAGE_SIZE)
-        sp->page_size = PAGE_SIZE;
-#else
-        sp->page_size = sysconf(_SC_PAGE_SIZE);
-        if(sp->page_size <= 0) {
-          myLog(LOG_ERR, "Failed to retrieve page size : %s", strerror(errno));
-          abort();
-        }
-#endif
-      }
-    }
-  }
-
-  // if sp->xs_handle is not NULL then we know that sp->xc_handle is good too
-  // because of the way we opened the handles in the first place.
-  static int xenHandlesOK(HSP *sp) { return (sp->xs_handle != NULL); }
-
-  static void closeXenHandles(HSP *sp)
-  {
-    if(HSF_XENCTRL_HANDLE_OK(sp->xc_handle)) {
-      xc_interface_close(sp->xc_handle);
-      sp->xc_handle = 0;
-    }
-    if(sp->xs_handle) {
-      xs_daemon_close(sp->xs_handle);
-      sp->xs_handle = NULL;
-    }
-  }
-
-  static int readVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode)
-  {
-    if(xenHandlesOK(sp)) {
-      xc_physinfo_t physinfo = { 0 };
-      if(xc_physinfo(sp->xc_handle, &physinfo) < 0) {
-	myLog(LOG_ERR, "xc_physinfo() failed : %s", strerror(errno));
-      }
-      else {
-      	vnode->mhz = (physinfo.cpu_khz / 1000);
-	vnode->cpus = physinfo.nr_cpus;
-	vnode->memory = ((uint64_t)physinfo.total_pages * sp->page_size);
-	vnode->memory_free = ((uint64_t)physinfo.free_pages * sp->page_size);
-	vnode->num_domains = sp->num_domains;
-	return YES;
-      }
-    }
-    return NO;
-  }
-
-  static int compile_vif_regex(HSP *sp) {
-    int err = regcomp(&sp->vif_regex, HSF_XEN_VIF_REGEX, REG_EXTENDED);
-    if(err) {
-      char errbuf[101];
-      myLog(LOG_ERR, "regcomp(%s) failed: %s", HSF_XEN_VIF_REGEX, regerror(err, &sp->vif_regex, errbuf, 100));
-      return NO;
-    }
-    return YES;
-  }
-
-  static long regmatch_as_long(regmatch_t *rm, char *str) {
-    int len = (int)rm->rm_eo - (int)rm->rm_so;
-      // copy it out so we can null-terminate just to be safe
-      char extraction[8];
-      if(rm->rm_so != -1 && len > 0 && len < 8) {
-	memcpy(extraction, str + rm->rm_so, len);
-	extraction[len] = '\0';
-	return strtol(extraction, NULL, 0);
-      }
-      else {
-	return -1;
-      }
-  }
-
-/* For convenience, define a domId to mean "the physical host" */
-#define XEN_DOMID_PHYSICAL (uint32_t)-1
-
-  static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors, int capacity)
-  {
-    if(debug > 3) {
-      if(dom_id == XEN_DOMID_PHYSICAL) myLog(LOG_INFO, "xenstat_adaptors(): looking for physical host interfaces");
-      else myLog(LOG_INFO, "xenstat_adaptors(): looking for vif with domId=%"PRIu32, dom_id);
-    }
-
-    SFLAdaptor *adaptor;
-    UTHASH_WALK(sp->adaptorsByName, adaptor) {
-      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-      if(niostate->up
-	 && (niostate->switchPort == NO)
-	 && adaptor->num_macs
-	 && !isZeroMAC(&adaptor->macs[0])) {
-	if(myAdaptors->num_adaptors >= capacity) break;
-	uint32_t vif_domid=0;
-	uint32_t vif_netid=0;
-	uint32_t xapi_index=0;
-	int isVirtual = NO;
-#ifdef HSF_XEN_VIF_REGEX
-	// we could move this regex extraction to the point where we first learn the adaptor->name and
-	// store it wit the adaptor user-data.  Then we wouldn't have to do it so often.  It might get
-	// expensive on a system with a large number of VMs.
-	if(regexec(&sp->vif_regex, adaptor->deviceName, HSF_XEN_VIF_REGEX_NMATCH, sp->vif_match, 0) == 0) {
-	  long ifield1 = regmatch_as_long(&sp->vif_match[1], adaptor->deviceName);
-	  long ifield2 = regmatch_as_long(&sp->vif_match[2], adaptor->deviceName);
-	  if(ifield1 == -1 || ifield2 == -1) {
-	    myLog(LOG_ERR, "failed to parse domId and netId from vif name <%s>", adaptor->deviceName);
-	  }
-	  else {
-	    vif_domid = (uint32_t)ifield1;
-	    vif_netid = (uint32_t)ifield2;
-	    isVirtual = YES;
-	  }
-	}
-#else
-	isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
-#endif
-	
-	int isXapi = (sscanf(adaptor->deviceName, "xapi%"SCNu32, &xapi_index) == 1);
-	if(debug > 3) {
-	  myLog(LOG_INFO, "- xenstat_adaptors(): found %s (virtual=%s, domid=%"PRIu32", netid=%"PRIu32") (xapi=%s, index=%"PRIu32")",
-		adaptor->deviceName,
-		isVirtual ? "YES" : "NO",
-		vif_domid,
-		vif_netid,
-		isXapi ? "YES" : "NO",
-		xapi_index);
-	}
-	if((isVirtual && dom_id == vif_domid) ||
-	   (!isVirtual && !isXapi && dom_id == XEN_DOMID_PHYSICAL)) {
-	  // include this one
-	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
-	  // mark it as a vm/container device
-	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
-	  if(isVirtual) {
-	    // for virtual interfaces we need to query for the MAC address
-	    char macQuery[256];
-	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
-	    if(macStr == NULL) {
-	      myLog(LOG_ERR, "xenstat_adaptors(): mac address query failed : %s : %s", macQuery, strerror(errno));
-	    }
-	    else{
-	      if(debug > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
-	      // got it - but make sure there is a place to write it
-	      if(adaptor->num_macs > 0) {
-		// OK, just overwrite the 'dummy' one that was there
-		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
-		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
-		}
-	      }
-	      free(macStr); // allocated by xs_read()
-	    }
-	  }
-	}
-      }
-    }
-    return myAdaptors;
-  }
-
-#endif /* HSF_XEN */
-
-#ifdef HSF_DOCKER
-
-  static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors, int capacity)
-  {
-    // we want the slice of global-namespace adaptors that are veth peers of the adaptors
-    // that belong to this container.
-    for(uint32_t j=0; j < vm->interfaces->num_adaptors; j++) {
-      SFLAdaptor *vm_adaptor = vm->interfaces->adaptors[j];
-      SFLAdaptor *adaptor = adaptorByPeerIndex(sp, vm_adaptor->ifIndex);
-      if(adaptor) {
-	HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-	if(niostate->up
-	   && (niostate->switchPort == NO)
-	   && (niostate->loopback == NO)
-	   && peerAdaptors->num_adaptors < capacity) {
-	  // include this one (if we have room)
-	  if(peerAdaptors->num_adaptors < capacity) {
-	    peerAdaptors->adaptors[peerAdaptors->num_adaptors++] = adaptor;
-	  }
-	}
-      }
-    }
-    return peerAdaptors->num_adaptors;
-  }
-
-#endif /* HSF_DOCKER */
 
 #ifdef HSP_SWITCHPORT_REGEX
   static int compile_swp_regex(HSP *sp) {
@@ -549,7 +333,7 @@ extern "C" {
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
 #if defined(HSF_XEN)
-    if(readVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
+    if(readXenVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
       SFLADD_ELEMENT(cs, &vnodeElem);
     }
 #else
@@ -566,560 +350,7 @@ extern "C" {
 
     sfl_poller_writeCountersSample(poller, cs);
   }
-
-#ifdef HSF_XEN
-
-#define HSP_MAX_PATHLEN 256
-
-  // allow HSF_XEN_VBD_PATH to be passed in at compile time,  but fall back on the default if it is not.
-#ifndef HSF_XEN_VBD_PATH
-#define HSF_XEN_VBD_PATH /sys/devices/xen-backend
-#endif
-
-  static int64_t xen_vbd_counter(uint32_t dom_id, char *vbd_dev, char *counter, int usec)
-  {
-    int64_t ctr64 = 0;
-    char ctrspec[HSP_MAX_PATHLEN];
-    snprintf(ctrspec, HSP_MAX_PATHLEN, "%u-%s/statistics/%s",
-	     dom_id,
-	     vbd_dev,
-	     counter);
-    char path[HSP_MAX_PATHLEN];
-    FILE *file = NULL;
-    // try vbd first,  then tap
-    snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSF_XEN_VBD_PATH) "/vbd-%s", ctrspec);
-    if((file = fopen(path, "r")) == NULL) {
-      snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSF_XEN_VBD_PATH) "/tap-%s", ctrspec);
-      file = fopen(path, "r");
-    }
-    
-    if(file) {
-      if(usec) {
-	uint64_t requests, avg_usecs, max_usecs;
-	if(fscanf(file, "requests: %"SCNi64", avg usecs: %"SCNi64", max usecs: %"SCNi64,
-		  &requests,
-		  &avg_usecs,
-		  &max_usecs) == 3) {
-	  // we want the total time in mS
-	  ctr64 = (requests * avg_usecs) / 1000;
-	}
-      }
-      else {
-	fscanf(file, "%"SCNi64, &ctr64);
-      }
-      fclose(file);
-    }
-    else {
-      if(debug) myLog(LOG_INFO, "xen_vbd_counter: <%s> not found ", path);
-    }
-    if(debug) myLog(LOG_INFO, "xen_vbd_counter: <%s> = %"PRIu64, path, ctr64);
-    return ctr64;
-  }
   
-  static int xen_collect_block_devices(HSP *sp, HSPVMState *state)
-  {
-    DIR *sysfsvbd = opendir(STRINGIFY_DEF(HSF_XEN_VBD_PATH));
-    if(sysfsvbd == NULL) {
-      static int logcount = 0;
-      if(logcount++ < 3) {
-	myLog(LOG_ERR, "opendir %s failed : %s", STRINGIFY_DEF(HSF_XEN_VBD_PATH), strerror(errno));
-      }
-      return 0;
-    }
-    int found = 0;
-    char scratch[sizeof(struct dirent) + _POSIX_PATH_MAX];
-    struct dirent *dp = NULL;
-    for(;;) {
-      readdir_r(sysfsvbd, (struct dirent *)scratch, &dp);
-      if(dp == NULL) break;
-      uint32_t vbd_dom_id;
-      char vbd_type[256];
-      char vbd_dev[256];
-      if(sscanf(dp->d_name, "%3s-%u-%s", vbd_type, &vbd_dom_id, vbd_dev) == 3) {
-	if(vbd_dom_id == state->domId
-	   && (my_strequal(vbd_type, "vbd") || my_strequal(vbd_type, "tap"))) {
-	  strArrayAdd(state->volumes, vbd_dev);
-	  found++;
-	}
-      }
-    }
-    closedir(sysfsvbd);
-    return found;
-  }
-
-  static int xenstat_dsk(HSP *sp, HSPVMState *state, SFLHost_vrt_dsk_counters *dsk)
-  {
-    for(uint32_t i = 0; i < strArrayN(state->volumes); i++) {
-      char *vbd_dev = strArrayAt(state->volumes, i);
-      if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", vbd_dev, state->domId); 
-      dsk->rd_req += xen_vbd_counter(state->domId, vbd_dev, "rd_req", NO);
-      dsk->rd_bytes += (xen_vbd_counter(state->domId, vbd_dev, "rd_sect", NO) * HSP_SECTOR_BYTES);
-      dsk->wr_req += xen_vbd_counter(state->domId, vbd_dev, "wr_req", NO);
-      dsk->wr_bytes += (xen_vbd_counter(state->domId, vbd_dev, "wr_sect", NO) * HSP_SECTOR_BYTES);
-      dsk->errs += xen_vbd_counter(state->domId, vbd_dev, "oo_req", NO);
-      //dsk->capacity $$$
-      //dsk->allocation $$$
-      //dsk->available $$$
-    }
-    return YES;
-  }
-  
-#endif
-
-  void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
-  {
-    assert(poller->magic);
-    HSPVMState *state = (HSPVMState *)poller->userData;
-    if(state == NULL) return;
-
-#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
-
-    HSP *sp = (HSP *)poller->magic;
-
-#if defined(HSF_XEN)
-    if(xenHandlesOK(sp)) {
-
-      xc_domaininfo_t domaininfo;
-      if(!sp->sFlow->sFlowSettings_file->xen_update_dominfo) {
-	// this optimization forces us to use the (stale) domaininfo from the last time
-	// we refreshed the VM list.  Most of these parameters change very rarely anyway
-	// so this is not a big sacrifice at all.
-	domaininfo = state->domaininfo; // struct copy
-      }
-      else {
-	// it seems that xc_domain_getinfolist takes the domId after all
-	// so state->vm_index is not actually needed any more
-	// int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
-	int32_t n = xc_domain_getinfolist(sp->xc_handle, state->domId, 1, &domaininfo);
-	if(n < 0 || domaininfo.domain != state->domId) {
-	  // Assume something changed under our feet.
-	  // Request a reload of the VM information and bail.
-	  // We'll try again next time.
-	  myLog(LOG_INFO, "request for vm_index %u (dom_id=%u) returned %d (with dom_id=%u)",
-		state->vm_index,
-		state->domId,
-		n,
-		domaininfo.domain);
-	  sp->refreshVMList = YES;
-	  return;
-	}
-      }
-      
-      // host ID
-      SFLCounters_sample_element hidElem = { 0 };
-      hidElem.tag = SFLCOUNTERS_HOST_HID;
-      char query[255];
-      char hname[255];
-      snprintf(query, sizeof(query), "/local/domain/%u/name", state->domId);
-      char *xshname = (char *)xs_read(sp->xs_handle, XBT_NULL, query, NULL);
-      if(xshname) {
-	// copy the name out here so we can free it straight away
-	strncpy(hname, xshname, 255);
-	free(xshname); // allocated by xs_read
-	hidElem.counterBlock.host_hid.hostname.str = hname;
-	hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
-	memcpy(hidElem.counterBlock.host_hid.uuid, &domaininfo.handle, 16);
-	hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;
-	hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;
-	//hidElem.counterBlock.host_hid.os_release.str = NULL;
-	//hidElem.counterBlock.host_hid.os_release.len = 0;
-	SFLADD_ELEMENT(cs, &hidElem);
-      }
-      
-      // host parent
-      SFLCounters_sample_element parElem = { 0 };
-      parElem.tag = SFLCOUNTERS_HOST_PAR;
-      parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-      parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
-      SFLADD_ELEMENT(cs, &parElem);
-
-      // VM Net I/O
-      SFLCounters_sample_element nioElem = { 0 };
-      nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
-      char devFilter[20];
-      snprintf(devFilter, 20, "vif%u.", state->domId);
-      uint32_t network_count = readNioCounters(sp, &nioElem.counterBlock.host_vrt_nio, devFilter, NULL);
-      if(state->network_count != network_count) {
-	// request a refresh if the number of VIFs changed. Not a perfect test
-	// (e.g. if one was removed and another was added at the same time then
-	// we would miss it). I guess we should keep the whole list of network ids,
-	// or just force a refresh every few minutes?
-	myLog(LOG_INFO, "vif count changed from %u to %u (dom_id=%u). Setting refreshAdaptorList=YES",
-	      state->network_count,
-	      network_count,
-	      state->domId);
-	state->network_count = network_count;
-	sp->refreshAdaptorList = YES;
-      }
-      SFLADD_ELEMENT(cs, &nioElem);
-
-      // VM cpu counters [ref xenstat.c]
-      SFLCounters_sample_element cpuElem = { 0 };
-      cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-      u_int64_t vcpu_ns = 0;
-      for(uint32_t c = 0; c <= domaininfo.max_vcpu_id; c++) {
-	xc_vcpuinfo_t info;
-	if(xc_vcpu_getinfo(sp->xc_handle, state->domId, c, &info) != 0) {
-	  // error or domain is in transition.  Just bail.
-	  myLog(LOG_INFO, "vcpu list in transition (dom_id=%u)", state->domId);
-	  return;
-	}
-	else {
-	  if(info.online) {
-	    vcpu_ns += info.cpu_time;
-	  }
-	}
-      }
-      uint32_t st = domaininfo.flags;
-      // first 8 bits (b7-b0) are a mask of flags (see tools/libxc/xen/domctl.h)
-      // next 8 bits (b15-b8) indentify the CPU to which the domain is bound
-      // next 8 bits (b23-b16) indentify the the user-supplied shutdown code
-      cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_NOSTATE;
-      if(st & XEN_DOMINF_shutdown) {
-	cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_SHUTDOWN;
-	if(((st >> XEN_DOMINF_shutdownshift) & XEN_DOMINF_shutdownmask) == SHUTDOWN_crash) {
-	  cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_CRASHED;
-	}
-      }
-      else if(st & XEN_DOMINF_paused) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_PAUSED;
-      else if(st & XEN_DOMINF_blocked) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_BLOCKED;
-      else if(st & XEN_DOMINF_running) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_RUNNING;
-      // SFL_VIR_DOMAIN_SHUTOFF ?
-      // other domaininfo flags include:
-      // XEN_DOMINF_dying      : not sure when this is set -- perhaps always :)
-      // XEN_DOMINF_hvm_guest  : as opposed to a PV guest
-      // XEN_DOMINF_debugged   :
-
-      cpuElem.counterBlock.host_vrt_cpu.cpuTime = (vcpu_ns / 1000000);
-      cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domaininfo.max_vcpu_id + 1;
-      SFLADD_ELEMENT(cs, &cpuElem);
-
-      // VM memory counters [ref xenstat.c]
-      SFLCounters_sample_element memElem = { 0 };
-      memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-
-      if(debug) myLog(LOG_INFO, "vm domid=%u, dsIndex=%u, vm_index=%u, tot_pages=%u",
-		      state->domId,
-		      SFL_DS_INDEX(poller->dsi),
-		      state->vm_index,
-		      domaininfo.tot_pages);
-
-		      
-      memElem.counterBlock.host_vrt_mem.memory = domaininfo.tot_pages * sp->page_size;
-      memElem.counterBlock.host_vrt_mem.maxMemory = (domaininfo.max_pages == UINT_MAX) ? -1 : (domaininfo.max_pages * sp->page_size);
-      SFLADD_ELEMENT(cs, &memElem);
-
-      // VM disk I/O counters
-      SFLCounters_sample_element dskElem = { 0 };
-      dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-      if(sp->sFlow->sFlowSettings_file->xen_dsk) {
-	if(xenstat_dsk(sp, state, &dskElem.counterBlock.host_vrt_dsk)) {
-	  SFLADD_ELEMENT(cs, &dskElem);
-	}
-      }
-
-      // include my slice of the adaptor list - and update
-      // the MAC with the correct one at the same time
-      SFLCounters_sample_element adaptorsElem = { 0 };
-      adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-      SFLAdaptorList myAdaptors;
-      SFLAdaptor *adaptors[HSP_MAX_VIFS];
-      myAdaptors.adaptors = adaptors;
-      myAdaptors.capacity = HSP_MAX_VIFS;
-      myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, state->domId, &myAdaptors, HSP_MAX_VIFS);
-      SFLADD_ELEMENT(cs, &adaptorsElem);
-
-      
-      sfl_poller_writeCountersSample(poller, cs);
-    }
-
-#elif defined(HSF_VRT)
-    if(sp->virConn) {
-      virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
-      if(domainPtr == NULL) {
-	sp->refreshVMList = YES;
-      }
-      else {
-	// host ID
-	SFLCounters_sample_element hidElem = { 0 };
-	hidElem.tag = SFLCOUNTERS_HOST_HID;
-	const char *hname = virDomainGetName(domainPtr); // no need to free this one
-	if(hname) {
-	  // copy the name out here so we can free it straight away
-	  hidElem.counterBlock.host_hid.hostname.str = (char *)hname;
-	  hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
-	  virDomainGetUUID(domainPtr, hidElem.counterBlock.host_hid.uuid);
-	
-	  // char *osType = virDomainGetOSType(domainPtr); $$$
-	  hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
-	  hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
-	  //hidElem.counterBlock.host_hid.os_release.str = NULL;
-	  //hidElem.counterBlock.host_hid.os_release.len = 0;
-	  SFLADD_ELEMENT(cs, &hidElem);
-	}
-      
-	// host parent
-	SFLCounters_sample_element parElem = { 0 };
-	parElem.tag = SFLCOUNTERS_HOST_PAR;
-	parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-	parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
-	SFLADD_ELEMENT(cs, &parElem);
-
-	// VM Net I/O
-	SFLCounters_sample_element nioElem = { 0 };
-	nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
-	// since we are already maintaining the accumulated network counters (and handling issues like 32-bit
-	// rollover) then we can just use the same mechanism again.  On a non-linux platform we may
-	// want to take advantage of the libvirt call to get the counters (it takes the domain id and the
-	// device name as parameters so you have to call it multiple times),  but even then we would
-	// probably do that down inside the readNioCounters() fn in case there is work to do on the
-	// accumulation and rollover-detection.
-	readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, state->interfaces);
-	SFLADD_ELEMENT(cs, &nioElem);
-      
-	// VM cpu counters [ref xenstat.c]
-	SFLCounters_sample_element cpuElem = { 0 };
-	cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-	virDomainInfo domainInfo;
-	int domainInfoOK = NO;
-	if(virDomainGetInfo(domainPtr, &domainInfo) != 0) {
-	  myLog(LOG_ERR, "virDomainGetInfo() failed");
-	}
-	else {
-	  domainInfoOK = YES;
-	  // enum virDomainState really is the same as enum SFLVirDomainState
-	  cpuElem.counterBlock.host_vrt_cpu.state = domainInfo.state;
-	  cpuElem.counterBlock.host_vrt_cpu.cpuTime = (domainInfo.cpuTime / 1000000);
-	  cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domainInfo.nrVirtCpu;
-	  SFLADD_ELEMENT(cs, &cpuElem);
-	}
-      
-	SFLCounters_sample_element memElem = { 0 };
-	memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-	if(domainInfoOK) {
-	  memElem.counterBlock.host_vrt_mem.memory = domainInfo.memory * 1024;
-	  memElem.counterBlock.host_vrt_mem.maxMemory = (domainInfo.maxMem == UINT_MAX) ? -1 : (domainInfo.maxMem * 1024);
-	  SFLADD_ELEMENT(cs, &memElem);
-	}
-
-    
-	// VM disk I/O counters
-	SFLCounters_sample_element dskElem = { 0 };
-	dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-	for(int i = strArrayN(state->disks); --i >= 0; ) {
-	  /* state->volumes and state->disks are populated in lockstep
-	   * so they always have the same number of elements
-	   */
-	  char *volPath = strArrayAt(state->volumes, i);
-	  char *dskPath = strArrayAt(state->disks, i);
-	  int gotVolInfo = NO;
-
-#ifndef HSP_VRT_USE_DISKPATH
-	  /* define HSP_VRT_USE_DISKPATH if you want to bypass this virStorageVolGetInfo
-	   *  approach and just use virDomainGetBlockInfo instead.
-	   */
-	  virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
-	  if(volPtr == NULL) {
-	    myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
-	  }
-	  else {
-	    virStorageVolInfo volInfo;
-	    if(virStorageVolGetInfo(volPtr, &volInfo) != 0) {
-	      myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
-	    }
-	    else {
-	      gotVolInfo = YES;
-	      dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
-	      dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
-	      dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
-	    }
-	  }
-#endif
-
-#if (LIBVIR_VERSION_NUMBER >= 8001)
-	  if(gotVolInfo == NO) {
-	    /* try appealing directly to the disk path instead */
-	    /* this call was only added in April 2010 (version 0.8.1).
-	     * See http://markmail.org/message/mjafgt47f5e5zzfc
-	     */
-	    virDomainBlockInfo blkInfo;
-	    if(virDomainGetBlockInfo(domainPtr, volPath, &blkInfo, 0) == -1) {
-	      myLog(LOG_ERR, "virDomainGetBlockInfo(%s) failed", dskPath);
-	    }
-	    else {
-	      dskElem.counterBlock.host_vrt_dsk.capacity += blkInfo.capacity;
-	      dskElem.counterBlock.host_vrt_dsk.allocation += blkInfo.allocation;
-	      dskElem.counterBlock.host_vrt_dsk.available += (blkInfo.capacity - blkInfo.allocation);
-	      // don't need blkInfo.physical
-	    }
-	  }
-#endif
-	  /* we get reads, writes and errors from a different call */
-	  virDomainBlockStatsStruct blkStats;
-	  if(virDomainBlockStats(domainPtr, dskPath, &blkStats, sizeof(blkStats)) != -1) {
-	    if(blkStats.rd_req != -1) dskElem.counterBlock.host_vrt_dsk.rd_req += blkStats.rd_req;
-	    if(blkStats.rd_bytes != -1) dskElem.counterBlock.host_vrt_dsk.rd_bytes += blkStats.rd_bytes;
-	    if(blkStats.wr_req != -1) dskElem.counterBlock.host_vrt_dsk.wr_req += blkStats.wr_req;
-	    if(blkStats.wr_bytes != -1) dskElem.counterBlock.host_vrt_dsk.wr_bytes += blkStats.wr_bytes;
-	    if(blkStats.errs != -1) dskElem.counterBlock.host_vrt_dsk.errs += blkStats.errs;
-	  }
-	}
-	SFLADD_ELEMENT(cs, &dskElem);
-      
-	// include my slice of the adaptor list
-	SFLCounters_sample_element adaptorsElem = { 0 };
-	adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-	adaptorsElem.counterBlock.adaptors = state->interfaces;
-	SFLADD_ELEMENT(cs, &adaptorsElem);
-      
-      
-	sfl_poller_writeCountersSample(poller, cs);
-      
-	virDomainFree(domainPtr);
-      }
-    }
-
-#elif defined(HSF_DOCKER)
-
-    HSPContainer *container = state->container;
-    // host ID
-    SFLCounters_sample_element hidElem = { 0 };
-    hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = my_strnequal(container->hostname, container->id, HSF_DOCKER_SHORTID_LEN) ? container->name : container->hostname;
-    hidElem.counterBlock.host_hid.hostname.str = hname;
-    hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
-    memcpy(hidElem.counterBlock.host_hid.uuid, container->uuid, 16);
- 
-    // for containers we can show the same OS attributes as the parent
-    hidElem.counterBlock.host_hid.machine_type = sp->machine_type;
-    hidElem.counterBlock.host_hid.os_name = SFLOS_linux;
-    hidElem.counterBlock.host_hid.os_release.str = sp->os_release;
-    hidElem.counterBlock.host_hid.os_release.len = my_strlen(sp->os_release);
-    SFLADD_ELEMENT(cs, &hidElem);
-      
-    // host parent
-    SFLCounters_sample_element parElem = { 0 };
-    parElem.tag = SFLCOUNTERS_HOST_PAR;
-    parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-    parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
-    SFLADD_ELEMENT(cs, &parElem);
-    
-    // VM Net I/O
-    SFLCounters_sample_element nioElem = { 0 };
-    nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
-    // conjure the list of global-namespace adaptors that are
-    // actually veth adaptors peered to adaptors belonging to this
-    // container, and make that the list of adaptors that we sum counters over.
-    SFLAdaptorList peerAdaptors;
-    SFLAdaptor *adaptors[HSP_MAX_VIFS];
-    peerAdaptors.adaptors = adaptors;
-    peerAdaptors.capacity = HSP_MAX_VIFS;
-    peerAdaptors.num_adaptors = 0;
-    if(getContainerPeerAdaptors(sp, state, &peerAdaptors, HSP_MAX_VIFS) > 0) {
-      readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, &peerAdaptors);
-      SFLADD_ELEMENT(cs, &nioElem);
-    }
-      
-    // VM cpu counters [ref xenstat.c]
-    SFLCounters_sample_element cpuElem = { 0 };
-    cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-    HSFNameVal cpuVals[] = {
-      { "user",0,0 },
-      { "system",0,0},
-      { NULL,0,0},
-    };
-    if(readContainerCounters("cpuacct", container->id, "cpuacct.stat", 2, cpuVals)) {
-      uint64_t cpu_total = 0;
-      if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
-      if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
-      
-      cpuElem.counterBlock.host_vrt_cpu.state = container->running ? 
-	SFL_VIR_DOMAIN_RUNNING :
-	SFL_VIR_DOMAIN_PAUSED;
-      cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
-      cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
-      SFLADD_ELEMENT(cs, &cpuElem);
-    }
-      
-    SFLCounters_sample_element memElem = { 0 };
-    memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-    HSFNameVal memVals[] = {
-      { "total_rss",0,0 },
-      { "hierarchical_memory_limit",0,0},
-      { NULL,0,0},
-    };
-    if(readContainerCounters("memory", container->id, "memory.stat", 2, memVals)) {
-      if(memVals[0].nv_found) {
-        memElem.counterBlock.host_vrt_mem.memory = memVals[0].nv_val64;
-      }
-      if(memVals[1].nv_found && memVals[1].nv_val64 != (uint64_t)-1) {
-	uint64_t maxMem = memVals[1].nv_val64;
-	memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
-	// Apply simple sanity check to see if this matches the
-	// container->memoryLimit number that we got from docker-inspect
-	if(debug
-	   && container->memoryLimit != 0
-	   && maxMem != container->memoryLimit) {
-	  myLog(LOG_INFO, "warning: container %s memoryLimit=%"PRIu64" but readContainerCounters shows %"PRIu64,
-		container->name,
-		container->memoryLimit,
-		maxMem);
-	}
-      }
-      SFLADD_ELEMENT(cs, &memElem);
-    }
-
-    // VM disk I/O counters
-    SFLCounters_sample_element dskElem = { 0 };
-    dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-    HSFNameVal dskValsB[] = {
-      { "Read",0,0 },
-      { "Write",0,0},
-      { NULL,0,0},
-    };
-    if(readContainerCountersMulti("blkio", container->id, "blkio.io_service_bytes_recursive", 2, dskValsB)) {
-      if(dskValsB[0].nv_found) {
-        dskElem.counterBlock.host_vrt_dsk.rd_bytes += dskValsB[0].nv_val64;
-      }
-      if(dskValsB[1].nv_found) {
-        dskElem.counterBlock.host_vrt_dsk.wr_bytes += dskValsB[1].nv_val64;
-      }
-    }
-    
-    HSFNameVal dskValsO[] = {
-      { "Read",0,0 },
-      { "Write",0,0},
-      { NULL,0,0},
-    };
-    
-    if(readContainerCountersMulti("blkio", container->id, "blkio.io_serviced_recursive", 2, dskValsO)) {
-      if(dskValsO[0].nv_found) {
-        dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
-      }
-      if(dskValsO[1].nv_found) {
-        dskElem.counterBlock.host_vrt_dsk.wr_req += dskValsO[1].nv_val64;
-      }
-    }
-    // TODO: fill in capacity, allocation, available fields
-    SFLADD_ELEMENT(cs, &dskElem);
-
-    // include my slice of the adaptor list (the ones from my private namespace)
-    SFLCounters_sample_element adaptorsElem = { 0 };
-    adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-    adaptorsElem.counterBlock.adaptors = state->interfaces;
-    { // $$$$
-      SFLAdaptor *ad;
-      ADAPTORLIST_WALK(state->interfaces, ad) assert(ad->num_macs == 1);
-    }
-    
-    SFLADD_ELEMENT(cs, &adaptorsElem);
-    sfl_poller_writeCountersSample(poller, cs);
-    
-#endif /* HSF_DOCKER */
-#endif /* HSF_XEN | HSF_VRT | HSF_DOCKER */
-  }
-
   /*_________________---------------------------__________________
     _________________    persistent dsIndex     __________________
     -----------------___________________________------------------
@@ -1127,246 +358,103 @@ extern "C" {
 
 #if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
 
-  static HSPVMStore *newVMStore(HSP *sp, char *uuid, uint32_t dsIndex) {
-    HSPVMStore *vmStore = (HSPVMStore *)my_calloc(sizeof(HSPVMStore));
-    memcpy(vmStore->uuid, uuid, 16);
-    vmStore->dsIndex = dsIndex;
-    ADD_TO_LIST(sp->vmStore, vmStore);
-    return vmStore;
-  }
 
-  static void readVMStore(HSP *sp) {
-    FILE *f_vms;
-    if((f_vms = fopen(sp->vmStoreFile, "r")) == NULL) {
-      myLog(LOG_INFO, "cannot open vmStore file %s : %s", sp->vmStoreFile, strerror(errno));
-      return;
+  uint32_t assignVM_dsIndex(HSP *sp, HSPVMState *state) {
+    uint32_t first = HSP_DEFAULT_LOGICAL_DSINDEX_START;
+    uint32_t last = HSP_DEFAULT_APP_DSINDEX_START - 1;
+    uint32_t range = last - first + 1;
+
+    if(sp->vmsByDsIndex->entries >= range) {
+      // table is full
+      state->dsIndex = 0;
+      return NO;
     }
-    char line[HSP_MAX_VMSTORE_LINELEN+1];
-    uint32_t lineNo = 0;
-    while(fgets(line, HSP_MAX_VMSTORE_LINELEN, f_vms)) {
-      lineNo++;
-      char *p = line;
-      // comments start with '#'
-      p[strcspn(p, "#")] = '\0';
-      // should just have two tokens, so check for 3
-      uint32_t tokc = 0;
-      char *tokv[3];
-      for(int i = 0; i < 3; i++) {
-	size_t len;
-	p += strspn(p, HSP_VMSTORE_SEPARATORS);
-	if((len = strcspn(p, HSP_VMSTORE_SEPARATORS)) == 0) break;
-	tokv[tokc++] = p;
-	p += len;
-	if(*p != '\0') *p++ = '\0';
+
+    uint32_t hash = hashUUID(state->uuid);
+    uint32_t preferred = first + (hash % range);
+    state->dsIndex = preferred;    
+    for(;;) {
+      HSPVMState *probe = UTHashGet(sp->vmsByDsIndex, state);
+      if(probe == NULL) {
+	// claim this one
+	UTHashAdd(sp->vmsByDsIndex, state, YES);
+	break;
       }
-      // expect UUID=int
-      char uuid[16];
-      if(tokc != 2 || !parseUUID(tokv[0], uuid)) {
-	myLog(LOG_ERR, "readVMStore: bad line %u in %s", lineNo, sp->vmStoreFile);
+      if(probe == state) {
+	// why did we assign again?
+	break;
       }
-      else {
-	HSPVMStore *vmStore = newVMStore(sp, uuid, strtol(tokv[1], NULL, 0));
-	if(vmStore->dsIndex > sp->maxDsIndex) {
-	  sp->maxDsIndex = vmStore->dsIndex;
-	}
+      // collision - keep searching
+      state->dsIndex++;
+      if(state->dsIndex > last)
+	state->dsIndex = first;
+      if(state->dsIndex == preferred) {
+	// full wrap - shouldn't happen if the table
+	// is not full, but detect it anyway just in
+	// case we change something later.
+	state->dsIndex = 0;
+	return NO;
       }
     }
-    fclose(f_vms);
+    return YES;
   }
-
-  static void writeVMStore(HSP *sp) {
-    rewind(sp->f_vmStore);
-    for(HSPVMStore *vmStore = sp->vmStore; vmStore != NULL; vmStore = vmStore->nxt) {
-      char uuidStr[51];
-      printUUID((u_char *)vmStore->uuid, (u_char *)uuidStr, 50);
-      fprintf(sp->f_vmStore, "%s=%u\n", uuidStr, vmStore->dsIndex);
-    }
-    fflush(sp->f_vmStore);
-    // chop off anything that may be lingering from before
-    truncateOpenFile(sp->f_vmStore);
-  }
-
-  uint32_t assignVM_dsIndex(HSP *sp, char *uuid) {
-    // check in case we saw this one before
-    HSPVMStore *vmStore = sp->vmStore;
-    for ( ; vmStore != NULL; vmStore = vmStore->nxt) {
-      if(memcmp(uuid, vmStore->uuid, 16) == 0) return vmStore->dsIndex;
-    }
-    // allocate a new one
-    vmStore = newVMStore(sp, uuid, ++sp->maxDsIndex); // $$$ circle back and find a free one if we reach the end of the range
-    // ask it to be written to disk
-    sp->vmStoreInvalid = YES;
-    return sp->maxDsIndex;
-  }
-
-#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
-
-
+  
   /*_________________---------------------------__________________
-    _________________    domain_xml_node        __________________
+    _________________   add and remove VM       __________________
     -----------------___________________________------------------
   */
 
-#ifdef HSF_VRT
-
-  static int domain_xml_path_equal(xmlNode *node, char *nodeName, ...) {
-    if(node == NULL
-       || node->name == NULL
-       || node->type != XML_ELEMENT_NODE
-       || !my_strequal(nodeName, (char *)node->name)) {
-      return NO;
-    }
-    int match = YES;
-    va_list names;
-    va_start(names, nodeName);
-    xmlNode *parentNode = node->parent;
-    char *parentName;
-    while((parentName = va_arg(names, char *)) != NULL) {
-      if(parentNode == NULL
-	 || parentNode->name == NULL
-	 || !my_strequal(parentName, (char *)parentNode->name)) {
-	match = NO;
-	break;
-      }
-      parentNode = parentNode->parent;
-    }
-    va_end(names);
-    return match;
-  }
-
-  static char *get_xml_attr(xmlNode *node, char *attrName) {
-    for(xmlAttr *attr = node->properties; attr; attr = attr->next) {
-      if(attr->name) {
-	if(debug) myLog(LOG_INFO, "attribute %s", attr->name);
-	if(attr->children && !strcmp((char *)attr->name, attrName)) {
-	  return (char *)attr->children->content;
-	}
+  HSPVMState *getVM(HSP *sp, char *uuid, EnumVMType vmType, getCountersFn_t getCountersFn) {
+    HSPVMState search = { 0 };
+    memcpy(search.uuid, uuid, 16);
+    HSPVMState *vm = UTHashGet(sp->vmsByUUID, &search);
+    if(vm == NULL) {
+      // new vm or container
+      vm = (HSPVMState *)my_calloc(sizeof(HSPVMState));
+      memcpy(vm->uuid, uuid, 16);
+      vm->vmType = vmType;
+      vm->volumes = strArrayNew();
+      vm->disks = strArrayNew();
+      vm->interfaces = adaptorListNew();
+      sp->refreshAdaptorList = YES;
+      if(assignVM_dsIndex(sp, vm)) {
+	SFLDataSource_instance dsi;
+	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+	SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, vm->dsIndex, 0);
+	vm->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, getCountersFn);
+	vm->poller->userData = vm;
+	sfl_poller_set_sFlowCpInterval(vm->poller, sp->sFlow->sFlowSettings->pollingInterval);
+	sfl_poller_set_sFlowCpReceiver(vm->poller, HSP_SFLOW_RECEIVER_INDEX);
       }
     }
-    return NULL;
-  }
-    
-  void domain_xml_interface(xmlNode *node, char **ifname, char **ifmac) {
-    for(xmlNode *n = node; n; n = n->next) {
-      if(domain_xml_path_equal(n, "target", "interface", "devices", NULL)) {
-	char *dev = get_xml_attr(n, "dev");
-	if(dev) {
-	  if(debug) myLog(LOG_INFO, "interface.dev=%s", dev);
-	  if(ifname) *ifname = dev;
-	}
-      }
-      else if(domain_xml_path_equal(n, "mac", "interface", "devices", NULL)) {
-	char *addr = get_xml_attr(n, "address");
-	if(debug) myLog(LOG_INFO, "interface.mac=%s", addr);
-	if(ifmac) *ifmac = addr;
-      }
-    }
-    if(node->children) domain_xml_interface(node->children, ifname, ifmac);
-  }
-    
-  void domain_xml_disk(xmlNode *node, char **disk_path, char **disk_dev) {
-    for(xmlNode *n = node; n; n = n->next) {
-      if(domain_xml_path_equal(n, "source", "disk", "devices", NULL)) {
-	char *path = get_xml_attr(n, "file");
-	if(path) {
-	  if(debug) myLog(LOG_INFO, "disk.file=%s", path);
-	  if(disk_path) *disk_path = path;
-	}
-      }
-      else if(domain_xml_path_equal(n, "target", "disk", "devices", NULL)) {
-	char *dev = get_xml_attr(n, "dev");
-	if(debug) myLog(LOG_INFO, "disk.dev=%s", dev);
-	if(disk_dev) *disk_dev = dev;
-      }
-      else if(domain_xml_path_equal(n, "readonly", "disk", "devices", NULL)) {
-	if(debug) myLog(LOG_INFO, "ignoring readonly device");
-	*disk_path = NULL;
-	*disk_dev = NULL;
-	return;
-      }
-    }
-    if(node->children) domain_xml_disk(node->children, disk_path, disk_dev);
-  }
-  
-  void domain_xml_node(HSP *sp, xmlNode *node, HSPVMState *state) {
-    for(xmlNode *n = node; n; n = n->next) {
-      if(domain_xml_path_equal(n, "interface", "devices", "domain", NULL)) {
-	char *ifname=NULL,*ifmac=NULL;
-	domain_xml_interface(n, &ifname, &ifmac);
-	if(ifname && ifmac) {
-	  SFLMacAddress mac;
-	  memset(&mac, 0, sizeof(mac));
-	  if(hexToBinary((u_char *)ifmac, mac.mac, 6) == 6) {
-	    SFLAdaptor *ad = adaptorByMac(sp, &mac);
-	    if(ad == NULL) {
-	      ad = nioAdaptorNew(ifname, mac.mac, 0);
-	      UTHashAdd(sp->adaptorsByMac, ad, NO);
-	    }
-	    adaptorListAdd(state->interfaces, ad);
-	    // mark it as a vm/container device
-	    ADAPTOR_NIO(ad)->vm_or_container = YES;
-	    // clear the mark so we don't free it
-	    ad->marked = NO;
-	  }
-	}
-      }
-      else if(domain_xml_path_equal(n, "disk", "devices", "domain", NULL)) {
-	// need both a path and a dev before we will accept it
-	char *disk_path=NULL,*disk_dev=NULL;
-	domain_xml_disk(n, &disk_path, &disk_dev);
-	if(disk_path && disk_dev) {
-	  strArrayAdd(state->volumes, (char *)disk_path);
-	  strArrayAdd(state->disks, (char *)disk_dev);
-	}
-      }
-      else if(n->children) domain_xml_node(sp, n->children, state);
-    }
+    return vm;
   }
 
-#endif /* HSF_VRT */
 
-#ifdef HSF_DOCKER
-  static HSPContainer *getContainer(HSP *sp, char *id, int create) {
-    if(id == NULL) return NULL;
-    HSPContainer cont = { .id = id };
-    HSPContainer *container = UTHashGet(sp->containers, &cont);
-    if(container == NULL && create) {
-      container = (HSPContainer *)my_calloc(sizeof(HSPContainer));
-      container->id = my_strdup(id);
-      // turn it into a UUID - just take the first 16 bytes of the id
-      parseUUID(id, container->uuid);
-      // and assign a dsIndex that will be persistent across restarts
-      container->dsIndex = assignVM_dsIndex(sp, container->uuid);
-      // add to collection
-      UTHashAdd(sp->containers, container, NO);
+  static void removeAndFreeVM(HSP *sp, HSPVMState *vm) {
+    myLog(LOG_INFO, "configVMs: removing vm with dsIndex=%u (domId=%u)",
+	  vm->dsIndex,
+	  vm->domId);
+    UTHashDel(sp->vmsByUUID, vm);
+    UTHashDel(sp->vmsByDsIndex, vm);
+    if(vm->disks) strArrayFree(vm->disks);
+    if(vm->volumes) strArrayFree(vm->volumes);
+    if(vm->interfaces) {
+      adaptorListMarkAll(vm->interfaces);
+      // delete any hash-table references to these adaptors
+      deleteMarkedAdaptors_adaptorList(sp, vm->interfaces);
+      // then free them along with the adaptorList itself
+      adaptorListFree(vm->interfaces);
     }
-    return container;
-  }
-
-  static void freeContainer(HSPContainer *container) {
-      if(container->id) my_free(container->id);
-      if(container->name) my_free(container->name);
-      if(container->hostname) my_free(container->hostname);
-      my_free(container);
-  }
-
-  static int dockerContainerCB(void *magic, char *line) {
-    HSP *sp = (HSP *)magic;
-    char id[HSF_DOCKER_MAX_LINELEN];
-    if(sscanf(line, "%s\n", id) == 1) {
-      getContainer(sp, id, YES);
+    if(vm->poller) {
+      vm->poller->userData = NULL;
+      sfl_agent_removePoller(sp->sFlow->agent, &vm->poller->dsi);
     }
-    return YES;
-  }
-  
-  static int dockerInspectCB(void *magic, char *line) {
-    // just append it to the string-buffer
-    UTStrBuf *inspectBuf = (UTStrBuf *)magic;
-    UTStrBuf_append(inspectBuf, line);
-    return YES;
+    my_free(vm);
+    sp->refreshAdaptorList = YES;
   }
 
-#endif
+#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
 
   /*_________________---------------------------__________________
     _________________    configVMs              __________________
@@ -1375,368 +463,29 @@ extern "C" {
   
   static void configVMs(HSP *sp) {
     if(debug) myLog(LOG_INFO, "configVMs");
-    HSPSFlow *sf = sp->sFlow;
-    if(sf && sf->agent) {
-      // mark and sweep
-      // 1. mark all the current virtual pollers
-      for(SFLPoller *pl = sf->agent->pollers; pl; pl = pl->nxt) {
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY
-	   && SFL_DS_INDEX(pl->dsi) >= HSP_DEFAULT_LOGICAL_DSINDEX_START
-	   && SFL_DS_INDEX(pl->dsi) < HSP_DEFAULT_APP_DSINDEX_START)
-	  {
-	    HSPVMState *state = (HSPVMState *)pl->userData;
-	    state->marked = YES;
-	    state->vm_index = 0;
-	  }
-      }
-      
-      // 2. create new VM pollers, or clear the mark on existing ones
-#if defined(HSF_XEN)
-      
-      if(xenHandlesOK(sp)) {
-#define DOMAIN_CHUNK_SIZE 256
-	xc_domaininfo_t domaininfo[DOMAIN_CHUNK_SIZE];
-	int32_t num_domains=0, new_domains=0, duplicate_domains=0;
-	do {
-	  new_domains = xc_domain_getinfolist(sp->xc_handle,
-					      num_domains,
-					      DOMAIN_CHUNK_SIZE,
-					      domaininfo);
-	  if(new_domains < 0) {
-	    myLog(LOG_ERR, "xc_domain_getinfolist() failed : %s", strerror(errno));
-	  }
-	  else {
-	    for(uint32_t i = 0; i < new_domains; i++) {
-	      uint32_t domId = domaininfo[i].domain;
-	      // dom0 is the hypervisor. We used to ignore it, but actually it should be included.
-	      if(debug) {
-		// may need to ignore any that are not marked as "running" here
-		myLog(LOG_INFO, "ConfigVMs(): domId=%u flags=0x%x tot_pages=%"PRIu64" max_pages=%"PRIu64" shared_info_frame=%"PRIu64" cpu_time=%"PRIu64" nr_online_vcpus=%u max_vcpu_id=%u ssidref=%u handle=%x",
-		      domId,
-		      domaininfo[i].flags,
-		      domaininfo[i].tot_pages,
-		      domaininfo[i].max_pages,
-		      domaininfo[i].shared_info_frame,
-		      domaininfo[i].cpu_time,
-		      domaininfo[i].nr_online_vcpus,
-		      domaininfo[i].max_vcpu_id,
-		      domaininfo[i].ssidref,
-		      domaininfo[i].handle);
-	      }
-	      uint32_t dsIndex = assignVM_dsIndex(sp, (char *)&domaininfo[i].handle);
-	      SFLDataSource_instance dsi;
-	      // ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
-	      SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + dsIndex, 0);
-	      SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-	      HSPVMState *state = (HSPVMState *)vpoller->userData;
-	      if(state) {
-		// it was already there, just clear the mark.
-		state->marked = NO;
-	      }
-	      else {
-		// new one - tell it what to do.
-		myLog(LOG_INFO, "configVMs: new domain=%u", domId);
-		uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-		sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-		sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-		// hang a new HSPVMState object on the userData hook
-		state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
-		state->network_count = 0;
-		state->marked = NO;
-		vpoller->userData = state;
-		state->volumes = strArrayNew();
-		sp->refreshAdaptorList = YES;
-	      }
-	      // remember the index so we can access this individually later
-	      // (actually this was a misunderstanding - the vm_index is not
-	      // really needed at all.  Should take it out. Can still detect
-	      // duplicates using the 'marked' flag).
-	      if(state->vm_index) {
-		duplicate_domains++;
-		if(debug) {
-		  myLog(LOG_INFO, "duplicate entry for domId=%u vm_index %u repeated at %u (keep first one)", domId, state->vm_index, (num_domains + i));
-		}
-	      }
-	      else {
-		state->vm_index = num_domains + i;
-		// and the domId, which might have changed (if vm rebooted)
-		state->domId = domId;
-		// pick up the list of block device numbers
-		strArrayReset(state->volumes);
-		if(sp->sFlow->sFlowSettings_file->xen_dsk) {
-		  xen_collect_block_devices(sp, state);
-		}
-		// store state so we don't have to call xc_domain_getinfolist() again for every
-		// VM when we are sending it's counter-sample in agentCB_getCountersVM
-		state->domaininfo = domaininfo[i]; // structure copy
-	      }
-	    }
-	  }
-	  num_domains += new_domains;
-	} while(new_domains > 0);
-	// remember the number of domains we found
-	sp->num_domains = num_domains - duplicate_domains;
-      }
-
-#elif defined(HSF_VRT)
-
-      if(sp->virConn == NULL) {
-	// no libvirt connection
-	return;
-      }
-      int num_domains = virConnectNumOfDomains(sp->virConn);
-      if(num_domains == -1) {
-	myLog(LOG_ERR, "virConnectNumOfDomains() returned -1");
-	return;
-      }
-      int *domainIds = (int *)my_calloc(num_domains * sizeof(int));
-      if(virConnectListDomains(sp->virConn, domainIds, num_domains) != num_domains) {
-	my_free(domainIds);
-	return;
-      }
-      for(int i = 0; i < num_domains; i++) {
-	int domId = domainIds[i];
-	virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, domId);
-	if(domainPtr) {
-	  char uuid[16];
-	  virDomainGetUUID(domainPtr, (u_char *)uuid);
-	  uint32_t dsIndex = assignVM_dsIndex(sp, uuid);
-	  SFLDataSource_instance dsi;
-	  // ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
-	  SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + dsIndex, 0);
-	  SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-	  HSPVMState *state = (HSPVMState *)vpoller->userData;
-	  if(state) {
-	    // it was already there, just clear the mark.
-	    state->marked = NO;
-	    // and reset the information that we are about to refresh
-	    adaptorListMarkAll(state->interfaces);
-	    strArrayReset(state->volumes);
-	    strArrayReset(state->disks);
-	  }
-	  else {
-	    // new one - tell it what to do.
-	    myLog(LOG_INFO, "configVMs: new domain=%u", domId);
-	    uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-	    sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-	    sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-	    // hang a new HSPVMState object on the userData hook
-	    state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
-	    state->network_count = 0;
-	    state->marked = NO;
-	    vpoller->userData = state;
-	    state->interfaces = adaptorListNew();
-	    state->volumes = strArrayNew();
-	    state->disks = strArrayNew();
-	    sp->refreshAdaptorList = YES;
-	  }
-	  // remember the index so we can access this individually later
-	  if(debug) {
-	    if(state->vm_index != i) {
-	      myLog(LOG_INFO, "domId=%u vm_index %u->%u", domId, state->vm_index, i);
-	    }
-	  }
-	  state->vm_index = i;
-	  // and the domId, which might have changed (if vm rebooted)
-	  state->domId = domId;
-	  
-	  // get the XML descr - this seems more portable than some of
-	  // the newer libvert API calls,  such as those to list interfaces
-	  char *xmlstr = virDomainGetXMLDesc(domainPtr, 0 /*VIR_DOMAIN_XML_SECURE not allowed for read-only */);
-	  if(xmlstr == NULL) {
-	    myLog(LOG_ERR, "virDomainGetXMLDesc(domain=%u, 0) failed", domId);
-	  }
-	  else {
-	    // parse the XML to get the list of interfaces and storage nodes
-	    xmlDoc *doc = xmlParseMemory(xmlstr, strlen(xmlstr));
-	    if(doc) {
-	      xmlNode *rootNode = xmlDocGetRootElement(doc);
-	      domain_xml_node(sp, rootNode, state);
-	      xmlFreeDoc(doc);
-	    }
-	    free(xmlstr); // allocated by virDomainGetXMLDesc()
-	  }
-	  xmlCleanupParser();
-	  virDomainFree(domainPtr);
-	  // fully delete and free the marked adaptors - some may return if
-	  // they are still present in the global-namespace list,  but
-	  // we have to do this here in case one of these was discovered
-	  // and allocated just for this VM.
-	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
-	  adaptorListFreeMarked(state->interfaces);
-	}
-      }
-      // remember the number of domains we found
-      sp->num_domains = num_domains;
-      my_free(domainIds);
-
-#elif defined(HSF_DOCKER)
-
-      static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", "--no-trunc=true", NULL };
-      char dockerLine[HSF_DOCKER_MAX_LINELEN];
-      if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN, NULL)) {
-	// successful, now gather data for each one
-	UTStringArray *dockerInspect = strArrayNew();
-	strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
-	strArrayAdd(dockerInspect, "inspect");
-	HSPContainer *container;
-	UTHASH_WALK(sp->containers, container) {
-	  // mark for removal, in case it is no longer current
-	  container->marked = YES;
-	  strArrayAdd(dockerInspect, container->id);
-	  if(debug) {
-	    char *idlist =  strArrayStr(dockerInspect, NULL, NULL, " ", NULL);
-	    myLog(LOG_INFO, "dockerInspect: %s", idlist);
-	    my_free(idlist);
-	  }
-	}
-	strArrayAdd(dockerInspect, NULL);
-	UTStrBuf *inspectBuf = UTStrBuf_new(1024);
-	int inspectOK = myExec(inspectBuf,
-			       strArray(dockerInspect),
-			       dockerInspectCB,
-			       dockerLine,
-			       HSF_DOCKER_MAX_LINELEN,
-			       NULL);
-	strArrayFree(dockerInspect);
-	char *ibuf = UTStrBuf_unwrap(inspectBuf);
-	if(inspectOK) {
-	  // call was sucessful, so now we should have JSON to parse
-	  cJSON *jtop = cJSON_Parse(ibuf);
-	  if(jtop) {
-	    // top-level should be array
-	    int nc = cJSON_GetArraySize(jtop);
-	    if(debug && nc != sp->containers->entries) {
-	      // cross-check
-	      myLog(LOG_INFO, "warning docker-ps returned %u containers but docker-inspect returned %u", sp->containers->entries, nc);
-	    }
-	    for(int ii = 0; ii < nc; ii++) {
-	      cJSON *jcont = cJSON_GetArrayItem(jtop, ii);
-	      if(jcont) {
-
-		cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
-		if(jid) {
-		  if(my_strlen(jid->valuestring) >= HSF_DOCKER_SHORTID_LEN) {
-		    HSPContainer *container = getContainer(sp, jid->valuestring, NO);
-		    if(container) {
-		      // Clear the mark - this container is still current
-		      container->marked = NO;
-		      cJSON *jname = cJSON_GetObjectItem(jcont, "Name");
-		      if(my_strequal(jname->valuestring, container->name) == NO) {
-			if(container->name) my_free(container->name);
-			container->name = my_strdup(jname->valuestring);
-		      }
-		      cJSON *jstate = cJSON_GetObjectItem(jcont, "State");
-		      if(jstate) {
-		      	cJSON *jpid = cJSON_GetObjectItem(jstate, "Pid");
-		      	if(jpid) {
-			  container->pid = (pid_t)jpid->valueint;
-		      	}
-		      	cJSON *jrun = cJSON_GetObjectItem(jstate, "Running");
-		      	if(jrun) {
-			  container->running = (jrun->type == cJSON_True);
-		      	}
-		      }
-		      cJSON *jconfig = cJSON_GetObjectItem(jcont, "Config");
-		      if(jconfig) {
-		      	cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname");
-		      	if(jhn) {
-			  if(container->hostname) my_free(container->hostname);
-			  container->hostname = my_strdup(jhn->valuestring);
-		      	}
-		      	// cJSON *jdn = cJSON_GetObjectItem(jconfig, "Domainname");
-		      	cJSON *jmem = cJSON_GetObjectItem(jconfig, "Memory");
-		      	if(jmem) {
-			  container->memoryLimit = (uint64_t)jmem->valuedouble;
-		      	}
-		      }
-		    }
-		  }
-		}
-	      }
-	    }
-	    cJSON_Delete(jtop);
-	  }
-	}
-	my_free(ibuf);
-      }
-
-      HSPContainer *container;
-      UTHASH_WALK(sp->containers, container) {
-	if(container->marked) {
-	  UTHashDel(sp->containers, container);
-	  freeContainer(container);
-	}
-	else {
-	  // container still current - look up state
-	  SFLDataSource_instance dsi;
-	  // ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
-	  SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, HSP_DEFAULT_LOGICAL_DSINDEX_START + container->dsIndex, 0);
-	  SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-	  HSPVMState *state = (HSPVMState *)vpoller->userData;
-	  if(state) {
-	    // it was already there, just clear the mark.
-	    state->marked = NO;
-	    // and reset the information that we are about to refresh
-	    adaptorListMarkAll(state->interfaces);
-	    strArrayReset(state->volumes);
-	    strArrayReset(state->disks);
-	  }
-	  else {
-	    // new one - tell it what to do.
-	    myLog(LOG_INFO, "configVMs: new container=%u", container->dsIndex);
-	    uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-	    sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-	    sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-	    // hang a new HSPVMState object on the userData hook
-	    state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
-	    state->container = container;
-	    state->network_count = 0;
-	    state->marked = NO;
-	    vpoller->userData = state;
-	    state->interfaces = adaptorListNew();
-	    state->volumes = strArrayNew();
-	    state->disks = strArrayNew();
-	    sp->refreshAdaptorList = YES;
-	  }
-	  readContainerInterfaces(sp, state);
-	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
-	  adaptorListFreeMarked(state->interfaces);
-	  // we are using sp->num_domains as the portable field across Xen, KVM, Docker
-	  sp->num_domains = sp->containers->entries;
-	}
-      }
-
-#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
-      
-      // 3. remove any that don't exist any more
-      for(SFLPoller *pl = sf->agent->pollers; pl; ) {
-	SFLPoller *nextPl = pl->nxt;
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY
-	   && SFL_DS_INDEX(pl->dsi) >= HSP_DEFAULT_LOGICAL_DSINDEX_START
-	   && SFL_DS_INDEX(pl->dsi) < HSP_DEFAULT_APP_DSINDEX_START) {
-	  HSPVMState *state = (HSPVMState *)pl->userData;
-	  if(state->marked) {
-	    myLog(LOG_INFO, "configVMs: removing poller with dsIndex=%u (domId=%u)",
-		  SFL_DS_INDEX(pl->dsi),
-		  state->domId);
-	    if(state->disks) strArrayFree(state->disks);
-	    if(state->volumes) strArrayFree(state->volumes);
-	    if(state->interfaces) {
-	      adaptorListMarkAll(state->interfaces);
-	      // delete any hash-table references to these adaptors
-	      deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
-	      // then free them along with the adaptorList itself
-	      adaptorListFree(state->interfaces);
-	    }
-	    my_free(state);
-	    pl->userData = NULL;
-	    sfl_agent_removePoller(sf->agent, &pl->dsi);
-	    sp->refreshAdaptorList = YES;
-
-	  }
-	}
-	pl = nextPl;
+    // mark and sweep
+    // 1. mark all the current virtual pollers
+    HSPVMState *state;
+    UTHASH_WALK(sp->vmsByUUID, state) {
+      state->marked = YES;
+      state->vm_index = 0; // $$$
+    }
+    
+    // 2. create new VM pollers, or clear the mark on existing ones
+#ifdef HSF_XEN
+    configVMs_XEN(sp);
+#endif
+#ifdef HSF_VRT
+    configVMs_VRT(sp);
+#endif
+#ifdef HSF_DOCKER
+    configVMs_DOCKER(sp);
+#endif
+    
+    // 3. remove any VMs (and their pollers) that don't survive
+    UTHASH_WALK(sp->vmsByUUID, state) {
+      if(state->marked) {
+	removeAndFreeVM(sp, state);
       }
     }
   }
@@ -1806,14 +555,6 @@ extern "C" {
       sp->refreshVMList = NO;
       configVMs(sp);
     }
-
-#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
-    // write the persistent state if requested
-    if(sp->vmStoreInvalid) {
-      writeVMStore(sp);
-      sp->vmStoreInvalid = NO;
-    }
-#endif
 
     // refresh the interface list periodically or on request
     if(sp->refreshAdaptorList || (sp->clk % sp->refreshAdaptorListSecs) == 0) {
@@ -2338,7 +1079,6 @@ extern "C" {
     sp->pidFile = HSP_DEFAULT_PIDFILE;
     sp->DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
     sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
-    sp->vmStoreFile = HSP_DEFAULT_VMSTORE_FILE;
     sp->crashFile = HSP_DEFAULT_CRASH_FILE;
     sp->dropPriv = YES;
     sp->refreshAdaptorListSecs = HSP_REFRESH_ADAPTORS;
@@ -3197,10 +1937,12 @@ extern "C" {
     nvml_init(sp);
 #endif
     
-#if defined(HSF_XEN)
+#ifdef HSF_XEN
     // open Xen handles while we still have root privileges
     openXenHandles(sp);
-#elif defined(HSF_VRT)
+#endif
+    
+#ifdef HSF_VRT
     // open the libvirt connection
     int virErr = virInitialize();
     if(virErr != 0) {
@@ -3216,29 +1958,6 @@ extern "C" {
     }
 #endif
     
-#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
-    // load the persistent state from last time
-    readVMStore(sp);
-    // open the vmStore file for writing while we still have root priviliges
-    // use mode "w+" because we intend to write it and rewrite it.
-    // (It might have worked to open it using mode "a+" and then read the previous
-    // vm-state and append new entries to the end,  but in the end it seemed
-    // clearer to just separate out the initial readVMStore(sp) part,
-    // and force the whole file to be rewritten on change.  That way we
-    // can change the format knowing that the new format will be imposed for
-    // all entries.
-
-    if((sp->f_vmStore = fopen(sp->vmStoreFile, "w+")) == NULL) {
-      myLog(LOG_ERR, "cannot open vmStore file %s : %s", sp->vmStoreFile, strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-
-    // Could just mark it as invalid but better to just go ahead and write it
-    // again immediately. Otherwise if anything else goes wrong with the config
-    // then we will have truncated the file and lost the persistent state. 
-    writeVMStore(sp);
-#endif
-
     myLog(LOG_INFO, "started");
     
     // initialize the clock so we can detect second boundaries
@@ -3253,6 +1972,9 @@ extern "C" {
     sp->adaptorsByIndex = UTHASH_NEW(SFLAdaptor, ifIndex, NO);
     sp->adaptorsByPeerIndex = UTHASH_NEW(SFLAdaptor, peer_ifIndex, NO);
     sp->adaptorsByMac = UTHASH_NEW(SFLAdaptor, macs[0], NO);
+    sp->vmsByUUID = UTHASH_NEW(HSPVMState, uuid, NO);
+    sp->vmsByDsIndex = UTHASH_NEW(HSPVMState, dsIndex, NO);
+    
 #ifdef HSF_DOCKER
     sp->containers = UTHASH_NEW(HSPContainer, id, YES);
 #endif
@@ -3577,12 +2299,12 @@ extern "C" {
     closelog();
     myLog(LOG_INFO,"stopped");
     
-#if defined(HSF_XEN)
+#ifdef HSF_XEN
     closeXenHandles(sp);
-#elif defined(HSF_VRT)
+#endif
+#ifdef HSF_VRT
     virConnectClose(sp->virConn);
 #endif
-
 #ifdef HSF_NVML
     nvml_stop(sp);
 #endif

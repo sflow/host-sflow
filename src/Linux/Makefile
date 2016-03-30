@@ -256,6 +256,9 @@ READ_OBJS=readInterfaces.o \
 HSFLOW_OBJS= hsflowconfig.o \
              dnsSD.o \
              hsflowd.o \
+             hsflowd_xen.o \
+             hsflowd_vrt.o \
+             hsflowd_docker.o \
              util.o
 
 SFLOWOVS_OBJS=sflowovsd.o util.o
