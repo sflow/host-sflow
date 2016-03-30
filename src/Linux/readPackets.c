@@ -31,11 +31,12 @@ extern "C" {
       // look up the adaptor objects
       SFLAdaptor *adaptor = adaptorByName(sp, devName);
       if(adaptor) {
-	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-      
-	// make sure the counters are up to the second
-	updateNioCounters(sp);
 	
+	// make sure the counters are up to the second
+	updateNioCounters(sp, adaptor);
+	
+	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+
 	// see if we were able to discern multicast and broadcast counters
 	// by polling for ethtool stats.  Be careful to use unsigned 32-bit
 	// arithmetic here:
@@ -112,6 +113,17 @@ extern "C" {
 	  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
 	  SFLADD_ELEMENT(cs, &lacp_elem);
 	}
+
+#ifdef HSP_ETHTOOL_STATS
+	// possibly include SFP struct with optical gauges
+	SFLCounters_sample_element sfp_elem = { 0 };
+	if(adaptorNIO->sfp.num_lasers) {
+	  sfp_elem.tag = SFLCOUNTERS_SFP;
+	  sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
+	  SFLADD_ELEMENT(cs, &sfp_elem);
+	}
+#endif
+	
 	sfl_poller_writeCountersSample(poller, cs);
       }
     }

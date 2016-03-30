@@ -287,18 +287,346 @@ extern "C" {
     }
   }
 
+  
+#ifdef HSP_ETHTOOL_STATS
+
+  /*_________________---------------------------__________________
+    _________________    SFF8472 SFP Data       __________________
+    -----------------___________________________------------------
+  */
+  
+  static double sff8472_calibration(double reading, uint16_t *eew, uint32_t iscale, uint32_t ioffset)
+  {
+    // (reading * scale) + offset
+    double offset = ntohs(eew[ioffset]);
+    uint16_t scale16 = ntohs(eew[iscale]);
+    double scale = (double)(scale16 >> 8) + ((double)(scale16 & 0xFF) / 256.0);
+    return (reading * scale) + offset;
+  }
+  
+#define SFF8472_CAL(x, e, i) (x) = sff8472_calibration((x), (e), (i), (i)+1)
+
+  
+  static double sff8472_calibration_rxpwr(double reading, float *rxpwr)
+  {
+    // rxpwr[0],..,rxpwr[4] correspond to RX_PWR(4),..,RXPWR(0) in the spec
+    // (i.e. in reverse order).  The calibrated result is the 16-bit sum of
+    // each term multiplied by reading^N (then truncated to 16 bits)
+    // i.e. RX_PWR(0) * 1
+    //     +RX_PWR(1) * reading
+    //     +RX_PWR(2) * reading * reading
+    // and so on.
+    float r = 1;
+    uint16_t ans = 0;
+    for(int ii = 5; --ii >= 0;) {
+      ans += (uint16_t)(rxpwr[ii] * r);
+      r *= reading;
+    }
+    return ans;
+  }
+#define SFF8472_CAL_RXPWR(x, ff) (x) = sff8472_calibration_rxpwr((x), (ff))
+
+  
+  static void sff8472_read(SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
+  {
+    struct ethtool_eeprom *eeprom = NULL;
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    
+    if(nio->modinfo_len < ETH_MODULE_SFF_8472_LEN)
+      goto out;
+    
+    eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8472_LEN);
+    eeprom->cmd = ETHTOOL_GMODULEEEPROM;
+    eeprom->len = ETH_MODULE_SFF_8472_LEN;
+    ifr->ifr_data = (char *)eeprom;
+    if(ioctl(fd, SIOCETHTOOL, ifr) < 0) {
+      myLog(LOG_ERR, "SFF8036 ethtool ioctl failed: %s", strerror(errno));
+      goto out;
+    }
+    
+    if(eeprom->data[0] != 0x03 ||
+       eeprom->data[1] != 0x04) {
+      goto out;
+    }
+    
+    uint32_t num_lasers = 1;
+    uint16_t wavelength=0;
+    double temperature, voltage, bias_current;
+    double tx_power, tx_power_max, tx_power_min;
+    double rx_power, rx_power_max, rx_power_min;
+    
+    uint16_t *eew = (uint16_t *)(eeprom->data);
+    
+    // wavelength
+    if(!(eeprom->data[8] & 0x0c)) {
+      wavelength = ntohs(eew[30]);
+    }
+	  
+    // temperature
+    uint16_t temp16 = ntohs(eew[128 + 48]);
+    temperature = (int8_t)(temp16 >> 8); // high byte in oC (signed)
+    temperature += (double)(temp16 & 0xFF) / 256.0; // low byte in 1/256 oC
+	  
+    // voltage
+    voltage = ntohs(eew[128 + 49]);
+	  
+    // bias current
+    bias_current = ntohs(eew[128 + 50]);
+	  
+    // power
+    tx_power = ntohs(eew[128 + 51]);
+    rx_power = ntohs(eew[128 + 52]);
+    tx_power_max = ntohs(eew[128 + 12]);
+    tx_power_min = ntohs(eew[128 + 13]);
+    rx_power_max = ntohs(eew[128 + 16]);
+    rx_power_min = ntohs(eew[128 + 17]);
+
+    // calibration
+    if(eeprom->data[92] & 0x10) {
+      // apply external calibration
+      SFF8472_CAL(bias_current, eew, (128 + 38));
+      SFF8472_CAL(tx_power, eew, (128 + 40));
+      SFF8472_CAL(tx_power_max, eew, (128 + 40));
+      SFF8472_CAL(tx_power_min, eew, (128 + 40));
+      SFF8472_CAL(temperature, eew, (128 + 42));
+      SFF8472_CAL(voltage, eew, (128 + 44));
+      // rx power calibration is a polynomial
+      // read the float coefficients as uint32_t
+      // so we can byte-swap them easily:
+      uint32_t rxpwr[5];
+      memcpy(rxpwr, eew + 128 + 28, 5 * 4);
+      for(int ii = 0; ii < 5; ii++) rxpwr[ii] = ntohl(rxpwr[ii]);
+      // now apply to rx_pwr
+      SFF8472_CAL_RXPWR(rx_power, (float *)rxpwr);
+      SFF8472_CAL_RXPWR(rx_power_min, (float *)rxpwr);
+      SFF8472_CAL_RXPWR(rx_power_max, (float *)rxpwr);
+    }
+	  
+    // populate sFlow structure
+    nio->sfp.lasers = (SFLLaser *)UTHeapQReAlloc(nio->sfp.lasers, sizeof(SFLLaser) * num_lasers);
+    nio->sfp.module_id = adaptor->ifIndex;
+    nio->sfp.module_supply_voltage = (voltage / 10); // mV
+    nio->sfp.module_temperature = (temperature * 1000); // mC
+    nio->sfp.num_lasers = num_lasers;
+    SFLLaser *laser = &(nio->sfp.lasers[0]);
+    laser->tx_bias_current = bias_current; // uA
+    laser->tx_power = (tx_power / 10); // uW
+    laser->tx_power_min = (tx_power_min / 10); // uW
+    laser->tx_power_max = (tx_power_max / 10); // uW
+    laser->tx_wavelength = wavelength;
+    laser->rx_power = (rx_power / 10); // uW
+    laser->rx_power_min = (rx_power_min / 10); // uW
+    laser->rx_power_max = (rx_power_max / 10); // uW
+    laser->rx_wavelength = wavelength; // same as tx_wavelength
+	  
+    if(debug) {
+      myLog(LOG_INFO, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+	    adaptor->deviceName,
+	    laser->tx_wavelength,
+	    nio->sfp.module_temperature,
+	    nio->sfp.module_supply_voltage,
+	    laser->tx_bias_current,
+	    laser->tx_power,
+	    laser->tx_power_min,
+	    laser->tx_power_max,
+	    laser->rx_power,
+	    laser->rx_power_min,
+	    laser->rx_power_max);
+    }
+	  
+  out:
+    if(eeprom)
+      my_free(eeprom);
+  }
+  
+  static void sff8436_read(SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
+  {
+    struct ethtool_eeprom *eeprom = NULL;
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    
+    if(nio->modinfo_len < ETH_MODULE_SFF_8436_LEN)
+      goto out;
+    
+    eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8436_LEN);
+    eeprom->cmd = ETHTOOL_GMODULEEEPROM;
+    eeprom->len = ETH_MODULE_SFF_8436_LEN;
+#ifdef HSF_TEST_QSFP
+    int bytes = hexToBinary((u_char *)
+			    "0d-00-02-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-1b-10-00-00-7f-92-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-ff-ff-ff-ff-ff-ff-ff-ff-00"
+			    "0d-00-23-00-00-00-00-40-40-06-d5-05-69-00-00-05"
+			    "0a-00-0a-00-46-49-4e-49-53-41-52-20-43-4f-52-50"
+			    "20-20-20-20-07-00-90-65-46-43-42-47-34-31-30-51"
+			    "42-31-43-31-30-2d-46-43-41-20-42-68-07-d0-46-db"
+			    "00-01-04-da-44-53-4a-30-30-41-41-20-20-20-20-20"
+			    "20-20-20-20-31-34-31-30-32-37-20-20-08-00-00-39"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "0f-10-00-a1-53-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "4b-00-fb-00-46-00-00-00-00-00-00-00-00-00-00-00"
+			    "94-70-6e-f0-86-c4-7b-0c-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
+			    "00-00-22-22-00-00-00-00-00-00-00-00-00-00-33-33"
+			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00",
+			    &eeprom->data[0],
+			    ETH_MODULE_SFF_8436_LEN);
+    if(bytes != ETH_MODULE_SFF_8436_LEN) {
+      myLog(LOG_ERR, "test QSFP: hexToBinary failed (bytes=%d)", bytes);
+    }
+#else    
+    ifr->ifr_data = (char *)eeprom;
+    if(ioctl(fd, SIOCETHTOOL, ifr) < 0) {
+      myLog(LOG_ERR, "SFF8036 ethtool ioctl failed: %s", strerror(errno));
+      goto out;
+    }
+#endif
+
+    // check for SFF8436_ID_DWDM_QSFP_PLUS
+    if(eeprom->data[0] != 0x0d) {
+      goto out;
+    }
+    
+    uint32_t num_lasers = 4;
+    uint16_t wavelength=0;
+    double temperature, voltage, bias_current[4];
+    double rx_power[4], rx_power_max, rx_power_min;
+    
+    uint16_t *eew = (uint16_t *)(eeprom->data);
+    
+    // wavelength - determined by transciever technology code
+#ifndef SFF8436_DEVICE_TECH_OFFSET
+    // these defs should eventually appear in ethtool.h
+#define SFF8436_DEVICE_TECH_OFFSET 0x93
+#define SFF8436_TRANS_TECH_MASK 0xF0
+#define SFF8436_TRANS_COPPER_LNR_EQUAL (15 << 4)
+#define SFF8436_TRANS_COPPER_NEAR_EQUAL (14 << 4)
+#define SFF8436_TRANS_COPPER_FAR_EQUAL (13 << 4)
+#define SFF8436_TRANS_COPPER_LNR_FAR_EQUAL (12 << 4)
+#define SFF8436_TRANS_COPPER_PAS_EQUAL (11 << 4)
+#define SFF8436_TRANS_COPPER_PAS_UNEQUAL (10 << 4)
+#define SFF8436_TRANS_1490_DFB (9 << 4)
+#define SFF8436_TRANS_OTHERS (8 << 4)
+#define SFF8436_TRANS_1550_EML (7 << 4)
+#define SFF8436_TRANS_1310_EML (6 << 4)
+#define SFF8436_TRANS_1550_DFB (5 << 4)
+#define SFF8436_TRANS_1310_DFB (4 << 4)
+#define SFF8436_TRANS_1310_FP (3 << 4)
+#define SFF8436_TRANS_1550_VCSEL (2 << 4)
+#define SFF8436_TRANS_1310_VCSEL (1 << 4)
+#define SFF8436_TRANS_850_VCSEL (0 << 4)
+#endif
+    
+    uint8_t tx_tech = (eeprom->data[SFF8436_DEVICE_TECH_OFFSET]
+		       & SFF8436_TRANS_TECH_MASK);
+    switch (tx_tech) {
+    case SFF8436_TRANS_850_VCSEL: wavelength = 850; break;
+    case SFF8436_TRANS_1310_EML:
+    case SFF8436_TRANS_1310_DFB:
+    case SFF8436_TRANS_1310_FP:
+    case SFF8436_TRANS_1310_VCSEL: wavelength = 1310; break;
+    case SFF8436_TRANS_1550_EML:
+    case SFF8436_TRANS_1550_DFB:
+    case SFF8436_TRANS_1550_VCSEL: wavelength = 1550; break;
+    case SFF8436_TRANS_1490_DFB: wavelength = 1490; break;
+    }
+    
+    // temperature
+    uint16_t temp16 = ntohs(eew[11]);
+    temperature = (int8_t)(temp16 >> 8); // high byte in oC (signed)
+    temperature += (double)(temp16 & 0xFF) / 256.0; // low byte in 1/256 oC
+	  
+    // voltage
+    voltage = ntohs(eew[13]);
+	  
+    // channel stats
+    for (int ch=0; ch < num_lasers; ch++) {
+      rx_power[ch] = ntohs(eew[17 + ch]);
+      bias_current[ch] = ntohs(eew[21 + ch]);
+    }
+	  
+    // power
+    rx_power_max = ntohs(eew[256 + 24]);
+    rx_power_min = ntohs(eew[256 + 25]);
+	  
+    // populate sFlow structure
+    nio->sfp.lasers = (SFLLaser *)UTHeapQReAlloc(nio->sfp.lasers, sizeof(SFLLaser) * num_lasers);
+    nio->sfp.module_id = adaptor->ifIndex;
+    nio->sfp.module_supply_voltage = (voltage / 10); // mV
+    nio->sfp.module_temperature = (temperature * 1000); // mC
+    nio->sfp.num_lasers = num_lasers;
+    
+    for (int ch=0; ch < num_lasers; ch++) {
+      SFLLaser *laser = &(nio->sfp.lasers[ch]);
+      laser->tx_bias_current = bias_current[ch]; // uA
+      laser->tx_wavelength = wavelength;
+      laser->rx_power = (rx_power[ch] / 10); // uW
+      laser->rx_power_min = (rx_power_min / 10); // uW
+      laser->rx_power_max = (rx_power_max / 10); // uW
+      laser->rx_wavelength = wavelength; // same as tx_wavelength
+	  
+      if(debug) {
+	myLog(LOG_INFO, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+	      adaptor->deviceName,
+	      ch,
+	      laser->tx_wavelength,
+	      nio->sfp.module_temperature,
+	      nio->sfp.module_supply_voltage,
+	      laser->tx_bias_current,
+	      laser->tx_power,
+	      laser->tx_power_min,
+	      laser->tx_power_max,
+	      laser->rx_power,
+	      laser->rx_power_min,
+	      laser->rx_power_max);
+      }
+    }
+	  
+  out:
+    if(eeprom)
+      my_free(eeprom);
+  }
+
+#endif /* ETHTOOL_STATS */
+  
   /*_________________---------------------------__________________
     _________________    updateNioCounters      __________________
     -----------------___________________________------------------
   */
   
-  void updateNioCounters(HSP *sp) {
+  void updateNioCounters(HSP *sp, SFLAdaptor *filter) {
 
-    // don't do anything if we already refreshed the numbers less than a second ago
-    if(sp->nio_last_update == sp->clk) {
-      return;
+    if(filter == NULL) {
+      // full refresh - but don't do anything if we just
+      // refreshed all the numbers less than a second ago
+      if (sp->nio_last_update == sp->clk) {
+	return;
+      }
+      sp->nio_last_update = sp->clk;
     }
-    sp->nio_last_update = sp->clk;
 
     FILE *procFile;
     procFile= fopen("/proc/net/dev", "r");
@@ -341,7 +669,12 @@ extern "C" {
 		  &drops_out) == 9) {
 	  SFLAdaptor *adaptor = adaptorByName(sp, deviceName);
 	  if(adaptor) {
+	    
+	    if(filter && (filter != adaptor))
+	      continue;
+	    
 	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+	    
 #ifdef HSP_ETHTOOL_STATS
 	    HSP_ethtool_counters et_ctrs = { 0 }, et_delta = { 0 };
 	    if (niostate->et_nfound) {
@@ -385,6 +718,12 @@ extern "C" {
 		}
 	      }
 	      my_free(et_stats);
+	    }
+	    
+	    // check for SFP (laser) stats
+	    switch(niostate->modinfo_type) {
+	    case ETH_MODULE_SFF_8472: sff8472_read(adaptor, &ifr, fd); break;
+	    case ETH_MODULE_SFF_8436: sff8436_read(adaptor, &ifr, fd); break;
 	    }
 #endif
 	    // have to detect discontinuities here, so use a full
@@ -507,7 +846,7 @@ extern "C" {
     // may need to schedule intermediate calls to updateNioCounters()
     // too (to avoid undetected wraps), but at the very least we need to do
     // it here to make sure the data is up to the second.
-    updateNioCounters(sp);
+    updateNioCounters(sp, NULL);
 
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByName, adaptor) {
