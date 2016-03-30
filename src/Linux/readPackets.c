@@ -419,19 +419,20 @@ extern "C" {
       memcpy(macsrc.mac, buf+6, 6);
       SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
       SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
-      
-      if(srcdev) {
-	myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
-	      srcdev->deviceName,
-	      srcdev->ifIndex,
-	      srcdev->peer_ifIndex);
-      }
-      
-      if(dstdev) {
-	myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
-	      dstdev->deviceName,
-	      dstdev->ifIndex,
-	      dstdev->peer_ifIndex);
+
+      if(debug > 1) {
+	if(srcdev) {
+	  myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
+		srcdev->deviceName,
+		srcdev->ifIndex,
+		srcdev->peer_ifIndex);
+	}
+	if(dstdev) {
+	  myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
+		dstdev->deviceName,
+		dstdev->ifIndex,
+		dstdev->peer_ifIndex);
+	}
       }
       
       takeSample(sp,
