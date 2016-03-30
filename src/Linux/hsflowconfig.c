@@ -727,7 +727,7 @@ extern int debug;
     }
     else if(sp->sFlow->explicitAgentDevice && sp->sFlow->agentDevice) {
       // it may have been defined as agent=<device>
-      SFLAdaptor *ad = UTHashGet(sp->adaptorsByName, sp->sFlow->agentDevice);
+      SFLAdaptor *ad = adaptorByName(sp, sp->sFlow->agentDevice);
       if(ad) {
 	sp->sFlow->agentIP = ADAPTOR_NIO(ad)->ipAddr;
 	if(debug) myLog(LOG_INFO, "selectAgentAddress pegged to device in config file");
