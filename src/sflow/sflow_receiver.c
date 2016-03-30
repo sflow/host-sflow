@@ -580,6 +580,35 @@ static uint32_t appWorkersEncodingLength(SFLAPPWorkers *appworkers) {
   return elemSiz;
 }
 
+static uint32_t sfpEncodingLength(SFLSFP_counters *sfp) {
+  uint32_t elemSiz = 0;
+  elemSiz += 12; // id, voltage, temp
+  elemSiz += 4; // num_lasers
+  elemSiz += (sfp->num_lasers * XDRSIZ_LASER_COUNTERS);
+  return elemSiz;
+}
+
+static void putSFP(SFLReceiver *receiver, SFLSFP_counters *sfp) {
+  uint32_t ii;
+  putNet32(receiver, sfp->module_id);
+  putNet32(receiver, sfp->module_supply_voltage);
+  putNet32(receiver, sfp->module_temperature);
+  putNet32(receiver, sfp->num_lasers);
+  for(ii = 0; ii < sfp->num_lasers; ii++) {
+    SFLLaser *laser = &(sfp->lasers[ii]);
+    putNet32(receiver, laser->tx_bias_current);
+    putNet32(receiver, laser->tx_power);
+    putNet32(receiver, laser->tx_power_min);
+    putNet32(receiver, laser->tx_power_max);
+    putNet32(receiver, laser->tx_wavelength);
+    putNet32(receiver, laser->rx_power);
+    putNet32(receiver, laser->rx_power_min);
+    putNet32(receiver, laser->rx_power_max);
+    putNet32(receiver, laser->rx_wavelength);
+  }
+}
+ 
+   
 /*_________________-----------------------------__________________
   _________________      computeFlowSampleSize  __________________
   -----------------_____________________________------------------
@@ -818,6 +847,7 @@ static int computeCountersSampleSize(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
     case SFLCOUNTERS_VG: elemSiz = sizeof(elem->counterBlock.vg); break;
     case SFLCOUNTERS_VLAN: elemSiz = sizeof(elem->counterBlock.vlan); break;
     case SFLCOUNTERS_LACP: elemSiz = XDRSIZ_LACP_COUNTERS; break;
+    case SFLCOUNTERS_SFP: elemSiz = sfpEncodingLength(&elem->counterBlock.sfp); break;
     case SFLCOUNTERS_PROCESSOR: elemSiz = sizeof(elem->counterBlock.processor);  break;
     case SFLCOUNTERS_HOST_HID: elemSiz = hostIdEncodingLength(&elem->counterBlock.host_hid);  break;
     case SFLCOUNTERS_HOST_PAR: elemSiz = 8 /*sizeof(elem->counterBlock.host_par)*/;  break;
@@ -957,6 +987,9 @@ int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_
       putNet32(receiver, elem->counterBlock.lacp.LACPDUsTx);
       putNet32(receiver, elem->counterBlock.lacp.markerPDUsTx);
       putNet32(receiver, elem->counterBlock.lacp.markerResponsePDUsTx);
+      break;
+    case SFLCOUNTERS_SFP:
+      putSFP(receiver, &elem->counterBlock.sfp);
       break;
     case SFLCOUNTERS_PROCESSOR:
       putNet32(receiver, elem->counterBlock.processor.five_sec_cpu);

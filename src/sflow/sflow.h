@@ -1097,6 +1097,31 @@ typedef struct {
 
 #define SFL_MAX_PORTNAME_LEN 255
 
+/* Optical SFP/QSFP metrics */
+/* opaque = counter_data; enterprise = 0; format = 10 */
+
+typedef struct {
+  uint32_t tx_bias_current; /* microamps */
+  uint32_t tx_power;        /* microwatts */
+  uint32_t tx_power_min;    /* microwatts */
+  uint32_t tx_power_max;    /* microwatts */
+  uint32_t tx_wavelength;   /* nanometers */
+  uint32_t rx_power;        /* microwatts */
+  uint32_t rx_power_min;    /* microwatts */
+  uint32_t rx_power_max;    /* microwatts */
+  uint32_t rx_wavelength;   /* nanometers */
+} SFLLaser;
+
+#define XDRSIZ_LASER_COUNTERS 36
+
+typedef struct {
+  uint32_t module_id;
+  uint32_t module_supply_voltage; /* millivolts */
+  int32_t module_temperature; /* signed - in oC / 1000 */
+  uint32_t num_lasers;
+  SFLLaser *lasers;
+} SFLSFP_counters;
+  
 /* Counters data */
 
 enum SFLCounters_type_tag {
@@ -1108,6 +1133,7 @@ enum SFLCounters_type_tag {
   SFLCOUNTERS_VLAN          = 5,
   SFLCOUNTERS_80211         = 6,
   SFLCOUNTERS_LACP          = 7,
+  SFLCOUNTERS_SFP           = 10,
   SFLCOUNTERS_PROCESSOR     = 1001,
   SFLCOUNTERS_RADIO         = 1002,
   SFLCOUNTERS_PORTNAME      = 1005,
@@ -1164,6 +1190,7 @@ typedef union _SFLCounters_type {
   SFLAPPWorkers appWorkers;
   SFLLACP_counters lacp;
   SFLPortName portName;
+  SFLSFP_counters sfp;
 } SFLCounters_type;
 
 typedef struct _SFLCounters_sample_element {

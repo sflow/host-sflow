@@ -1787,7 +1787,7 @@ extern "C" {
     // possibly poll the nio counters to avoid 32-bit rollover
     if(sp->nio_polling_secs &&
        ((sp->clk % sp->nio_polling_secs) == 0)) {
-      updateNioCounters(sp);
+      updateNioCounters(sp, NULL);
     }
 
 #ifdef HSF_PCAP

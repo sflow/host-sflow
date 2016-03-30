@@ -223,8 +223,11 @@ extern "C" {
 
   void *UTHeapQReAlloc(void *buf, size_t newSiz)
   {
+    if(buf == NULL)
+      return UTHeapQNew(newSiz);
     size_t siz = UTHeapQSize(buf);
-    if(newSiz <= siz) return buf;
+    if(newSiz <= siz)
+      return buf;
     void *newBuf = UTHeapQNew(newSiz);
     memcpy(newBuf, buf, siz);
     UTHeapQFree(buf);
