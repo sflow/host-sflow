@@ -461,6 +461,20 @@ extern "C" {
     // latched counter for delta calculation
     HSP_ethtool_counters et_last;
     HSP_ethtool_counters et_total;
+    // SFP (optical) stats
+    // #define HSF_TEST_QSFP 1
+    // These should eventually be in ethtool.h
+#ifndef ETH_MODULE_SFF_8472
+#define ETH_MODULE_SFF_8472 0x02
+#define ETH_MODULE_SFF_8472_LEN 512
+#endif
+#ifndef ETH_MODULE_SFF_8436
+#define ETH_MODULE_SFF_8436 0x03
+#define ETH_MODULE_SFF_8436_LEN 640
+#endif
+    uint32_t modinfo_type;
+    uint32_t modinfo_len;
+    SFLSFP_counters sfp;
 #endif
     // LACP/bonding data
     SFLLACP_counters lacp;
@@ -664,7 +678,7 @@ extern "C" {
   void updateBondCounters(HSP *sp, SFLAdaptor *bond);
   void readBondState(HSP *sp);
   void syncBondPolling(HSP *sp);
-  void updateNioCounters(HSP *sp);
+  void updateNioCounters(HSP *sp, SFLAdaptor *adaptor);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
 #ifdef HSF_ULOG
   int readPackets_ulog(HSP *sp);

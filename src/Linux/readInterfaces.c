@@ -202,6 +202,7 @@ approach seemed more stable and portable.
   }
 
 #if (HSP_ETHTOOL_STATS || HSF_DOCKER)
+
 /*________________---------------------------__________________
   ________________  staticStringsIndexOf     __________________
   ----------------___________________________------------------
@@ -254,11 +255,11 @@ approach seemed more stable and portable.
   {
     // set device type from ethtool driver info - could also have gone
     // to /sys/class/net/<device>/.
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
     struct ethtool_drvinfo drvinfo;
     drvinfo.cmd = ETHTOOL_GDRVINFO;
     ifr->ifr_data = (char *)&drvinfo;
     if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
 	adaptorNIO->devType = HSPDEV_BRIDGE;
       else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
@@ -273,8 +274,31 @@ approach seemed more stable and portable.
 	adaptorNIO->devType = HSPDEV_PHYSICAL;
       else
 	adaptorNIO->devType = HSPDEV_OTHER;
+      
+      // optical data
+#ifdef HSF_TEST_QSFP
+      adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
+      adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
+#elif HSP_ETHTOOL_STATS
+      struct ethtool_modinfo modinfo = { 0 };
+      modinfo.cmd = ETHTOOL_GMODULEINFO;
+      ifr->ifr_data = (char *)&modinfo;
+      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+	myLog(LOG_INFO, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
+	      adaptor->deviceName,
+	      modinfo.eeprom_len,
+	      modinfo.type);
+	adaptorNIO->modinfo_len = modinfo.eeprom_len;
+	adaptorNIO->modinfo_type = modinfo.type;
+      }
+      else {
+	if(debug) myLog(LOG_INFO, "ETHTOOL_GMODULEINF0 %s failed : %s",
+			adaptor->deviceName,
+			strerror(errno));
+      }
+#endif
     }
-    
+
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
     int changed = NO;
