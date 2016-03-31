@@ -279,22 +279,28 @@ approach seemed more stable and portable.
 #ifdef HSF_TEST_QSFP
       adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
       adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
-#elif HSP_ETHTOOL_STATS
-      struct ethtool_modinfo modinfo = { 0 };
-      modinfo.cmd = ETHTOOL_GMODULEINFO;
-      ifr->ifr_data = (char *)&modinfo;
-      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-	myLog(LOG_INFO, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
-	      adaptor->deviceName,
-	      modinfo.eeprom_len,
-	      modinfo.type);
-	adaptorNIO->modinfo_len = modinfo.eeprom_len;
-	adaptorNIO->modinfo_type = modinfo.type;
-      }
-      else {
-	if(debug) myLog(LOG_INFO, "ETHTOOL_GMODULEINF0 %s failed : %s",
-			adaptor->deviceName,
-			strerror(errno));
+      adaptorNIO->modinfo_tested = YES;
+#endif
+#ifdef HSP_ETHTOOL_STATS
+      /* avoid re-testing this every time in case it is slow */
+      if(!adaptorNIO->modinfo_tested) {
+	adaptorNIO->modinfo_tested = YES;
+	struct ethtool_modinfo modinfo = { 0 };
+	modinfo.cmd = ETHTOOL_GMODULEINFO;
+	ifr->ifr_data = (char *)&modinfo;
+	if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+	  myLog(LOG_INFO, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
+		adaptor->deviceName,
+		modinfo.eeprom_len,
+		modinfo.type);
+	  adaptorNIO->modinfo_len = modinfo.eeprom_len;
+	  adaptorNIO->modinfo_type = modinfo.type;
+	}
+	else {
+	  if(debug) myLog(LOG_INFO, "ETHTOOL_GMODULEINF0 %s failed : %s",
+			  adaptor->deviceName,
+			  strerror(errno));
+	}
       }
 #endif
     }

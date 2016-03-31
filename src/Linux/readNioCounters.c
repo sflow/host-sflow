@@ -719,11 +719,18 @@ extern "C" {
 	      }
 	      my_free(et_stats);
 	    }
-	    
-	    // check for SFP (laser) stats
-	    switch(niostate->modinfo_type) {
-	    case ETH_MODULE_SFF_8472: sff8472_read(adaptor, &ifr, fd); break;
-	    case ETH_MODULE_SFF_8436: sff8436_read(adaptor, &ifr, fd); break;
+
+	    if(filter) {
+	      // If we are refreshing stats for an individual device, then
+	      // check for SFP (laser) stats too. This operation can be slow so
+	      // it's important to avoid doing it when we are refreshing
+	      // counters for all interfaces for host-sflow network totals.
+	      // Since the host-sflow network totals do not include laser
+	      // stats,  this is not a problem.
+	      switch(niostate->modinfo_type) {
+	      case ETH_MODULE_SFF_8472: sff8472_read(adaptor, &ifr, fd); break;
+	      case ETH_MODULE_SFF_8436: sff8436_read(adaptor, &ifr, fd); break;
+	      }
 	    }
 #endif
 	    // have to detect discontinuities here, so use a full

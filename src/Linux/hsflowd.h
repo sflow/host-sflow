@@ -429,7 +429,7 @@ extern "C" {
 		 HSPDEV_VIF,
 		 HSPDEV_OVS,
 		 HSPDEV_BRIDGE } EnumHSPDevType;
-  
+
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
@@ -441,6 +441,7 @@ extern "C" {
     uint32_t bond_slave:1;
     uint32_t switchPort:1;
     uint32_t vm_or_container:1;
+    uint32_t modinfo_tested:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -465,7 +466,7 @@ extern "C" {
     HSP_ethtool_counters et_total;
     // SFP (optical) stats
     // #define HSF_TEST_QSFP 1
-    // These should eventually be in ethtool.h
+    // These definitions should eventually be in ethtool.h
 #ifndef ETH_MODULE_SFF_8472
 #define ETH_MODULE_SFF_8472 0x02
 #define ETH_MODULE_SFF_8472_LEN 512
