@@ -1343,7 +1343,7 @@ extern "C" {
 	      break;
 	    }
 	    else {
-	      if(debug) myLog(LOG_INFO, "setSwitchPortSamplingRate(%s) succeeded");
+	      if(debug) myLog(LOG_INFO, "setSwitchPortSamplingRate(%s) succeeded", adaptor->deviceName);
 	      // hardware or kernel sampling was successfully configured
 	      niostate->sampling_n_set = niostate->sampling_n;
 	    }
