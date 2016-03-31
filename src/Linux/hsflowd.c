@@ -458,8 +458,6 @@ extern "C" {
     sp->refreshAdaptorList = YES;
   }
 
-#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
-
   /*_________________---------------------------__________________
     _________________    configVMs              __________________
     -----------------___________________________------------------
@@ -492,6 +490,8 @@ extern "C" {
       }
     }
   }
+
+#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
     
   /*_________________---------------------------__________________
     _________________       printIP             __________________
@@ -552,12 +552,15 @@ extern "C" {
       }
     }
 #endif
-    
+
+
+#if defined(HSF_XEN) || defined(HSF_DOCKER) || defined(HSF_VRT)
     // refresh the list of VMs periodically or on request
     if(sp->refreshVMList || (sp->clk % sp->refreshVMListSecs) == 0) {
       sp->refreshVMList = NO;
       configVMs(sp);
     }
+#endif
 
     // refresh the interface list periodically or on request
     if(sp->refreshAdaptorList || (sp->clk % sp->refreshAdaptorListSecs) == 0) {
