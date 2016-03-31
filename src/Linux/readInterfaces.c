@@ -281,7 +281,8 @@ approach seemed more stable and portable.
       adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
       adaptorNIO->modinfo_tested = YES;
 #endif
-#ifdef HSP_ETHTOOL_STATS
+      
+#ifdef HSP_OPTICAL_STATS
       /* avoid re-testing this every time in case it is slow */
       if(!adaptorNIO->modinfo_tested) {
 	adaptorNIO->modinfo_tested = YES;
@@ -302,7 +303,7 @@ approach seemed more stable and portable.
 			  strerror(errno));
 	}
       }
-#endif
+#endif /* HSP_OPTICAL_STATS */
     }
 
     // Try to get the ethtool info for this interface so we can infer the
@@ -541,7 +542,11 @@ approach seemed more stable and portable.
       // remember some useful flags in the userData structure
       HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       if(adaptorNIO->up != up) {
-	if(up) ad_cameup++;
+	if(up) {
+	  ad_cameup++;
+	  // trigger test for module eeprom data
+	  adaptorNIO->modinfo_tested = NO;
+	}
 	else ad_wentdown++;
 	if(debug) {
 	  myLog(LOG_INFO, "adaptor %s %s",

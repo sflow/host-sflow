@@ -288,7 +288,7 @@ extern "C" {
   }
 
   
-#ifdef HSP_ETHTOOL_STATS
+#ifdef HSP_OPTICAL_STATS
 
   /*_________________---------------------------__________________
     _________________    SFF8472 SFP Data       __________________
@@ -610,7 +610,7 @@ extern "C" {
       my_free(eeprom);
   }
 
-#endif /* ETHTOOL_STATS */
+#endif /* HSP_OPTICAL_STATS */
   
   /*_________________---------------------------__________________
     _________________    updateNioCounters      __________________
@@ -720,6 +720,7 @@ extern "C" {
 	      my_free(et_stats);
 	    }
 
+#ifdef HSP_OPTICAL_STATS
 	    if(filter) {
 	      // If we are refreshing stats for an individual device, then
 	      // check for SFP (laser) stats too. This operation can be slow so
@@ -732,7 +733,9 @@ extern "C" {
 	      case ETH_MODULE_SFF_8436: sff8436_read(adaptor, &ifr, fd); break;
 	      }
 	    }
-#endif
+#endif /* HSP_OPTICAL_STATS */
+#endif /* HSP_ETHTOOL_STATS */
+
 	    // have to detect discontinuities here, so use a full
 	    // set of latched counters and accumulators.
 	    int accumulate = niostate->last_update ? YES : NO;

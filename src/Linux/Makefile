@@ -199,6 +199,12 @@ ifeq ($(ETHTOOL_STATS),yes)
 	CFLAGS += -DHSP_ETHTOOL_STATS
 endif
 
+# set OPTICAL=yes to enable the use of ethtool for adding SFP/QSFP stats.  This extension
+# is experimental for now,  so it is off by default.
+ifeq ($(OPTICAL_STATS),yes)
+	CFLAGS += -DHSP_ETHTOOL_STATS -DHSP_OPTICAL_STATS
+endif
+
 # detect Debian systems
 ifeq ($(DEBIAN),)
 	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
