@@ -38,15 +38,22 @@ schedule:
         MYREL=`./getRelease`; \
         cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL schedule
 
+dist:
+	MYVER=`./getVersion`; \
+        MYREL=`./getRelease`; \
+	MYTARBALL=$(PROG)-$$MYVER.tar.gz; \
+	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYTARBALL;
+
 rpm:
-	PLATFORM=`uname`; \
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
+	MYTARBALL=$(PROG)-$$MYVER.tar.gz; \
+	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYTARBALL; \
 	MYSRCDIR=$(MY_RPM_TOP)/SOURCES; \
 	rm -rf $$MYSRCDIR; \
 	mkdir -p $$MYSRCDIR; \
-	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYSRCDIR/$(PROG)-$$MYVER.tar.gz; \
+	cp $$MYTARBALL $$MYSRCDIR; \
 	rpmbuild --define "_topdir $(MY_RPM_TOP)" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG).spec; \
 	echo "==============="; \
 	MYRPM="$(MY_RPM_TOP)/RPMS/$$MYARCH/$(PROG)-$$MYVER-$$MYREL.$$MYARCH.rpm"; \
@@ -55,7 +62,6 @@ rpm:
 	cp $$MYRPM $$MYSRPM .
 
 aixrpm:
-	PLATFORM=`uname`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
 	SOURCES=/opt/freeware/src/packages/SOURCES; \
@@ -82,7 +88,6 @@ pkg:
 	mv /tmp/$(PROG)-$$MYVER-$$MYREL .
 
 deb: $(PROG)
-	PLATFORM=`uname`; \
 	MYARCH=`uname -m|sed 's/x86_64/amd64/'`; \
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
