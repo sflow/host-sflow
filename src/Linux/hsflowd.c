@@ -1322,6 +1322,10 @@ extern "C" {
 	 && !niostate->bond_master) {
 	niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
 	if(niostate->sampling_n != niostate->sampling_n_set) {
+	  if(debug) myLog("setSwitchPortSamplingRate(%s) %u -> %u",
+			  adaptor->deviceName,
+			  niostate->sampling_n_set,
+			  niostate->sampling_n);
 	  strArrayInsert(cmdline, 1, adaptor->deviceName);
 	  char srate[HSP_MAX_TOK_LEN];
 	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
@@ -1339,6 +1343,7 @@ extern "C" {
 	      break;
 	    }
 	    else {
+	      if(debug) myLog("setSwitchPortSamplingRate(%s) succeeded");
 	      // hardware or kernel sampling was successfully configured
 	      niostate->sampling_n_set = niostate->sampling_n;
 	    }
