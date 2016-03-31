@@ -998,8 +998,10 @@ extern "C" {
     sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
     sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
     
+#if defined(HSF_XEN) || defined(HSF_DOCKER) || defined(HSF_VRT)
     // add <virtualEntity> pollers for each virtual machine
     configVMs(sp);
+#endif
 
  #ifdef HSF_ULOG
     if(sp->sFlow->sFlowSettings_file->ulogGroup != 0) {
