@@ -415,6 +415,7 @@ extern "C" {
       // new vm or container
       vm = (HSPVMState *)my_calloc(sizeof(HSPVMState));
       memcpy(vm->uuid, uuid, 16);
+      UTHashAdd(sp->vmsByUUID, vm, NO);
       vm->created = YES;
       vm->vmType = vmType;
       vm->volumes = strArrayNew();
@@ -436,9 +437,11 @@ extern "C" {
 
 
   static void removeAndFreeVM(HSP *sp, HSPVMState *vm) {
-    myLog(LOG_INFO, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
-	  vm->dsIndex,
-	  vm->domId);
+    if(debug) {
+      myLog(LOG_INFO, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
+	    vm->dsIndex,
+	    vm->domId);
+    }
     UTHashDel(sp->vmsByUUID, vm);
     UTHashDel(sp->vmsByDsIndex, vm);
     if(vm->disks) strArrayFree(vm->disks);

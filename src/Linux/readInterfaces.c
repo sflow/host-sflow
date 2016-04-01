@@ -636,7 +636,7 @@ expecting lines of the form:
 VNIC: <ifindex> <device> <mac>
 */
 
-  static int containerLinkCB(HSP *sp, HSPVMState *vm, char *line) {
+  static int containerLinkCB(HSP *sp, HSPContainer *container, char *line) {
     if(debug) myLog(LOG_INFO, "containerLinkCB: line=<%s>", line);
     char deviceName[HSF_DOCKER_MAX_LINELEN];
     char macStr[HSF_DOCKER_MAX_LINELEN];
@@ -644,10 +644,10 @@ VNIC: <ifindex> <device> <mac>
     if(sscanf(line, "VNIC: %u %s %s", &ifIndex, deviceName, macStr) == 3) {
       u_char mac[6];
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
-	SFLAdaptor *adaptor = adaptorListGet(vm->interfaces, deviceName);
+	SFLAdaptor *adaptor = adaptorListGet(container->vm->interfaces, deviceName);
 	if(adaptor == NULL) {
 	  adaptor = nioAdaptorNew(deviceName, mac, ifIndex);
-	  adaptorListAdd(vm->interfaces, adaptor);
+	  adaptorListAdd(container->vm->interfaces, adaptor);
 	  // add to "all namespaces" collections too
 	  UTHashAdd(sp->adaptorsByMac, adaptor, YES);
 	  UTHashAdd(sp->adaptorsByIndex, adaptor, YES);
@@ -677,9 +677,8 @@ VNIC: <ifindex> <device> <mac>
 #define MY_SETNS(fd, nstype) setns(fd, nstype)
 #endif
 
-  int readContainerInterfaces(HSP *sp, HSPVMState *vm)  {
-    if(!vm->container) return 0;
-    pid_t nspid = vm->container->pid;
+  int readContainerInterfaces(HSP *sp, HSPContainer *container)  {
+    pid_t nspid = container->pid;
     if(debug) myLog(LOG_INFO, "readContainerInterfaces: pid=%u", nspid);
     if(nspid == 0) return 0;
 
@@ -807,12 +806,12 @@ VNIC: <ifindex> <device> <mac>
 	return 0;
       }
       char line[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(sp, vm, line);
+      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(sp, container, line);
       fclose(ovs);
       wait(NULL); // block here until child is done
     }
 
-    return vm->interfaces->num_adaptors;
+    return container->vm->interfaces->num_adaptors;
   }
 
 #endif	

@@ -712,8 +712,7 @@ extern "C" {
 #ifdef HSF_DOCKER
   int readContainerCounters(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
   int readContainerCountersMulti(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
-  int readContainerInterfaces(HSP *sp, HSPVMState *vm);
-  int readContainerInterfaces2(HSP *sp, HSPVMState *vm);
+  int readContainerInterfaces(HSP *sp, HSPContainer *container);
 #endif
 
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);

@@ -37,7 +37,7 @@ extern "C" {
 
   void agentCB_getCounters_DOCKER(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-    assert(poller->magic);
+    HSP *sp = (HSP *)poller->magic;
     HSPVMState *state = (HSPVMState *)poller->userData;
     if(state == NULL) {
       if(debug) myLog(LOG_INFO, "agentCB_getCounters_DOCKER: state==NULL");
@@ -47,8 +47,11 @@ extern "C" {
       myLog(LOG_ERR, "agentCB_getCounters_DOCKER(): not a DOCKER container");
       return;
     }
-    HSP *sp = (HSP *)poller->magic;
     HSPContainer *container = state->container;
+    if(container == NULL) {
+      if(debug) myLog(LOG_INFO, "agentCB_getCounters_DOCKER: container==NULL");
+      return;
+    }
     
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
@@ -192,6 +195,8 @@ extern "C" {
       UTHashAdd(sp->containers, container, NO);
       // point up to vm struct - creating if necessary
       container->vm = getVM(sp, container->uuid, VMTYPE_DOCKER, agentCB_getCounters_DOCKER);
+      // add container pointer to vm
+      container->vm->container = container;
     }
     return container;
   }
@@ -332,7 +337,7 @@ extern "C" {
 	  // strArrayReset(state->volumes);
 	  // strArrayReset(state->disks);
 	  // then refresh it
-	  readContainerInterfaces(sp, state);
+	  readContainerInterfaces(sp, container);
 	  // and clean up
 	  deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
 	  adaptorListFreeMarked(state->interfaces);
