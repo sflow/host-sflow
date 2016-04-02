@@ -409,7 +409,7 @@ extern "C" {
     nio->sfp.module_temperature = (temperature * 1000); // mC
     nio->sfp.num_lasers = num_lasers;
     SFLLaser *laser = &(nio->sfp.lasers[0]);
-    laser->tx_bias_current = bias_current; // uA
+    laser->tx_bias_current = (bias_current * 2); // uA
     laser->tx_power = (tx_power / 10); // uW
     laser->tx_power_min = (tx_power_min / 10); // uW
     laser->tx_power_max = (tx_power_max / 10); // uW
@@ -581,7 +581,7 @@ extern "C" {
     
     for (int ch=0; ch < num_lasers; ch++) {
       SFLLaser *laser = &(nio->sfp.lasers[ch]);
-      laser->tx_bias_current = bias_current[ch]; // uA
+      laser->tx_bias_current = (bias_current[ch] * 2); // uA
       laser->tx_wavelength = wavelength;
       laser->rx_power = (rx_power[ch] / 10); // uW
       laser->rx_power_min = (rx_power_min / 10); // uW
