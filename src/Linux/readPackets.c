@@ -204,8 +204,12 @@ extern "C" {
 
     int internal_in = NO;
     int internal_out = NO;
+#ifdef CUMULUS
+    int bridgeModel = YES;
+#else
     int bridgeModel = isBridge;
-	
+#endif
+
     // If it is the container-end of a veth pair, then we want to
     // map it back to the other end that is in the global-namespace,
     // Since those are the bridge ports.
