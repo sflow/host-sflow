@@ -9,7 +9,7 @@ extern "C" {
 
 #include "hsflowd.h"
 
-#ifdef HSF_XEN
+#ifdef HSP_XEN
 	    
   /*_________________---------------------------__________________
     _________________     Xen Handles           __________________
@@ -17,19 +17,19 @@ extern "C" {
   */
 
 #ifdef XENCTRL_HAS_XC_INTERFACE
-#define HSF_XENCTRL_INTERFACE_OPEN() xc_interface_open(NULL /*logger*/, NULL/*dombuild_logger*/, XC_OPENFLAG_NON_REENTRANT);
-#define HSF_XENCTRL_HANDLE_OK(h) ((h) != NULL)
+#define HSP_XENCTRL_INTERFACE_OPEN() xc_interface_open(NULL /*logger*/, NULL/*dombuild_logger*/, XC_OPENFLAG_NON_REENTRANT);
+#define HSP_XENCTRL_HANDLE_OK(h) ((h) != NULL)
 #else
-#define HSF_XENCTRL_INTERFACE_OPEN() xc_interface_open()
-#define HSF_XENCTRL_HANDLE_OK(h) ((h) && (h) != -1)
+#define HSP_XENCTRL_INTERFACE_OPEN() xc_interface_open()
+#define HSP_XENCTRL_HANDLE_OK(h) ((h) && (h) != -1)
 #endif
 
   void openXenHandles(HSP *sp)
   {
     // need to do this while we still have root privileges
     if(sp->xc_handle == 0) {
-      sp->xc_handle = HSF_XENCTRL_INTERFACE_OPEN();
-      if(!HSF_XENCTRL_HANDLE_OK(sp->xc_handle)) {
+      sp->xc_handle = HSP_XENCTRL_INTERFACE_OPEN();
+      if(!HSP_XENCTRL_HANDLE_OK(sp->xc_handle)) {
         myLog(LOG_ERR, "xc_interface_open() failed : %s", strerror(errno));
       }
       else {
@@ -59,7 +59,7 @@ extern "C" {
 
   void closeXenHandles(HSP *sp)
   {
-    if(HSF_XENCTRL_HANDLE_OK(sp->xc_handle)) {
+    if(HSP_XENCTRL_HANDLE_OK(sp->xc_handle)) {
       xc_interface_close(sp->xc_handle);
       sp->xc_handle = 0;
     }
@@ -89,10 +89,10 @@ extern "C" {
   }
 
   int xen_compile_vif_regex(HSP *sp) {
-    int err = regcomp(&sp->vif_regex, HSF_XEN_VIF_REGEX, REG_EXTENDED);
+    int err = regcomp(&sp->vif_regex, HSP_XEN_VIF_REGEX, REG_EXTENDED);
     if(err) {
       char errbuf[101];
-      myLog(LOG_ERR, "regcomp(%s) failed: %s", HSF_XEN_VIF_REGEX, regerror(err, &sp->vif_regex, errbuf, 100));
+      myLog(LOG_ERR, "regcomp(%s) failed: %s", HSP_XEN_VIF_REGEX, regerror(err, &sp->vif_regex, errbuf, 100));
       return NO;
     }
     return YES;
@@ -131,11 +131,11 @@ extern "C" {
 	uint32_t vif_netid=0;
 	uint32_t xapi_index=0;
 	int isVirtual = NO;
-#ifdef HSF_XEN_VIF_REGEX
+#ifdef HSP_XEN_VIF_REGEX
 	// we could move this regex extraction to the point where we first learn the adaptor->name and
 	// store it wit the adaptor user-data.  Then we wouldn't have to do it so often.  It might get
 	// expensive on a system with a large number of VMs.
-	if(regexec(&sp->vif_regex, adaptor->deviceName, HSF_XEN_VIF_REGEX_NMATCH, sp->vif_match, 0) == 0) {
+	if(regexec(&sp->vif_regex, adaptor->deviceName, HSP_XEN_VIF_REGEX_NMATCH, sp->vif_match, 0) == 0) {
 	  long ifield1 = regmatch_as_long(&sp->vif_match[1], adaptor->deviceName);
 	  long ifield2 = regmatch_as_long(&sp->vif_match[2], adaptor->deviceName);
 	  if(ifield1 == -1 || ifield2 == -1) {
@@ -195,9 +195,9 @@ extern "C" {
 
 #define HSP_MAX_PATHLEN 256
 
-  // allow HSF_XEN_VBD_PATH to be passed in at compile time,  but fall back on the default if it is not.
-#ifndef HSF_XEN_VBD_PATH
-#define HSF_XEN_VBD_PATH /sys/devices/xen-backend
+  // allow HSP_XEN_VBD_PATH to be passed in at compile time,  but fall back on the default if it is not.
+#ifndef HSP_XEN_VBD_PATH
+#define HSP_XEN_VBD_PATH /sys/devices/xen-backend
 #endif
 
   static int64_t xen_vbd_counter(uint32_t dom_id, char *vbd_dev, char *counter, int usec)
@@ -211,9 +211,9 @@ extern "C" {
     char path[HSP_MAX_PATHLEN];
     FILE *file = NULL;
     // try vbd first,  then tap
-    snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSF_XEN_VBD_PATH) "/vbd-%s", ctrspec);
+    snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSP_XEN_VBD_PATH) "/vbd-%s", ctrspec);
     if((file = fopen(path, "r")) == NULL) {
-      snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSF_XEN_VBD_PATH) "/tap-%s", ctrspec);
+      snprintf(path, HSP_MAX_PATHLEN, STRINGIFY_DEF(HSP_XEN_VBD_PATH) "/tap-%s", ctrspec);
       file = fopen(path, "r");
     }
     
@@ -242,11 +242,11 @@ extern "C" {
   
   static int xen_collect_block_devices(HSP *sp, HSPVMState *state)
   {
-    DIR *sysfsvbd = opendir(STRINGIFY_DEF(HSF_XEN_VBD_PATH));
+    DIR *sysfsvbd = opendir(STRINGIFY_DEF(HSP_XEN_VBD_PATH));
     if(sysfsvbd == NULL) {
       static int logcount = 0;
       if(logcount++ < 3) {
-	myLog(LOG_ERR, "opendir %s failed : %s", STRINGIFY_DEF(HSF_XEN_VBD_PATH), strerror(errno));
+	myLog(LOG_ERR, "opendir %s failed : %s", STRINGIFY_DEF(HSP_XEN_VBD_PATH), strerror(errno));
       }
       return 0;
     }
@@ -450,9 +450,17 @@ extern "C" {
       adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, state->domId, &myAdaptors, HSP_MAX_VIFS);
       SFLADD_ELEMENT(cs, &adaptorsElem);
 
-      
-      sfl_poller_writeCountersSample(poller, cs);
+      SEMLOCK_DO(sp->sync_receiver) {
+	sfl_poller_writeCountersSample(poller, cs);
+      }
     }
+  }
+
+  static void agentCB_getCounters_XEN_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters_XEN);
   }
 
   /*_________________---------------------------__________________
@@ -491,7 +499,7 @@ extern "C" {
 		    domaininfo[i].ssidref,
 		    domaininfo[i].handle);
 	    }
-	    HSPVMState *state = getVM(sp, (char *)&domaininfo[i].handle, VMTYPE_XEN, agentCB_getCounters_XEN);
+	    HSPVMState *state = getVM(sp, (char *)&domaininfo[i].handle, VMTYPE_XEN, agentCB_getCounters_XEN_request);
 	    if(state->marked == NO &&
 	       state->created == NO) {
 	      duplicate_domains++;
@@ -528,7 +536,7 @@ extern "C" {
     }
   }
 
-#endif /* HSF_XEN */
+#endif /* HSP_XEN */
 
 #if defined(__cplusplus)
 } /* extern "C" */

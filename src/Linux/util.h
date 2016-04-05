@@ -64,12 +64,12 @@ extern "C" {
 #define SYS_FREE free
 
 #ifdef UTHEAP
-
   // realm allocation (buffer recycling)
+  void UTHeapInit(void);
   void *UTHeapQNew(size_t len);
   void *UTHeapQReAlloc(void *buf, size_t newSiz);
   void UTHeapQFree(void *buf);
-  void UTHeapQKeep(void *buf);
+  void UTHeapGC(void);
 
 #define my_calloc UTHeapQNew
 #define my_realloc UTHeapQReAlloc
@@ -152,6 +152,21 @@ extern "C" {
   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end);
   int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
   int strArrayIndexOf(UTStringArray *ar, char *str);
+
+  // obj array
+  typedef struct _UTArray {
+    void **objs;
+    uint32_t n;
+    uint32_t capacity;
+  } UTArray;
+
+  UTArray *UTArrayNew(void);
+  void UTArrayAdd(UTArray *ar, void *obj);
+  void UTArrayInsert(UTArray *ar, int i, void *obj);
+  void UTArrayReset(UTArray *ar);
+  void UTArrayFree(UTArray *ar);
+  uint32_t UTArrayN(UTArray *ar);
+  void *UTArrayAt(UTArray *ar, int i);
 
   // tokenizer
   char *parseNextTok(char **str, char *sep, int delim, char quot, int trim, char *buf, int buflen);

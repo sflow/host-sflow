@@ -125,9 +125,7 @@ extern "C" {
     union _UTHeapHeader *nxt;  // valid when in linked list waiting to be reallocated
     struct {                   // valid when buffer being used - store bookkeeping info here
       uint32_t realmIdx;
-      uint16_t refCount;
-#define UT_MAX_REFCOUNT 0xFFFF
-      uint16_t queueIdx;
+      uint32_t queueIdx;
     } h;
   } UTHeapHeader;
 
@@ -179,12 +177,55 @@ extern "C" {
     }
     // remember the details so we know what to do on free (overwriting the nxt pointer)
     utBuf->h.realmIdx = utRealm.realmIdx;
-    utBuf->h.refCount = 1;
     utBuf->h.queueIdx = queueIdx;
     // return a pointer to just after the header
     return (char *)utBuf + sizeof(UTHeapHeader);
   }
 
+
+  /*_________________---------------------------__________________
+    _________________    foreign thread free    __________________
+    -----------------___________________________------------------
+  */
+
+  static struct {
+    UTHeapHeader *foreign;
+    pthread_mutex_t *sync_foreign;
+    uint32_t n_foreign;
+  } UTHeap;
+
+  // call once at startup
+  void UTHeapInit() {
+    if(UTHeap.sync_foreign == NULL) {
+      UTHeap.sync_foreign = (pthread_mutex_t *)SYS_CALLOC(1, sizeof(pthread_mutex_t));
+      pthread_mutex_init(UTHeap.sync_foreign, NULL);
+      UTHeap.n_foreign = 0;
+    }
+  }
+
+  // each thread should call this periodically
+  void UTHeapGC(void)
+  {
+    if(UTHeap.n_foreign) {
+      SEMLOCK_DO(UTHeap.sync_foreign) {
+	for(UTHeapHeader *utBuf = UTHeap.foreign, *prev = NULL; utBuf; ) {
+	  UTHeapHeader *nextBuf = utBuf->nxt;
+	  if(utBuf->h.realmIdx == utRealm.realmIdx) {
+	    // this one is mine - recycle and unlink
+	    if(debug) {
+	      myLog(LOG_INFO, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
+	    }
+	    UTHeapQFree(utBuf);
+	    if(prev) prev->nxt = nextBuf;
+	    else UTHeap.foreign = nextBuf;
+	    UTHeap.n_foreign--;
+	  }
+	  else prev = utBuf;
+	  utBuf = nextBuf;
+	}
+      }
+    }
+  }
 
   /*_________________---------------------------__________________
     _________________    UTHeapQFree            __________________
@@ -194,24 +235,22 @@ extern "C" {
   void UTHeapQFree(void *buf)
   {
     UTHeapHeader *utBuf = UTHeapQHdr(buf);
-    int rc = utBuf->h.refCount;
-    assert(rc != 0);
-    assert(utBuf->h.realmIdx == utRealm.realmIdx);
-    // UT_MAX_REFCOUNT => immortality
-    if(rc != UT_MAX_REFCOUNT) {
-      // decrement the ref count
-      if(--rc != 0) {
-	// not zero yet, so just write back the decremented refcount
-	utBuf->h.refCount = rc;
-      }
-      else {
-	// reference count reached zero, so it's time to free this buffer for real
-	// read the queue index before we overwrite it
-	uint16_t queueIdx = utBuf->h.queueIdx;
-	memset(utBuf, 0, 1 << queueIdx);
-	// put it back on the queue
-	utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
-	utRealm.bufferLists[queueIdx] = utBuf;
+    if(utBuf->h.realmIdx == utRealm.realmIdx) {
+      // read the queue index before we overwrite it
+      uint16_t queueIdx = utBuf->h.queueIdx;
+      memset(utBuf, 0, 1 << queueIdx);
+      // put it back on the queue
+      utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
+      utRealm.bufferLists[queueIdx] = utBuf;
+    }
+    else {
+      // foreign realm - queue it for the owner to recycle.  Could
+      // improve this to use a separate mutex and queue for each
+      // realm if we ever find that there is performance pressure.
+      SEMLOCK_DO(UTHeap.sync_foreign) {
+	utBuf->nxt = UTHeap.foreign;
+	UTHeap.foreign = utBuf;
+	UTHeap.n_foreign++;
       }
     }
   }
@@ -232,20 +271,6 @@ extern "C" {
     memcpy(newBuf, buf, siz);
     UTHeapQFree(buf);
     return newBuf;
-  }
-
-  /*_________________---------------------------__________________
-    _________________      UTHeapQKeep          __________________
-    -----------------___________________________------------------
-  */
-
-  void UTHeapQKeep(void *buf)
-  {
-    // might even need to grab the semaphore for this operation too?
-    UTHeapHeader *utBuf = UTHeapQHdr(buf);
-    assert(utBuf->h.refCount > 0);
-    assert(utBuf->h.realmIdx == utRealm.realmIdx);
-    if(++utBuf->h.refCount == 0) utBuf->h.refCount = UT_MAX_REFCOUNT;
   }
 
 #endif /* UTHEAP */
@@ -600,7 +625,60 @@ extern "C" {
     
     return trim ? trimWhitespace(buf) : buf;
   }
+    
+  /*_________________---------------------------__________________
+    _________________        obj array          __________________
+    -----------------___________________________------------------
+  */
 
+  UTArray *UTArrayNew(void) {
+    return (UTArray *)my_calloc(sizeof(UTArray));
+  }
+  
+  static void UTArrayGrowthCheck(UTArray *ar, int i) {
+    if(ar->capacity <= i) {
+      uint32_t oldBytes = ar->capacity * sizeof(void *);
+      ar->capacity = i + 16;
+      uint32_t newBytes = ar->capacity * sizeof(void *);
+      void **newArray = (void **)my_calloc(newBytes);
+      if(ar->objs) {
+	memcpy(newArray, ar->objs, oldBytes);
+	my_free(ar->objs);
+      }
+      ar->objs = newArray;
+    }
+  }
+
+  void UTArrayAdd(UTArray *ar, void *obj) {
+    UTArrayGrowthCheck(ar, ar->n);
+    ar->objs[ar->n++] = obj;
+  }
+  
+  void UTArrayInsert(UTArray *ar, int i, void *obj) {
+    UTArrayGrowthCheck(ar, i);
+    ar->objs[i] = obj;
+    if(i >= ar->n) ar->n = i+1;
+  }
+
+  void UTArrayReset(UTArray *ar) {
+    for(uint32_t i = 0; i < ar->n; i++) ar->objs[i] = NULL;
+    ar->n = 0;
+  }
+  
+   void UTArrayFree(UTArray *ar) {
+     UTArrayReset(ar);
+     if(ar->objs) my_free(ar->objs);
+     my_free(ar);
+   }
+  
+  uint32_t UTArrayN(UTArray *ar) {
+    return ar->n;
+  }
+  
+  void *UTArrayAt(UTArray *ar, int i) {
+    return ar->objs[i];
+  }
+  
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________
     ----------------___________________________------------------

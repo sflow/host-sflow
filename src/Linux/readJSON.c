@@ -11,10 +11,10 @@ extern "C" {
 
   extern int debug;
 
-#ifdef HSF_JSON
+#ifdef HSP_JSON
 
 
-#ifdef HSF_RTMETRIC
+#ifdef HSP_RTMETRIC
   
   typedef enum {
     RTMetricType_string = 0,
@@ -43,7 +43,7 @@ extern "C" {
 #define TAG_RTMETRIC ((4300 << 12) + 1002)
 #define TAG_RTFLOW ((4300 << 12) + 1003)
 
-#endif /* HSF_RTMETRIC */
+#endif /* HSP_RTMETRIC */
 
   /*_________________---------------------------__________________
     _________________  int counters and gauges  __________________
@@ -99,9 +99,18 @@ extern "C" {
       // The application is not sending counters, so send the synthesized
       // app_operations counter block that we have been maintaining.
       SFLADD_ELEMENT(cs, &application->counters);
-      sfl_poller_writeCountersSample(poller, cs);
-      // and any rtcount metrics that we have been collecting
+      SEMLOCK_DO(sp->sync_receiver) {
+	sfl_poller_writeCountersSample(poller, cs);
+	// and any rtcount metrics that we have been collecting
+      }
     }
+  }
+
+  static void agentCB_getCounters_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters);
   }
 
   /*_________________---------------------------__________________
@@ -123,13 +132,19 @@ extern "C" {
     SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, dsIndex, 0);
 
     // before we allocate anything, make sure there isn't a clash on servicePort
-    if(servicePort && sfl_agent_getPoller(sp->sFlow->agent, &dsi)) {
-      service_port_clash++;
-      if(debug || service_port_clash < HSP_SERVICE_PORT_CLASH_WARNINGS) {
-	myLog(LOG_ERR, "addApplication(%s) service port %d already allocated for another application",
-	      application,
-	      servicePort);
-	return NULL;
+    if(servicePort) {
+      SFLPoller *poller = NULL;
+      SEMLOCK_DO(sp->sync) {
+	poller = sfl_agent_getPoller(sp->sFlow->agent, &dsi);
+      }
+      if(poller) {
+	service_port_clash++;
+	if(debug || service_port_clash < HSP_SERVICE_PORT_CLASH_WARNINGS) {
+	  myLog(LOG_ERR, "addApplication(%s) service port %d already allocated for another application",
+		application,
+		servicePort);
+	  return NULL;
+	}
       }
     }
 
@@ -143,11 +158,13 @@ extern "C" {
     aa->settings_revisionNo = sp->sFlow->revisionNo;
     lookupApplicationSettings(sp->sFlow->sFlowSettings, "app", application, &sampling_n, &polling_secs);
     // poller
-    aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, agentCB_getCounters);
-    sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
-    sfl_poller_set_sFlowCpReceiver(aa->poller, HSP_SFLOW_RECEIVER_INDEX); 
-    // point to the application with the userData ptr
-    aa->poller->userData = aa;
+    SEMLOCK_DO(sp->sync) {
+      aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, agentCB_getCounters_request);
+      sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
+      sfl_poller_set_sFlowCpReceiver(aa->poller, HSP_SFLOW_RECEIVER_INDEX);
+      // point to the application with the userData ptr
+      aa->poller->userData = aa;
+    }
     // more counter-block initialization
     aa->counters.tag = SFLCOUNTERS_APP;
     aa->counters.counterBlock.app.application.str = aa->application; // just point
@@ -156,9 +173,11 @@ extern "C" {
     aa->json_counters = YES;
     aa->last_json_counters = sp->clk;
     // sampler
-    aa->sampler = sfl_agent_addSampler(sp->sFlow->agent, &dsi);
-    sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
-    sfl_sampler_set_sFlowFsReceiver(aa->sampler, HSP_SFLOW_RECEIVER_INDEX);
+    SEMLOCK_DO(sp->sync) {
+      aa->sampler = sfl_agent_addSampler(sp->sFlow->agent, &dsi);
+      sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
+      sfl_sampler_set_sFlowFsReceiver(aa->sampler, HSP_SFLOW_RECEIVER_INDEX);
+    }
     
     return aa;
   }
@@ -260,8 +279,10 @@ extern "C" {
 	    if(prev) prev->ht_nxt = next_aa;
 	    else sp->applicationHT[bkt] = next_aa;
 	    // remove sampler and poller
-	    sfl_agent_removeSampler(sp->sFlow->agent, &aa->sampler->dsi);
-	    sfl_agent_removePoller(sp->sFlow->agent, &aa->poller->dsi);
+	    SEMLOCK_DO(sp->sync) {
+	      sfl_agent_removeSampler(sp->sFlow->agent, &aa->sampler->dsi);
+	      sfl_agent_removePoller(sp->sFlow->agent, &aa->poller->dsi);
+	    }
 	    // free
 	    my_free(aa->application);
 	    my_free(aa);
@@ -375,7 +396,9 @@ extern "C" {
       myLog(LOG_INFO, "sendAppSample (sampling_n=%d)", sampling_n);
     }
     // and send it out
-    sfl_sampler_writeFlowSample(app->sampler, &fs);
+    SEMLOCK_DO(sp->sync_receiver) {
+      sfl_sampler_writeFlowSample(app->sampler, &fs);
+    }
   }
 
 
@@ -622,12 +645,14 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
         SFLADD_ELEMENT(&csample, &c_par);
 
 	// submit the counter sample
-	sfl_poller_writeCountersSample(application->poller, &csample);
+	SEMLOCK_DO(sp->sync_receiver) {
+	  sfl_poller_writeCountersSample(application->poller, &csample);
+	}
       }
     }
   }
 
-#ifdef HSF_RTMETRIC
+#ifdef HSP_RTMETRIC
 
   /*_________________---------------------------__________________
     _________________     XDR encoding          __________________
@@ -906,13 +931,13 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       uint32_t len = (char *)xdr_ptr(&buf) - (char *)mstart - 4;
       mstart[0] = htonl(len);
       fstart[0] = htonl(num_fields);
-      sfl_receiver_writeEncoded(receiver,
-				1,
-				buf.xdr,
-				(buf.cursor << 2));
+      SEMLOCK_DO(sp->sync_receiver) {
+	sfl_receiver_writeEncoded(receiver,
+				  1,
+				  buf.xdr,
+				  (buf.cursor << 2));
+      }
     }
-    // don't flush: allow them to accumulate in the datagram
-    // sfl_receiver_flush(receiver);
   }
 
   /*_________________---------------------------__________________
@@ -1139,16 +1164,16 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       uint32_t len = (char *)xdr_ptr(&buf) - (char *)mstart - 4;
       mstart[0] = htonl(len);
       fstart[0] = htonl(num_fields);
-      sfl_receiver_writeEncoded(receiver,
-				1,
-				buf.xdr,
-				(buf.cursor << 2));
+      SEMLOCK_DO(sp->sync_receiver) {
+	sfl_receiver_writeEncoded(receiver,
+				  1,
+				  buf.xdr,
+				  (buf.cursor << 2));
+      }
     }
-    // don't flush: allow them to accumulate in the datagram
-    // sfl_receiver_flush(receiver);
   }
 
-#endif /* HSF_RTMETRIC */
+#endif /* HSP_RTMETRIC */
   
   /*_________________---------------------------__________________
     _________________      readJSON             __________________
@@ -1176,12 +1201,12 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  if(fs) readJSON_flowSample(sp, fs);
 	  cJSON *cs = cJSON_GetObjectItem(top, "counter_sample");
 	  if(cs) readJSON_counterSample(sp, cs);
-#ifdef HSF_RTMETRIC
+#ifdef HSP_RTMETRIC
 	  cJSON *rtmetric = cJSON_GetObjectItem(top, "rtmetric");
 	  if(rtmetric) readJSON_rtmetric(sp, rtmetric);
 	  cJSON *rtflow = cJSON_GetObjectItem(top, "rtflow");
 	  if(rtflow) readJSON_rtflow(sp, rtflow);
-#endif /* HSF_RTMETRIC */
+#endif /* HSP_RTMETRIC */
 	  cJSON_Delete(top);
 	}
       }
@@ -1189,7 +1214,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     return batch;
   }
 
-#endif /* HSF_JSON */
+#endif /* HSP_JSON */
   
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -191,9 +191,9 @@ extern int debug;
   {
     HSPToken *t = tok;
     t = t->nxt;
-    if(t && strcasecmp(t->str, "in") == 0) (*arg) = HSF_DIRN_IN;
-    else if(t && strcasecmp(t->str, "out") == 0) (*arg) = HSF_DIRN_OUT;
-    else if(t && strcasecmp(t->str, "both") == 0) (*arg) = HSF_DIRN_BOTH;
+    if(t && strcasecmp(t->str, "in") == 0) (*arg) = HSP_DIRN_IN;
+    else if(t && strcasecmp(t->str, "out") == 0) (*arg) = HSP_DIRN_OUT;
+    else if(t && strcasecmp(t->str, "both") == 0) (*arg) = HSP_DIRN_BOTH;
     else {
       parseError(sp, tok, "expected 'in' or 'out' or 'both'", "");
       return NULL;
@@ -335,7 +335,7 @@ extern int debug;
     st->jsonFIFO = NULL;
     st->xen_update_dominfo = 0;
     st->xen_dsk = 1;
-    st->samplingDirection = HSF_DIRN_IN;
+    st->samplingDirection = HSP_DIRN_IN;
     return st;
   }
 

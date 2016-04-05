@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#ifdef HSF_NVML
+#ifdef HSP_NVML
 
 
 #include "hsflowd.h"
@@ -142,7 +142,7 @@ extern "C" {
     return YES;
   }
 
-#endif /* HSF_NVML */
+#endif /* HSP_NVML */
 
 #if defined(__cplusplus)
 } /* extern "C" */

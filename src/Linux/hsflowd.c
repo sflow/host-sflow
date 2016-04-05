@@ -12,7 +12,7 @@ extern "C" {
 #include "hsflowd.h"
 #include "cpu_utils.h"
 
-#ifdef HSF_PCAP
+#ifdef HSP_PCAP
   // includes for setsockopt(SO_ATTACH_FILTER)
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -64,7 +64,7 @@ extern "C" {
 
     // note that we are relying on any new settings being installed atomically from the DNS-SD
     // thread (it's just a pointer move,  so it should be atomic).  Otherwise we would want to
-    // grab sf->config_mut whenever we call sfl_sampler_writeFlowSample(),  because that can
+    // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
     // bring us here where we read the list of collectors.
 
     for(HSPCollector *coll = sp->sFlow->sFlowSettings->collectors; coll; coll=coll->nxt) {
@@ -195,7 +195,7 @@ extern "C" {
   }
 #endif
 
-#ifndef HSF_XEN
+#ifndef HSP_XEN
   static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors, int capacity)
   {
     // build the list of adaptors that are up and have non-empty MACs,
@@ -218,7 +218,7 @@ extern "C" {
   }
 #endif
 
-  void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  static void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
@@ -252,7 +252,7 @@ extern "C" {
       SFLADD_ELEMENT(cs, &cpuElem);
     }
 
-#ifdef HSF_NVML
+#ifdef HSP_NVML
     SFLCounters_sample_element nvmlElem = { 0 };
     nvmlElem.tag = SFLCOUNTERS_HOST_GPU_NVML;
     if(readNvmlCounters(sp, &nvmlElem.counterBlock.host_gpu_nvml)) {
@@ -260,7 +260,7 @@ extern "C" {
     }
 #endif
 
-#ifdef HSF_CUMULUS
+#ifdef HSP_CUMULUS
     SFLCounters_sample_element bcmElem = { 0 };
     bcmElem.tag = SFLCOUNTERS_BCM_TABLES;
     if(readBroadcomCounters(sp, &bcmElem.counterBlock.bcm_tables)) {
@@ -285,7 +285,7 @@ extern "C" {
       SFLADD_ELEMENT(cs, &dskElem);
     }
 
-#ifdef HSF_CUMULUS
+#ifdef HSP_CUMULUS
     // don't send L4 stats from switches.  Save the space for other things.
 #else
     // host TCP/IP counters
@@ -309,7 +309,7 @@ extern "C" {
     // include the adaptor list
     SFLCounters_sample_element adaptorsElem = { 0 };
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-#ifdef HSF_XEN
+#ifdef HSP_XEN
     // collect list of host adaptors that do not belong to VMs
     SFLAdaptorList myAdaptors;
     SFLAdaptor *adaptors[HSP_MAX_VIFS];
@@ -331,10 +331,10 @@ extern "C" {
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
     // hypervisor node stats
-#if defined(HSF_XEN) || defined(HSF_DOCKER) || defined(HSF_VRT)
+#if defined(HSP_XEN) || defined(HSP_DOCKER) || defined(HSP_VRT)
     SFLCounters_sample_element vnodeElem = { 0 };
     vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
-#if defined(HSF_XEN)
+#if defined(HSP_XEN)
     if(readXenVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
       SFLADD_ELEMENT(cs, &vnodeElem);
     }
@@ -347,10 +347,19 @@ extern "C" {
     vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
     vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
     SFLADD_ELEMENT(cs, &vnodeElem);
-#endif /* HSF_XEN */
-#endif /* HSF_XEN || HSF_DOCKER || HSF_VRT */
+#endif /* HSP_XEN */
+#endif /* HSP_XEN || HSP_DOCKER || HSP_VRT */
 
-    sfl_poller_writeCountersSample(poller, cs);
+    SEMLOCK_DO(sp->sync_receiver) {
+      sfl_poller_writeCountersSample(poller, cs);
+    }
+  }
+
+  static void agentCB_getCounters_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters);
   }
   
   /*_________________---------------------------__________________
@@ -358,7 +367,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-#if defined(HSF_XEN) || defined(HSF_VRT) || defined(HSF_DOCKER)
+#if defined(HSP_XEN) || defined(HSP_VRT) || defined(HSP_DOCKER)
 
 
   uint32_t assignVM_dsIndex(HSP *sp, HSPVMState *state) {
@@ -426,10 +435,12 @@ extern "C" {
 	SFLDataSource_instance dsi;
 	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
 	SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, vm->dsIndex, 0);
-	vm->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, getCountersFn);
-	vm->poller->userData = vm;
-	sfl_poller_set_sFlowCpInterval(vm->poller, sp->sFlow->sFlowSettings->pollingInterval);
-	sfl_poller_set_sFlowCpReceiver(vm->poller, HSP_SFLOW_RECEIVER_INDEX);
+	SEMLOCK_DO(sp->sync) {
+	  vm->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, getCountersFn);
+	  vm->poller->userData = vm;
+	  sfl_poller_set_sFlowCpInterval(vm->poller, sp->sFlow->sFlowSettings->pollingInterval);
+	  sfl_poller_set_sFlowCpReceiver(vm->poller, HSP_SFLOW_RECEIVER_INDEX);
+	}
       }
     }
     return vm;
@@ -455,7 +466,9 @@ extern "C" {
     }
     if(vm->poller) {
       vm->poller->userData = NULL;
-      sfl_agent_removePoller(sp->sFlow->agent, &vm->poller->dsi);
+      SEMLOCK_DO(sp->sync) {
+	sfl_agent_removePoller(sp->sFlow->agent, &vm->poller->dsi);
+      }
     }
     my_free(vm);
     sp->refreshAdaptorList = YES;
@@ -476,13 +489,13 @@ extern "C" {
     }
     
     // 2. create new VM pollers, or clear the mark on existing ones
-#ifdef HSF_XEN
+#ifdef HSP_XEN
     configVMs_XEN(sp);
 #endif
-#ifdef HSF_VRT
+#ifdef HSP_VRT
     configVMs_VRT(sp);
 #endif
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
     configVMs_DOCKER(sp);
 #endif
     
@@ -494,7 +507,7 @@ extern "C" {
     }
   }
 
-#endif /* HSF_XEN || HSF_VRT || HSF_DOCKER */
+#endif /* HSP_XEN || HSP_VRT || HSP_DOCKER */
     
   /*_________________---------------------------__________________
     _________________       printIP             __________________
@@ -536,16 +549,42 @@ extern "C" {
   
   static void tick(HSP *sp) {
     
-    // send a tick to the sFlow agent
-    sfl_agent_tick(sp->sFlow->agent, sp->clk);
-    
+    // reset the pollActions
+    UTArrayReset(sp->pollActions);
+
+    // send a tick to the sFlow agent. This will be passed on
+    // to the samplers, pollers and receiver.  If the poller is
+    // ready to poll counters it will pull it's callback, but
+    // we are using that just to populate the poll actions list.
+    // That way we can relinquish the sync semaphore quickly.
+    // It is up to the poller's getCounters Fn to grab it again
+    // if and when it is required.  Same goes for the
+    // sync_receiver lock,  which is needed when the final
+    // counter sample is submitted for XDR serialization.
+    SEMLOCK_DO(sp->sync) {
+      sfl_agent_tick(sp->sFlow->agent, sp->clk);
+    }
+    // We can only get away with this scheme because the poller
+    // objects are only ever removed and free by this thread.
+    // So we don't need to worry about them being freed under
+    // our feet below.
+
+    // now we can execute them without holding on to the semaphore
+    for(uint32_t ii = 0; ii < UTArrayN(sp->pollActions); ii += 2) {
+      SFLPoller *poller = (SFLPoller *)UTArrayAt(sp->pollActions, ii);
+      getCountersFn_t cb = (getCountersFn_t)UTArrayAt(sp->pollActions, ii+1);
+      SFL_COUNTERS_SAMPLE_TYPE cs;
+      memset(&cs, 0, sizeof(cs));
+      (cb)((void *)sp, poller, &cs);
+    }
+
     // possibly poll the nio counters to avoid 32-bit rollover
     if(sp->nio_polling_secs &&
        ((sp->clk % sp->nio_polling_secs) == 0)) {
       updateNioCounters(sp, NULL);
     }
 
-#ifdef HSF_PCAP
+#ifdef HSP_PCAP
     // read pcap stats to get drops - will go out with
     // packet samples sent from readPackets.c
     for(BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
@@ -557,7 +596,7 @@ extern "C" {
 #endif
 
 
-#if defined(HSF_XEN) || defined(HSF_DOCKER) || defined(HSF_VRT)
+#if defined(HSP_XEN) || defined(HSP_DOCKER) || defined(HSP_VRT)
     // refresh the list of VMs periodically or on request
     if(sp->refreshVMList || (sp->clk % sp->refreshVMListSecs) == 0) {
       sp->refreshVMList = NO;
@@ -609,7 +648,7 @@ extern "C" {
 #endif
     }
 
-#ifdef HSF_JSON
+#ifdef HSP_JSON
     // give the JSON module a chance to remove idle apps
     if(sp->clk % HSP_JSON_APP_TIMEOUT) {
       json_app_timeout_check(sp);
@@ -623,14 +662,14 @@ extern "C" {
       sp->outputRevisionNo = sp->sFlow->revisionNo;
     }
 
-#ifdef HSF_NVML
+#ifdef HSP_NVML
     // poll the GPU
     nvml_tick(sp);
 #endif
 
   }
 
-#ifdef HSF_ULOG
+#ifdef HSP_ULOG
   /*_________________---------------------------__________________
     _________________     openULOG              __________________
     -----------------___________________________------------------
@@ -681,7 +720,7 @@ extern "C" {
   }
 #endif
 
-#ifdef HSF_NFLOG
+#ifdef HSP_NFLOG
 
   /*_________________---------------------------__________________
     _________________     openNFLOG             __________________
@@ -752,9 +791,9 @@ extern "C" {
     }
   }
 
-#endif // HSF_NFLOG
+#endif // HSP_NFLOG
 
-#ifdef HSF_JSON
+#ifdef HSP_JSON
   /*_________________---------------------------__________________
     _________________     openJSON              __________________
     -----------------___________________________------------------
@@ -825,7 +864,7 @@ extern "C" {
 #endif
 
 
-#ifdef HSF_PCAP
+#ifdef HSP_PCAP
   /*_________________---------------------------__________________
     _________________   setKernelSampling       __________________
     -----------------___________________________------------------
@@ -912,11 +951,13 @@ extern "C" {
     if(debug) myLog(LOG_INFO, "PCAP: kernel sampling OK");
     return YES;
   }
-#endif /* HSF_PCAP */
+#endif /* HSP_PCAP */
   
   /*_________________---------------------------__________________
     _________________         initAgent         __________________
     -----------------___________________________------------------
+
+    called with sp->sync locked
   */
   
   static int initAgent(HSP *sp)
@@ -997,23 +1038,23 @@ extern "C" {
     SFLDataSource_instance dsi;
   // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
     SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
-    sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
+    sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_request);
     sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
     sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
     
-#if defined(HSF_XEN) || defined(HSF_DOCKER) || defined(HSF_VRT)
+#if defined(HSP_XEN) || defined(HSP_DOCKER) || defined(HSP_VRT)
     // add <virtualEntity> pollers for each virtual machine
     configVMs(sp);
 #endif
 
- #ifdef HSF_ULOG
+ #ifdef HSP_ULOG
     if(sp->sFlow->sFlowSettings_file->ulogGroup != 0) {
       // ULOG group is set, so open the netfilter
       // socket to ULOG while we are still root
       openULOG(sp);
     }
 #endif
-#ifdef HSF_NFLOG
+#ifdef HSP_NFLOG
     if(sp->sFlow->sFlowSettings_file->nflogGroup != 0) {
       // ULOG group is set, so open the netfilter
       // socket to ULOG while we are still root
@@ -1021,7 +1062,7 @@ extern "C" {
     }
 #endif
       
-#ifdef HSF_JSON
+#ifdef HSP_JSON
     uint16_t jsonPort = sp->sFlow->sFlowSettings_file->jsonPort;
     char *jsonFIFO = sp->sFlow->sFlowSettings_file->jsonFIFO;
     if(jsonPort || jsonFIFO) {
@@ -1043,7 +1084,7 @@ extern "C" {
     }
 #endif
 
-#ifdef HSF_PCAP
+#ifdef HSP_PCAP
     for(HSPPcap *pcap = sp->sFlow->sFlowSettings_file->pcaps; pcap; pcap = pcap->nxt) {
       BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
       bpfs->nxt = sp->bpf_socs;
@@ -1332,8 +1373,8 @@ extern "C" {
 	  strArrayInsert(cmdline, 1, adaptor->deviceName);
 	  char srate[HSP_MAX_TOK_LEN];
 	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-	  if(settings->samplingDirection & HSF_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
-	  if(settings->samplingDirection & HSF_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
+	  if(settings->samplingDirection & HSP_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
+	  if(settings->samplingDirection & HSP_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
 	  int status;
 	  if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	    if(WEXITSTATUS(status) != 0) {
@@ -1420,7 +1461,7 @@ extern "C" {
   {
     // This pointer-operation should be atomic.  We rely on it to be so
     // in places where we consult sf->sFlowSettings without first acquiring
-    // the sf->config_mut lock.
+    // the sp->sync lock.
     sf->sFlowSettings = settings;
 
     // do this every time in case the switchPorts are not detected yet at
@@ -1520,7 +1561,7 @@ extern "C" {
       else if(my_strnequal(keyBuf, "polling.", 8)) {
 	setApplicationPolling(st, keyBuf+8, strtol(valBuf, NULL, 0));
       }
-#if HSF_DNSSD_AGENTCIDR
+#if HSP_DNSSD_AGENTCIDR
       else if(strcmp(keyBuf, "agent.cidr") == 0) {
 	HSPCIDR cidr = { 0 };
 	if(SFLAddress_parseCIDR(valBuf,
@@ -1533,7 +1574,7 @@ extern "C" {
 	  myLog(LOG_ERR, "CIDR parse error in dnsSD record <%s>=<%s>", keyBuf, valBuf);
 	}
       }
-#endif /* HSF_DNSSD_AGENTCIDR */
+#endif /* HSP_DNSSD_AGENTCIDR */
       else {
 	myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
       }
@@ -1545,6 +1586,11 @@ extern "C" {
     sp->DNSSD_countdown = sfl_random(sp->DNSSD_startDelay);
     time_t clk = UTClockSeconds();
     while(1) {
+
+#ifdef UTHEAP
+      UTHeapGC();
+#endif
+
       my_usleep(999983); // just under a second
       time_t test_clk = UTClockSeconds();
       if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
@@ -1571,8 +1617,7 @@ extern "C" {
 	sp->DNSSD_ttl = 0;
 	// now make the requests
 	int num_servers = dnsSD(sp, myDnsCB, newSettings_dnsSD);
-	SEMLOCK_DO(sp->config_mut) {
-
+	SEMLOCK_DO(sp->sync) {
 	  // three cases here:
 	  // A) if(num_servers == -1) (i.e. query failed) then keep the current config
 	  // B) if(num_servers == 0) then stop monitoring
@@ -1648,7 +1693,7 @@ extern "C" {
 #define GETMYLIMIT(L) getMyLimit((L), STRINGIFY(L))
 #define SETMYLIMIT(L,V) setMyLimit((L), STRINGIFY(L), (V))
 
-#ifdef HSF_CAPABILITIES
+#ifdef HSP_CAPABILITIES
   static void logCapability(cap_t myCap, cap_flag_t flag) {
     cap_flag_value_t flag_effective, flag_permitted, flag_inheritable;
     if(cap_get_flag(myCap, flag, CAP_EFFECTIVE, &flag_effective) == -1 ||
@@ -1721,14 +1766,14 @@ extern "C" {
 
     cap_free(myCap);
   }
-#endif /*HSF_CAPABILITIES */
+#endif /*HSP_CAPABILITIES */
 
   static void drop_privileges(int requestMemLockBytes) {
     if(debug) myLog(LOG_INFO, "drop_priviliges: getuid=%d", getuid());
 
     if(getuid() != 0) return;
 
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
     /* Make certain capabilities inheritable.  CAP_SYS_PTRACE seems
      * be required just to access /proc/<nspid>/ns/net.  I found
      * some discussion of this here:
@@ -1772,7 +1817,7 @@ extern "C" {
       
     }
 
-#if defined(HSF_CUMULUS) || defined(HSF_DOCKER)
+#if defined(HSP_CUMULUS) || defined(HSP_DOCKER)
     // For now we have to retain root privileges on Cumulus Linux because
     // we need to open netfilter/ULOG and to run the portsamp program.
 
@@ -1807,9 +1852,9 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-#endif /* (not) HSF_CUMULUS */
+#endif /* (not) HSP_CUMULUS */
 
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
     // claim my inheritance
     passCapabilities(NO, desired_caps, 2);
 #endif
@@ -1830,6 +1875,157 @@ extern "C" {
   }
 
 /*_________________---------------------------__________________
+  _________________    packet/event thread    __________________
+  -----------------___________________________------------------
+*/
+
+#if (HSP_ULOG || HSP_NFLOG || HSP_JSON || HSP_PCAP)
+  
+  static void *runPacketLoop(void *magic) {
+    HSP *sp = (HSP *)magic;
+
+    // set the timeout so that if all is quiet we will still loop
+    // around and check for ticks/signals several times per second
+#define HSP_PACKET_SELECT_TIMEOUT_uS 200000
+    
+    fd_set readfds;
+
+    for(;;) {
+#ifdef UTHEAP      
+      UTHeapGC();
+#endif
+      FD_ZERO(&readfds);
+      int max_fd = 0;
+#ifdef HSP_ULOG
+      if(sp->ulog_soc > 0) {
+	if(sp->ulog_soc > max_fd) max_fd = sp->ulog_soc;
+	FD_SET(sp->ulog_soc, &readfds);
+      }
+#endif
+    
+#ifdef HSP_NFLOG
+      if(sp->nflog_soc > 0) {
+      if(sp->nflog_soc > max_fd) max_fd = sp->nflog_soc;
+      FD_SET(sp->nflog_soc, &readfds);
+    }
+#endif
+    
+#ifdef HSP_JSON
+      if(sp->json_soc > 0) {
+	if(sp->json_soc > max_fd) max_fd = sp->json_soc;
+	FD_SET(sp->json_soc, &readfds);
+      }
+      if(sp->json_soc6 > 0) {
+	if(sp->json_soc6 > max_fd) max_fd = sp->json_soc6;
+	FD_SET(sp->json_soc6, &readfds);
+      }
+      if(sp->json_fifo > 0) {
+	if(sp->json_fifo > max_fd) max_fd = sp->json_fifo;
+	FD_SET(sp->json_fifo, &readfds);
+      }
+#endif
+
+#ifdef HSP_PCAP
+      for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
+	if(bpfs->soc > 0) {
+	  if(bpfs->soc > max_fd) max_fd = bpfs->soc;
+	  FD_SET(bpfs->soc, &readfds);
+	}
+      }
+#endif
+      
+      if(!sp->configOK) {
+	// no config (may be temporary condition caused by DNS-SD),
+	// so disable the socket polling - just use select() to sleep
+	max_fd = 0;
+      }
+      struct timeval timeout;
+      timeout.tv_sec = 0;
+      timeout.tv_usec = HSP_PACKET_SELECT_TIMEOUT_uS;
+      int nfds = select(max_fd + 1,
+			&readfds,
+			(fd_set *)NULL,
+			(fd_set *)NULL,
+			&timeout);
+      // may return prematurely if a signal was caught, in which case nfds will be
+      // -1 and errno will be set to EINTR.  If we get any other error, abort.
+      if(nfds < 0 && errno != EINTR) {
+	myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      if(debug > 2 && nfds > 0) {
+	myLog(LOG_INFO, "select returned %d", nfds);
+      }
+      // may get here just because a signal was caught so these
+      // callbacks need to be non-blocking when they read from the socket
+#ifdef HSP_ULOG
+      if(sp->ulog_soc > 0 && FD_ISSET(sp->ulog_soc, &readfds)) {
+        int batch = readPackets_ulog(sp);
+        if(debug) {
+          if(debug > 2) myLog(LOG_INFO, "readPackets_ulog batch=%d", batch);
+          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_ulog got max batch (%d)", batch);
+        }
+      }
+#endif
+#ifdef HSP_NFLOG
+      if(sp->nflog_soc > 0 && FD_ISSET(sp->nflog_soc, &readfds)) {
+        int batch = readPackets_nflog(sp);
+        if(debug) {
+          if(debug > 2) myLog(LOG_INFO, "readPackets_nflog batch=%d", batch);
+          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_nflog got max batch (%d)", batch);
+	}
+      }
+#endif
+#ifdef HSP_JSON
+      if(sp->json_soc > 0 && FD_ISSET(sp->json_soc, &readfds)) {
+	readJSON(sp, sp->json_soc);
+      }
+      if(sp->json_soc6 > 0 && FD_ISSET(sp->json_soc6, &readfds)) {
+	readJSON(sp, sp->json_soc6);
+      }
+      if(sp->json_fifo > 0 && FD_ISSET(sp->json_fifo, &readfds)) {
+	readJSON(sp, sp->json_fifo);
+      }
+#endif
+
+#ifdef HSP_PCAP
+      for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
+	if(bpfs->soc > 0
+	   && FD_ISSET(bpfs->soc, &readfds)) {
+	  int batch = readPackets_pcap(sp, bpfs);
+	  if(debug) {
+	    if(debug > 2) myLog(LOG_INFO, "PCAP: readPackets batch=%d", batch);
+	    if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "PCAP: readPackets got max batch (%d)", batch);
+	  }
+	}
+      }
+#endif
+    }
+  }
+
+  static void launchPacketThread(HSP *sp) {
+    // launch packet thread, to ensure that any slow operations
+    // in the polling loop cannot stall the processing of packet
+    // samples (of which there can be 1000s/sec).
+    // Set a more conservative stacksize here - partly because
+    // we don't need more,  but mostly because Debian was refusing
+    // to create the thread - I guess because it was enough to
+    // blow through our mlockall() allocation.
+    // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, HSP_PACKET_STACKSIZE);
+    sp->packet_thread = my_calloc(sizeof(pthread_t));
+    int err = pthread_create(sp->packet_thread, &attr, runPacketLoop, sp);
+    if(err != 0) {
+      myLog(LOG_ERR, "pthread_create() failed: %s\n", strerror(err));
+      exit(EXIT_FAILURE);
+    }
+  }
+
+#endif /* (HSP_ULOG || HSP_NFLOG || HSP_JSON || HSP_PCAP) */
+
+/*_________________---------------------------__________________
   _________________         main              __________________
   -----------------___________________________------------------
 */
@@ -1837,10 +2033,9 @@ extern "C" {
   int main(int argc, char *argv[])
   {
     HSP *sp = &HSPSamplingProbe;
-    
-#if (HSF_ULOG || HSF_NFLOG || HSF_JSON)
-    fd_set readfds;
-    FD_ZERO(&readfds);
+
+#ifdef UTHEAP
+    UTHeapInit();
 #endif
 
     // open syslog
@@ -1948,17 +2143,17 @@ extern "C" {
       }
     }
 
-#ifdef HSF_NVML
+#ifdef HSP_NVML
     // NVIDIA shared library for interrogating GPU
     nvml_init(sp);
 #endif
     
-#ifdef HSF_XEN
+#ifdef HSP_XEN
     // open Xen handles while we still have root privileges
     openXenHandles(sp);
 #endif
     
-#ifdef HSF_VRT
+#ifdef HSP_VRT
     // open the libvirt connection
     int virErr = virInitialize();
     if(virErr != 0) {
@@ -1979,9 +2174,16 @@ extern "C" {
     // initialize the clock so we can detect second boundaries
     sp->clk = UTClockSeconds();
 
-    // semaphore to protect config shared with DNSSD thread
-    sp->config_mut = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(sp->config_mut, NULL);
+    // semaphore to protect config shared with DNSSD thread, and also
+    // to protect serialization of counter-samples and packet-samples
+    // since they come from different threads.
+    sp->sync = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp->sync, NULL);
+    sp->sync_receiver = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp->sync_receiver, NULL);
+
+    // poll actions array
+    sp->pollActions = UTArrayNew();
 
     // allocate device tables
     sp->adaptorsByName = UTHASH_NEW(SFLAdaptor, deviceName, YES);
@@ -1991,13 +2193,13 @@ extern "C" {
     sp->vmsByUUID = UTHASH_NEW(HSPVMState, uuid, NO);
     sp->vmsByDsIndex = UTHASH_NEW(HSPVMState, dsIndex, NO);
     
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
     sp->containers = UTHASH_NEW(HSPContainer, id, YES);
 #endif
     
     setState(sp, HSPSTATE_READCONFIG);
     
-    int configOK = NO;
+    sp->configOK = NO;
     while(sp->state != HSPSTATE_END) {
 
       switch(sp->state) {
@@ -2074,7 +2276,7 @@ extern "C" {
 	break;
 	
       case HSPSTATE_WAITCONFIG:
-	SEMLOCK_DO(sp->config_mut) {
+	SEMLOCK_DO(sp->sync) {
 	  if(sp->sFlow->sFlowSettings) {
 	    // we have a config - proceed
 	    // we must have an agentIP now, so we can use
@@ -2119,10 +2321,13 @@ extern "C" {
 	      configSwitchPorts(sp); // in readPackets.c
 #endif
 
-#ifdef HSF_XEN
+#ifdef HSP_XEN
 	      if(xen_compile_vif_regex(sp) == NO) {
 		exit(EXIT_FAILURE);
 	      }
+#endif
+#if (HSP_ULOG || HSP_NFLOG || HSP_JSON || HSP_PCAP)
+	      launchPacketThread(sp);
 #endif
 	      setState(sp, HSPSTATE_RUN);
 	    }
@@ -2140,7 +2345,7 @@ extern "C" {
 	      }
 	    }
 	  }
-	} // config_mut
+	} // sync
 	break;
 	
       case HSPSTATE_RUN:
@@ -2153,15 +2358,15 @@ extern "C" {
 	    sp->clk = test_clk - 1;
 	  }
 	  while(sp->clk < test_clk) {
-
+	    
 	    // this would be a good place to test the memory footprint and
 	    // bail out if it looks like we are leaking memory(?)
-
-	    SEMLOCK_DO(sp->config_mut) {
+	    
+	    SEMLOCK_DO(sp->sync) {
 	      // was the config turned off?
 	      // set configOK flag here while we have the semaphore
-	      configOK = (sp->sFlow->sFlowSettings != NULL);
-	      if(configOK) {
+	      sp->configOK = (sp->sFlow->sFlowSettings != NULL);
+	      if(sp->configOK) {
 		// did the polling interval change?  We have the semaphore
 		// here so we can just run along and tell everyone.
 		uint32_t piv = sp->sFlow->sFlowSettings->pollingInterval;
@@ -2178,10 +2383,12 @@ extern "C" {
 		  // polling schedule as their bond master.
 		  syncBondPolling(sp);
 		}
-		// clock-tick
-		tick(sp);
 	      }
-	    } // semaphore
+	    }
+	    if(sp->configOK) {
+	      // clock-tick - after relinquishing the semaphore
+	      tick(sp);
+	    }
 	    sp->clk++;
 	  }
 	}
@@ -2191,119 +2398,14 @@ extern "C" {
 	break;
       }
 
-      // set the timeout so that if all is quiet we will still loop
-      // around and check for ticks/signals several times per second
+#ifdef UTHEAP      
+      UTHeapGC();
+#endif
+
+      // set the timeout so that we will loop around and check
+      // for ticks/signals several times per second
 #define HSP_SELECT_TIMEOUT_uS 200000
-
-#if (HSF_ULOG || HSF_NFLOG || HSF_JSON)
-      int max_fd = 0;
-#ifdef HSF_ULOG
-      if(sp->ulog_soc > 0) {
-	if(sp->ulog_soc > max_fd) max_fd = sp->ulog_soc;
-	FD_SET(sp->ulog_soc, &readfds);
-      }
-#endif
-#ifdef HSF_NFLOG
-      if(sp->nflog_soc > 0) {
-	if(sp->nflog_soc > max_fd) max_fd = sp->nflog_soc;
-	FD_SET(sp->nflog_soc, &readfds);
-      }
-#endif
-#ifdef HSF_JSON
-      if(sp->json_soc > 0) {
-	if(sp->json_soc > max_fd) max_fd = sp->json_soc;
-	FD_SET(sp->json_soc, &readfds);
-      }
-      if(sp->json_soc6 > 0) {
-	if(sp->json_soc6 > max_fd) max_fd = sp->json_soc6;
-	FD_SET(sp->json_soc6, &readfds);
-      }
-      if(sp->json_fifo > 0) {
-	if(sp->json_fifo > max_fd) max_fd = sp->json_fifo;
-	FD_SET(sp->json_fifo, &readfds);
-      }
-#endif
-
-
-#ifdef HSF_PCAP
-      for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
-	if(bpfs->soc > 0) {
-	  if(bpfs->soc > max_fd) max_fd = bpfs->soc;
-	  FD_SET(bpfs->soc, &readfds);
-	}
-      }
-#endif
-      
-      if(!configOK) {
-	// no config (may be temporary condition caused by DNS-SD),
-	// so disable the socket polling - just use select() to sleep
-	max_fd = 0;
-      }
-      struct timeval timeout;
-      timeout.tv_sec = 0;
-      timeout.tv_usec = HSP_SELECT_TIMEOUT_uS;
-      int nfds = select(max_fd + 1,
-			&readfds,
-			(fd_set *)NULL,
-			(fd_set *)NULL,
-			&timeout);
-      // may return prematurely if a signal was caught, in which case nfds will be
-      // -1 and errno will be set to EINTR.  If we get any other error, abort.
-      if(nfds < 0 && errno != EINTR) {
-	myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      if(debug > 2 && nfds > 0) {
-	myLog(LOG_INFO, "select returned %d", nfds);
-      }
-      // may get here just because a signal was caught so these
-      // callbacks need to be non-blocking when they read from the socket
-#ifdef HSF_ULOG
-      if(sp->ulog_soc > 0 && FD_ISSET(sp->ulog_soc, &readfds)) {
-        int batch = readPackets_ulog(sp);
-        if(debug) {
-          if(debug > 2) myLog(LOG_INFO, "readPackets_ulog batch=%d", batch);
-          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_ulog got max batch (%d)", batch);
-        }
-      }
-#endif
-#ifdef HSF_NFLOG
-      if(sp->nflog_soc > 0 && FD_ISSET(sp->nflog_soc, &readfds)) {
-        int batch = readPackets_nflog(sp);
-        if(debug) {
-          if(debug > 2) myLog(LOG_INFO, "readPackets_nflog batch=%d", batch);
-          if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "readPackets_nflog got max batch (%d)", batch);
-	}
-      }
-#endif
-#ifdef HSF_JSON
-      if(sp->json_soc > 0 && FD_ISSET(sp->json_soc, &readfds)) {
-	readJSON(sp, sp->json_soc);
-      }
-      if(sp->json_soc6 > 0 && FD_ISSET(sp->json_soc6, &readfds)) {
-	readJSON(sp, sp->json_soc6);
-      }
-      if(sp->json_fifo > 0 && FD_ISSET(sp->json_fifo, &readfds)) {
-	readJSON(sp, sp->json_fifo);
-      }
-#endif
-
-#ifdef HSF_PCAP
-      for (BPFSoc *bpfs = sp->bpf_socs; bpfs; bpfs = bpfs->nxt) {
-	if(bpfs->soc > 0
-	   && FD_ISSET(bpfs->soc, &readfds)) {
-	  int batch = readPackets_pcap(sp, bpfs);
-	  if(debug) {
-	    if(debug > 2) myLog(LOG_INFO, "PCAP: readPackets batch=%d", batch);
-	    if(batch == HSP_READPACKET_BATCH) myLog(LOG_INFO, "PCAP: readPackets got max batch (%d)", batch);
-	  }
-	}
-      }
-#endif
-
-#else /* (HSF_ULOG || HSF_NFLOG || HSF_JSON) */
       my_usleep(HSP_SELECT_TIMEOUT_uS);
-#endif /* (HSF_ULOG || HSF_NFLOG || HSF_JSON) */
     }
 
     // get here if a signal kicks the state to HSPSTATE_END
@@ -2315,13 +2417,13 @@ extern "C" {
     closelog();
     myLog(LOG_INFO,"stopped");
     
-#ifdef HSF_XEN
+#ifdef HSP_XEN
     closeXenHandles(sp);
 #endif
-#ifdef HSF_VRT
+#ifdef HSP_VRT
     virConnectClose(sp->virConn);
 #endif
-#ifdef HSF_NVML
+#ifdef HSP_NVML
     nvml_stop(sp);
 #endif
 

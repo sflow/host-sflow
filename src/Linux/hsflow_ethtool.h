@@ -32,7 +32,7 @@ extern "C" {
   };
 #endif
 
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
   static const char *HSP_ethtool_peer_ifindex_names[] = {
     "peer_ifindex",
     NULL

@@ -25,7 +25,7 @@ ifeq ($(ULOG),)
 	ULOG=$(shell if test -r /usr/include/linux/netfilter_ipv4/ipt_ULOG.h; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(ULOG),yes)
-	CFLAGS += -DHSF_ULOG
+	CFLAGS += -DHSP_ULOG
 endif
 
 # if NFLOG is not set, assume it should be "yes" if the include file is present
@@ -34,9 +34,9 @@ ifeq ($(NFLOG),)
 	NFLOG=$(shell if test -r /usr/include/libnfnetlink/libnfnetlink.h; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(NFLOG),yes)
-#	CFLAGS += -I/usr/include/libnl3 -DHSF_NFLOG
+#	CFLAGS += -I/usr/include/libnl3 -DHSP_NFLOG
 #	LIBS += -lnl-3 -lnl-nf-3
-	CFLAGS += -I/usr/include/libnfnetlink -DHSF_NFLOG
+	CFLAGS += -I/usr/include/libnfnetlink -DHSP_NFLOG
 	LIBS += -lnfnetlink
 endif
 
@@ -51,7 +51,7 @@ endif
 # identifies switch ports for individual counter-export
 # and enables ULOG packet-sampling.
 ifeq ($(CUMULUS),yes)
-	CFLAGS += -DHSF_CUMULUS
+	CFLAGS += -DHSP_CUMULUS
 	WITH_SFLOWOVSD=no
 endif
 
@@ -62,7 +62,7 @@ ifeq ($(JSON),)
 endif
 ifeq ($(JSON),yes)
 	JSONDIR=../json
-	CFLAGS += -DHSF_JSON -I$(JSONDIR)
+	CFLAGS += -DHSP_JSON -I$(JSONDIR)
 	LIBS += $(JSONDIR)/libjson.a -lm
 endif
 
@@ -72,7 +72,7 @@ ifeq ($(RTMETRIC),)
 	RTMETRIC=yes
 endif
 ifeq ($(RTMETRIC),yes)
-	CFLAGS += -DHSF_RTMETRIC
+	CFLAGS += -DHSP_RTMETRIC
 endif
 
 # if PCAP is not set, assume it should be "yes" if the include file is present
@@ -81,7 +81,7 @@ ifeq ($(PCAP),)
 	PCAP=$(shell if test -r /usr/include/pcap.h; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(PCAP),yes)
-	CFLAGS += -DHSF_PCAP
+	CFLAGS += -DHSP_PCAP
 	LIBS += -lpcap
 endif
 
@@ -92,7 +92,7 @@ ifeq ($(DOCKER),)
 	DOCKER=$(shell if docker ps >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(DOCKER),yes)
-	CFLAGS += -DHSF_DOCKER -I$(JSONDIR)
+	CFLAGS += -DHSP_DOCKER -I$(JSONDIR)
 	LIBS += $(JSONDIR)/libjson.a -lm -lcap
 endif
 
@@ -104,7 +104,7 @@ ifeq ($(SYSTEM_SLICE),)
 	SYSTEM_SLICE=$(shell if test -r /sys/fs/cgroup/cpuacct/system.slice; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(SYSTEM_SLICE),yes)
-	CFLAGS += -DHSF_SYSTEM_SLICE
+	CFLAGS += -DHSP_SYSTEM_SLICE
 endif
 
 # if LIBVIRT is not set, then assume it should be "yes" if we find the library.
@@ -141,28 +141,28 @@ endif
 
 # translate the selection into compile flags
 ifeq ($(LIBVIRT),yes)
-	CFLAGS += -DHSF_VRT -I/usr/include/libvirt -I/usr/include/libxml2
+	CFLAGS += -DHSP_VRT -I/usr/include/libvirt -I/usr/include/libxml2
 	LIBS += -lvirt -lxml2
 endif
 
 ifeq ($(XEN_ROOT),)
 else
 	include $(XEN_ROOT)/tools/Rules.mk
-	CFLAGS += -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
+	CFLAGS += -DHSP_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
 	CFLAGS += -Wno-declaration-after-statement # turn off "mixed declarations and code" warning
 	LIBS += -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
 endif
 
 ifeq ($(XEN_DDK),yes)
-	CFLAGS += -DHSF_XEN
+	CFLAGS += -DHSP_XEN
 	LIBS += -lxenstore -lxenctrl
 endif
 
 
-# allow HSF_XEN_VBD_PATH to be overridden here.  For example: make HSF_XEN_VBD_PATH=/sys/devices
-ifeq ($(HSF_XEN_VBD_PATH),)
+# allow HSP_XEN_VBD_PATH to be overridden here.  For example: make HSP_XEN_VBD_PATH=/sys/devices
+ifeq ($(HSP_XEN_VBD_PATH),)
 else
-	CFLAGS += -DHSF_XEN_VBD_PATH=$(HSF_XEN_VBD_PATH)
+	CFLAGS += -DHSP_XEN_VBD_PATH=$(HSP_XEN_VBD_PATH)
 endif
 
 # xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
@@ -172,7 +172,7 @@ ifeq ($(XENSTORE_H),)
 	XENSTORE_H=$(shell if ls /usr/include/xenstore.h 2>&1 >/dev/null; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(XENSTORE_H),yes)
-	CFLAGS += -DHSF_XENSTORE_H
+	CFLAGS += -DHSP_XENSTORE_H
 endif
 
 # control how to read disk info from libvirt
@@ -190,7 +190,7 @@ ifeq ($(NVML),yes)
 	ifeq ($(NVML_HEADER_DIR),)
 		NVML_HEADER_DIR=/usr/include/nvml
 	endif
-	CFLAGS += -DHSF_NVML -I$(NVML_HEADER_DIR)
+	CFLAGS += -DHSP_NVML -I$(NVML_HEADER_DIR)
 	LIBS += -lnvidia-ml
 endif
 

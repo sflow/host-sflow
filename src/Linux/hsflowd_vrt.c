@@ -9,7 +9,7 @@ extern "C" {
 
 #include "hsflowd.h"
 
-#ifdef HSF_VRT
+#ifdef HSP_VRT
 
 
   static void agentCB_getCounters_VRT(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
@@ -164,12 +164,20 @@ extern "C" {
 	adaptorsElem.counterBlock.adaptors = state->interfaces;
 	SFLADD_ELEMENT(cs, &adaptorsElem);
       
-      
-	sfl_poller_writeCountersSample(poller, cs);
+	SEMLOCK_DO(sp->sync_receiver) {
+	  sfl_poller_writeCountersSample(poller, cs);
+	}
       
 	virDomainFree(domainPtr);
       }
     }
+  }
+
+  static void agentCB_getCounters_VRT_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters_VRT);
   }
 
   /*_________________---------------------------__________________
@@ -319,7 +327,7 @@ extern "C" {
       if(domainPtr) {
 	char uuid[16];
 	virDomainGetUUID(domainPtr, (u_char *)uuid);
-	HSPVMState *state = getVM(sp, uuid, VMTYPE_VRT, agentCB_getCounters_VRT);
+	HSPVMState *state = getVM(sp, uuid, VMTYPE_VRT, agentCB_getCounters_VRT_request);
 	state->marked = NO;
 	state->created = NO;
 	// remember the domId, which might have changed (if vm rebooted)
@@ -359,7 +367,7 @@ extern "C" {
     my_free(domainIds);
   }
 
-#endif /* HSF_VRT */
+#endif /* HSP_VRT */
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

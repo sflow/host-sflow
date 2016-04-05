@@ -10,9 +10,9 @@ extern "C" {
 #include "hsflowd.h"
   extern int debug;
 
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
 
-#define HSF_DOCKER_MAX_STATS_LINELEN 512
+#define HSP_DOCKER_MAX_STATS_LINELEN 512
 
 
   /*_________________---------------------------__________________
@@ -23,14 +23,14 @@ extern "C" {
   static int readCgroupCounters(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals, int multi) {
     int found = 0;
 
-    char statsFileName[HSF_DOCKER_MAX_FNAME_LEN+1];
-#ifdef HSF_SYSTEM_SLICE
-    snprintf(statsFileName, HSF_DOCKER_MAX_FNAME_LEN, "/sys/fs/cgroup/%s/system.slice/docker-%s.scope/%s",
+    char statsFileName[HSP_DOCKER_MAX_FNAME_LEN+1];
+#ifdef HSP_SYSTEM_SLICE
+    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, "/sys/fs/cgroup/%s/system.slice/docker-%s.scope/%s",
 	     cgroup,
 	     longId,
 	     fname);
 #else
-    snprintf(statsFileName, HSF_DOCKER_MAX_FNAME_LEN, "/sys/fs/cgroup/%s/docker/%s/%s",
+    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, "/sys/fs/cgroup/%s/docker/%s/%s",
 	     cgroup,
 	     longId,
 	     fname);
@@ -42,13 +42,13 @@ extern "C" {
       }
     }
     else {
-      char line[HSF_DOCKER_MAX_STATS_LINELEN];
-      char var[HSF_DOCKER_MAX_STATS_LINELEN];
+      char line[HSP_DOCKER_MAX_STATS_LINELEN];
+      char var[HSP_DOCKER_MAX_STATS_LINELEN];
       uint64_t val64;
       char *fmt = multi ?
 	"%*s %s %"SCNu64 :
 	"%s %"SCNu64 ;
-      while(fgets(line, HSF_DOCKER_MAX_STATS_LINELEN, statsFile)) {
+      while(fgets(line, HSP_DOCKER_MAX_STATS_LINELEN, statsFile)) {
 	if(found == nvals && !multi) break;
 	if(sscanf(line, fmt, var, &val64) == 2) {
 	  for(int ii = 0; ii < nvals; ii++) {
@@ -87,7 +87,7 @@ extern "C" {
     return readCgroupCounters(cgroup, longId, fname, nvals, nameVals, 1);
   }
 
-#endif /* HSF_DOCKER */
+#endif /* HSP_DOCKER */
 
 #if defined(__cplusplus)
 } /* extern "C" */

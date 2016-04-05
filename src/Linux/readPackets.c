@@ -11,7 +11,7 @@ extern "C" {
 
   extern int debug;
 
-#if (HSF_ULOG || HSF_NFLOG || HSF_PCAP)
+#if (HSP_ULOG || HSP_NFLOG || HSP_PCAP)
 
 
   /*_________________-----------------------------------__________________
@@ -19,7 +19,7 @@ extern "C" {
     -----------------___________________________________------------------
   */
 
-  void agentCB_getCounters_interface(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  static void agentCB_getCounters_interface(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
@@ -124,9 +124,18 @@ extern "C" {
 	}
 #endif
 	
-	sfl_poller_writeCountersSample(poller, cs);
+	SEMLOCK_DO(sp->sync_receiver) {
+	  sfl_poller_writeCountersSample(poller, cs);
+	}
       }
     }
+  }
+
+  static void agentCB_getCounters_interface_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters_interface);
   }
 
   /*_________________---------------------------__________________
@@ -144,13 +153,15 @@ extern "C" {
       uint32_t pollingInterval = sf->sFlowSettings ?
 	sf->sFlowSettings->pollingInterval :
 	SFL_DEFAULT_POLLING_INTERVAL;
-      adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface);
-      sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
-      sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
-      // remember the device name to make the lookups easier later.
-      // Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
-      // in case it gets freed at some point.  The device name is enough.
-      adaptorNIO->poller->userData = (void *)my_strdup(adaptor->deviceName);
+      SEMLOCK_DO(sp->sync) {
+	adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface_request);
+	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
+	sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
+	// remember the device name to make the lookups easier later.
+	// Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
+	// in case it gets freed at some point.  The device name is enough.
+	adaptorNIO->poller->userData = (void *)my_strdup(adaptor->deviceName);
+      }
     }
     return adaptorNIO->poller;
   }
@@ -168,9 +179,11 @@ extern "C" {
       SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
       HSPSFlow *sf = sp->sFlow;
       // add sampler
-      adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
-      sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
-      sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sf->sFlowSettings_file->headerBytes);
+      SEMLOCK_DO(sp->sync) {
+	adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
+	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
+	sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sf->sFlowSettings_file->headerBytes);
+      }
       // and make sure we have a poller too
       getPoller(sp, adaptor);
     }
@@ -281,7 +294,7 @@ extern "C" {
     SFLAdaptor *sampler_dev = ad_in ?: ad_out;
 
     // detect egress sampling
-#ifdef HSF_CUMULUS
+#ifdef HSP_CUMULUS
     // On Cumulus Linux the sampling direction is indicated in the low
     // bit of the pkt->hook field: 0==ingress,1==egress
     if(ad_out &&
@@ -386,7 +399,9 @@ extern "C" {
 	// drops against the point whose sampling-rate needs to be adjusted.
 	samplerNIO->netlink_drops += drops;
 	fs.drops = samplerNIO->netlink_drops;
-	sfl_sampler_writeFlowSample(sampler, &fs);
+	SEMLOCK_DO(sp->sync_receiver) {
+	  sfl_sampler_writeFlowSample(sampler, &fs);
+	}
       }
     }
   }
@@ -397,7 +412,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-#ifdef HSF_PCAP
+#ifdef HSP_PCAP
   // function of type pcap_handler
 
   void readPackets_pcap_cb(u_char *user, const struct pcap_pkthdr *hdr, const u_char *buf)
@@ -469,7 +484,7 @@ extern "C" {
 
 #endif
   
-#ifdef HSF_ULOG
+#ifdef HSP_ULOG
 
   int readPackets_ulog(HSP *sp)
   {
@@ -586,7 +601,7 @@ extern "C" {
 
 #endif
 
-#ifdef HSF_NFLOG
+#ifdef HSP_NFLOG
 
   int readPackets_nflog(HSP *sp)
   {
@@ -776,7 +791,7 @@ extern "C" {
   }
 
 
-#endif /* HSF_ULOG || HSF_NFLOG || HSF_PCAP */
+#endif /* HSP_ULOG || HSP_NFLOG || HSP_PCAP */
   
 #if defined(__cplusplus)
 } /* extern "C" */

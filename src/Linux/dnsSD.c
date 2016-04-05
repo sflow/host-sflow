@@ -12,8 +12,8 @@ extern "C" {
 
 extern int debug;
 
-#define HSF_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
-#define HSF_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
+#define HSP_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
+#define HSP_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
     
   /*________________---------------------------__________________
     ________________       dnsSD_Request       __________________
@@ -123,7 +123,7 @@ extern int debug;
 	  res_payload -= 6;
 	  
 	  // still got room for an FQDN?
-	  if((endp - x) < HSF_MIN_DNAME) {
+	  if((endp - x) < HSP_MIN_DNAME) {
 	    myLog(LOG_ERR,"no room for target name -- only %d bytes left", (endp - x));
 	    return -1;
 	  }
@@ -141,7 +141,7 @@ extern int debug;
 	    return -1;
 	  }
 	  
-	  if(ans_len < HSF_MIN_DNAME) {
+	  if(ans_len < HSP_MIN_DNAME) {
 	    // just ignore this one -- e.g. might just be "."
 	  }
 	  else {
@@ -170,7 +170,7 @@ extern int debug;
 	  // [TXT:res_len]
 
 	  // still got room for a text record?
-	  if((endp - x) < HSF_MIN_TXT) {
+	  if((endp - x) < HSP_MIN_TXT) {
 	    myLog(LOG_ERR,"no room for text record -- only %d bytes left", (endp - x));
 	    return -1;
 	  }

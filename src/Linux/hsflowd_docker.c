@@ -10,7 +10,7 @@ extern "C" {
 #include "hsflowd.h"
 #include "cpu_utils.h"
 
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
 
   static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors, int capacity)
   {
@@ -35,7 +35,7 @@ extern "C" {
     return peerAdaptors->num_adaptors;
   }
 
-  void agentCB_getCounters_DOCKER(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  static void agentCB_getCounters_DOCKER(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     HSP *sp = (HSP *)poller->magic;
     HSPVMState *state = (HSPVMState *)poller->userData;
@@ -56,7 +56,7 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = my_strnequal(container->hostname, container->id, HSF_DOCKER_SHORTID_LEN) ? container->name : container->hostname;
+    char *hname = my_strnequal(container->hostname, container->id, HSP_DOCKER_SHORTID_LEN) ? container->name : container->hostname;
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, container->uuid, 16);
@@ -179,8 +179,17 @@ extern "C" {
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
     adaptorsElem.counterBlock.adaptors = state->interfaces;
     SFLADD_ELEMENT(cs, &adaptorsElem);
-    sfl_poller_writeCountersSample(poller, cs);
+    SEMLOCK_DO(sp->sync_receiver) {
+      sfl_poller_writeCountersSample(poller, cs);
+    }
   }    
+
+  static void agentCB_getCounters_DOCKER_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters_DOCKER);
+  }
   
   static HSPContainer *getContainer(HSP *sp, char *id, int create) {
     if(id == NULL) return NULL;
@@ -194,7 +203,7 @@ extern "C" {
       // add to collection
       UTHashAdd(sp->containers, container, NO);
       // point up to vm struct - creating if necessary
-      container->vm = getVM(sp, container->uuid, VMTYPE_DOCKER, agentCB_getCounters_DOCKER);
+      container->vm = getVM(sp, container->uuid, VMTYPE_DOCKER, agentCB_getCounters_DOCKER_request);
       // add container pointer to vm
       container->vm->container = container;
     }
@@ -211,7 +220,7 @@ extern "C" {
 
   static int dockerContainerCB(void *magic, char *line) {
     HSP *sp = (HSP *)magic;
-    char id[HSF_DOCKER_MAX_LINELEN];
+    char id[HSP_DOCKER_MAX_LINELEN];
     if(sscanf(line, "%s\n", id) == 1) {
       getContainer(sp, id, YES);
     }
@@ -225,97 +234,103 @@ extern "C" {
     return YES;
   }
 
-  /*_________________---------------------------__________________
-    _________________    configVMs              __________________
-    -----------------___________________________------------------
-  */
+  void dockerInspectVMs(HSP *sp) {
+    char dockerLine[HSP_DOCKER_MAX_LINELEN];
+    UTStringArray *dockerInspect = strArrayNew();
+    strArrayAdd(dockerInspect, HSP_DOCKER_CMD);
+    strArrayAdd(dockerInspect, "inspect");
+    HSPContainer *container;
+    UTHASH_WALK(sp->containers, container) {
+      // mark for removal, in case it is no longer current
+      container->marked = YES;
+      // and add id to command line
+      strArrayAdd(dockerInspect, container->id);
+    }
+    strArrayAdd(dockerInspect, NULL);
+    UTStrBuf *inspectBuf = UTStrBuf_new(1024);
+    int inspectOK = myExec(inspectBuf,
+			   strArray(dockerInspect),
+			   dockerInspectCB,
+			   dockerLine,
+			   HSP_DOCKER_MAX_LINELEN,
+			   NULL);
+    strArrayFree(dockerInspect);
+    char *ibuf = UTStrBuf_unwrap(inspectBuf);
+    if(inspectOK) {
+      // call was sucessful, so now we should have JSON to parse
+      cJSON *jtop = cJSON_Parse(ibuf);
+      if(jtop) {
+	// top-level should be array
+	int nc = cJSON_GetArraySize(jtop);
+	if(debug && nc != sp->containers->entries) {
+	  // cross-check
+	  myLog(LOG_INFO, "warning docker-ps returned %u containers but docker-inspect returned %u", sp->containers->entries, nc);
+	}
+	for(int ii = 0; ii < nc; ii++) {
+	  cJSON *jcont = cJSON_GetArrayItem(jtop, ii);
+	  if(jcont) {
 
-  void configVMs_DOCKER(HSP *sp) {
-    static char *dockerPS[] = { HSF_DOCKER_CMD, "ps", "-q", "--no-trunc=true", NULL };
-    char dockerLine[HSF_DOCKER_MAX_LINELEN];
-    if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSF_DOCKER_MAX_LINELEN, NULL)) {
-      // successful, now gather data for each one
-      UTStringArray *dockerInspect = strArrayNew();
-      strArrayAdd(dockerInspect, HSF_DOCKER_CMD);
-      strArrayAdd(dockerInspect, "inspect");
-      HSPContainer *container;
-      UTHASH_WALK(sp->containers, container) {
-	// mark for removal, in case it is no longer current
-	container->marked = YES;
-	// and add id to command line
-	strArrayAdd(dockerInspect, container->id);
-      }
-      strArrayAdd(dockerInspect, NULL);
-      UTStrBuf *inspectBuf = UTStrBuf_new(1024);
-      int inspectOK = myExec(inspectBuf,
-			     strArray(dockerInspect),
-			     dockerInspectCB,
-			     dockerLine,
-			     HSF_DOCKER_MAX_LINELEN,
-			     NULL);
-      strArrayFree(dockerInspect);
-      char *ibuf = UTStrBuf_unwrap(inspectBuf);
-      if(inspectOK) {
-	// call was sucessful, so now we should have JSON to parse
-	cJSON *jtop = cJSON_Parse(ibuf);
-	if(jtop) {
-	  // top-level should be array
-	  int nc = cJSON_GetArraySize(jtop);
-	  if(debug && nc != sp->containers->entries) {
-	    // cross-check
-	    myLog(LOG_INFO, "warning docker-ps returned %u containers but docker-inspect returned %u", sp->containers->entries, nc);
-	  }
-	  for(int ii = 0; ii < nc; ii++) {
-	    cJSON *jcont = cJSON_GetArrayItem(jtop, ii);
-	    if(jcont) {
-
-	      cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
-	      if(jid) {
-		if(my_strlen(jid->valuestring) >= HSF_DOCKER_SHORTID_LEN) {
-		  HSPContainer *container = getContainer(sp, jid->valuestring, NO);
-		  if(container) {
-		    cJSON *jname = cJSON_GetObjectItem(jcont, "Name");
-		    if(my_strequal(jname->valuestring, container->name) == NO) {
-		      if(container->name) my_free(container->name);
-		      container->name = my_strdup(jname->valuestring);
+	    cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
+	    if(jid) {
+	      if(my_strlen(jid->valuestring) >= HSP_DOCKER_SHORTID_LEN) {
+		HSPContainer *container = getContainer(sp, jid->valuestring, NO);
+		if(container) {
+		  cJSON *jname = cJSON_GetObjectItem(jcont, "Name");
+		  if(my_strequal(jname->valuestring, container->name) == NO) {
+		    if(container->name) my_free(container->name);
+		    container->name = my_strdup(jname->valuestring);
+		  }
+		  cJSON *jstate = cJSON_GetObjectItem(jcont, "State");
+		  if(jstate) {
+		    cJSON *jpid = cJSON_GetObjectItem(jstate, "Pid");
+		    if(jpid) {
+		      container->pid = (pid_t)jpid->valueint;
 		    }
-		    cJSON *jstate = cJSON_GetObjectItem(jcont, "State");
-		    if(jstate) {
-		      cJSON *jpid = cJSON_GetObjectItem(jstate, "Pid");
-		      if(jpid) {
-			container->pid = (pid_t)jpid->valueint;
-		      }
-		      cJSON *jrun = cJSON_GetObjectItem(jstate, "Running");
-		      if(jrun) {
-			container->running = (jrun->type == cJSON_True);
-			if(container->running) {
-			  // Clear the mark - this container is still current
-			  container->marked = NO;
-			}
+		    cJSON *jrun = cJSON_GetObjectItem(jstate, "Running");
+		    if(jrun) {
+		      container->running = (jrun->type == cJSON_True);
+		      if(container->running) {
+			// Clear the mark - this container is still current
+			container->marked = NO;
 		      }
 		    }
-		    cJSON *jconfig = cJSON_GetObjectItem(jcont, "Config");
-		    if(jconfig) {
-		      cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname");
-		      if(jhn) {
-			if(container->hostname) my_free(container->hostname);
-			container->hostname = my_strdup(jhn->valuestring);
-		      }
-		      // cJSON *jdn = cJSON_GetObjectItem(jconfig, "Domainname");
-		      cJSON *jmem = cJSON_GetObjectItem(jconfig, "Memory");
-		      if(jmem) {
-			container->memoryLimit = (uint64_t)jmem->valuedouble;
-		      }
+		  }
+		  cJSON *jconfig = cJSON_GetObjectItem(jcont, "Config");
+		  if(jconfig) {
+		    cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname");
+		    if(jhn) {
+		      if(container->hostname) my_free(container->hostname);
+		      container->hostname = my_strdup(jhn->valuestring);
+		    }
+		    // cJSON *jdn = cJSON_GetObjectItem(jconfig, "Domainname");
+		    cJSON *jmem = cJSON_GetObjectItem(jconfig, "Memory");
+		    if(jmem) {
+		      container->memoryLimit = (uint64_t)jmem->valuedouble;
 		    }
 		  }
 		}
 	      }
 	    }
 	  }
-	  cJSON_Delete(jtop);
 	}
+	cJSON_Delete(jtop);
       }
-      my_free(ibuf);
+    }
+    my_free(ibuf);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    configVMs              __________________
+    -----------------___________________________------------------
+  */
+
+  void configVMs_DOCKER(HSP *sp) {
+    static char *dockerPS[] = { HSP_DOCKER_CMD, "ps", "-q", "--no-trunc=true", NULL };
+    char dockerLine[HSP_DOCKER_MAX_LINELEN];
+    if(myExec(sp, dockerPS, dockerContainerCB, dockerLine, HSP_DOCKER_MAX_LINELEN, NULL)) {
+      // successful, now gather data for each one
+      if(sp->containers->entries)
+	dockerInspectVMs(sp);
     }
     
     HSPContainer *container;
@@ -348,7 +363,7 @@ extern "C" {
     }
   }
 
-#endif /* HSF_DOCKER */
+#endif /* HSP_DOCKER */
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

@@ -201,7 +201,7 @@ approach seemed more stable and portable.
     }
   }
 
-#if (HSP_ETHTOOL_STATS || HSF_DOCKER)
+#if (HSP_ETHTOOL_STATS || HSP_DOCKER)
 
 /*________________---------------------------__________________
   ________________  staticStringsIndexOf     __________________
@@ -248,7 +248,7 @@ approach seemed more stable and portable.
     return 0;
   }
 
-#endif /* (HSP_ETHTOOL_STATS || HSF_DOCKER) */
+#endif /* (HSP_ETHTOOL_STATS || HSP_DOCKER) */
 
 
   static int read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
@@ -276,7 +276,7 @@ approach seemed more stable and portable.
 	adaptorNIO->devType = HSPDEV_OTHER;
       
       // optical data
-#ifdef HSF_TEST_QSFP
+#ifdef HSP_TEST_QSFP
       adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
       adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
       adaptorNIO->modinfo_tested = YES;
@@ -337,7 +337,7 @@ approach seemed more stable and portable.
 	}
 	adaptor->ifSpeed = ifSpeed_bps;
       }
-#if (HSP_ETHTOOL_STATS || HSF_DOCKER)
+#if (HSP_ETHTOOL_STATS || HSP_DOCKER)
       // see if the ethtool stats block can give us multicast/broadcast counters too
       HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       adaptorNIO->et_nfound=0;
@@ -377,7 +377,7 @@ approach seemed more stable and portable.
 	      adaptorNIO->et_nfound++;
 	    }
 #endif
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
 	    if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
 	      // Now go ahead and make the call to get the peer_ifindex. This should
 	      // work for veth pairs. If the container's device is a macvlan then it's
@@ -626,7 +626,7 @@ approach seemed more stable and portable.
   return sp->adaptorsByName->entries;
 }
 
-#ifdef HSF_DOCKER
+#ifdef HSP_DOCKER
 
 /*________________---------------------------__________________
   ________________   containerLinkCB         __________________
@@ -638,8 +638,8 @@ VNIC: <ifindex> <device> <mac>
 
   static int containerLinkCB(HSP *sp, HSPContainer *container, char *line) {
     if(debug) myLog(LOG_INFO, "containerLinkCB: line=<%s>", line);
-    char deviceName[HSF_DOCKER_MAX_LINELEN];
-    char macStr[HSF_DOCKER_MAX_LINELEN];
+    char deviceName[HSP_DOCKER_MAX_LINELEN];
+    char macStr[HSP_DOCKER_MAX_LINELEN];
     uint32_t ifIndex;
     if(sscanf(line, "VNIC: %u %s %s", &ifIndex, deviceName, macStr) == 3) {
       u_char mac[6];
@@ -702,8 +702,8 @@ VNIC: <ifindex> <device> <mac>
       close(pfd[1]);
       
       // open /proc/<nspid>/ns/net
-      char topath[HSF_DOCKER_MAX_FNAME_LEN+1];
-      snprintf(topath, HSF_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
+      char topath[HSP_DOCKER_MAX_FNAME_LEN+1];
+      snprintf(topath, HSP_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
       int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
       if(nsfd < 0) {
 	fprintf(stderr, "cannot open %s : %s", topath, strerror(errno));

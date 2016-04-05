@@ -450,7 +450,7 @@ extern "C" {
     eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8436_LEN);
     eeprom->cmd = ETHTOOL_GMODULEEEPROM;
     eeprom->len = ETH_MODULE_SFF_8436_LEN;
-#ifdef HSF_TEST_QSFP
+#ifdef HSP_TEST_QSFP
     int bytes = hexToBinary((u_char *)
 			    "0d-00-02-00-00-00-00-00-00-00-00-00-00-00-00-00"
 			    "00-00-00-00-00-00-1b-10-00-00-7f-92-00-00-00-00"
