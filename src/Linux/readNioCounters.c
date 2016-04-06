@@ -410,6 +410,7 @@ extern "C" {
     nio->sfp.module_temperature = (temperature * 1000); // mC
     nio->sfp.num_lanes = num_lanes;
     SFLLane *lane = &(nio->sfp.lanes[0]);
+    lane->lane_index = 1;
     lane->tx_bias_current = (bias_current * 2); // uA
     lane->tx_power = (tx_power / 10); // uW
     lane->tx_power_min = (tx_power_min / 10); // uW
