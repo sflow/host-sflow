@@ -349,7 +349,7 @@ extern "C" {
       goto out;
     }
     
-    uint32_t num_lasers = 1;
+    uint32_t num_lanes = 1;
     uint16_t wavelength=0;
     double temperature, voltage, bias_current;
     double tx_power, tx_power_max, tx_power_min;
@@ -403,35 +403,36 @@ extern "C" {
     }
 	  
     // populate sFlow structure
-    nio->sfp.lasers = (SFLLaser *)UTHeapQReAlloc(nio->sfp.lasers, sizeof(SFLLaser) * num_lasers);
+    nio->sfp.lanes = (SFLLane *)UTHeapQReAlloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
     nio->sfp.module_id = adaptor->ifIndex;
+    nio->sfp.module_total_lanes = num_lanes;
     nio->sfp.module_supply_voltage = (voltage / 10); // mV
     nio->sfp.module_temperature = (temperature * 1000); // mC
-    nio->sfp.num_lasers = num_lasers;
-    SFLLaser *laser = &(nio->sfp.lasers[0]);
-    laser->tx_bias_current = (bias_current * 2); // uA
-    laser->tx_power = (tx_power / 10); // uW
-    laser->tx_power_min = (tx_power_min / 10); // uW
-    laser->tx_power_max = (tx_power_max / 10); // uW
-    laser->tx_wavelength = wavelength;
-    laser->rx_power = (rx_power / 10); // uW
-    laser->rx_power_min = (rx_power_min / 10); // uW
-    laser->rx_power_max = (rx_power_max / 10); // uW
-    laser->rx_wavelength = wavelength; // same as tx_wavelength
+    nio->sfp.num_lanes = num_lanes;
+    SFLLane *lane = &(nio->sfp.lanes[0]);
+    lane->tx_bias_current = (bias_current * 2); // uA
+    lane->tx_power = (tx_power / 10); // uW
+    lane->tx_power_min = (tx_power_min / 10); // uW
+    lane->tx_power_max = (tx_power_max / 10); // uW
+    lane->tx_wavelength = wavelength;
+    lane->rx_power = (rx_power / 10); // uW
+    lane->rx_power_min = (rx_power_min / 10); // uW
+    lane->rx_power_max = (rx_power_max / 10); // uW
+    lane->rx_wavelength = wavelength; // same as tx_wavelength
 	  
     if(debug) {
       myLog(LOG_INFO, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
-	    laser->tx_wavelength,
+	    lane->tx_wavelength,
 	    nio->sfp.module_temperature,
 	    nio->sfp.module_supply_voltage,
-	    laser->tx_bias_current,
-	    laser->tx_power,
-	    laser->tx_power_min,
-	    laser->tx_power_max,
-	    laser->rx_power,
-	    laser->rx_power_min,
-	    laser->rx_power_max);
+	    lane->tx_bias_current,
+	    lane->tx_power,
+	    lane->tx_power_min,
+	    lane->tx_power_max,
+	    lane->rx_power,
+	    lane->rx_power_min,
+	    lane->rx_power_max);
     }
 	  
   out:
@@ -510,7 +511,7 @@ extern "C" {
       goto out;
     }
     
-    uint32_t num_lasers = 4;
+    uint32_t num_lanes = 4;
     uint16_t wavelength=0;
     double temperature, voltage, bias_current[4];
     double rx_power[4], rx_power_max, rx_power_min;
@@ -563,7 +564,7 @@ extern "C" {
     voltage = ntohs(eew[13]);
 	  
     // channel stats
-    for (int ch=0; ch < num_lasers; ch++) {
+    for (int ch=0; ch < num_lanes; ch++) {
       rx_power[ch] = ntohs(eew[17 + ch]);
       bias_current[ch] = ntohs(eew[21 + ch]);
     }
@@ -573,35 +574,37 @@ extern "C" {
     rx_power_min = ntohs(eew[256 + 25]);
 	  
     // populate sFlow structure
-    nio->sfp.lasers = (SFLLaser *)UTHeapQReAlloc(nio->sfp.lasers, sizeof(SFLLaser) * num_lasers);
+    nio->sfp.lanes = (SFLLane *)UTHeapQReAlloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
     nio->sfp.module_id = adaptor->ifIndex;
+    nio->sfp.module_total_lanes = num_lanes;
     nio->sfp.module_supply_voltage = (voltage / 10); // mV
     nio->sfp.module_temperature = (temperature * 1000); // mC
-    nio->sfp.num_lasers = num_lasers;
+    nio->sfp.num_lanes = num_lanes;
     
-    for (int ch=0; ch < num_lasers; ch++) {
-      SFLLaser *laser = &(nio->sfp.lasers[ch]);
-      laser->tx_bias_current = (bias_current[ch] * 2); // uA
-      laser->tx_wavelength = wavelength;
-      laser->rx_power = (rx_power[ch] / 10); // uW
-      laser->rx_power_min = (rx_power_min / 10); // uW
-      laser->rx_power_max = (rx_power_max / 10); // uW
-      laser->rx_wavelength = wavelength; // same as tx_wavelength
+    for (int ch=0; ch < num_lanes; ch++) {
+      SFLLane *lane = &(nio->sfp.lanes[ch]);
+      lane->lane_index = (ch + 1);
+      lane->tx_bias_current = (bias_current[ch] * 2); // uA
+      lane->tx_wavelength = wavelength;
+      lane->rx_power = (rx_power[ch] / 10); // uW
+      lane->rx_power_min = (rx_power_min / 10); // uW
+      lane->rx_power_max = (rx_power_max / 10); // uW
+      lane->rx_wavelength = wavelength; // same as tx_wavelength
 	  
       if(debug) {
 	myLog(LOG_INFO, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	      adaptor->deviceName,
 	      ch,
-	      laser->tx_wavelength,
+	      lane->tx_wavelength,
 	      nio->sfp.module_temperature,
 	      nio->sfp.module_supply_voltage,
-	      laser->tx_bias_current,
-	      laser->tx_power,
-	      laser->tx_power_min,
-	      laser->tx_power_max,
-	      laser->rx_power,
-	      laser->rx_power_min,
-	      laser->rx_power_max);
+	      lane->tx_bias_current,
+	      lane->tx_power,
+	      lane->tx_power_min,
+	      lane->tx_power_max,
+	      lane->rx_power,
+	      lane->rx_power_min,
+	      lane->rx_power_max);
       }
     }
 	  
@@ -723,10 +726,10 @@ extern "C" {
 #ifdef HSP_OPTICAL_STATS
 	    if(filter) {
 	      // If we are refreshing stats for an individual device, then
-	      // check for SFP (laser) stats too. This operation can be slow so
+	      // check for SFP (lane) stats too. This operation can be slow so
 	      // it's important to avoid doing it when we are refreshing
 	      // counters for all interfaces for host-sflow network totals.
-	      // Since the host-sflow network totals do not include laser
+	      // Since the host-sflow network totals do not include optical
 	      // stats,  this is not a problem.
 	      switch(niostate->modinfo_type) {
 	      case ETH_MODULE_SFF_8472: sff8472_read(adaptor, &ifr, fd); break;

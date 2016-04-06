@@ -117,7 +117,7 @@ extern "C" {
 #ifdef HSP_ETHTOOL_STATS
 	// possibly include SFP struct with optical gauges
 	SFLCounters_sample_element sfp_elem = { 0 };
-	if(adaptorNIO->sfp.num_lasers) {
+	if(adaptorNIO->sfp.num_lanes) {
 	  sfp_elem.tag = SFLCOUNTERS_SFP;
 	  sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
 	  SFLADD_ELEMENT(cs, &sfp_elem);

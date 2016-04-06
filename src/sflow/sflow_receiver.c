@@ -582,29 +582,31 @@ static uint32_t appWorkersEncodingLength(SFLAPPWorkers *appworkers) {
 
 static uint32_t sfpEncodingLength(SFLSFP_counters *sfp) {
   uint32_t elemSiz = 0;
-  elemSiz += 12; // id, voltage, temp
-  elemSiz += 4; // num_lasers
-  elemSiz += (sfp->num_lasers * XDRSIZ_LASER_COUNTERS);
+  elemSiz += 16; // id, total_lanes, voltage, temp
+  elemSiz += 4; // num_lanes
+  elemSiz += (sfp->num_lanes * XDRSIZ_LANE_COUNTERS);
   return elemSiz;
 }
 
 static void putSFP(SFLReceiver *receiver, SFLSFP_counters *sfp) {
   uint32_t ii;
   putNet32(receiver, sfp->module_id);
+  putNet32(receiver, sfp->module_total_lanes);
   putNet32(receiver, sfp->module_supply_voltage);
   putNet32(receiver, sfp->module_temperature);
-  putNet32(receiver, sfp->num_lasers);
-  for(ii = 0; ii < sfp->num_lasers; ii++) {
-    SFLLaser *laser = &(sfp->lasers[ii]);
-    putNet32(receiver, laser->tx_bias_current);
-    putNet32(receiver, laser->tx_power);
-    putNet32(receiver, laser->tx_power_min);
-    putNet32(receiver, laser->tx_power_max);
-    putNet32(receiver, laser->tx_wavelength);
-    putNet32(receiver, laser->rx_power);
-    putNet32(receiver, laser->rx_power_min);
-    putNet32(receiver, laser->rx_power_max);
-    putNet32(receiver, laser->rx_wavelength);
+  putNet32(receiver, sfp->num_lanes);
+  for(ii = 0; ii < sfp->num_lanes; ii++) {
+    SFLLane *lane = &(sfp->lanes[ii]);
+    putNet32(receiver, lane->lane_index);
+    putNet32(receiver, lane->tx_bias_current);
+    putNet32(receiver, lane->tx_power);
+    putNet32(receiver, lane->tx_power_min);
+    putNet32(receiver, lane->tx_power_max);
+    putNet32(receiver, lane->tx_wavelength);
+    putNet32(receiver, lane->rx_power);
+    putNet32(receiver, lane->rx_power_min);
+    putNet32(receiver, lane->rx_power_max);
+    putNet32(receiver, lane->rx_wavelength);
   }
 }
  

@@ -1101,6 +1101,7 @@ typedef struct {
 /* opaque = counter_data; enterprise = 0; format = 10 */
 
 typedef struct {
+  uint32_t lane_index;      /* index of lane in module - starting from 1 */
   uint32_t tx_bias_current; /* microamps */
   uint32_t tx_power;        /* microwatts */
   uint32_t tx_power_min;    /* microwatts */
@@ -1110,16 +1111,17 @@ typedef struct {
   uint32_t rx_power_min;    /* microwatts */
   uint32_t rx_power_max;    /* microwatts */
   uint32_t rx_wavelength;   /* nanometers */
-} SFLLaser;
+} SFLLane;
 
-#define XDRSIZ_LASER_COUNTERS 36
+#define XDRSIZ_LANE_COUNTERS 40
 
 typedef struct {
   uint32_t module_id;
+  uint32_t module_total_lanes; /* total lanes in module */
   uint32_t module_supply_voltage; /* millivolts */
   int32_t module_temperature; /* signed - in oC / 1000 */
-  uint32_t num_lasers;
-  SFLLaser *lasers;
+  uint32_t num_lanes; /* number of active lane structs to come */
+  SFLLane *lanes;
 } SFLSFP_counters;
   
 /* Counters data */
