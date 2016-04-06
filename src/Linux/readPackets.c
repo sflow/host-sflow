@@ -153,7 +153,7 @@ extern "C" {
       uint32_t pollingInterval = sf->sFlowSettings ?
 	sf->sFlowSettings->pollingInterval :
 	SFL_DEFAULT_POLLING_INTERVAL;
-      SEMLOCK_DO(sp->sync) {
+      SEMLOCK_DO(sp->sync_agent) {
 	adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface_request);
 	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
 	sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
@@ -179,7 +179,7 @@ extern "C" {
       SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
       HSPSFlow *sf = sp->sFlow;
       // add sampler
-      SEMLOCK_DO(sp->sync) {
+      SEMLOCK_DO(sp->sync_agent) {
 	adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
 	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
 	sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sf->sFlowSettings_file->headerBytes);

@@ -134,7 +134,7 @@ extern "C" {
     // before we allocate anything, make sure there isn't a clash on servicePort
     if(servicePort) {
       SFLPoller *poller = NULL;
-      SEMLOCK_DO(sp->sync) {
+      SEMLOCK_DO(sp->sync_agent) {
 	poller = sfl_agent_getPoller(sp->sFlow->agent, &dsi);
       }
       if(poller) {
@@ -158,7 +158,7 @@ extern "C" {
     aa->settings_revisionNo = sp->sFlow->revisionNo;
     lookupApplicationSettings(sp->sFlow->sFlowSettings, "app", application, &sampling_n, &polling_secs);
     // poller
-    SEMLOCK_DO(sp->sync) {
+    SEMLOCK_DO(sp->sync_agent) {
       aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, agentCB_getCounters_request);
       sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
       sfl_poller_set_sFlowCpReceiver(aa->poller, HSP_SFLOW_RECEIVER_INDEX);
@@ -173,7 +173,7 @@ extern "C" {
     aa->json_counters = YES;
     aa->last_json_counters = sp->clk;
     // sampler
-    SEMLOCK_DO(sp->sync) {
+    SEMLOCK_DO(sp->sync_agent) {
       aa->sampler = sfl_agent_addSampler(sp->sFlow->agent, &dsi);
       sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
       sfl_sampler_set_sFlowFsReceiver(aa->sampler, HSP_SFLOW_RECEIVER_INDEX);
@@ -279,7 +279,7 @@ extern "C" {
 	    if(prev) prev->ht_nxt = next_aa;
 	    else sp->applicationHT[bkt] = next_aa;
 	    // remove sampler and poller
-	    SEMLOCK_DO(sp->sync) {
+	    SEMLOCK_DO(sp->sync_agent) {
 	      sfl_agent_removeSampler(sp->sFlow->agent, &aa->sampler->dsi);
 	      sfl_agent_removePoller(sp->sFlow->agent, &aa->poller->dsi);
 	    }

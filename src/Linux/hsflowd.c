@@ -435,7 +435,7 @@ extern "C" {
 	SFLDataSource_instance dsi;
 	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
 	SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, vm->dsIndex, 0);
-	SEMLOCK_DO(sp->sync) {
+	SEMLOCK_DO(sp->sync_agent) {
 	  vm->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, getCountersFn);
 	  vm->poller->userData = vm;
 	  sfl_poller_set_sFlowCpInterval(vm->poller, sp->sFlow->sFlowSettings->pollingInterval);
@@ -466,7 +466,7 @@ extern "C" {
     }
     if(vm->poller) {
       vm->poller->userData = NULL;
-      SEMLOCK_DO(sp->sync) {
+      SEMLOCK_DO(sp->sync_agent) {
 	sfl_agent_removePoller(sp->sFlow->agent, &vm->poller->dsi);
       }
     }
@@ -561,7 +561,7 @@ extern "C" {
     // if and when it is required.  Same goes for the
     // sync_receiver lock,  which is needed when the final
     // counter sample is submitted for XDR serialization.
-    SEMLOCK_DO(sp->sync) {
+    SEMLOCK_DO(sp->sync_agent) {
       sfl_agent_tick(sp->sFlow->agent, sp->clk);
     }
     // We can only get away with this scheme because the poller
@@ -957,7 +957,8 @@ extern "C" {
     _________________         initAgent         __________________
     -----------------___________________________------------------
 
-    called with sp->sync locked
+    sync_config held here, and packet-thread not started yet,  so no
+    need to take extra locks while we set this agent up.
   */
   
   static int initAgent(HSP *sp)
@@ -1617,7 +1618,7 @@ extern "C" {
 	sp->DNSSD_ttl = 0;
 	// now make the requests
 	int num_servers = dnsSD(sp, myDnsCB, newSettings_dnsSD);
-	SEMLOCK_DO(sp->sync) {
+	SEMLOCK_DO(sp->sync_config) {
 	  // three cases here:
 	  // A) if(num_servers == -1) (i.e. query failed) then keep the current config
 	  // B) if(num_servers == 0) then stop monitoring
@@ -2174,11 +2175,13 @@ extern "C" {
     // initialize the clock so we can detect second boundaries
     sp->clk = UTClockSeconds();
 
-    // semaphore to protect config shared with DNSSD thread, and also
-    // to protect serialization of counter-samples and packet-samples
-    // since they come from different threads.
-    sp->sync = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(sp->sync, NULL);
+    // semaphore to protect config shared with DNSSD thread,
+    sp->sync_config = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp->sync_config, NULL);
+    // semaphore to protect structure of sFlow agent (sampler and poller lists).
+    sp->sync_agent = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp->sync_agent, NULL);
+    // semaphore to protect XDR datagram encoding (receiver).
     sp->sync_receiver = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(sp->sync_receiver, NULL);
 
@@ -2276,7 +2279,7 @@ extern "C" {
 	break;
 	
       case HSPSTATE_WAITCONFIG:
-	SEMLOCK_DO(sp->sync) {
+	SEMLOCK_DO(sp->sync_config) {
 	  if(sp->sFlow->sFlowSettings) {
 	    // we have a config - proceed
 	    // we must have an agentIP now, so we can use
@@ -2286,23 +2289,23 @@ extern "C" {
 	    if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
 	    else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
 	    sfl_random_init(seed);
-
+	    
 	    // desync the clock so we don't detect second rollovers
 	    // at the same time as other hosts no matter what clock
 	    // source we use...
 	    UTClockDesync_uS(sfl_random(1000000));
-
+	    
 	    // initialize the faster polling of NIO counters
 	    // to avoid undetected 32-bit wraps
 	    sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
-	      
+	    
 	    if(initAgent(sp)) {
 	      if(debug) {
 		myLog(LOG_INFO, "initAgent suceeded");
 		// print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
 		malloc_stats();
 	      }
-
+	    
 	      if(sp->dropPriv) {
 		// don't need to be root any more - we held on to root privileges
 		// to make sure we could write the pid file,  and open the output
@@ -2313,14 +2316,14 @@ extern "C" {
 		// we just don't want the responsibility...
 		drop_privileges(HSP_RLIMIT_MEMLOCK);
 	      }
-
+	    
 #ifdef HSP_SWITCHPORT_REGEX
 	      // now that interfaces have been read and sflow agent is
 	      // initialized, check to see if we should be exporting
 	      // individual counter data for switch port interfaces.
 	      configSwitchPorts(sp); // in readPackets.c
 #endif
-
+	      
 #ifdef HSP_XEN
 	      if(xen_compile_vif_regex(sp) == NO) {
 		exit(EXIT_FAILURE);
@@ -2345,7 +2348,7 @@ extern "C" {
 	      }
 	    }
 	  }
-	} // sync
+	} // sync_config
 	break;
 	
       case HSPSTATE_RUN:
@@ -2362,7 +2365,7 @@ extern "C" {
 	    // this would be a good place to test the memory footprint and
 	    // bail out if it looks like we are leaking memory(?)
 	    
-	    SEMLOCK_DO(sp->sync) {
+	    SEMLOCK_DO(sp->sync_config) {
 	      // was the config turned off?
 	      // set configOK flag here while we have the semaphore
 	      sp->configOK = (sp->sFlow->sFlowSettings != NULL);

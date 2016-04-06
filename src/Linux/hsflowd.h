@@ -584,7 +584,8 @@ extern "C" {
     UTHash *containers; // can we access via vmsByDsIndex instead?
 #endif
     // inter-thread communication
-    pthread_mutex_t *sync;
+    pthread_mutex_t *sync_config;
+    pthread_mutex_t *sync_agent;
     pthread_mutex_t *sync_receiver;
     int DNSSD;
     char *DNSSD_domain;
