@@ -124,7 +124,7 @@ extern "C" {
 	}
 #endif
 	
-	SEMLOCK_DO(sp->sync_receiver) {
+	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(poller, cs);
 	}
       }
@@ -399,7 +399,7 @@ extern "C" {
 	// drops against the point whose sampling-rate needs to be adjusted.
 	samplerNIO->netlink_drops += drops;
 	fs.drops = samplerNIO->netlink_drops;
-	SEMLOCK_DO(sp->sync_receiver) {
+	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_sampler_writeFlowSample(sampler, &fs);
 	}
       }

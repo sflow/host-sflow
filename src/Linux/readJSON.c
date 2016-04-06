@@ -99,7 +99,7 @@ extern "C" {
       // The application is not sending counters, so send the synthesized
       // app_operations counter block that we have been maintaining.
       SFLADD_ELEMENT(cs, &application->counters);
-      SEMLOCK_DO(sp->sync_receiver) {
+      SEMLOCK_DO(sp->sync_agent) {
 	sfl_poller_writeCountersSample(poller, cs);
 	// and any rtcount metrics that we have been collecting
       }
@@ -396,7 +396,7 @@ extern "C" {
       myLog(LOG_INFO, "sendAppSample (sampling_n=%d)", sampling_n);
     }
     // and send it out
-    SEMLOCK_DO(sp->sync_receiver) {
+    SEMLOCK_DO(sp->sync_agent) {
       sfl_sampler_writeFlowSample(app->sampler, &fs);
     }
   }
@@ -645,7 +645,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
         SFLADD_ELEMENT(&csample, &c_par);
 
 	// submit the counter sample
-	SEMLOCK_DO(sp->sync_receiver) {
+	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(application->poller, &csample);
 	}
       }
@@ -931,7 +931,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       uint32_t len = (char *)xdr_ptr(&buf) - (char *)mstart - 4;
       mstart[0] = htonl(len);
       fstart[0] = htonl(num_fields);
-      SEMLOCK_DO(sp->sync_receiver) {
+      SEMLOCK_DO(sp->sync_agent) {
 	sfl_receiver_writeEncoded(receiver,
 				  1,
 				  buf.xdr,
@@ -1164,7 +1164,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       uint32_t len = (char *)xdr_ptr(&buf) - (char *)mstart - 4;
       mstart[0] = htonl(len);
       fstart[0] = htonl(num_fields);
-      SEMLOCK_DO(sp->sync_receiver) {
+      SEMLOCK_DO(sp->sync_agent) {
 	sfl_receiver_writeEncoded(receiver,
 				  1,
 				  buf.xdr,

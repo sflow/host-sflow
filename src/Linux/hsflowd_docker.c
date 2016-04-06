@@ -179,7 +179,7 @@ extern "C" {
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
     adaptorsElem.counterBlock.adaptors = state->interfaces;
     SFLADD_ELEMENT(cs, &adaptorsElem);
-    SEMLOCK_DO(sp->sync_receiver) {
+    SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(poller, cs);
     }
   }    

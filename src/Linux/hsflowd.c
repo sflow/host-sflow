@@ -350,7 +350,7 @@ extern "C" {
 #endif /* HSP_XEN */
 #endif /* HSP_XEN || HSP_DOCKER || HSP_VRT */
 
-    SEMLOCK_DO(sp->sync_receiver) {
+    SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(poller, cs);
     }
   }
@@ -1007,42 +1007,44 @@ extern "C" {
       }
     }
 
-    time_t now = UTClockSeconds();
-    sf->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
-    sfl_agent_init(sf->agent,
-		   &sf->agentIP,
-		   sf->subAgentId,
-		   now,
-		   now,
-		   sp,
-		   agentCB_alloc,
-		   agentCB_free,
-		   agentCB_error,
-		   agentCB_sendPkt);
-    // just one receiver - we are serious about making this lightweight for now
-    SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
-
-    // max datagram size might have been tweaked in the config file
-    if(sf->sFlowSettings_file->datagramBytes) {
-      sfl_receiver_set_sFlowRcvrMaximumDatagramSize(receiver, sf->sFlowSettings_file->datagramBytes);
+    SEMLOCK_DO(sp->sync_agent) {
+      time_t now = UTClockSeconds();
+      sf->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
+      sfl_agent_init(sf->agent,
+		     &sf->agentIP,
+		     sf->subAgentId,
+		     now,
+		     now,
+		     sp,
+		     agentCB_alloc,
+		     agentCB_free,
+		     agentCB_error,
+		     agentCB_sendPkt);
+      // just one receiver - we are serious about making this lightweight for now
+      SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
+      
+      // max datagram size might have been tweaked in the config file
+      if(sf->sFlowSettings_file->datagramBytes) {
+	sfl_receiver_set_sFlowRcvrMaximumDatagramSize(receiver, sf->sFlowSettings_file->datagramBytes);
+      }
+      
+      // claim the receiver slot
+      sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
+      
+      // set the timeout to infinity
+      sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
+      
+      uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
+      
+      // add a <physicalEntity> poller to represent the whole physical host
+      SFLDataSource_instance dsi;
+      // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
+      SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
+      sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_request);
+      sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
+      sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
     }
 
-    // claim the receiver slot
-    sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
-    
-    // set the timeout to infinity
-    sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
-
-    uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-    
-    // add a <physicalEntity> poller to represent the whole physical host
-    SFLDataSource_instance dsi;
-  // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
-    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
-    sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_request);
-    sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
-    sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
-    
 #if defined(HSP_XEN) || defined(HSP_DOCKER) || defined(HSP_VRT)
     // add <virtualEntity> pollers for each virtual machine
     configVMs(sp);
@@ -2178,12 +2180,10 @@ extern "C" {
     // semaphore to protect config shared with DNSSD thread,
     sp->sync_config = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(sp->sync_config, NULL);
-    // semaphore to protect structure of sFlow agent (sampler and poller lists).
+    // semaphore to protect structure of sFlow agent (sampler and poller lists
+    // and XDR datagram encoding)
     sp->sync_agent = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
     pthread_mutex_init(sp->sync_agent, NULL);
-    // semaphore to protect XDR datagram encoding (receiver).
-    sp->sync_receiver = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(sp->sync_receiver, NULL);
 
     // poll actions array
     sp->pollActions = UTArrayNew();

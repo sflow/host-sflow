@@ -586,7 +586,6 @@ extern "C" {
     // inter-thread communication
     pthread_mutex_t *sync_config;
     pthread_mutex_t *sync_agent;
-    pthread_mutex_t *sync_receiver;
     int DNSSD;
     char *DNSSD_domain;
     uint32_t previousPollingInterval;
