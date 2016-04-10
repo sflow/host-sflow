@@ -217,7 +217,7 @@ extern "C" {
 
     int internal_in = NO;
     int internal_out = NO;
-#ifdef CUMULUS
+#ifdef HSP_CUMULUS
     int bridgeModel = YES;
 #else
     int bridgeModel = isBridge;
