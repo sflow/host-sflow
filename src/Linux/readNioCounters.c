@@ -348,7 +348,13 @@ extern "C" {
        eeprom->data[1] != 0x04) {
       goto out;
     }
-    
+
+    // test (SFF_A0_DOM & SFF_A0_DOM_IMPL)
+    if(!(eeprom->data[92] & 0x40)) {
+      // no optical stats
+      goto out;
+    }
+
     uint32_t num_lanes = 1;
     uint16_t wavelength=0;
     double temperature, voltage, bias_current;
@@ -356,7 +362,7 @@ extern "C" {
     double rx_power, rx_power_max, rx_power_min;
     
     uint16_t *eew = (uint16_t *)(eeprom->data);
-    
+
     // wavelength
     if(!(eeprom->data[8] & 0x0c)) {
       wavelength = ntohs(eew[30]);
