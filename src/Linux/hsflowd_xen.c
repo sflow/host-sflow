@@ -450,7 +450,7 @@ extern "C" {
       adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, state->domId, &myAdaptors, HSP_MAX_VIFS);
       SFLADD_ELEMENT(cs, &adaptorsElem);
 
-      SEMLOCK_DO(sp->sync_receiver) {
+      SEMLOCK_DO(sp->sync_agent) {
 	sfl_poller_writeCountersSample(poller, cs);
       }
     }
