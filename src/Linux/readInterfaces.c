@@ -667,7 +667,7 @@ VNIC: <ifindex> <device> <mac>
 */
 
 #include <linux/version.h>
-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0) || (__GLIBC__ <= 2 && __GLIBC_MINOR__ < 14))
 #ifndef CLONE_NEWNET
 #define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
 #endif
