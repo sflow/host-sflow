@@ -66,14 +66,14 @@ inm_uuid() {
 	    return 0;
 	fi;
     fi
-
     if [ -d /dev/disk/by-uuid ]; then
-	# first local disk
-	MYUUID=`ls /dev/disk/by-uuid | head -n 1`;
-        if is_uuid $MYUUID; then
-	    echo $MYUUID
-	    return 0;
-	fi;
+        # first local disk
+        for MYUUID in `ls /dev/disk/by-uuid`; do
+            if is_uuid $MYUUID; then
+                echo $MYUUID
+                return 0;
+            fi;
+        done;
     fi
 
     if [ -x /sbin/blkid ]; then
