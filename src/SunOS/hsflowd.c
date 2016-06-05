@@ -210,7 +210,7 @@ extern "C" {
     truncateOpenFile(sp->f_vmStore);
   }
 
-  uint32_t assignVM_dsIndex(HSP *sp, char *uuid) {
+  uint32_t assignVM_dsIndex(HSP *sp, u_char *uuid) {
     // check in case we saw this one before
     HSPVMStore *vmStore = sp->vmStore;
     for ( ; vmStore != NULL; vmStore = vmStore->nxt) {
