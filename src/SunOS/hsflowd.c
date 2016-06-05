@@ -1101,7 +1101,7 @@ extern "C" {
       }
       else {
         u_char uuidStr[51];
-        printUUID((sp->uuid, uuidStr, 50);
+        printUUID(sp->uuid, uuidStr, 50);
 	fprintf(f_uuid, "uuid=%s\n", uuidStr);
 	
         fflush(f_uuid);
