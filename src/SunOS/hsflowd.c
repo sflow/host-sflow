@@ -764,10 +764,17 @@ extern "C" {
       myLog(LOG_ERR, "myDNSCB: string too long");
       return;
     }
+
+    // bail out of invalid inputs
+    if ((key == NULL && keyLen != 0) || (val == NULL && valLen != 0)) {
+      myLog(LOG_ERR, "myDNSCB: NULL string of non-zero length.");
+      return;
+    }
+
     // null terminate
-    memcpy(keyBuf, (char *)key, keyLen);
+    if (key) memcpy(keyBuf, (char *)key, keyLen);
     keyBuf[keyLen] = '\0';
-    memcpy(valBuf, (char *)val, valLen);
+    if (val) memcpy(valBuf, (char *)val, valLen);
     valBuf[valLen] = '\0';
 
     if(debug) {
