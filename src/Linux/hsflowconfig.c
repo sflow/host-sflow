@@ -964,6 +964,9 @@ extern int debug;
 	    case HSPTOKEN_DEV:
 	      if((tok = expectDevice(sp, tok, &pc->dev)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_PROMISC:
+	      if((tok = expectONOFF(sp, tok, &pc->promisc)) == NULL) return NO;
+	      break;
 	    default:
 	      parseError(sp, tok, "unexpected pcap setting", "");
 	      return NO;

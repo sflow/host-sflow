@@ -195,7 +195,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
+  static void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
   {
 
     if(debug > 1) {
@@ -317,6 +317,12 @@ extern "C" {
     }
 #endif
 
+    if(sampler_dev == NULL) {
+      // for promiscuous tap monitoring there may be no sense of 'in'
+      // or 'out' on this adaptor, but we can still set the sampler_dev.
+      sampler_dev = ad_tap;
+    }
+
     // must have a sampler_dev with an ifIndex
     if(sampler_dev && sampler_dev->ifIndex) {
       HSPAdaptorNIO *samplerNIO = ADAPTOR_NIO(sampler_dev);
@@ -415,7 +421,7 @@ extern "C" {
 #ifdef HSP_PCAP
   // function of type pcap_handler
 
-  void readPackets_pcap_cb(u_char *user, const struct pcap_pkthdr *hdr, const u_char *buf)
+  static void readPackets_pcap_cb(u_char *user, const struct pcap_pkthdr *hdr, const u_char *buf)
   {
     static uint32_t MySkipCount=1;
     BPFSoc *bpfs = (BPFSoc *)user;
@@ -438,6 +444,7 @@ extern "C" {
       memcpy(macsrc.mac, buf+6, 6);
       SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
       SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
+      SFLAdaptor *tapdev = bpfs->promisc ? adaptorByName(sp, bpfs->deviceName) : NULL;
 
       if(debug > 1) {
 	if(srcdev) {
@@ -457,6 +464,7 @@ extern "C" {
       takeSample(sp,
 		 srcdev,
 		 dstdev,
+		 tapdev,
 		 bpfs->isBridge,
 		 0 /*hook*/,
 		 buf /* mac hdr*/,
@@ -581,6 +589,7 @@ extern "C" {
 		takeSample(sp,
 			   dev_in,
 			   dev_out,
+			   NULL,
 			   NO,
 			   pkt->hook,
 			   pkt->mac,
@@ -729,6 +738,7 @@ extern "C" {
 		takeSample(sp,
 			   adaptorByIndex(sp, (ifin_phys ?: ifin)),
 			   adaptorByIndex(sp, (ifout_phys ?: ifout)),
+			   NULL,
 			   NO,
 			   msg_pkt_hdr->hook,
 			   mac_hdr,

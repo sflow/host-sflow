@@ -234,7 +234,7 @@ extern "C" {
     return YES;
   }
 
-  void dockerInspectVMs(HSP *sp) {
+  static void dockerInspectVMs(HSP *sp) {
     char dockerLine[HSP_DOCKER_MAX_LINELEN];
     UTStringArray *dockerInspect = strArrayNew();
     strArrayAdd(dockerInspect, HSP_DOCKER_CMD);

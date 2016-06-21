@@ -1104,12 +1104,13 @@ extern "C" {
 	bpfs->subSamplingRate = bpfs->samplingRate;
 	bpfs->pcap = pcap_open_live(pcap->dev,
 				    sp->sFlow->sFlowSettings_file->headerBytes,
-				    NO, /* promisc */
+				    pcap->promisc,
 				    0, /* timeout==poll */
 				    bpfs->pcap_err);
 	if(bpfs->pcap) {
 	  if(debug) myLog(LOG_INFO, "PCAP: device %s opened OK", pcap->dev);
 	  bpfs->soc = pcap_fileno(bpfs->pcap);
+	  bpfs->promisc = pcap->promisc;
 	  setKernelSampling(sp, bpfs);
 	}
 	else {

@@ -159,6 +159,7 @@ extern "C" {
     uint32_t subSamplingRate;
     uint32_t drops;
     uint32_t isBridge:1;
+    uint32_t promisc:1;
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
   } BPFSoc;
@@ -278,6 +279,7 @@ extern "C" {
   typedef struct _HSPPcap {
     struct _HSPPcap *nxt;
     char *dev;
+    int promisc;
   } HSPPcap;
 
   typedef struct _HSPCIDR {
