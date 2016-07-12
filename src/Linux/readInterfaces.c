@@ -337,12 +337,13 @@ approach seemed more stable and portable.
 	}
 	adaptor->ifSpeed = ifSpeed_bps;
       }
+    }
 #if (HSP_ETHTOOL_STATS || HSP_DOCKER)
-      // see if the ethtool stats block can give us multicast/broadcast counters too
-      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-      adaptorNIO->et_nfound=0;
-      adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
-      if(adaptorNIO->et_nctrs) {
+    // see if the ethtool stats block can give us multicast/broadcast counters too
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    adaptorNIO->et_nfound=0;
+    adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
+    if(adaptorNIO->et_nctrs) {
 	struct ethtool_gstrings *ctrNames;
 	uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
 	ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
@@ -405,9 +406,8 @@ approach seemed more stable and portable.
 	  }
 	}
 	my_free(ctrNames);
-      }
-#endif
     }
+#endif
     return changed;
   }
 
