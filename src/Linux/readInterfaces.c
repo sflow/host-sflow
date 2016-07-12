@@ -250,6 +250,43 @@ approach seemed more stable and portable.
 
 #endif /* (HSP_ETHTOOL_STATS || HSP_DOCKER) */
 
+  static int ethtool_get_settings(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  {
+    // Try to get the ethtool info for this interface so we can infer the
+    // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
+    int changed = NO;
+    struct ethtool_cmd ecmd = { 0 };
+    ecmd.cmd = ETHTOOL_GSET;
+    ifr->ifr_data = (char *)&ecmd;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      uint32_t direction = ecmd.duplex ? 1 : 2;
+      if(direction != adaptor->ifDirection) {
+	changed = YES;
+      }
+      adaptor->ifDirection = direction;
+      uint64_t ifSpeed_mb = ecmd.speed;
+      // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
+      // speed_hi field too,  but we would need to run autoconf-style
+      // tests to see if it was there and we are trying to avoid that.
+      if(ifSpeed_mb == (uint16_t)-1 ||
+	 ifSpeed_mb == (uint32_t)-1) {
+	// unknown
+	if(adaptor->ifSpeed != 0) {
+	  changed = YES;
+	}
+	adaptor->ifSpeed = 0;
+      }
+      else {
+	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
+	if(adaptor->ifSpeed != ifSpeed_bps) {
+	  changed = YES;
+	}
+	adaptor->ifSpeed = ifSpeed_bps;
+      }
+    }
+    return changed;
+  }
+
 
   static int read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
@@ -306,38 +343,8 @@ approach seemed more stable and portable.
 #endif /* HSP_OPTICAL_STATS */
     }
 
-    // Try to get the ethtool info for this interface so we can infer the
-    // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
-    int changed = NO;
-    struct ethtool_cmd ecmd = { 0 };
-    ecmd.cmd = ETHTOOL_GSET;
-    ifr->ifr_data = (char *)&ecmd;
-    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-      uint32_t direction = ecmd.duplex ? 1 : 2;
-      if(direction != adaptor->ifDirection) {
-	changed = YES;
-      }
-      adaptor->ifDirection = direction;
-      uint64_t ifSpeed_mb = ecmd.speed;
-      // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
-      // speed_hi field too,  but we would need to run autoconf-style
-      // tests to see if it was there and we are trying to avoid that.
-      if(ifSpeed_mb == (uint16_t)-1 ||
-	 ifSpeed_mb == (uint32_t)-1) {
-	// unknown
-	if(adaptor->ifSpeed != 0) {
-	  changed = YES;
-	}
-	adaptor->ifSpeed = 0;
-      }
-      else {
-	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
-	if(adaptor->ifSpeed != ifSpeed_bps) {
-	  changed = YES;
-	}
-	adaptor->ifSpeed = ifSpeed_bps;
-      }
-    }
+    int changed = ethtool_get_settings(ifr, fd, adaptor);
+
 #if (HSP_ETHTOOL_STATS || HSP_DOCKER)
     // see if the ethtool stats block can give us multicast/broadcast counters too
     HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
