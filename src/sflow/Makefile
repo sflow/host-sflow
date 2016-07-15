@@ -7,7 +7,7 @@ OPT = -O3 -DNDEBUG
 #OPT = -g -ggdb -O2
 #OPT= -g -ggdb
 
-CFLAGS= -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall -Wcast-align
+CFLAGS += -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall -Wcast-align
 LDFLAGS=
 
 #CC= g++
