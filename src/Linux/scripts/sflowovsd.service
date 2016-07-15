@@ -1,0 +1,12 @@
+[Unit]
+Description=Host sFlow Daemon
+After=network.target syslog.target
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/sflowovsd -p %t/sflowovsd.pid
+PIDFile=%t/sflowovsd.pid
+
+[Install]
+WantedBy=multi-user.target
+

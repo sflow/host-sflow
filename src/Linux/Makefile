@@ -235,6 +235,9 @@ endif
 ifeq ($(CONFDIR),)
 	CONFDIR=/etc
 endif
+ifeq ($(SYSTEMDDIR),)
+	SYSTEMDDIR=/usr/lib/systemd/system
+endif
 
 INSTALL=install
 
@@ -243,10 +246,12 @@ ifeq ($(INSTROOT),)
 	BIN_D=$(BINDIR)
 	INIT_D=$(INITDIR)
 	CONF_D=$(CONFDIR)
+	SYSTEMD_D=$(SYSTEMDDIR)
 else
 	BIN_D=$(INSTROOT)/$(BINDIR)
 	INIT_D=$(INSTROOT)/$(INITDIR)
 	CONF_D=$(INSTROOT)/$(CONFDIR)
+	SYSTEMD_D=$(INSTROOT)/$(SYSTEMDDIR)
 endif
 
 READ_OBJS=readInterfaces.o \
@@ -302,13 +307,15 @@ install: $(INSTALLTGTS)
 install-hsflowd: hsflowd
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
-	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd; fi
+	if [ ! -e $(INIT_D)/hsflowd ] && [ $(SYSTEMD) != yes ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd; fi
+	if [ $(SYSTEMD) = yes ]; then $(INSTALL) -D -m 0644 scripts/hsflowd.service $(SYSTEMD_D)/hsflowd.service; fi
 	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
 
 install-sflowovsd: sflowovsd
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 sflowovsd $(BIN_D)
-	if [ ! -e $(INIT_D)/sflowovsd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(SFLOWOVSD_INITSCRIPT) $(INIT_D)/sflowovsd; fi
+	if [ ! -e $(INIT_D)/sflowovsd ] && [ $(SYSTEMD) != yes ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(SFLOWOVSD_INITSCRIPT) $(INIT_D)/sflowovsd; fi
+	if [ $(SYSTEMD) = yes ]; then $(INSTALL) -D -m 0644 scripts/sflowovsd.service $(SYSTEMD_D)/sflowovsd.service; fi
 
 #### SCHEDULE ####
 
