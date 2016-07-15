@@ -1,0 +1,12 @@
+[Unit]
+Description=Host sFlow Daemon
+After=network.target syslog.target
+
+[Service]
+Type=forking
+ExecStart=/usr/sbin/hsflowd -u %m -p %t/hsflowd.pid
+PIDFile=%t/hsflowd.pid
+
+[Install]
+WantedBy=multi-user.target
+
