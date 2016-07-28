@@ -250,6 +250,129 @@ approach seemed more stable and portable.
 
 #endif /* (HSP_ETHTOOL_STATS || HSP_DOCKER) */
 
+#ifdef ETHTOOL_GLINKSETTINGS
+  /* New local definitions needed for updated ethtool ioctl, ripped from
+   * upstream ethtool  */
+  #define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32         \
+	  (SCHAR_MAX)
+  #define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NBITS                \
+	  (32 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32)
+  #define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NBYTES       \
+	  (4 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32)
+  #define ETHTOOL_DECLARE_LINK_MODE_MASK(name)           \
+	  uint32_t name[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32]
+
+  struct ethtool_link_usettings {
+	 struct {
+		 __u8 transceiver;
+	 } deprecated;
+	 struct ethtool_link_settings base;
+	 struct {
+		ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
+		ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
+		ETHTOOL_DECLARE_LINK_MODE_MASK(lp_advertising);
+	 } link_modes;
+  };
+#endif
+
+  static int ethtool_get_settings(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  {
+    // Try to get the ethtool info for this interface so we can infer the
+    // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
+    int changed = NO;
+#ifdef ETHTOOL_GLINKSETTINGS
+    int err;
+    struct {
+            struct ethtool_link_settings req;
+            __u32 link_mode_data[3 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
+    } ecmd;
+
+    /* Handshake with kernel to determine number of words for link
+     * mode bitmaps. When requested number of bitmap words is not
+     * the one expected by kernel, the latter returns the integer
+     * opposite of what it is expecting. We request length 0 below
+     * (aka. invalid bitmap length) to get this info.
+     */
+    memset(&ecmd, 0, sizeof(ecmd));
+    ecmd.req.cmd = ETHTOOL_GLINKSETTINGS;
+    ifr->ifr_data = (void *)&ecmd;
+    err = ioctl(fd, SIOCETHTOOL, ifr);
+    if (err == 0) {
+      /* see above: we expect a strictly negative value from kernel.
+       */
+      if (ecmd.req.link_mode_masks_nwords >= 0
+          || ecmd.req.cmd != ETHTOOL_GLINKSETTINGS) {
+              return 0;
+       }
+      /* got the real ecmd.req.link_mode_masks_nwords,
+       * now send the real request
+       */
+      ecmd.req.cmd = ETHTOOL_GLINKSETTINGS;
+      ecmd.req.link_mode_masks_nwords = -ecmd.req.link_mode_masks_nwords;
+      err = ioctl(fd, SIOCETHTOOL, ifr);
+      if (err < 0) {
+              return 0;
+      }
+
+      uint32_t direction = ecmd.req.duplex ? 1 : 2;
+      if(direction != adaptor->ifDirection) {
+	changed = YES;
+      }
+      adaptor->ifDirection = direction;
+      uint64_t ifSpeed_mb = ecmd.req.speed;
+      // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
+      // speed_hi field too,  but we would need to run autoconf-style
+      // tests to see if it was there and we are trying to avoid that.
+      if(ifSpeed_mb == (uint16_t)-1 ||
+        ifSpeed_mb == (uint32_t)-1) {
+        // unknown
+        if(adaptor->ifSpeed != 0) {
+          changed = YES;
+        }
+        adaptor->ifSpeed = 0;
+      }
+      else {
+        uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
+        if(adaptor->ifSpeed != ifSpeed_bps) {
+          changed = YES;
+        }
+        adaptor->ifSpeed = ifSpeed_bps;
+      }
+      return changed;
+    }
+#endif
+    struct ethtool_cmd ecmd_legacy = { 0 };
+    ecmd_legacy.cmd = ETHTOOL_GSET;
+    ifr->ifr_data = (char *)&ecmd_legacy;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      uint32_t direction = ecmd_legacy.duplex ? 1 : 2;
+      if(direction != adaptor->ifDirection) {
+	changed = YES;
+      }
+      adaptor->ifDirection = direction;
+      uint64_t ifSpeed_mb = ecmd_legacy.speed;
+      // ethtool_cmd_speed(&ecmd_legacy) is available in newer systems and uses the
+      // speed_hi field too,  but we would need to run autoconf-style
+      // tests to see if it was there and we are trying to avoid that.
+      if(ifSpeed_mb == (uint16_t)-1 ||
+	 ifSpeed_mb == (uint32_t)-1) {
+	// unknown
+	if(adaptor->ifSpeed != 0) {
+	  changed = YES;
+	}
+	adaptor->ifSpeed = 0;
+      }
+      else {
+	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
+	if(adaptor->ifSpeed != ifSpeed_bps) {
+	  changed = YES;
+	}
+	adaptor->ifSpeed = ifSpeed_bps;
+      }
+    }
+    return changed;
+  }
+
 
   static int read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
@@ -306,43 +429,14 @@ approach seemed more stable and portable.
 #endif /* HSP_OPTICAL_STATS */
     }
 
-    // Try to get the ethtool info for this interface so we can infer the
-    // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
-    int changed = NO;
-    struct ethtool_cmd ecmd = { 0 };
-    ecmd.cmd = ETHTOOL_GSET;
-    ifr->ifr_data = (char *)&ecmd;
-    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-      uint32_t direction = ecmd.duplex ? 1 : 2;
-      if(direction != adaptor->ifDirection) {
-	changed = YES;
-      }
-      adaptor->ifDirection = direction;
-      uint64_t ifSpeed_mb = ecmd.speed;
-      // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
-      // speed_hi field too,  but we would need to run autoconf-style
-      // tests to see if it was there and we are trying to avoid that.
-      if(ifSpeed_mb == (uint16_t)-1 ||
-	 ifSpeed_mb == (uint32_t)-1) {
-	// unknown
-	if(adaptor->ifSpeed != 0) {
-	  changed = YES;
-	}
-	adaptor->ifSpeed = 0;
-      }
-      else {
-	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
-	if(adaptor->ifSpeed != ifSpeed_bps) {
-	  changed = YES;
-	}
-	adaptor->ifSpeed = ifSpeed_bps;
-      }
+    int changed = ethtool_get_settings(ifr, fd, adaptor);
+
 #if (HSP_ETHTOOL_STATS || HSP_DOCKER)
-      // see if the ethtool stats block can give us multicast/broadcast counters too
-      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-      adaptorNIO->et_nfound=0;
-      adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
-      if(adaptorNIO->et_nctrs) {
+    // see if the ethtool stats block can give us multicast/broadcast counters too
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    adaptorNIO->et_nfound=0;
+    adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
+    if(adaptorNIO->et_nctrs) {
 	struct ethtool_gstrings *ctrNames;
 	uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
 	ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
@@ -405,9 +499,8 @@ approach seemed more stable and portable.
 	  }
 	}
 	my_free(ctrNames);
-      }
-#endif
     }
+#endif
     return changed;
   }
 
