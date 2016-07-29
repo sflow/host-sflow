@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 
@@ -9,8 +9,7 @@ extern "C" {
 
 #include "util.h"
 
-  int debug = 0;
-  int daemonize = 0;
+  static int debugLevel = 0;
 
   /*________________---------------------------__________________
     ________________       UTStrBuf            __________________
@@ -71,13 +70,35 @@ extern "C" {
   {
     va_list args;
     va_start(args, fmt);
-    if(debug && !daemonize) {
+    if(debugLevel) {
       vfprintf(stderr, fmt, args);
       fprintf(stderr, "\n");
     }
     else vsyslog(syslogType, fmt, args);
   }
 
+  void setDebug(int level) {
+    debugLevel = level;
+  }
+
+  int getDebug() {
+    return debugLevel;
+  }
+
+  int debug(int level) {
+    return (debugLevel >= level);
+  }
+
+  void myDebug(int level, char *fmt, ...)
+  {
+    if(debug(level)) {
+      va_list args;
+      va_start(args, fmt);
+      fprintf(stderr, "dbg%d: ", level);
+      vfprintf(stderr, fmt, args);
+      fprintf(stderr, "\n");
+    }
+  }
 
   /*_________________---------------------------__________________
     _________________       my_os_allocation    __________________
@@ -86,11 +107,11 @@ extern "C" {
 
   void *my_os_calloc(size_t bytes)
   {
-    if(debug) myLog(LOG_INFO, "my_os_calloc(%u)", bytes);
+    myDebug(1, "my_os_calloc(%u)", bytes);
     void *mem = SYS_CALLOC(1, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
-      if(debug) malloc_stats();
+      if(debug(1)) malloc_stats();
       exit(EXIT_FAILURE);
     }
     return mem;
@@ -98,11 +119,11 @@ extern "C" {
 
   void *my_os_realloc(void *ptr, size_t bytes)
   {
-    if(debug) myLog(LOG_INFO, "my_os_realloc(%u)", bytes);
+    myDebug(1, "my_os_realloc(%u)", bytes);
     void *mem = SYS_REALLOC(ptr, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
-      if(debug) malloc_stats();
+      if(debug(1)) malloc_stats();
       exit(EXIT_FAILURE);
     }
     return mem;
@@ -212,9 +233,7 @@ extern "C" {
 	  UTHeapHeader *nextBuf = utBuf->nxt;
 	  if(utBuf->h.realmIdx == utRealm.realmIdx) {
 	    // this one is mine - recycle and unlink
-	    if(debug) {
-	      myLog(LOG_INFO, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
-	    }
+	    myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
 	    UTHeapQFree(utBuf);
 	    if(prev) prev->nxt = nextBuf;
 	    else UTHeap.foreign = nextBuf;
@@ -631,15 +650,24 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  UTArray *UTArrayNew(void) {
-    return (UTArray *)my_calloc(sizeof(UTArray));
+  UTArray *UTArrayNew(int flags) {
+    UTArray *ar = (UTArray *)my_calloc(sizeof(UTArray));
+    if(flags & UTARRAY_SYNC) {
+      ar->sync = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+      pthread_mutex_init(ar->sync, NULL);
+    }
+    return ar;
   }
   
-  static void UTArrayGrowthCheck(UTArray *ar, int i) {
-    if(ar->capacity <= i) {
-      uint32_t oldBytes = ar->capacity * sizeof(void *);
-      ar->capacity = i + 16;
-      uint32_t newBytes = ar->capacity * sizeof(void *);
+  static void arrayGrowthCheck(UTArray *ar, int i) {
+    if(ar->cap <= i) {
+      uint32_t oldBytes = ar->cap * sizeof(void *);
+      // stay two slots under the powers of 2 to make
+      // it easier for the allocator to avoid waste
+      ar->cap += 2;
+      while(ar->cap <= (i+2)) ar->cap *= 2;
+      ar->cap -= 2;
+      uint32_t newBytes = ar->cap * sizeof(void *);
       void **newArray = (void **)my_calloc(newBytes);
       if(ar->objs) {
 	memcpy(newArray, ar->objs, oldBytes);
@@ -648,28 +676,63 @@ extern "C" {
       ar->objs = newArray;
     }
   }
-
-  void UTArrayAdd(UTArray *ar, void *obj) {
-    UTArrayGrowthCheck(ar, ar->n);
-    ar->objs[ar->n++] = obj;
-  }
   
-  void UTArrayInsert(UTArray *ar, int i, void *obj) {
-    UTArrayGrowthCheck(ar, i);
-    ar->objs[i] = obj;
-    if(i >= ar->n) ar->n = i+1;
+  uint32_t UTArrayAdd(UTArray *ar, void *obj) {
+    int offset = -1;
+    SEMLOCK_DO(ar->sync) {
+      arrayGrowthCheck(ar, ar->n);
+      offset = ar->n;
+      ar->objs[ar->n++] = obj;
+    }
+    return offset;
+  }
+
+  void *UTArrayDelAt(UTArray *ar, int i) {
+    void *obj = NULL;
+    SEMLOCK_DO(ar->sync) {
+      obj = ar->objs[i];
+      ar->objs[i] = NULL;
+      if(i == (ar->n - 1)) --ar->n;
+    }
+    return obj;
+  }
+
+  bool UTArrayDel(UTArray *ar, void *obj) {
+    bool ans = NO;
+    SEMLOCK_DO(ar->sync) {
+      for(uint32_t i = 0; i < ar->n; i++) {
+	if(ar->objs[i] == obj) {
+	  ar->objs[i] = NULL;
+	  if(i == (ar->n - 1)) --ar->n;
+	ans = YES;
+	break;
+	}
+      }
+    }
+    return ans;
+  }
+ 
+  void UTArrayPut(UTArray *ar, void *obj, int i) {
+    SEMLOCK_DO(ar->sync) {
+      arrayGrowthCheck(ar, i);
+      ar->objs[i] = obj;
+      if(i >= ar->n) ar->n = i+1;
+    }
   }
 
   void UTArrayReset(UTArray *ar) {
-    for(uint32_t i = 0; i < ar->n; i++) ar->objs[i] = NULL;
-    ar->n = 0;
+    SEMLOCK_DO(ar->sync) {
+      for(uint32_t i = 0; i < ar->n; i++) ar->objs[i] = NULL;
+      ar->n = 0;
+    }
   }
   
-   void UTArrayFree(UTArray *ar) {
-     UTArrayReset(ar);
-     if(ar->objs) my_free(ar->objs);
-     my_free(ar);
-   }
+  void UTArrayFree(UTArray *ar) {
+    UTArrayReset(ar);
+    if(ar->objs) my_free(ar->objs);
+    if(ar->sync) my_free(ar->sync);
+    my_free(ar);
+  }
   
   uint32_t UTArrayN(UTArray *ar) {
     return ar->n;
@@ -695,7 +758,7 @@ extern "C" {
     }
     int err = getaddrinfo(name, NULL, &hints, &info);
     if(err) {
-      if(debug) myLog(LOG_INFO, "getaddrinfo() failed: %s", gai_strerror(err));
+      myDebug(1, "getaddrinfo() failed: %s", gai_strerror(err));
       switch(err) {
       case EAI_NONAME: break;
       case EAI_NODATA: break;
@@ -941,10 +1004,16 @@ extern "C" {
     }
     if(cpid == 0) {
       // in child
-      close(pfd[0]);   // close read-end
-      dup2(pfd[1], 1); // stdout -> write-end
-      dup2(pfd[1], 2); // stderr -> write-end
-      close(pfd[1]);
+      while(close(pfd[0]) == -1 && errno == EINTR);   // close read-end
+      while(dup2(pfd[1], 1) == -1 && errno == EINTR); // stdout -> write-end
+      while(dup2(pfd[1], 2) == -1 && errno == EINTR); // stderr -> write-end
+      while(close(pfd[1]) == -1 && errno == EINTR); // clean up
+      // By merging stdout and stderr we make it easier to read the data back
+      // but it does mean the caller has to be able to tell the difference between
+      // the expected lines of stdout and an error message.
+      // (One option is to collect all the output and then check
+      // the exit status before processing it,  but if this gets awkward it may
+      // be better to come back and do this more carefully.)
       // exec program
       char *env[] = { NULL };
       if(execve(cmd[0], cmd, env) == -1) {
@@ -962,9 +1031,9 @@ extern "C" {
 	exit(EXIT_FAILURE);
       }
       while(fgets(line, lineLen, ovs)) {
-	if(debug > 1) myLog(LOG_INFO, "myExec input> <%s>", line);
+	myDebug(2, "myExec input> <%s>", line);
 	if((*lineCB)(magic, line) == NO) {
-	  if(debug > 1) myLog(LOG_INFO, "myExec callback returned NO");
+	  myDebug(2, "myExec callback returned NO");
 	  ans = NO;
 	  break;
 	}
@@ -1111,12 +1180,11 @@ extern "C" {
   }
     
   /*________________---------------------------__________________
-    ________________      truncateOpenFile     __________________
+    ________________     UTTruncateOpenFile     __________________
     ----------------___________________________------------------
   */
 
-  int truncateOpenFile(FILE *fptr)
-  {
+  int UTTruncateOpenFile(FILE *fptr)   {
     int fd = fileno(fptr);
     if(fd == -1) {
       myLog(LOG_ERR, "truncateOpenFile(): fileno() failed : %s", strerror(errno));
@@ -1128,11 +1196,28 @@ extern "C" {
     }
     return YES;
   }
+    
+  /*________________---------------------------__________________
+    ________________     UTFileExists          __________________
+    ----------------___________________________------------------
+  */
+  
+  int UTFileExists(char *path) {
+    struct stat statBuf;
+    return (stat(path, &statBuf) == 0);
+  }
 
   /*________________---------------------------__________________
     ________________      SFLAddress utils     __________________
     ----------------___________________________------------------
   */
+  
+  char *SFLAddress_print(SFLAddress *addr, char *buf, size_t len) {
+    return (char *)inet_ntop(addr->type == SFLADDRESSTYPE_IP_V6 ? AF_INET6 : AF_INET,
+			     &addr->address,
+			     buf,
+			     len);
+  }
 
   int SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2) {
     if(addr1 == addr2) return YES;
@@ -1353,38 +1438,39 @@ extern "C" {
 
 #define UTHASH_BYTES(oh) ((oh)->cap * sizeof(void *))
   
-  UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, int stringKey) {
+  UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, uint32_t options) {
     UTHash *oh = (UTHash *)my_calloc(sizeof(UTHash));
+    oh->options = options;
+    if(options & UTHASH_SYNC) {
+      oh->sync = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+      pthread_mutex_init(oh->sync, NULL);
+    }
     oh->cap = UTHASH_INIT;
-    oh->bins = my_calloc(UTHASH_BYTES(oh));
+    // using my_os_calloc/my_os_free for bins since (1) they are
+    // powers of 2 and we don't want to incur ~50% overhead and
+    // (2) a large HT might leave a trail of retained buffers as
+    // it grows.  This assumes my_os_calloc does better with powers
+    // of 2 than UTHEAP does.
+    oh->bins = my_os_calloc(UTHASH_BYTES(oh));
     oh->f_offset = f_offset;
-    oh->f_len = (stringKey) ? 0 : f_len;
+    oh->f_len = (options & UTHASH_SKEY) ? 0 : f_len;
     return oh;
   }
 
-  void UTHashFree(UTHash *oh) {
-    if(oh == NULL) return;
-    my_free(oh->bins);
-    my_free(oh);
-  } 
+  static void *hashAdd(UTHash *oh, void *obj);
 
-  void UTHashReset(UTHash *oh) {
-    if(oh == NULL) return;
-    memset(oh->bins, 0, UTHASH_BYTES(oh));
-    oh->entries = 0;
-  }
- 
-  void UTHashGrow(UTHash *oh) {
+  static void hashGrow(UTHash *oh) {
     uint32_t old_cap = oh->cap;
     void **old_bins = oh->bins;
     oh->cap *= 2;
-    oh->bins = my_calloc(UTHASH_BYTES(oh));
+
+    oh->bins = my_os_calloc(UTHASH_BYTES(oh));
     for(uint32_t ii = 0; ii < old_cap; ii++)
-      if(old_bins[ii]) UTHashAdd(oh, old_bins[ii], NO);
-    my_free(old_bins);
+      if(old_bins[ii]) hashAdd(oh, old_bins[ii]);
+    my_os_free(old_bins);
   }
   
-  static uint32_t UTHashHash(UTHash *oh, void *obj) {
+  static uint32_t hashHash(UTHash *oh, void *obj) {
     char *f = (char *)obj + oh->f_offset;
     if(oh->f_len == 0) {
       // field is ptr to null-terminated string
@@ -1394,7 +1480,7 @@ extern "C" {
     return hash_fnv1a(f, oh->f_len);
   }
   
-  static uint32_t UTHashEqual(UTHash *oh, void *obj1, void *obj2) {
+  static uint32_t hashEqual(UTHash *oh, void *obj1, void *obj2) {
     char *f1 = (char *)obj1 + oh->f_offset;
     char *f2 = (char *)obj2 + oh->f_offset;
     return (oh->f_len == 0)
@@ -1405,12 +1491,12 @@ extern "C" {
   // oh->cap is always a power of 2, so we can just mask the bits
 #define UTHASH_WRAP(oh, pr) ((pr) & ((oh)->cap - 1))
 			     
-static uint32_t UTHashSearch(UTHash *oh, void *obj, void **found) {
-    uint32_t probe = UTHashHash(oh, obj);
+static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
+    uint32_t probe = hashHash(oh, obj);
     probe = UTHASH_WRAP(oh, probe);
     for( ; oh->bins[probe]; probe=UTHASH_WRAP(oh,probe+1)) {
       void *entry = oh->bins[probe];
-      if(UTHashEqual(oh, obj, entry)) {
+      if(hashEqual(oh, obj, entry)) {
 	(*found) = entry;
 	return probe;
       }
@@ -1418,37 +1504,180 @@ static uint32_t UTHashSearch(UTHash *oh, void *obj, void **found) {
     (*found) = NULL;
     return probe;
   }
-  
-  void UTHashAdd(UTHash *oh, void *obj, int overwrite_ok) {
+
+  static void *hashAdd(UTHash *oh, void *obj) {
     // make sure there is room so the search cannot fail
     if(oh->entries > (oh->cap >> 1))
-      UTHashGrow(oh);
+      hashGrow(oh);
     // search for obj or empty slot
     void *found = NULL;
-    uint32_t idx = UTHashSearch(oh, obj, &found);
-    if(!overwrite_ok)
-      assert(found==NULL);
+    uint32_t idx = hashSearch(oh, obj, &found);
     // put it here
     oh->bins[idx] = obj;
     oh->entries++;
+    // return what was there before
+    return found;
+  }
+  
+  void *UTHashAdd(UTHash *oh, void *obj) {
+    void *overwritten;
+    SEMLOCK_DO(oh->sync) {
+      overwritten = hashAdd(oh, obj);
+    }
+    return overwritten;
   }
   
   void *UTHashGet(UTHash *oh, void *obj) {
     void *found = NULL;
-    UTHashSearch(oh, obj, &found);
+    SEMLOCK_DO(oh->sync) {
+      hashSearch(oh, obj, &found);
+    }
     return found;
   }
 
-  int UTHashDel(UTHash *oh, void *obj) {
+  void *UTHashGetOrAdd(UTHash *oh, void *obj) {
     void *found = NULL;
-    int idx = UTHashSearch(oh, obj, &found);
-    if (found) {
-      oh->bins[idx] = NULL;
-      oh->entries--;
+    SEMLOCK_DO(oh->sync) {
+      hashSearch(oh, obj, &found);
+      if(!found)
+	hashAdd(oh, obj);
+    }
+    return found;
+  }
+
+  void *UTHashDel(UTHash *oh, void *obj) {
+    void *found = NULL;
+    SEMLOCK_DO(oh->sync) {
+      int idx = hashSearch(oh, obj, &found);
+      if (found) {
+	oh->bins[idx] = NULL;
+	oh->entries--;
+      }
+    }
+    return found;
+  }
+
+  uint32_t UTHashN(UTHash *oh) {
+    return oh->entries;
+  }
+
+  void UTHashFree(UTHash *oh) {
+    if(oh == NULL) return;
+    my_os_free(oh->bins);
+    if(oh->sync) my_free(oh->sync);
+    my_free(oh);
+  } 
+
+  /*_________________---------------------------__________________
+    _________________   socket handling         __________________
+    -----------------___________________________------------------
+  */
+
+  int UTSocketUDP(char *bindaddr, int family, uint16_t port, uint32_t bufferSize)
+  {
+    struct sockaddr_in myaddr_in = { 0 };
+    struct sockaddr_in6 myaddr_in6 = { 0 };
+    SFLAddress loopbackAddress = { 0 };
+    int soc = 0;
+
+    // create socket
+    if((soc = socket(family, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
+      myLog(LOG_ERR, "error opening socket: %s", strerror(errno));
+      return 0;
+    }
+      
+    // set the socket to non-blocking
+    int fdFlags = fcntl(soc, F_GETFL);
+    fdFlags |= O_NONBLOCK;
+    if(fcntl(soc, F_SETFL, fdFlags) < 0) {
+      myLog(LOG_ERR, "fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+      close(soc);
+      return 0;
+    }
+
+    // make sure it doesn't get inherited, e.g. when we fork a script
+    fdFlags = fcntl(soc, F_GETFD);
+    fdFlags |= FD_CLOEXEC;
+    if(fcntl(soc, F_SETFD, fdFlags) < 0) {
+      myLog(LOG_ERR, "ULOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
+    }
+      
+    // lookup bind address
+    struct sockaddr *psockaddr = (family == PF_INET6) ?
+      (struct sockaddr *)&myaddr_in6 :
+      (struct sockaddr *)&myaddr_in;
+    if(lookupAddress(bindaddr, psockaddr, &loopbackAddress, family) == NO) {
+      myLog(LOG_ERR, "error resolving <%s> : %s", bindaddr, strerror(errno));
+      close(soc);
+      return 0;
+    }
+
+    // bind
+    if(family == PF_INET6) myaddr_in6.sin6_port = htons(port);
+    else myaddr_in.sin_port = htons(port);
+    if(bind(soc,
+	    psockaddr,
+	    (family == PF_INET6) ?
+	    sizeof(myaddr_in6) :
+	    sizeof(myaddr_in)) == -1) {
+      myLog(LOG_ERR, "bind(%s) failed: %s", bindaddr, strerror(errno));
+      close(soc); 
+      return 0;
+    }
+
+    // increase receiver buffer size
+    uint32_t rcvbuf = bufferSize;
+    if(setsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+      myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", bufferSize, strerror(errno));
+    }
+
+    return soc;
+  }
+
+  /*_________________---------------------------__________________
+    _________________          regex            __________________
+    -----------------___________________________------------------
+  */
+
+  regex_t *UTRegexCompile(char *pattern_str) {
+    regex_t *rx = (regex_t *)my_calloc(sizeof(regex_t));
+    int err = regcomp(rx, pattern_str, REG_EXTENDED | REG_NEWLINE);
+    if(err != 0) {
+      char errbuf[101];
+      myLog(LOG_ERR, "regcomp(%s) failed: %s", pattern_str, regerror(err, rx, errbuf, 100));
+      my_free(rx);
+      return NULL;
+    }
+    return rx;
+  }
+
+
+  static int extract_int(char *str, int start, int end) {
+    int len = end - start;
+    if(start >= 0
+       && len > 0
+       && len < 16) {
+      char extraction[16];
+      memcpy(extraction, str + start, len);
+      extraction[len] = '\0';
+      return strtol(extraction, NULL, 0);
+    }
+    return -1;
+  }
+
+  int UTRegexExtractInt(regex_t *rx, char *str, int nvals, int *val1, int *val2, int *val3) {
+    assert(nvals > 0 && nvals <= 3);
+    regmatch_t valMatch[4];
+    if(regexec(rx, str, nvals+1, valMatch, 0) == 0) {
+      if(nvals >= 1) *val1 = extract_int(str, valMatch[1].rm_so, valMatch[1].rm_eo);
+      if(nvals >= 2) *val2 = extract_int(str, valMatch[2].rm_so, valMatch[2].rm_eo);
+      if(nvals >= 3) *val3 = extract_int(str, valMatch[3].rm_so, valMatch[3].rm_eo);
       return YES;
     }
     return NO;
   }
+
+    
   
 #if defined(__cplusplus)
 }  /* extern "C" */

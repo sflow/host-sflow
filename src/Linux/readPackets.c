@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 
@@ -8,11 +8,6 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
-
-  extern int debug;
-
-#if (HSP_ULOG || HSP_NFLOG || HSP_PCAP)
-
 
   /*_________________-----------------------------------__________________
     _________________   agentCB_getCounters_interface   __________________
@@ -23,7 +18,9 @@ extern "C" {
   {
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
-    
+
+    assert(EVCurrentBus() == sp->pollBus);
+
     // device name was copied as userData
     char *devName = (char *)poller->userData;
     
@@ -47,7 +44,6 @@ extern "C" {
 	uint32_t mcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
-#ifdef HSP_ETHTOOL_STATS
 	// only do this if we were able to find all four
 	// via ethtool, otherwise it would just be too weird...
 	if(adaptorNIO->et_nfound == 4) {
@@ -58,7 +54,6 @@ extern "C" {
 	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
 	  pkts_out -= (mcasts_out + bcasts_out);
 	}
-#endif
 	// generic interface counters
 	SFLCounters_sample_element elem = { 0 };
 	elem.tag = SFLCOUNTERS_GENERIC;
@@ -114,7 +109,6 @@ extern "C" {
 	  SFLADD_ELEMENT(cs, &lacp_elem);
 	}
 
-#ifdef HSP_ETHTOOL_STATS
 	// possibly include SFP struct with optical gauges
 	SFLCounters_sample_element sfp_elem = { 0 };
 	if(adaptorNIO->sfp.num_lanes) {
@@ -122,7 +116,6 @@ extern "C" {
 	  sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
 	  SFLADD_ELEMENT(cs, &sfp_elem);
 	}
-#endif
 	
 	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(poller, cs);
@@ -149,12 +142,11 @@ extern "C" {
     if(adaptorNIO->poller == NULL) {
       SFLDataSource_instance dsi;
       SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
-      HSPSFlow *sf = sp->sFlow;
-      uint32_t pollingInterval = sf->sFlowSettings ?
-	sf->sFlowSettings->pollingInterval :
+      uint32_t pollingInterval = sp->sFlowSettings ?
+	sp->sFlowSettings->pollingInterval :
 	SFL_DEFAULT_POLLING_INTERVAL;
       SEMLOCK_DO(sp->sync_agent) {
-	adaptorNIO->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters_interface_request);
+	adaptorNIO->poller = sfl_agent_addPoller(sp->agent, &dsi, sp, agentCB_getCounters_interface_request);
 	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
 	sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
 	// remember the device name to make the lookups easier later.
@@ -177,12 +169,11 @@ extern "C" {
     if(adaptorNIO->sampler == NULL) {
       SFLDataSource_instance dsi;
       SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
-      HSPSFlow *sf = sp->sFlow;
       // add sampler
       SEMLOCK_DO(sp->sync_agent) {
-	adaptorNIO->sampler = sfl_agent_addSampler(sf->agent, &dsi);
+	adaptorNIO->sampler = sfl_agent_addSampler(sp->agent, &dsi);
 	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
-	sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sf->sFlowSettings_file->headerBytes);
+	sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sp->sFlowSettings_file->headerBytes);
       }
       // and make sure we have a poller too
       getPoller(sp, adaptor);
@@ -195,10 +186,10 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
+  void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
   {
 
-    if(debug > 1) {
+    if(getDebug() > 1) {
       myLog(LOG_INFO, "takeSample: hook=%u in=%s out=%s pkt_len=%u cap_len=%u mac_len=%u",
 	    hook,
 	    ad_in ? ad_in->deviceName : "<not found>",
@@ -217,11 +208,7 @@ extern "C" {
 
     int internal_in = NO;
     int internal_out = NO;
-#ifdef HSP_CUMULUS
-    int bridgeModel = YES;
-#else
-    int bridgeModel = isBridge;
-#endif
+    int bridgeModel = sp->cumulus.cumulus ? YES : isBridge;
 
     // If it is the container-end of a veth pair, then we want to
     // map it back to the other end that is in the global-namespace,
@@ -231,7 +218,7 @@ extern "C" {
 	bridgeModel = YES;
       SFLAdaptor *ad_in_global = adaptorByPeerIndex(sp, ad_in->ifIndex);
       if(ad_in_global) {
-	if(debug) {
+	if(getDebug()) {
 	  myLog(LOG_INFO, "  GlobalNS veth peer ad_in=%s(%u)",
 		ad_in_global->deviceName,
 		ad_in_global->ifIndex);
@@ -245,7 +232,7 @@ extern "C" {
 	bridgeModel = YES;
       SFLAdaptor *ad_out_global = adaptorByPeerIndex(sp, ad_out->ifIndex);
       if(ad_out_global) {
-	if(debug) {
+	if(getDebug()) {
 	  myLog(LOG_INFO, "  GlobalNS veth peer ad_out=%s(%u)",
 		ad_out_global->deviceName,
 		ad_out_global->ifIndex);
@@ -294,28 +281,29 @@ extern "C" {
     SFLAdaptor *sampler_dev = ad_in ?: ad_out;
 
     // detect egress sampling
-#ifdef HSP_CUMULUS
-    // On Cumulus Linux the sampling direction is indicated in the low
-    // bit of the pkt->hook field: 0==ingress,1==egress
-    if(ad_out &&
-       (hook & 1) == 1) {
-      sampler_dev = ad_out;
+    if(sp->cumulus.cumulus) {
+      // On Cumulus Linux the sampling direction is indicated in the low
+      // bit of the pkt->hook field: 0==ingress,1==egress
+      if(ad_out &&
+	 (hook & 1) == 1) {
+	sampler_dev = ad_out;
+      }
     }
-#else
-    if(ad_in && ad_out) {
-      // If the ingress was a loopback and the egress is not -- and the
-      // egress has an ifIndex,  then switch this over to indicate egress
-      // sampling.  In a typical host scenario most samples will be
-      // "lo" -> "eth0" or "eth0" -> "lo", so this ensures that
-      // that we present it as bidirectional sampling on eth0.
-      if(ADAPTOR_NIO(ad_in)->loopback) {
-	if(!ADAPTOR_NIO(ad_out)->loopback
-	   && ad_out->ifIndex) {
-	  sampler_dev = ad_out;
+    else {
+      if(ad_in && ad_out) {
+	// If the ingress was a loopback and the egress is not -- and the
+	// egress has an ifIndex,  then switch this over to indicate egress
+	// sampling.  In a typical host scenario most samples will be
+	// "lo" -> "eth0" or "eth0" -> "lo", so this ensures that
+	// that we present it as bidirectional sampling on eth0.
+	if(ADAPTOR_NIO(ad_in)->loopback) {
+	  if(!ADAPTOR_NIO(ad_out)->loopback
+	     && ad_out->ifIndex) {
+	    sampler_dev = ad_out;
+	  }
 	}
       }
     }
-#endif
 
     if(sampler_dev == NULL) {
       // for promiscuous tap monitoring there may be no sense of 'in'
@@ -327,7 +315,7 @@ extern "C" {
     if(sampler_dev && sampler_dev->ifIndex) {
       HSPAdaptorNIO *samplerNIO = ADAPTOR_NIO(sampler_dev);
 
-      if(debug > 2) {
+      if(getDebug() > 2) {
 	myLog(LOG_INFO, "selected sampler %s ifIndex=%u",
 	      sampler_dev->deviceName,
 	      sampler_dev->ifIndex);
@@ -367,7 +355,7 @@ extern "C" {
 	  // no need to copy - just point at the captured header
 	  u_char ipversion = cap_hdr[0] >> 4;
 	  if(ipversion != 4 && ipversion != 6) {
-	    if(debug) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
+	    if(getDebug()) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
 	  }
 	  else {
 	    if(mac_len == 0) {
@@ -412,352 +400,6 @@ extern "C" {
     }
   }
 
-
-  /*_________________---------------------------__________________
-    _________________      readPackets          __________________
-    -----------------___________________________------------------
-  */
-
-#ifdef HSP_PCAP
-  // function of type pcap_handler
-
-  static void readPackets_pcap_cb(u_char *user, const struct pcap_pkthdr *hdr, const u_char *buf)
-  {
-    static uint32_t MySkipCount=1;
-    BPFSoc *bpfs = (BPFSoc *)user;
-    uint32_t sr = bpfs->subSamplingRate;
-
-    if(sr == 0) {
-      // sampling disabled by setting to 0
-      return;
-    }
-    
-    if(--MySkipCount == 0) {
-      /* reached zero. Set the next skip */
-      MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
-
-      HSP *sp = bpfs->myHSP;
-      
-      // global MAC -> adaptor
-      SFLMacAddress macdst,macsrc;
-      memcpy(macdst.mac, buf, 6);
-      memcpy(macsrc.mac, buf+6, 6);
-      SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
-      SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
-      SFLAdaptor *tapdev = bpfs->promisc ? adaptorByName(sp, bpfs->deviceName) : NULL;
-
-      if(debug > 1) {
-	if(srcdev) {
-	  myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
-		srcdev->deviceName,
-		srcdev->ifIndex,
-		srcdev->peer_ifIndex);
-	}
-	if(dstdev) {
-	  myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
-		dstdev->deviceName,
-		dstdev->ifIndex,
-		dstdev->peer_ifIndex);
-	}
-      }
-      
-      takeSample(sp,
-		 srcdev,
-		 dstdev,
-		 tapdev,
-		 bpfs->isBridge,
-		 0 /*hook*/,
-		 buf /* mac hdr*/,
-		 14 /* mac len */,
-		 buf + 14 /* payload */,
-		 hdr->caplen - 14, /* length of captured payload */
-		 hdr->len, /* length of packet (pdu) */
-		 bpfs->drops, /* droppedSamples */
-		 bpfs->samplingRate);
-    }
-  }
-  
-  int readPackets_pcap(HSP *sp, BPFSoc *bpfs)
-  {
-    int batch = pcap_dispatch(bpfs->pcap,
-			      HSP_READPACKET_BATCH,
-			      readPackets_pcap_cb,
-			      (u_char *)bpfs);
-    if(batch == -1) {
-      myLog(LOG_ERR, "pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
-      // close the pcap socket so we don't spin? $$$$
-    }
-    return batch;
-  }
-
-#endif
-  
-#ifdef HSP_ULOG
-
-  int readPackets_ulog(HSP *sp)
-  {
-    int batch = 0;
-    static uint32_t MySkipCount=1;
-
-    if(sp->sFlow->sFlowSettings == NULL) {
-      // config was turned off
-      return 0;
-    }
-
-    if(sp->sFlow->sFlowSettings->ulogSubSamplingRate == 0) {
-      // packet sampling was disabled by setting desired rate to 0
-      return 0;
-    }
-
-    if(sp->ulog_soc) {
-      for( ; batch < HSP_READPACKET_BATCH; batch++) {
-	char buf[HSP_MAX_ULOG_MSG_BYTES];
-	socklen_t peerlen = sizeof(sp->ulog_peer);
-	int len = recvfrom(sp->ulog_soc,
-			   buf,
-			   HSP_MAX_ULOG_MSG_BYTES,
-			   0,
-			   (struct sockaddr *)&sp->ulog_peer,
-			   &peerlen);
-	if(len <= 0) break;
-	if(debug > 1) myLog(LOG_INFO, "got ULOG msg: %u bytes", len);
-	for(struct nlmsghdr *msg = (struct nlmsghdr *)buf; NLMSG_OK(msg, len); msg=NLMSG_NEXT(msg, len)) {
-
-	  if(debug > 1) {
-	    myLog(LOG_INFO, "netlink (%u bytes left) msg [len=%u type=%u flags=0x%x seq=%u pid=%u]",
-		  len,
-		  msg->nlmsg_len,
-		  msg->nlmsg_type,
-		  msg->nlmsg_flags,
-		  msg->nlmsg_seq,
-		  msg->nlmsg_pid);
-	  }
-
-          // check for drops indicated by sequence no
-          uint32_t droppedSamples = 0;
-          if(sp->ulog_seqno) {
-            droppedSamples = msg->nlmsg_seq - sp->ulog_seqno - 1;
-            if(droppedSamples) {
-              sp->ulog_drops += droppedSamples;
-            }
-          }
-          sp->ulog_seqno = msg->nlmsg_seq;
-
-	  switch(msg->nlmsg_type) {
-	  case NLMSG_NOOP:
-	  case NLMSG_ERROR:
-	  case NLMSG_OVERRUN:
-	    // ignore these
-	    break;
-	  case NLMSG_DONE: // last in multi-part
-	  default:
-	    {
-
-	      if(--MySkipCount == 0) {
-		/* reached zero. Set the next skip */
-		uint32_t sr = sp->sFlow->sFlowSettings->ulogSubSamplingRate;
-		MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
-
-		/* and take a sample */
-
-		// we're seeing type==111 on Fedora14
-		//if(msg->nlmsg_flags & NLM_F_REQUEST) { }
-		//if(msg->nlmsg_flags & NLM_F_MULTI) { }
-		//if(msg->nlmsg_flags & NLM_F_ACK) { }
-		//if(msg->nlmsg_flags & NLM_F_ECHO) { }
-		ulog_packet_msg_t *pkt = NLMSG_DATA(msg);
-		
-		if(debug > 1) {
-		  myLog(LOG_INFO, "ULOG mark=%u ts=%s prefix=%s",
-			pkt->mark,
-			ctime(&pkt->timestamp_sec),
-			pkt->prefix);
-		}
-
-
-
-		SFLAdaptor *dev_in = NULL;
-		SFLAdaptor *dev_out = NULL;
-
-		if(pkt->indev_name[0]) {
-		  dev_in = adaptorByName(sp, pkt->indev_name);
-		}
-		if(pkt->outdev_name[0]) {
-		  dev_out = adaptorByName(sp, pkt->outdev_name);
-		}
-
-		takeSample(sp,
-			   dev_in,
-			   dev_out,
-			   NULL,
-			   NO,
-			   pkt->hook,
-			   pkt->mac,
-			   pkt->mac_len,
-			   pkt->payload,
-			   pkt->data_len, /* length of captured payload */
-			   pkt->data_len, /* length of packet (pdu) */
-			   droppedSamples,
-			   sp->sFlow->sFlowSettings->ulogActualSamplingRate);
-	      }
-	    }
-	  }
-	}
-      }
-    }
-    return batch;
-  }
-
-#endif
-
-#ifdef HSP_NFLOG
-
-  int readPackets_nflog(HSP *sp)
-  {
-    int batch = 0;
-    static uint32_t MySkipCount=1;
-    
-    if(sp->sFlow->sFlowSettings == NULL) {
-      // config was turned off
-      return 0;
-    }
-
-
-    if(sp->sFlow->sFlowSettings->nflogSubSamplingRate == 0) {
-      // packet sampling was disabled by setting desired rate to 0
-      return 0;
-    }
-    
-    if(sp->nflog_soc) {
-      for( ; batch < HSP_READPACKET_BATCH; batch++) {
-	u_char buf[HSP_MAX_NFLOG_MSG_BYTES];
-	int len = nfnl_recv(sp->nfnl,
-			    buf,
-			    HSP_MAX_NFLOG_MSG_BYTES);
-	if(len <= 0) break;
-	if(debug > 1) {
-	  struct nlmsghdr *msg = (struct nlmsghdr *)buf;
-	  myLog(LOG_INFO, "got NFLOG msg: bytes_read=%u nlmsg_len=%u nlmsg_type=%u OK=%s",
-		len,
-		msg->nlmsg_len,
-		msg->nlmsg_type,
-		NLMSG_OK(msg, len) ? "true" : "false");
-	}
-	for(struct nlmsghdr *msg = (struct nlmsghdr *)buf; NLMSG_OK(msg, len); msg=NLMSG_NEXT(msg, len)) {
-	  if(debug > 1) {
-	    myLog(LOG_INFO, "netlink (%u bytes left) msg [len=%u type=%u flags=0x%x seq=%u pid=%u]",
-		  len,
-		  msg->nlmsg_len,
-		  msg->nlmsg_type,
-		  msg->nlmsg_flags,
-		  msg->nlmsg_seq,
-		  msg->nlmsg_pid);
-	  }
-
-          // check for drops indicated by sequence no
-          uint32_t droppedSamples = 0;
-          if(sp->nflog_seqno) {
-            droppedSamples = msg->nlmsg_seq - sp->nflog_seqno - 1;
-            if(droppedSamples) {
-              sp->nflog_drops += droppedSamples;
-            }
-          }
-          sp->nflog_seqno = msg->nlmsg_seq;
-
-	  switch(msg->nlmsg_type) {
-	  case NLMSG_NOOP:
-	  case NLMSG_ERROR:
-	  case NLMSG_OVERRUN:
-	    // ignore these
-	    break;
-	  case NLMSG_DONE: // last in multi-part
-	  default:
-	    {
-	      struct nfgenmsg *genmsg;
-	      struct nfattr *attr = nfnl_parse_hdr(sp->nfnl, msg, &genmsg);
-	      if(attr == NULL) {
-		continue;
-	      }
-	      int min_len = NLMSG_SPACE(sizeof(struct nfgenmsg));
-	      int attr_len = msg->nlmsg_len - NLMSG_ALIGN(min_len);
-	      struct nfattr *tb[NFULA_MAX] = { 0 };
-
-	      while (NFA_OK(attr, attr_len)) {
-		if (NFA_TYPE(attr) <= NFULA_MAX) {
-		  tb[NFA_TYPE(attr)-1] = attr;
-		  if(debug > 2) {
-		    myLog(LOG_INFO, "found attr %d attr_len=%d\n", NFA_TYPE(attr), attr_len);
-		  }
-		}
-                attr = NFA_NEXT(attr,attr_len);
-	      }
-	      // get the essential fields so we know this is really a packet we can sample
-	      struct nfulnl_msg_packet_hdr *msg_pkt_hdr = nfnl_get_pointer_to_data(tb, NFULA_PACKET_HDR, struct nfulnl_msg_packet_hdr);
-	      u_char *cap_hdr = nfnl_get_pointer_to_data(tb, NFULA_PAYLOAD, u_char);
-	      int cap_len = NFA_PAYLOAD(tb[NFULA_PAYLOAD-1]);
-	      if(msg_pkt_hdr == NULL
-		 || cap_hdr == NULL
-		 || cap_len <= 0) {
-		// not a packet header msg, or no captured payload found
-		continue;
-	      }
-
-	      if(debug > 2) {
-		myLog(LOG_INFO, "capture payload (cap_len)=%d\n", cap_len);
-	      }
-
-	      if(--MySkipCount == 0) {
-		/* reached zero. Set the next skip */
-		uint32_t sr = sp->sFlow->sFlowSettings->nflogSubSamplingRate;
-		MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
-		
-		/* and take a sample */
-		char *prefix = nfnl_get_pointer_to_data(tb, NFULA_PREFIX, char);
-		uint32_t ifin_phys = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_PHYSINDEV, uint32_t));
-		uint32_t ifout_phys = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_PHYSOUTDEV, uint32_t));
-		uint32_t ifin = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_INDEV, uint32_t));
-		uint32_t ifout = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_OUTDEV, uint32_t));
-		u_char *mac_hdr = nfnl_get_pointer_to_data(tb, NFULA_HWHEADER, u_char);
-		uint16_t mac_len = ntohs(nfnl_get_data(tb, NFULA_HWLEN, uint16_t));
-		uint32_t mark = ntohl(nfnl_get_data(tb, NFULA_MARK, uint32_t));
-		uint32_t seq = ntohl(nfnl_get_data(tb, NFULA_SEQ, uint32_t));
-		uint32_t seq_global = ntohl(nfnl_get_data(tb, NFULA_SEQ_GLOBAL, uint32_t));
-
-		if(debug > 1) { 
-		  myLog(LOG_INFO, "NFLOG prefix: %s in: %u (phys=%u) out: %u (phys=%u) seq: %u seq_global: %u mark: %u\n",
-			prefix,
-			ifin,
-			ifin_phys,
-			ifout,
-			ifout_phys,
-			seq,
-			seq_global,
-			mark);
-		}
-
-		takeSample(sp,
-			   adaptorByIndex(sp, (ifin_phys ?: ifin)),
-			   adaptorByIndex(sp, (ifout_phys ?: ifout)),
-			   NULL,
-			   NO,
-			   msg_pkt_hdr->hook,
-			   mac_hdr,
-			   mac_len,
-			   cap_hdr,
-			   cap_len, /* length of captured payload */
-			   cap_len, /* length of packet (pdu) */
-			   droppedSamples,
-			   sp->sFlow->sFlowSettings->nflogActualSamplingRate);
-	      }
-	    }
-	  }
-	}
-      }
-    }
-    return batch;
-  }
-#endif
-
   /*_________________---------------------------__________________
     _________________   configSwitchPorts       __________________
     -----------------___________________________------------------
@@ -800,8 +442,6 @@ extern "C" {
     return count;
   }
 
-
-#endif /* HSP_ULOG || HSP_NFLOG || HSP_PCAP */
   
 #if defined(__cplusplus)
 } /* extern "C" */

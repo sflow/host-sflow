@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #ifndef CPU_UTILS_H

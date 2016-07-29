@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #ifndef HSFLOW_ETHTOOL_H
@@ -9,35 +9,34 @@
 extern "C" {
 #endif
 
-#ifdef HSP_ETHTOOL_STATS
   static const char *HSP_ethtool_mcasts_in_names[] = {
     "HwIfInMcastPkts",
     "receive-multicast-packet",
+    "rx_mcast_packets", // os10
     NULL
   };
   static const char *HSP_ethtool_mcasts_out_names[] = {
     "HwIfOutMcastPkts",
     "tx-multicast-packets",
+    "tx_mcast_packets", // os10
     NULL
   };
   static const char *HSP_ethtool_bcasts_in_names[] = {
     "HwIfInBcastPkts",
     "receive-broadcast-packet",
+    "rx_bcast_packets", // os10
     NULL
   };
   static const char *HSP_ethtool_bcasts_out_names[] = {
     "HwIfOutBcastPkts",
     "tx-broadcast-packets",
+    "tx_bcast_packets", // os10
     NULL
   };
-#endif
-
-#ifdef HSP_DOCKER
   static const char *HSP_ethtool_peer_ifindex_names[] = {
     "peer_ifindex",
     NULL
   };
-#endif
 
 #if defined(__cplusplus)
 } /* extern "C" */

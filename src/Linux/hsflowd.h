@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #ifndef HSFLOWD_H
@@ -20,6 +20,7 @@ extern "C" {
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <syslog.h>
 #include <signal.h>
 #include <fcntl.h>
@@ -38,163 +39,27 @@ extern "C" {
 #include <signal.h>
 #include <ucontext.h>
 
+#include <regex.h> // for regex_t
+
 #include <stdarg.h> // for va_start()
 #include "util.h"
 #include "sflow_api.h"
+#include "evbus.h"
 
-#ifdef HSP_XEN
-// xs.h because xenstore.h
-#ifdef HSP_XENSTORE_H
-#include "xenstore.h"
-#else
-#include "xs.h"
-#endif
-#include "xenctrl.h"
-#include "dirent.h"
-#include "regex.h" // for vif detection
-// The pattern on a xenserver is usually just "vif%d.%d" but
-// different platforms may have different strings here, so
-// make it a regular expression that can be changed at
-// compile time.  This expression looks for anything that
-// has "vif" in it and ends with domid.netid,  which might
-// actually work for all xen variants.
-#define HSP_XEN_VIF_REGEX "vif[^0-9]*([0-9]+)\\.([0-9]+)$"
-#define HSP_XEN_VIF_REGEX_NMATCH 3 // fields-to-extract + 1
-// For convenience, define a domId to mean "the physical host"
-#define XEN_DOMID_PHYSICAL (uint32_t)-1
-#endif
+  // define these here because we use them to trigger a module load
+  // even when the module is not referenced in the config.
+#define HSP_CUMULUS_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
+#define HSP_OS10_SWITCHPORT_CONFIG_PROG "/opt/dell/os10/bin/nas_sflow_cli.py"
 
-#ifdef HSP_VRT
-#include "libvirt.h"
-#include "libxml/xmlreader.h"
-#endif
-
-#ifdef HSP_DOCKER
-#define HSP_CAPABILITIES
-/* Typically need libcap-dev[el] package */
-#include <linux/types.h>
-#include <sys/capability.h>
-#include <sys/prctl.h>
-#include <sched.h>
-
-#include "cJSON.h"
-  typedef struct _HSFNameVal {
+  typedef struct _HSPNameVal {
     char *nv_name;
     int nv_found;
     uint64_t nv_val64;
-  } HSFNameVal;
+  } HSPNameVal;
 
   // forward declarations
-  struct _HSPSFlow;
   struct _HSP;
   struct _HSPVMState;
-  
-  typedef struct _HSPContainer {
-    struct _HSPVMState *vm;
-    char *id;
-    char *name;
-    char *hostname;
-    uint32_t dsIndex; // $$$
-    char uuid[16]; // $$$
-    pid_t pid;
-    uint32_t running:1;
-    uint32_t marked:1;
-    uint64_t memoryLimit;
-  } HSPContainer;
-#define HSP_DOCKER_CMD "/usr/bin/docker"
-#define HSP_NETNS_DIR "/var/run/netns"
-#define HSP_IP_CMD "/usr/sbin/ip"
-#define HSP_DOCKER_MAX_FNAME_LEN 255
-#define HSP_DOCKER_MAX_LINELEN 512
-#define HSP_DOCKER_SHORTID_LEN 12
-#endif
-
-#ifdef HSP_CUMULUS
-#define HSP_ETHTOOL_STATS 1
-#define HSP_SWITCHPORT_CONFIG 1
-#define HSP_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
-#include "regex.h" // for switchport detection
-#define HSP_SWITCHPORT_REGEX "^swp[0-9s]+$"
-  // uses ULOG (netlink) channel, so make sure that is enabled:
-#ifndef HSP_NFLOG
-#define HSP_ULOG 1
-#define HSP_DEFAULT_ULOG_GROUP 1
-#endif
-  // starting in CL 2.5, uses NFLOG, also defaulting to group==1
-#define HSP_DEFAULT_NFLOG_GROUP 1
-#endif
-
-#if (defined(HSP_ULOG) || defined(HSP_NFLOG) || defined(HSP_PCAP))
-#include <linux/types.h>
-#include <linux/netlink.h>
-#include <net/if.h>
-#define HSP_READPACKET_BATCH 10000
-#endif
-
-#ifdef HSP_ULOG
-#include <linux/netfilter_ipv4/ipt_ULOG.h>
-#define HSP_MAX_ULOG_MSG_BYTES 10000
-#define HSP_ULOG_RCV_BUF 8000000
-#endif /* HSP_ULOG */
-
-#ifdef HSP_NFLOG
-/* Set this to 65K+ to make sure we handle the
-   case where virtual port TSOs coallesce packets
-   (ignoring MTU constraints). */
-#define HSP_MAX_NFLOG_MSG_BYTES 65536 + 128
-#define HSP_NFLOG_RCV_BUF 8000000
-
-#include <linux/netfilter/nfnetlink_log.h>
-#include <libnfnetlink.h>
-#endif /* HSP_NFLOG */
-
-#ifdef HSP_PCAP
-#include <pcap.h>
-  typedef struct _BPFSoc {
-    struct _BPFSoc *nxt;
-    struct _HSP *myHSP;
-    char *deviceName;
-    int soc;
-    uint32_t samplingRate;
-    uint32_t subSamplingRate;
-    uint32_t drops;
-    uint32_t isBridge:1;
-    uint32_t promisc:1;
-    pcap_t *pcap;
-    char pcap_err[PCAP_ERRBUF_SIZE];
-  } BPFSoc;
-#endif /* HSP_PCAP */
-
-#ifdef HSP_JSON
-#include "cJSON.h"
-#define HSP_MAX_JSON_MSG_BYTES 10000
-#define HSP_READJSON_BATCH 100
-#define HSP_JSON_RCV_BUF 2000000
-
-  typedef struct _HSPApplication {
-    struct _HSPApplication *ht_nxt;
-    char *application;
-    uint32_t hash;
-    uint32_t dsIndex;
-    uint16_t servicePort;
-    uint32_t service_port_clash;
-    uint32_t settings_revisionNo;
-    int json_counters;
-    int json_ops_counters;
-    time_t last_json_counters;
-    time_t last_json;
-#define HSP_COUNTER_SYNTH_TIMEOUT 120
-#define HSP_JSON_APP_TIMEOUT 7200
-    SFLSampler *sampler;
-    SFLPoller *poller;
-    SFLCounters_sample_element counters;
-  } HSPApplication;
-
-#endif /* HSP_JSON */
-
-#ifdef HSP_NVML
-  #include <nvml.h>
-#endif // HSP_NVML
 
 #define ADD_TO_LIST(linkedlist, obj) \
   do { \
@@ -206,16 +71,9 @@ extern "C" {
 #define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
 #define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
 #define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
-#define HSP_DEFAULT_VMSTORE_FILE "/etc/hsflowd.data"
-#define HSP_DEFAULT_CRASH_FILE "/etc/hsflowd.crash"
-
-#ifndef HSP_DEFAULT_ULOG_GROUP
-#define HSP_DEFAULT_ULOG_GROUP 0
+#ifndef HSP_MOD_DIR
+#define HSP_MOD_DIR /etc/hsflowd/modules
 #endif
-#ifndef HSP_DEFAULT_NFLOG_GROUP
-#define HSP_DEFAULT_NFLOG_GROUP 0
-#endif
-#define HSP_DEFAULT_JSON_PORT 0
 
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
@@ -224,11 +82,7 @@ extern "C" {
 #define HSP_DEFAULT_LOGICAL_DSINDEX_START 100000
 #define HSP_DEFAULT_APP_DSINDEX_START 150000
 #define HSP_MAX_TICKS 60
-#define HSP_DEFAULT_DNSSD_STARTDELAY 30
-#define HSP_DEFAULT_DNSSD_RETRYDELAY 300
-#define HSP_DEFAULT_DNSSD_MINDELAY 10
-#define HSP_DNSSD_STACKSIZE 2000000
-#define HSP_PACKET_STACKSIZE 2000000
+
 #define HSP_REFRESH_VMS 60
 #define HSP_FORGET_VMS 180
 #define HSP_REFRESH_ADAPTORS 180
@@ -279,7 +133,7 @@ extern "C" {
   typedef struct _HSPPcap {
     struct _HSPPcap *nxt;
     char *dev;
-    int promisc;
+    bool promisc;
   } HSPPcap;
 
   typedef struct _HSPCIDR {
@@ -295,27 +149,19 @@ extern "C" {
   typedef struct _HSPApplicationSettings {
     struct _HSPApplicationSettings *nxt;
     char *application;
-    int got_sampling_n;
+    bool got_sampling_n;
     uint32_t sampling_n;
-    int got_polling_secs;
+    bool got_polling_secs;
     uint32_t polling_secs;
   } HSPApplicationSettings;
 
   typedef struct _HSPSFlowSettings {
     HSPCollector *collectors;
     uint32_t numCollectors;
-    HSPPcap *pcaps;
-    uint32_t numPcaps;
     uint32_t samplingRate;
     uint32_t pollingInterval;
     uint32_t headerBytes;
     uint32_t datagramBytes;
-
-    // performance tuning options for Xen
-    int xen_update_dominfo; // update dominfo for every VM at poll-time?
-    int xen_dsk; // include disk counters?
-    // may include flags to turn off hostname and MAC lookup calls
-    // to xs_read(),  but surely those are not so slow?
 
     // option to control switch-port sampling direction
     int samplingDirection;
@@ -326,84 +172,29 @@ extern "C" {
 
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
-    uint32_t ulogGroup;
-    double ulogProbability;
-    uint32_t ulogSamplingRate;
-    uint32_t ulogSubSamplingRate;
-    uint32_t ulogActualSamplingRate;
-
-    uint32_t nflogGroup;
-    double nflogProbability;
-    uint32_t nflogSamplingRate;
-    uint32_t nflogSubSamplingRate;
-    uint32_t nflogActualSamplingRate;
-
-    uint32_t jsonPort;
-    char *jsonFIFO;
     HSPCIDR *agentCIDRs;
   } HSPSFlowSettings;
-
-  typedef struct _HSPSFlow {
-    struct _HSP *myHSP;
-    SFLAgent *agent;
-    SFLPoller *poller;
-
-    HSPSFlowSettings *sFlowSettings_file;
-    HSPSFlowSettings *sFlowSettings_dnsSD; // owned by DNS-SD thread
-    HSPSFlowSettings *sFlowSettings; // owned by DNS-SD if running, else main
-    char *sFlowSettings_str;  // owned by DNS-SD if running, else main
-
-    uint32_t revisionNo;
-
-    uint32_t subAgentId;
-    char *agentDevice;
-    SFLAddress agentIP;
-    uint32_t explicitAgentDevice:1;
-    uint32_t explicitAgentIP:1;
-  } HSPSFlow; 
-
-  typedef enum { HSPSTATE_READCONFIG=0,
-		 HSPSTATE_WAITCONFIG,
-		 HSPSTATE_RUN,
-		 HSPSTATE_END
-  } EnumHSPState;
-
-#ifdef HSFLOWD_MAIN
-  static const char *HSPStateNames[] = {
-    "READCONFIG",
-    "WAITCONFIG",
-    "RUN",
-    "END"
-  };
-#endif
 
   // userData structure to store state for VM data-sources
   typedef enum {
     VMTYPE_UNDEFINED=0,
     VMTYPE_XEN,
-    VMTYPE_VRT,
+    VMTYPE_KVM,
     VMTYPE_DOCKER} EnumVMType;
   
   typedef struct _HSPVMState {
     char uuid[16];
     EnumVMType vmType;
     uint32_t dsIndex;
-    uint32_t created:1;
-    uint32_t marked:1;
-    uint32_t domId;
+    bool created:1;
+    bool marked:1;
     SFLAdaptorList *interfaces;
     UTStringArray *volumes;
     UTStringArray *disks;
     SFLPoller *poller;
-#ifdef HSP_XEN
-    uint32_t network_count;
-    xc_domaininfo_t domaininfo;
-#endif
-#ifdef HSP_DOCKER
-    HSPContainer *container;
-#endif
   } HSPVMState;
-    
+
+
   typedef enum { IPSP_NONE=0,
 		 IPSP_LOOPBACK6,
 		 IPSP_LOOPBACK4,
@@ -417,14 +208,12 @@ extern "C" {
 		 IPSP_NUM_PRIORITIES,
   } EnumIPSelectionPriority;
 
-#ifdef HSP_ETHTOOL_STATS
   typedef struct _HSP_ethtool_counters {
     uint64_t mcasts_in;
     uint64_t mcasts_out;
     uint64_t bcasts_in;
     uint64_t bcasts_out;
   } HSP_ethtool_counters;
-#endif
 
   typedef enum { HSPDEV_OTHER=0,
 		 HSPDEV_PHYSICAL,
@@ -438,13 +227,13 @@ extern "C" {
     SFLAddress ipAddr;
     uint32_t /*EnumIPSelectionPriority*/ ipPriority;
     EnumHSPDevType devType;
-    uint32_t up:1;
-    uint32_t loopback:1;
-    uint32_t bond_master:1;
-    uint32_t bond_slave:1;
-    uint32_t switchPort:1;
-    uint32_t vm_or_container:1;
-    uint32_t modinfo_tested:1;
+    bool up:1;
+    bool loopback:1;
+    bool bond_master:1;
+    bool bond_slave:1;
+    bool switchPort:1;
+    bool vm_or_container:1;
+    bool modinfo_tested:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -454,11 +243,8 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
-#if (defined(HSP_ETHTOOL_STATS) || defined(HSP_DOCKER))
     uint32_t et_nctrs; // how many in total
     uint32_t et_nfound; // how many of the ones we wanted
-#endif
-#ifdef HSP_ETHTOOL_STATS
     // the offsets within the ethtool stats block
     uint8_t et_idx_mcasts_in;
     uint8_t et_idx_mcasts_out;
@@ -481,7 +267,6 @@ extern "C" {
     uint32_t modinfo_type;
     uint32_t modinfo_len;
     SFLSFP_counters sfp;
-#endif
     // LACP/bonding data
     SFLLACP_counters lacp;
     // switch ports that are sending individual interface
@@ -492,6 +277,11 @@ extern "C" {
     uint32_t sampling_n;
     uint32_t sampling_n_set;
     uint32_t netlink_drops;
+    // allow mod_xen to write regex-extracted fields here
+    int xen_domid;
+    int xen_netid;
+    // OS10
+    int os10_port_id;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -500,29 +290,122 @@ extern "C" {
     uint64_t bytes_read;
     uint64_t bytes_written;
   } HSPDiskIO;
-    
-#ifdef HSP_NVML
-  typedef struct _HSPNVML {
-    unsigned int gpu_count;
-    uint32_t nvml_gpu_time; // mS. accumulator
-    uint32_t nvml_mem_time; // mS. accumulator
-    uint32_t nvml_energy;  // mJ. accumulator
-  } HSPNVML;
-#endif
+
+#define HSPBUS_POLL "poll" // main thread
+#define HSPBUS_CONFIG "config" // DNS-SD
+#define HSPBUS_PACKET "packet" // pcap,ulog,nflog,json packet processing
+
+// The generic start,tick,tock,final,end events are defined in evbus.h
+#define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // building counter-sample
+#define HSPEVENT_CONFIG_START "config_start"     // begin config lines
+#define HSPEVENT_CONFIG_LINE "config_line"       // ...next config line
+#define HSPEVENT_CONFIG_END "config_end"         // end config lines
+#define HSPEVENT_CONFIG_CHANGED "config_changed" // new config
+#define HSPEVENT_CONFIG_DONE "config_done"       // after new config
+#define HSPEVENT_INTF_CHANGED "intf_changed"     // interface(s) changed
 
   typedef struct _HSP {
-    EnumHSPState state;
-    time_t clk;
-    HSPSFlow *sFlow;
+    char *modulesPath;
+    EVMod *rootModule;
+    EVBus *pollBus;
+
+    // config settings (used to be separate HSPSFlow object)
+    SFLAgent *agent;
+    pthread_mutex_t *sync_agent; // sync access to sFlow agent
+    SFLPoller *poller;
+    HSPSFlowSettings *sFlowSettings_file;
+    HSPSFlowSettings *sFlowSettings_dnsSD;
+    HSPSFlowSettings *sFlowSettings_dnsSD_prev;
+    HSPSFlowSettings *sFlowSettings;
+    char *sFlowSettings_str;
+
+    // agent/agentIP config results
+    uint32_t revisionNo;
+    uint32_t subAgentId;
+    char *agentDevice;
+    SFLAddress agentIP;
+    bool explicitAgentDevice;
+    bool explicitAgentIP;
+
+    // config-file-only settings
+    struct {
+      bool DNSSD;
+      char *domain;
+    } DNSSD;
+    struct {
+      bool json;
+      uint32_t port;
+      char *FIFO;
+    } json;
+    struct {
+      bool kvm;
+      uint32_t refreshVMListSecs;
+      uint32_t forgetVMSecs;
+    } kvm;
+    struct {
+      bool xen;
+      regex_t *vif_regex;
+      char *vif_regex_str;
+      bool update_dominfo; // update dominfo for every VM at poll-time
+      bool dsk; // include disk counters
+      char *vbd; // path to virtual block device info
+      uint32_t refreshVMListSecs;
+      uint32_t forgetVMSecs;
+    } xen;
+    struct {
+      bool docker;
+      uint32_t refreshVMListSecs;
+      uint32_t forgetVMSecs;
+    } docker;
+    struct {
+      bool cumulus;
+      char *swp_regex_str;
+      regex_t *swp_regex;
+    } cumulus;
+    struct {
+      bool ovs;
+    } ovs;
+    struct {
+      bool os10;
+      uint32_t port;
+      char *swp_regex_str;
+      regex_t *swp_regex;
+    } os10;
+    struct {
+      bool nvml;
+    } nvml;
+    struct {
+      bool ulog;
+      uint32_t group;
+      double probability;
+      uint32_t samplingRate;
+    } ulog;
+    struct {
+      bool nflog;
+      uint32_t group;
+      double probability;
+      uint32_t samplingRate;
+    } nflog;
+    struct {
+      bool pcap;
+      HSPPcap *pcaps;
+      uint32_t numPcaps;
+    } pcap;
+
+    // hardware sampling flag
+    bool hardwareSampling;
+
+    // daemon setup
     char *configFile;
-    uint32_t configOK:1;
+    bool configOK;
     char *outputFile;
     char *pidFile;
-    int dropPriv;
+    bool daemonize;
+    bool dropPriv;
     uint32_t outputRevisionNo;
     FILE *f_out;
-    // crashdump
     char *crashFile;
+
     // Identity
     char hostname[SFL_MAX_HOSTNAME_CHARS+1];
     char os_release[SFL_MAX_OSRELEASE_CHARS+1];
@@ -535,7 +418,7 @@ extern "C" {
     UTHash *adaptorsByPeerIndex;
     UTHash *adaptorsByMac;
 
-    // poll actions
+    // poll actions for tick-tock cycle
     UTArray *pollActions;
 
     // have to poll the NIO counters fast enough to avoid 32-bit rollover
@@ -548,93 +431,29 @@ extern "C" {
     time_t nio_polling_secs;
 #define HSP_NIO_POLLING_SECS_32BIT 3
 
-    int refreshAdaptorList; // request flag
+    bool refreshAdaptorList; // request flag
     uint32_t refreshAdaptorListSecs; // poll interval
-    int refreshVMList; // request flag
-    uint32_t refreshVMListSecs; // poll interval
-    uint32_t forgetVMSecs; // age-out idle VM or container
+    bool refreshVMList; // request flag
+    uint32_t refreshVMListSecs; // poll interval (default)
+    uint32_t forgetVMSecs; // age-out idle VM or container (default)
 
     // 64-bit diskIO accumulators
     HSPDiskIO diskIO;
+
     // UDP send sockets
     int socket4;
     int socket6;
-#ifdef HSP_XEN
-    regex_t vif_regex;
-    regmatch_t vif_match[HSP_XEN_VIF_REGEX_NMATCH];
 
-#ifdef XENCTRL_HAS_XC_INTERFACE
-    xc_interface *xc_handle;
-#else
-    int xc_handle; // libxc
-#endif
-    struct xs_handle *xs_handle; // xenstore
-    uint32_t page_size;
-#endif
-#ifdef HSP_VRT
-    virConnectPtr virConn;
-#endif
-    // physical host / hypervisor characteristics
-    uint32_t num_domains;
+    // physical host / hypervisor vnode characteristics
     uint32_t cpu_mhz;
     uint32_t cpu_cores;
     uint64_t mem_total;
     uint64_t mem_free;
-    UTHash *vmsByUUID; // HSPVMState
-    UTHash *vmsByDsIndex; // HSPVMState
-#ifdef HSP_DOCKER
-    UTHash *containers; // can we access via vmsByDsIndex instead?
-#endif
-    // inter-thread communication
-    pthread_mutex_t *sync_config;
-    pthread_mutex_t *sync_agent;
-    int DNSSD;
-    char *DNSSD_domain;
-    uint32_t previousPollingInterval;
-    // the DNSSD thread and his private state
-    pthread_t *DNSSD_thread;
-    int DNSSD_countdown;
-    uint32_t DNSSD_startDelay;
-    uint32_t DNSSD_retryDelay;
-    uint32_t DNSSD_ttl;
-    // the packet thread
-    pthread_t *packet_thread;
-#ifdef HSP_ULOG
-    // ULOG packet-sampling
-    int ulog_soc;
-    uint32_t ulog_seqno;
-    uint32_t ulog_drops;
-    struct sockaddr_nl ulog_bind;
-    struct sockaddr_nl ulog_peer;
-#endif
-#ifdef HSP_NFLOG
-    // nflog packet sampling
-    struct nfnl_handle *nfnl;
-    int nflog_soc;
-    uint32_t nflog_seqno;
-    uint32_t nflog_drops;
-#endif // HSG_NFLOG
 
-#ifdef HSP_PCAP
-    BPFSoc *bpf_socs;
-#endif
-    
-#ifdef HSP_SWITCHPORT_REGEX
-    regex_t swp_regex;
-#endif
+    // vm/container dsIndex allocation
+    UTHash *vmsByUUID;
+    UTHash *vmsByDsIndex;
 
-#ifdef HSP_JSON
-    int json_soc;
-    int json_soc6;
-    int json_fifo;
-    HSPApplication **applicationHT;
-    uint32_t applicationHT_size;
-#define HSP_INITIAL_JSON_APP_HT_SIZE 16
-    uint32_t applicationHT_entries;
-#endif
-#ifdef HSP_NVML
-    HSPNVML nvml;
-#endif //HSP_NVML
   } HSP;
 
   // expose some config parser fns
@@ -642,8 +461,6 @@ extern "C" {
   HSPSFlowSettings *newSFlowSettings(void);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
   void clearCollectors(HSPSFlowSettings *settings);
-  HSPPcap *newPcap(HSPSFlowSettings *sFlowSettings);
-  void clearPcaps(HSPSFlowSettings *settings);
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n);
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
@@ -655,33 +472,6 @@ extern "C" {
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
     
-  // using DNS SRV+TXT records
-#define SFLOW_DNS_SD "_sflow._udp"
-#define HSP_MAX_DNS_LEN 255
-  typedef void (*HSPDnsCB)(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *settings);
-  int dnsSD(HSP *sp, HSPDnsCB callback, HSPSFlowSettings *settings);
-
-
-#if defined(HSP_XEN) || defined(HSP_VRT) || defined(HSP_DOCKER)
-  HSPVMState *getVM(HSP *sp, char *uuid, EnumVMType vmType, getCountersFn_t getCountersFn);
-  
-#ifdef HSP_XEN
-  void openXenHandles(HSP *sp);
-  void closeXenHandles(HSP *sp);
-  int xen_compile_vif_regex(HSP *sp);
-  SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors, int capacity);
-  int readXenVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode);
-  void configVMs_XEN(HSP *sp);
-#endif
-#ifdef HSP_VRT
-  void configVMs_VRT(HSP *sp);
-#endif
-#ifdef HSP_DOCKER
-  void configVMs_DOCKER(HSP *sp);
-#endif
-
-#endif /* defined(HSP_XEN) || defined(HSP_VRT) || defined(HSP_DOCKER) */
-
   // read functions
   int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
@@ -694,36 +484,8 @@ extern "C" {
   void syncBondPolling(HSP *sp);
   void updateNioCounters(HSP *sp, SFLAdaptor *adaptor);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
-#ifdef HSP_ULOG
-  int readPackets_ulog(HSP *sp);
-#endif
-#ifdef HSP_NFLOG
-  int readPackets_nflog(HSP *sp);
-#endif
-#ifdef HSP_PCAP
-  int readPackets_pcap(HSP *sp, BPFSoc *bpfs);
-#endif
   int configSwitchPorts(HSP *sp);
-  int readJSON(HSP *sp, int soc);
-  void json_app_timeout_check(HSP *sp);
   int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp);
-
-#ifdef HSP_NVML
-  void nvml_init(HSP *sp);
-  void nvml_stop(HSP *sp);
-  void nvml_tick(HSP *sp);
-  int readNvmlCounters(HSP *sp, SFLHost_gpu_nvml *nvml);
-#endif
-
-#ifdef HSP_CUMULUS
-  int readBroadcomCounters(HSP *sp, SFLBCM_tables *bcm);
-#endif
-
-#ifdef HSP_DOCKER
-  int readContainerCounters(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
-  int readContainerCountersMulti(char *cgroup, char *longId, char *fname, int nvals, HSFNameVal *nameVals);
-  int readContainerInterfaces(HSP *sp, HSPContainer *container);
-#endif
 
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)
@@ -735,6 +497,15 @@ extern "C" {
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
   int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
   void adaptorHTPrint(UTHash *ht, char *prefix);
+
+  // readPackets.c
+  void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
+
+
+  // VM lifecycle
+  HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);
+  void removeAndFreeVM(EVMod *mod, HSPVMState *state);
+
 
 #if defined(__cplusplus)
 } /* extern "C" */

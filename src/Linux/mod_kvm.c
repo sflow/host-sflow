@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 
@@ -9,25 +9,41 @@ extern "C" {
 
 #include "hsflowd.h"
 
-#ifdef HSP_VRT
+#include "libvirt.h"
+#include "libxml/xmlreader.h"
 
 
-  static void agentCB_getCounters_VRT(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  typedef struct _HSPVMState_KVM {
+    HSPVMState vm; // superclass: must come first
+    int virDomainId;
+  } HSPVMState_KVM;
+
+  typedef struct _HSP_mod_KVM {
+    virConnectPtr virConn;
+    UTHash *vmsByUUID;
+    UTArray *pollActions;
+    SFLCounters_sample_element vnodeElem;
+    int num_domains;
+    uint32_t refreshVMListSecs;
+    uint32_t forgetVMSecs;
+  } HSP_mod_KVM;
+
+  static void agentCB_getCounters_KVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
+    EVMod *mod = (EVMod *)magic;
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
     assert(poller->magic);
-    HSPVMState *state = (HSPVMState *)poller->userData;
+    HSPVMState_KVM *state = (HSPVMState_KVM *)poller->userData;
+    HSPVMState *vm = (HSPVMState *)&state->vm;
     if(state == NULL) {
-      if(debug) myLog(LOG_INFO, "agentCB_getCounters_VRT: state==NULL");
-      return;
-    }
-    if(state->vmType != VMTYPE_VRT) {
-      myLog(LOG_ERR, "agentCB_getCounters_VRT(): not a LIBVIRT VM");
+      myDebug(1, "agentCB_getCounters_KVM: state==NULL");
       return;
     }
 
-    HSP *sp = (HSP *)poller->magic;
-    if(sp->virConn) {
-      virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, state->domId);
+    if(mdata->virConn) {
+      virDomainPtr domainPtr = virDomainLookupByID(mdata->virConn, state->virDomainId);
       if(domainPtr == NULL) {
 	sp->refreshVMList = YES;
       }
@@ -66,7 +82,7 @@ extern "C" {
 	// device name as parameters so you have to call it multiple times),  but even then we would
 	// probably do that down inside the readNioCounters() fn in case there is work to do on the
 	// accumulation and rollover-detection.
-	readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, state->interfaces);
+	readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, vm->interfaces);
 	SFLADD_ELEMENT(cs, &nioElem);
       
 	// VM cpu counters [ref xenstat.c]
@@ -98,35 +114,13 @@ extern "C" {
 	// VM disk I/O counters
 	SFLCounters_sample_element dskElem = { 0 };
 	dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-	for(int i = strArrayN(state->disks); --i >= 0; ) {
-	  /* state->volumes and state->disks are populated in lockstep
+	for(int i = strArrayN(vm->disks); --i >= 0; ) {
+	  /* vm->volumes and vm->disks are populated in lockstep
 	   * so they always have the same number of elements
 	   */
-	  char *volPath = strArrayAt(state->volumes, i);
-	  char *dskPath = strArrayAt(state->disks, i);
-	  int gotVolInfo = NO;
-
-#ifndef HSP_VRT_USE_DISKPATH
-	  /* define HSP_VRT_USE_DISKPATH if you want to bypass this virStorageVolGetInfo
-	   *  approach and just use virDomainGetBlockInfo instead.
-	   */
-	  virStorageVolPtr volPtr = virStorageVolLookupByPath(sp->virConn, volPath);
-	  if(volPtr == NULL) {
-	    myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
-	  }
-	  else {
-	    virStorageVolInfo volInfo;
-	    if(virStorageVolGetInfo(volPtr, &volInfo) != 0) {
-	      myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
-	    }
-	    else {
-	      gotVolInfo = YES;
-	      dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
-	      dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
-	      dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
-	    }
-	  }
-#endif
+	  char *volPath = strArrayAt(vm->volumes, i);
+	  char *dskPath = strArrayAt(vm->disks, i);
+	  bool gotVolInfo = NO;
 
 #if (LIBVIR_VERSION_NUMBER >= 8001)
 	  if(gotVolInfo == NO) {
@@ -143,9 +137,30 @@ extern "C" {
 	      dskElem.counterBlock.host_vrt_dsk.allocation += blkInfo.allocation;
 	      dskElem.counterBlock.host_vrt_dsk.available += (blkInfo.capacity - blkInfo.allocation);
 	      // don't need blkInfo.physical
+	      gotVolInfo = YES;
 	    }
 	  }
 #endif
+
+	  if(gotVolInfo == NO) {
+	    virStorageVolPtr volPtr = virStorageVolLookupByPath(mdata->virConn, volPath);
+	    if(volPtr == NULL) {
+	      myLog(LOG_ERR, "virStorageLookupByPath(%s) failed", volPath);
+	    }
+	    else {
+	      virStorageVolInfo volInfo;
+	      if(virStorageVolGetInfo(volPtr, &volInfo) != 0) {
+		myLog(LOG_ERR, "virStorageVolGetInfo(%s) failed", volPath);
+	      }
+	      else {
+		gotVolInfo = YES;
+		dskElem.counterBlock.host_vrt_dsk.capacity += volInfo.capacity;
+		dskElem.counterBlock.host_vrt_dsk.allocation += volInfo.allocation;
+		dskElem.counterBlock.host_vrt_dsk.available += (volInfo.capacity - volInfo.allocation);
+	      }
+	    }
+	  }
+
 	  /* we get reads, writes and errors from a different call */
 	  virDomainBlockStatsStruct blkStats;
 	  if(virDomainBlockStats(domainPtr, dskPath, &blkStats, sizeof(blkStats)) != -1) {
@@ -161,7 +176,7 @@ extern "C" {
 	// include my slice of the adaptor list
 	SFLCounters_sample_element adaptorsElem = { 0 };
 	adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-	adaptorsElem.counterBlock.adaptors = state->interfaces;
+	adaptorsElem.counterBlock.adaptors = vm->interfaces;
 	SFLADD_ELEMENT(cs, &adaptorsElem);
       
 	SEMLOCK_DO(sp->sync_agent) {
@@ -173,11 +188,17 @@ extern "C" {
     }
   }
 
-  static void agentCB_getCounters_VRT_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  /*_________________--------------------------------------__________________
+    _________________  sflow agent callback for counters   __________________
+    -----------------______________________________________------------------
+  */
+
+  static void agentCB_getCounters_KVM_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-    HSP *sp = (HSP *)poller->magic;
-    UTArrayAdd(sp->pollActions, poller);
-    UTArrayAdd(sp->pollActions, agentCB_getCounters_VRT);
+    EVMod *mod = (EVMod *)poller->magic;
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    // defer, since the agent mutex is currently held and we don't want to block it
+    UTArrayAdd(mdata->pollActions, poller);
   }
 
   /*_________________---------------------------__________________
@@ -214,7 +235,7 @@ extern "C" {
   static char *get_xml_attr(xmlNode *node, char *attrName) {
     for(xmlAttr *attr = node->properties; attr; attr = attr->next) {
       if(attr->name) {
-	if(debug) myLog(LOG_INFO, "attribute %s", attr->name);
+	myDebug(1, "attribute %s", attr->name);
 	if(attr->children && !strcmp((char *)attr->name, attrName)) {
 	  return (char *)attr->children->content;
 	}
@@ -228,13 +249,13 @@ extern "C" {
       if(domain_xml_path_equal(n, "target", "interface", "devices", NULL)) {
 	char *dev = get_xml_attr(n, "dev");
 	if(dev) {
-	  if(debug) myLog(LOG_INFO, "interface.dev=%s", dev);
+	  myDebug(1, "interface.dev=%s", dev);
 	  if(ifname) *ifname = dev;
 	}
       }
       else if(domain_xml_path_equal(n, "mac", "interface", "devices", NULL)) {
 	char *addr = get_xml_attr(n, "address");
-	if(debug) myLog(LOG_INFO, "interface.mac=%s", addr);
+	myDebug(1, "interface.mac=%s", addr);
 	if(ifmac) *ifmac = addr;
       }
     }
@@ -246,17 +267,17 @@ extern "C" {
       if(domain_xml_path_equal(n, "source", "disk", "devices", NULL)) {
 	char *path = get_xml_attr(n, "file");
 	if(path) {
-	  if(debug) myLog(LOG_INFO, "disk.file=%s", path);
+	  myDebug(1, "disk.file=%s", path);
 	  if(disk_path) *disk_path = path;
 	}
       }
       else if(domain_xml_path_equal(n, "target", "disk", "devices", NULL)) {
 	char *dev = get_xml_attr(n, "dev");
-	if(debug) myLog(LOG_INFO, "disk.dev=%s", dev);
+	myDebug(1, "disk.dev=%s", dev);
 	if(disk_dev) *disk_dev = dev;
       }
       else if(domain_xml_path_equal(n, "readonly", "disk", "devices", NULL)) {
-	if(debug) myLog(LOG_INFO, "ignoring readonly device");
+	myDebug(1, "ignoring readonly device");
 	*disk_path = NULL;
 	*disk_dev = NULL;
 	return;
@@ -265,7 +286,7 @@ extern "C" {
     if(node->children) domain_xml_disk(node->children, disk_path, disk_dev);
   }
   
-  static void domain_xml_node(HSP *sp, xmlNode *node, HSPVMState *state) {
+  static void domain_xml_node(HSP *sp, xmlNode *node, HSPVMState_KVM *state) {
     for(xmlNode *n = node; n; n = n->next) {
       if(domain_xml_path_equal(n, "interface", "devices", "domain", NULL)) {
 	char *ifname=NULL,*ifmac=NULL;
@@ -277,9 +298,11 @@ extern "C" {
 	    SFLAdaptor *ad = adaptorByMac(sp, &mac);
 	    if(ad == NULL) {
 	      ad = nioAdaptorNew(ifname, mac.mac, 0);
-	      UTHashAdd(sp->adaptorsByMac, ad, NO);
+	      if(UTHashAdd(sp->adaptorsByMac, ad) != NULL) {
+		myDebug(1, "Warning: kvm adaptor overwriting adaptorsByIndex");
+	      }
 	    }
-	    adaptorListAdd(state->interfaces, ad);
+	    adaptorListAdd(state->vm.interfaces, ad);
 	    // mark it as a vm/container device
 	    ADAPTOR_NIO(ad)->vm_or_container = YES;
 	    // clear the mark so we don't free it
@@ -292,50 +315,85 @@ extern "C" {
 	char *disk_path=NULL,*disk_dev=NULL;
 	domain_xml_disk(n, &disk_path, &disk_dev);
 	if(disk_path && disk_dev) {
-	  strArrayAdd(state->volumes, (char *)disk_path);
-	  strArrayAdd(state->disks, (char *)disk_dev);
+	  strArrayAdd(state->vm.volumes, (char *)disk_path);
+	  strArrayAdd(state->vm.disks, (char *)disk_dev);
 	}
       }
       else if(n->children) domain_xml_node(sp, n->children, state);
     }
   }
 
-
+  
   /*_________________---------------------------__________________
-    _________________    configVMs              __________________
+    _________________   add and remove VM       __________________
     -----------------___________________________------------------
   */
 
-  void configVMs_VRT(HSP *sp) {
-    if(sp->virConn == NULL) {
+  HSPVMState_KVM *getVM_KVM(EVMod *mod, char *uuid) {
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    HSPVMState_KVM search;
+    memset(&search, 0, sizeof(search));
+    memcpy(search.vm.uuid, uuid, 16);
+    HSPVMState_KVM *state = UTHashGet(mdata->vmsByUUID, &search);
+    if(state == NULL) {
+      // new vm or container
+      state = (HSPVMState_KVM *)getVM(mod, uuid, YES, sizeof(HSPVMState_KVM), VMTYPE_KVM, agentCB_getCounters_KVM_request);
+      if(state) {
+	UTHashAdd(mdata->vmsByUUID, state);
+      }
+    }
+    return state;
+  }
+
+
+  static void removeAndFreeVM_KVM(EVMod *mod, HSPVMState_KVM *state) {
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    myDebug(1, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
+	  state->vm.dsIndex,
+	  state->virDomainId);
+    UTHashDel(mdata->vmsByUUID, state);
+    HSPVMState *vm = &state->vm;
+    removeAndFreeVM(mod, vm);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    configVMs_KVM          __________________
+    -----------------___________________________------------------
+  */
+
+  static void configVMs_KVM(EVMod *mod) {
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(mdata->virConn == NULL) {
       // no libvirt connection
       return;
     }
-    int num_domains = virConnectNumOfDomains(sp->virConn);
+    int num_domains = virConnectNumOfDomains(mdata->virConn);
     if(num_domains == -1) {
       myLog(LOG_ERR, "virConnectNumOfDomains() returned -1");
       return;
     }
     int *domainIds = (int *)my_calloc(num_domains * sizeof(int));
-    if(virConnectListDomains(sp->virConn, domainIds, num_domains) != num_domains) {
+    if(virConnectListDomains(mdata->virConn, domainIds, num_domains) != num_domains) {
       my_free(domainIds);
       return;
     }
     for(int i = 0; i < num_domains; i++) {
       int domId = domainIds[i];
-      virDomainPtr domainPtr = virDomainLookupByID(sp->virConn, domId);
+      virDomainPtr domainPtr = virDomainLookupByID(mdata->virConn, domId);
       if(domainPtr) {
 	char uuid[16];
 	virDomainGetUUID(domainPtr, (u_char *)uuid);
-	HSPVMState *state = getVM(sp, uuid, VMTYPE_VRT, agentCB_getCounters_VRT_request);
-	state->marked = NO;
-	state->created = NO;
+	HSPVMState_KVM *state = getVM_KVM(mod, uuid);
+	HSPVMState *vm = (HSPVMState *)&state->vm;
+	vm->marked = NO;
+	vm->created = NO;
 	// remember the domId, which might have changed (if vm rebooted)
-	state->domId = domId;
+	state->virDomainId = domId;
 	// reset the information that we are about to refresh
-	adaptorListMarkAll(state->interfaces);
-	strArrayReset(state->volumes);
-	strArrayReset(state->disks);
+	adaptorListMarkAll(vm->interfaces);
+	strArrayReset(vm->volumes);
+	strArrayReset(vm->disks);
 	// get the XML descr - this seems more portable than some of
 	// the newer libvert API calls,  such as those to list interfaces
 	char *xmlstr = virDomainGetXMLDesc(domainPtr, 0 /*VIR_DOMAIN_XML_SECURE not allowed for read-only */);
@@ -358,16 +416,122 @@ extern "C" {
 	// they are still present in the global-namespace list,  but
 	// we have to do this here in case one of these was discovered
 	// and allocated just for this VM.
-	deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
-	adaptorListFreeMarked(state->interfaces);
+	deleteMarkedAdaptors_adaptorList(sp, vm->interfaces);
+	adaptorListFreeMarked(vm->interfaces);
       }
     }
-    // remember the number of domains we found
-    sp->num_domains = num_domains;
+    mdata->num_domains = num_domains;
     my_free(domainIds);
   }
 
-#endif /* HSP_VRT */
+  /*_________________---------------------------__________________
+    _________________    configVMs              __________________
+    -----------------___________________________------------------
+  */
+  
+  static void configVMs(EVMod *mod) {
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    // mark and sweep
+    // 1. mark all the current virtual pollers
+    HSPVMState_KVM *state;
+    UTHASH_WALK(mdata->vmsByUUID, state) {
+      state->vm.marked = YES;
+    }
+    
+    // 2. create new VM pollers, or clear the mark on existing ones
+    configVMs_KVM(mod);
+
+    // 3. remove any VMs (and their pollers) that don't survive
+    UTHASH_WALK(mdata->vmsByUUID, state) {
+      if(state->vm.marked) {
+	removeAndFreeVM_KVM(mod, state);
+      }
+    }
+  }
+
+  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
+    if((evt->bus->clk % mdata->refreshVMListSecs) == 0
+       && sp->sFlowSettings) {
+      configVMs(mod);
+    }
+  }
+
+  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
+    // now we can execute pollActions without holding on to the semaphore
+    for(uint32_t ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {
+      SFLPoller *poller = (SFLPoller *)UTArrayAt(mdata->pollActions, ii);
+      SFL_COUNTERS_SAMPLE_TYPE cs;
+      memset(&cs, 0, sizeof(cs));
+      agentCB_getCounters_KVM((void *)mod, poller, &cs);
+    }
+    UTArrayReset(mdata->pollActions);
+  }
+
+  static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
+    memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
+    mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
+    mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
+    mdata->vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
+    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = mdata->num_domains;
+    mdata->vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
+    mdata->vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
+    SFLADD_ELEMENT(cs, &mdata->vnodeElem);
+  }
+
+  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    if(mdata->virConn) {
+      virConnectClose(mdata->virConn);
+      mdata->virConn = NULL;
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    module init            __________________
+    -----------------___________________________------------------
+  */
+
+  void mod_kvm(EVMod *mod) {
+    mod->data = my_calloc(sizeof(HSP_mod_KVM));
+    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    // open the libvirt connection - failure is not an option
+    int virErr = virInitialize();
+    if(virErr != 0) {
+      myLog(LOG_ERR, "virInitialize() failed: %d\n", virErr);
+      exit(EXIT_FAILURE);
+    }
+    mdata->virConn = virConnectOpenReadOnly(NULL);
+    if(mdata->virConn == NULL) {
+      myLog(LOG_ERR, "virConnectOpenReadOnly() failed\n");
+      exit(EXIT_FAILURE);
+    }
+
+    mdata->vmsByUUID = UTHASH_NEW(HSPVMState_KVM, vm.uuid, UTHASH_DFLT);
+    mdata->pollActions = UTArrayNew(UTARRAY_DFLT);
+
+    mdata->refreshVMListSecs = sp->kvm.refreshVMListSecs ?: sp->refreshVMListSecs;
+    mdata->forgetVMSecs = sp->kvm.forgetVMSecs ?: sp->forgetVMSecs;
+
+    // register call-backs
+    EVBus *pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock);
+    EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_FINAL), evt_final);
+  }
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

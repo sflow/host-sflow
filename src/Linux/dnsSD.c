@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #if defined(__cplusplus)
@@ -9,8 +9,6 @@ extern "C" {
 #include "hsflowd.h"
 #include "arpa/nameser.h"
 #include "resolv.h"
-
-extern int debug;
 
 #define HSP_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
 #define HSP_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
@@ -27,16 +25,16 @@ extern int debug;
 
     // We could have a config option to set the DNS servers that we will ask. If so
     // they should be written into this array of sockaddrs...
-    // if(debug) myLog(LOG_INFO,"_res_nsaddr=%p", &_res.nsaddr);
+    // myDebug(1,"_res_nsaddr=%p", &_res.nsaddr);
 
-    if(debug) myLog(LOG_INFO,"=== res_search(%s, C_IN, %u) ===", dname, rtype);
+    myDebug(1,"=== res_search(%s, C_IN, %u) ===", dname, rtype);
     int anslen = res_search(dname, C_IN, rtype, buf, PACKETSZ);
     if(anslen == -1) {
       if(errno == 0 && (h_errno == HOST_NOT_FOUND || h_errno == NO_DATA)) {
 	// although res_search returned -1, the request did actually get an answer,
 	// it's just that there was no SRV record configured,  or the response was
 	// not authoritative. Interpret this the same way as answer_count==0.
-	if(debug) myLog(LOG_INFO,"res_search(%s, C_IN, %u) came up blank (h_errno=%d)", dname, rtype, h_errno);
+	myDebug(1,"res_search(%s, C_IN, %u) came up blank (h_errno=%d)", dname, rtype, h_errno);
 	return 0;
       }
       else {
@@ -59,7 +57,7 @@ extern int debug;
       myLog(LOG_INFO,"res_search(%s) returned no answer", dname);
       return 0;
     }
-    if(debug) myLog(LOG_INFO, "dnsSD: answer_count = %d", answer_count);
+    myDebug(1, "dnsSD: answer_count = %d", answer_count);
 
     u_char *p = buf + sizeof(HEADER);
     u_char *endp = buf + anslen;
@@ -70,14 +68,14 @@ extern int debug;
       myLog(LOG_ERR,"dn_skipname() <query> failed");
       return -1;
     }
-    if(debug) myLog(LOG_INFO, "dnsSD: (compressed) query_name_len = %d", query_name_len);
+    myDebug(1, "dnsSD: (compressed) query_name_len = %d", query_name_len);
     p += (query_name_len);
     p += QFIXEDSZ;
 
     // collect array of results
     for(int entry = 0; entry < answer_count; entry++) {
 
-      if(debug) myLog(LOG_INFO, "dnsSD: entry %d, bytes_left=%d", entry, (endp - p));
+      myDebug(1, "dnsSD: entry %d, bytes_left=%d", entry, (endp - p));
 
       // consume name (again)
       query_name_len = dn_skipname(p, endp);
@@ -146,7 +144,7 @@ extern int debug;
 	  }
 	  else {
 	    // fqdn[ans_len] = '\0';
-	    if(debug) myLog(LOG_INFO, "answer %d is <%s>:<%u> (wgt=%d; pri=%d; ttl=%d; ans_len=%d; res_len=%d)",
+	    myDebug(1, "answer %d is <%s>:<%u> (wgt=%d; pri=%d; ttl=%d; ans_len=%d; res_len=%d)",
 			    entry,
 			    fqdn,
 			    res_prt,
@@ -175,7 +173,7 @@ extern int debug;
 	    return -1;
 	  }
 
-	  if(debug) {
+	  if(getDebug()) {
 	    printf("dsnSD TXT Record: ");
 	    for(int i = 0; i < res_len; i++) {
 	      int ch = x[i];

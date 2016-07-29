@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #if defined(__cplusplus)
@@ -12,8 +12,6 @@ extern "C" {
 #define HSP_MAX_CONFIG_DEPTH 3
 #define HSP_SEPARATORS " \t\r\n=;"
 
-extern int debug;
-  
   typedef enum { HSPTOKENTYPE_UNDEFINED=0,
 		 HSPTOKENTYPE_SYNTAX,
 		 HSPTOKENTYPE_OBJ,
@@ -23,7 +21,7 @@ extern int debug;
   // first to generate the enum, then to
   // populate the special token lookup table
   typedef enum {
-#define HSPTOKEN_DATA(tag, token, type) tag,
+#define HSPTOKEN_DATA(tag, token, type, deprecated) tag,
 #include "hsflowtokens.h"
 #undef HSPTOKEN_DATA
     HSPTOKEN_NUM_TOKENS } EnumHSPSpecialToken;
@@ -32,14 +30,14 @@ extern int debug;
     EnumHSPSpecialToken tag;
     char *str;
     EnumHSPTokenType type;
+    char *deprecated;
   } HSPSpecialToken;
   
   static const HSPSpecialToken HSPSpecialTokens[] = {
-#define HSPTOKEN_DATA(tag, token, type) { tag, token, type },
+#define HSPTOKEN_DATA(tag, token, type, deprecated) { tag, token, type, deprecated },
 #include "hsflowtokens.h"
 #undef HSPTOKEN_DATA
   };
-
 
   typedef struct _HSPToken {
     struct _HSPToken *nxt;
@@ -51,10 +49,38 @@ extern int debug;
   typedef enum {
     HSPOBJ_HSP=0,
     HSPOBJ_SFLOW,
+    HSPOBJ_DNSSD,
     HSPOBJ_COLLECTOR,
-    HSPOBJ_PCAP
+    HSPOBJ_JSON,
+    HSPOBJ_XEN,
+    HSPOBJ_KVM,
+    HSPOBJ_DOCKER,
+    HSPOBJ_ULOG,
+    HSPOBJ_NFLOG,
+    HSPOBJ_PCAP,
+    HSPOBJ_CUMULUS,
+    HSPOBJ_NVML,
+    HSPOBJ_OVS,
+    HSPOBJ_OS10
   } EnumHSPObject;
 
+  static const char *HSPObjectNames[] = {
+    "host-sflow-probe",
+    "sflow",
+    "dns-sd",
+    "collector",
+    "json",
+    "xen",
+    "kvm",
+    "docker",
+    "ulog",
+    "nflog",
+    "pcap",
+    "cumulus",
+    "nvml",
+    "ovs",
+    "os10"
+  };
 
   /*_________________---------------------------__________________
     _________________      parseError           __________________
@@ -72,6 +98,21 @@ extern int debug;
 	  msg2);
   }
 
+
+  /*_________________---------------------------__________________
+    _________________      unexpected           __________________
+    -----------------___________________________------------------
+  */
+  
+  static void unexpectedToken(HSP *sp, HSPToken *tok, EnumHSPObject level)
+  {
+    myLog(LOG_ERR, "parse error at <%s><%s> on line %d of %s : unexpected %s setting",
+	  tok->str,
+	  tok->nxt ? tok->nxt->str : "",
+	  tok->lineNo,
+	  sp->configFile,
+	  HSPObjectNames[level]);
+  }
 
   /*_________________---------------------------__________________
     _________________   attribute extraction    __________________
@@ -172,7 +213,7 @@ extern int debug;
 
   // expectONOFF
 
-  static HSPToken *expectONOFF(HSP *sp, HSPToken *tok, int *arg)
+  static HSPToken *expectONOFF(HSP *sp, HSPToken *tok, bool *arg)
   {
     HSPToken *t = tok;
     t = t->nxt;
@@ -208,8 +249,8 @@ extern int debug;
     HSPToken *t = tok;
     t = t->nxt;
     if(t && t->str) {
-      if(sp->DNSSD_domain) my_free(sp->DNSSD_domain);
-      sp->DNSSD_domain = my_strdup(t->str);
+      if(sp->DNSSD.domain) my_free(sp->DNSSD.domain);
+      sp->DNSSD.domain = my_strdup(t->str);
       return t;
     }
     parseError(sp, tok, "expected domain", "");
@@ -272,13 +313,27 @@ extern int debug;
     if(t && t->str) {
       struct stat statBuf;
       if(stat(t->str, &statBuf) != 0) {
-	parseError(sp, tok, "WARNING:", "file does not exist");
+	parseError(sp, tok, "WARNING:", "path does not exist");
 	// not a show-stopper. Let it go through.
       }
       *p_fileName = my_strdup(t->str);
       return t;
     }
     parseError(sp, tok, "expected file name", "");
+    return NULL;
+  }
+  
+  // expectRegex
+  
+  static HSPToken *expectRegex(HSP *sp, HSPToken *tok, regex_t **pattern)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && t->str) {
+      *pattern = UTRegexCompile(t->str);
+      return (*pattern) ? t : NULL;
+    }
+    parseError(sp, tok, "expected regex pattern", "");
     return NULL;
   }
 
@@ -305,21 +360,11 @@ extern int debug;
     settings->collectors = NULL;
   }
 
-  HSPPcap *newPcap(HSPSFlowSettings *sFlowSettings) {
+  static HSPPcap *newPcap(HSP *sp) {
     HSPPcap *col = (HSPPcap *)my_calloc(sizeof(HSPPcap));
-    ADD_TO_LIST(sFlowSettings->pcaps, col);
-    sFlowSettings->numPcaps++;
+    ADD_TO_LIST(sp->pcap.pcaps, col);
+    sp->pcap.numPcaps++;
     return col;
-  }
-
-  void clearPcaps(HSPSFlowSettings *settings) 
-  {
-    for(HSPPcap *pc = settings->pcaps; pc; ) {
-      HSPPcap *nextPc = pc->nxt;
-      my_free(pc);
-      pc = nextPc;
-    }
-    settings->pcaps = NULL;
   }
 
   HSPSFlowSettings *newSFlowSettings(void) {
@@ -329,12 +374,6 @@ extern int debug;
     st->pollingInterval = SFL_DEFAULT_POLLING_INTERVAL;
     st->headerBytes = SFL_DEFAULT_HEADER_SIZE;
     st->datagramBytes = SFL_DEFAULT_DATAGRAM_SIZE;
-    st->ulogGroup = HSP_DEFAULT_ULOG_GROUP;
-    st->nflogGroup = HSP_DEFAULT_NFLOG_GROUP;
-    st->jsonPort = HSP_DEFAULT_JSON_PORT;
-    st->jsonFIFO = NULL;
-    st->xen_update_dominfo = 0;
-    st->xen_dsk = 1;
     st->samplingDirection = HSP_DIRN_IN;
     return st;
   }
@@ -344,18 +383,16 @@ extern int debug;
       clearApplicationSettings(sFlowSettings);
       clearAgentCIDRs(sFlowSettings);
       clearCollectors(sFlowSettings);
-      clearPcaps(sFlowSettings);
       my_free(sFlowSettings);
     }
   }
 
-  static HSPSFlow *newSFlow(HSP *sp) {
-    HSPSFlow *sf = (HSPSFlow *)my_calloc(sizeof(HSPSFlow));
-    sf->sFlowSettings_file = newSFlowSettings();
-    sf->subAgentId = HSP_DEFAULT_SUBAGENTID;
-    sp->sFlow = sf; // just one of these, not a list
-    sf->myHSP = sp;
-    return sf;
+  static void newSFlow(HSP *sp) {
+    sp->sFlowSettings_file = newSFlowSettings();
+    sp->subAgentId = HSP_DEFAULT_SUBAGENTID;
+    sp->xen.update_dominfo = 0;
+    sp->xen.dsk = 1;
+    sp->xen.vbd = STRINGIFY_DEF(HSP_XEN_VBD_PATH);
   }
 
   static HSPToken *newToken(char *str, int len) {
@@ -489,6 +526,8 @@ extern int debug;
   
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings)
   {
+    assert(settings != NULL); // too soon! wait for config to be established
+
     // This falls back on the default "sampling=<n>" setting if the speed is unknown or zero
     uint32_t sampling_n = settings->samplingRate;
     char *method = "global_default";
@@ -518,14 +557,12 @@ extern int debug;
 	  }
 	}
       }
-
-      if(debug) {
-	myLog(LOG_INFO, "%s (speed=%"PRIu64") using %s sampling rate = %u",
+      
+      myDebug(1, "%s (speed=%"PRIu64") using %s sampling rate = %u",
 	      adaptor->deviceName,
 	      adaptor->ifSpeed,
 	      method,
 	      sampling_n);
-      }
     }
     return sampling_n;
   }
@@ -569,19 +606,22 @@ extern int debug;
   {
     char *r = p;
     HSPToken *token = NULL;
+#define HSP_MAX_TOKEN_LEN 255
+    char buf[HSP_MAX_TOKEN_LEN+1];
 
-    // skip separators
-    r += strspn(r, HSP_SEPARATORS);
-
-    if(*r != '\0') {
-      // found token, but watch out for a contiguous '{' or '}' token.
-      uint32_t len = strcspn(r, "{}" HSP_SEPARATORS);
-      if(len == 0) len = 1; // started with '{' or '}'
-      token = newToken(r, len);
-      r += len;
+    // allow quoted strings so that a regex can have any chars (including "{}") in it
+    uint32_t pre_seps = strspn(r, HSP_SEPARATORS);
+    char *str = parseNextTok(&r, HSP_SEPARATORS, NO, '"', YES, buf, HSP_MAX_TOKEN_LEN);
+    if(str
+       && *str != '\0') {
+      // found non-empty string, but watch out for a contiguous '{' or '}' token.
+      // If we find one then we'll just consume part of str...
+      uint32_t len = strcspn(str, "{}" HSP_SEPARATORS);
+      if(len == 0) len = 1; // => str started with '{' or '}'
+      token = newToken(str, len);
+      // tell the caller how many chars we actually consumed
+      *out = (p + pre_seps + len);
     }
-    // tell the caller how far we got
-    *out = r;
     // return token or NULL
     return token;
   }
@@ -685,23 +725,23 @@ extern int debug;
 
     uint32_t boosted_priority = ipPriority;
 
-    if(sp->sFlow && sp->sFlow->sFlowSettings_file) {
+    if(sp->sFlowSettings_file) {
       // allow the agent.cidr settings to boost the priority
       // of this address.  The cidrs are in reverse order.
-      HSPCIDR *cidr = sp->sFlow->sFlowSettings_file->agentCIDRs;
+      HSPCIDR *cidr = sp->sFlowSettings_file->agentCIDRs;
       uint32_t cidrIndex = 1;
       for(; cidr; cidrIndex++, cidr=cidr->nxt) {
-	if(debug) myLog(LOG_INFO, "testing CIDR at index %d", cidrIndex);
+	myDebug(1, "testing CIDR at index %d", cidrIndex);
 	if(SFLAddress_maskEqual(addr, &cidr->mask, &cidr->ipAddr)) break;
       }
       
       if(cidr) {
-	if(debug) myLog(LOG_INFO, "CIDR at index %d matched: boosting priority", cidrIndex);
+	myDebug(1, "CIDR at index %d matched: boosting priority", cidrIndex);
 	boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES); 
       }
     }
     else {
-      if(debug) myLog(LOG_INFO, "agentAddressPriority: no config yet (so no CIDR boost)");
+      myDebug(1, "agentAddressPriority: no config yet (so no CIDR boost)");
     }
       
     return boosted_priority;
@@ -716,21 +756,21 @@ extern int debug;
   int selectAgentAddress(HSP *sp, int *p_changed) {
 
     int selected = NO;
-    SFLAddress previous = sp->sFlow->agentIP;
+    SFLAddress previous = sp->agentIP;
 
-    if(debug) myLog(LOG_INFO, "selectAgentAddress");
+    myDebug(1, "selectAgentAddress");
 
-    if(sp->sFlow->explicitAgentIP && sp->sFlow->agentIP.type) {
+    if(sp->explicitAgentIP && sp->agentIP.type) {
       // it was hard-coded in the config file
-      if(debug) myLog(LOG_INFO, "selectAgentAddress hard-coded in config file");
+      myDebug(1, "selectAgentAddress hard-coded in config file");
       selected = YES;
     }
-    else if(sp->sFlow->explicitAgentDevice && sp->sFlow->agentDevice) {
+    else if(sp->explicitAgentDevice && sp->agentDevice) {
       // it may have been defined as agent=<device>
-      SFLAdaptor *ad = adaptorByName(sp, sp->sFlow->agentDevice);
+      SFLAdaptor *ad = adaptorByName(sp, sp->agentDevice);
       if(ad) {
-	sp->sFlow->agentIP = ADAPTOR_NIO(ad)->ipAddr;
-	if(debug) myLog(LOG_INFO, "selectAgentAddress pegged to device in config file");
+	sp->agentIP = ADAPTOR_NIO(ad)->ipAddr;
+	myDebug(1, "selectAgentAddress pegged to device in config file");
 	selected = YES;
       }
     }
@@ -760,15 +800,15 @@ extern int debug;
       if(selectedAdaptor) {
 	// crown the winner
 	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(selectedAdaptor);
-	sp->sFlow->agentIP = adaptorNIO->ipAddr;
-	sp->sFlow->agentDevice = my_strdup(selectedAdaptor->deviceName);
-	if(debug) myLog(LOG_INFO, "selectAgentAddress selected agentIP with highest priority");
+	sp->agentIP = adaptorNIO->ipAddr;
+	sp->agentDevice = my_strdup(selectedAdaptor->deviceName);
+	myDebug(1, "selectAgentAddress selected agentIP with highest priority");
 	selected = YES;
       }
     }
 
     if(p_changed) {
-      if(SFLAddress_equal(&previous, &sp->sFlow->agentIP)) {
+      if(SFLAddress_equal(&previous, &sp->agentIP)) {
 	*p_changed = YES;
       }
       else {
@@ -795,6 +835,13 @@ extern int debug;
     // to double as a state variable that determines what is allowed next.
     
     for(HSPToken *tok = readTokens(sp); tok; tok = tok->nxt) {
+
+      if(tok->stok
+	 && HSPSpecialTokens[tok->stok].deprecated)
+	myDebug(1, "line %u: %s now deprecated. prefer: \"%s\"",
+		tok->lineNo,
+		tok->str,
+		HSPSpecialTokens[tok->stok].deprecated);
 
       if(depth > HSP_MAX_CONFIG_DEPTH) {
 	// depth overrun
@@ -824,11 +871,14 @@ extern int debug;
 
 	    // Perhaps these sp->xxx settings should be outside the sflow { } block?
 	    // ======================================================================
+	  case HSPTOKEN_MODULES:
+	    if((tok = expectFile(sp, tok, &sp->modulesPath)) == NULL) return NO;
+	    break;
 	  case HSPTOKEN_LOOPBACK:
 	    if((tok = expectLoopback(sp, tok)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_DNSSD:
-	    if((tok = expectONOFF(sp, tok, &sp->DNSSD)) == NULL) return NO;
+	    if((tok = expectONOFF(sp, tok, &sp->DNSSD.DNSSD)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_DNSSD_DOMAIN:
 	    if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
@@ -843,79 +893,135 @@ extern int debug;
 	    if((tok = expectInteger32(sp, tok, &sp->forgetVMSecs, 60, 0xFFFFFFFF)) == NULL) return NO;
 	    break;
 	    // ======================================================================
-
+	  case HSPTOKEN_DNS_SD:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->DNSSD.DNSSD = YES;
+	    level[++depth] = HSPOBJ_DNSSD;
+	    break;
 	  case HSPTOKEN_COLLECTOR:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	    newCollector(sp->sFlow->sFlowSettings_file);
+	    newCollector(sp->sFlowSettings_file);
 	    level[++depth] = HSPOBJ_COLLECTOR;
+	    break;
+	  case HSPTOKEN_KVM:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->kvm.kvm = YES;
+	    level[++depth] = HSPOBJ_KVM;
+	    break;
+	  case HSPTOKEN_XEN:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->xen.xen = YES;
+	    level[++depth] = HSPOBJ_XEN;
+	    break;
+	  case HSPTOKEN_DOCKER:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->docker.docker = YES;
+	    level[++depth] = HSPOBJ_DOCKER;
+	    break;
+	  case HSPTOKEN_ULOG:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->ulog.ulog = YES;
+	    level[++depth] = HSPOBJ_ULOG;
+	    break;
+	  case HSPTOKEN_NFLOG:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->nflog.nflog = YES;
+	    level[++depth] = HSPOBJ_NFLOG;
 	    break;
 	  case HSPTOKEN_PCAP:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	    newPcap(sp->sFlow->sFlowSettings_file);
+	    sp->pcap.pcap = YES;
+	    newPcap(sp);
 	    level[++depth] = HSPOBJ_PCAP;
 	    break;
+	  case HSPTOKEN_CUMULUS:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->cumulus.cumulus = YES;
+	    level[++depth] = HSPOBJ_CUMULUS;
+	    break;
+	  case HSPTOKEN_OVS:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->ovs.ovs = YES;
+	    level[++depth] = HSPOBJ_OVS;
+	    break;
+	  case HSPTOKEN_JSON:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->json.json = YES;
+	    level[++depth] = HSPOBJ_JSON;
+	    break;
+	  case HSPTOKEN_NVML:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->nvml.nvml = YES;
+	    level[++depth] = HSPOBJ_NVML;
+	    break;
+	  case HSPTOKEN_OS10:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->os10.os10 = YES;
+	    level[++depth] = HSPOBJ_OS10;
+	    break;
+
 	  case HSPTOKEN_SAMPLING:
 	  case HSPTOKEN_PACKETSAMPLINGRATE:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_POLLING:
 	  case HSPTOKEN_COUNTERPOLLINGINTERVAL:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->sFlowSettings_file->pollingInterval, 0, 300)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_AGENTIP:
-	    if((tok = expectIP(sp, tok, &sp->sFlow->agentIP, NULL)) == NULL) return NO;
-	    sp->sFlow->explicitAgentIP = YES;
+	    if((tok = expectIP(sp, tok, &sp->agentIP, NULL)) == NULL) return NO;
+	    sp->explicitAgentIP = YES;
 	    break;
 	  case HSPTOKEN_AGENTCIDR:
 	    {
 	      HSPCIDR cidr = { 0 };
 	      if((tok = expectCIDR(sp, tok, &cidr)) == NULL) return NO;
-	      addAgentCIDR(sp->sFlow->sFlowSettings_file, &cidr);
+	      addAgentCIDR(sp->sFlowSettings_file, &cidr);
 	    }
 	    break;
 	  case HSPTOKEN_AGENT:
-	    if((tok = expectDevice(sp, tok, &sp->sFlow->agentDevice)) == NULL) return NO;
-	    sp->sFlow->explicitAgentDevice = YES;
+	    if((tok = expectDevice(sp, tok, &sp->agentDevice)) == NULL) return NO;
+	    sp->explicitAgentDevice = YES;
 	    break;
 	  case HSPTOKEN_SUBAGENTID:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->subAgentId, 0, HSP_MAX_SUBAGENTID)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_UUID:
 	    if((tok = expectUUID(sp, tok, sp->uuid)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_HEADERBYTES:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->sFlowSettings_file->headerBytes, 0, HSP_MAX_HEADER_BYTES)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_DATAGRAMBYTES:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->datagramBytes, SFL_MIN_DATAGRAM_SIZE, SFL_MAX_DATAGRAM_SIZE)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->sFlowSettings_file->datagramBytes, SFL_MIN_DATAGRAM_SIZE, SFL_MAX_DATAGRAM_SIZE)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_XEN_UPDATE_DOMINFO:
-	    if((tok = expectONOFF(sp, tok, &sp->sFlow->sFlowSettings_file->xen_update_dominfo)) == NULL) return NO;
+	    if((tok = expectONOFF(sp, tok, &sp->xen.update_dominfo)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_XEN_DSK:
-	    if((tok = expectONOFF(sp, tok, &sp->sFlow->sFlowSettings_file->xen_dsk)) == NULL) return NO;
+	    if((tok = expectONOFF(sp, tok, &sp->xen.dsk)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_ULOGGROUP:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->ulogGroup, 1, 32)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->ulog.group, 1, 32)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_NFLOGGROUP:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->nflogGroup, 1, 0xFFFFFFFF)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->nflog.group, 1, 0xFFFFFFFF)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_ULOGPROBABILITY:
-	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->ulogProbability, 0.0, 1.0)) == NULL) return NO;
+	    if((tok = expectDouble(sp, tok, &sp->ulog.probability, 0.0, 1.0)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_NFLOGPROBABILITY:
-	    if((tok = expectDouble(sp, tok, &sp->sFlow->sFlowSettings_file->nflogProbability, 0.0, 1.0)) == NULL) return NO;
+	    if((tok = expectDouble(sp, tok, &sp->nflog.probability, 0.0, 1.0)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_JSONPORT:
-	    if((tok = expectInteger32(sp, tok, &sp->sFlow->sFlowSettings_file->jsonPort, 1025, 65535)) == NULL) return NO;
+	    if((tok = expectInteger32(sp, tok, &sp->json.port, 1025, 65535)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_JSONFIFO:
 	    // expect a file name such as "/tmp/hsflowd_json_fifo" that was created using mkfifo(1)
-	    if((tok = expectFile(sp, tok, &sp->sFlow->sFlowSettings_file->jsonFIFO)) == NULL) return NO;
+	    if((tok = expectFile(sp, tok, &sp->json.FIFO)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_SAMPLINGDIRECTION:
-	    if((tok = expectDirection(sp, tok, &sp->sFlow->sFlowSettings_file->samplingDirection)) == NULL) return NO;
+	    if((tok = expectDirection(sp, tok, &sp->sFlowSettings_file->samplingDirection)) == NULL) return NO;
 	    break;
 	  default:
 	    // handle wildcards here - allow sampling.<app>=<n> and polling.<app>=<secs>
@@ -923,25 +1029,40 @@ extern int debug;
 	      char *app = tok->str + 9;
 	      uint32_t sampling_n=0;
 	      if((tok = expectInteger32(sp, tok, &sampling_n, 0, 65535)) == NULL) return NO;
-	      setApplicationSampling(sp->sFlow->sFlowSettings_file, app, sampling_n);
+	      setApplicationSampling(sp->sFlowSettings_file, app, sampling_n);
 	    }
 	    else if(tok->str && strncasecmp(tok->str, "polling.", 8) == 0) {
 	      char *app = tok->str + 8;
 	      uint32_t polling_secs=0;
 	      if((tok = expectInteger32(sp, tok, &polling_secs, 0, 300)) == NULL) return NO;
-	      setApplicationPolling(sp->sFlow->sFlowSettings_file, app, polling_secs);
+	      setApplicationPolling(sp->sFlowSettings_file, app, polling_secs);
 	    }
 	    else {
-	      parseError(sp, tok, "unexpected sFlow setting", "");
+	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
 	    }
 	    break;
 	  }
 	  break;
 	
+	case HSPOBJ_DNSSD:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_DNSSD_DOMAIN:
+	    case HSPTOKEN_DOMAIN:
+	      if((tok = expectDNSSD_domain(sp, tok)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	
 	case HSPOBJ_COLLECTOR:
 	  {
-	    HSPCollector *col = sp->sFlow->sFlowSettings_file->collectors;
+	    HSPCollector *col = sp->sFlowSettings_file->collectors;
 	    switch(tok->stok) {
 	    case HSPTOKEN_IP:
 	      if((tok = expectIP(sp, tok, &col->ipAddr, (struct sockaddr *)&col->sendSocketAddr)) == NULL) return NO;
@@ -950,16 +1071,121 @@ extern int debug;
 	      if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
 	      break;
 	    default:
-	      parseError(sp, tok, "unexpected collector setting", "");
+	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
 	      break;
 	    }
 	  }
 	  break;
 
+	case HSPOBJ_KVM:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_REFRESH_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->kvm.refreshVMListSecs, 60, 3600)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_FORGET_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->kvm.forgetVMSecs, 60, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	  
+	case HSPOBJ_XEN:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_XEN_UPDATE_DOMINFO:
+	    case HSPTOKEN_UPDATE_DOMINFO:
+	      if((tok = expectONOFF(sp, tok, &sp->xen.update_dominfo)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_XEN_DSK:
+	    case HSPTOKEN_DSK:
+	      if((tok = expectONOFF(sp, tok, &sp->xen.dsk)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SWITCHPORT:
+	      if((tok = expectRegex(sp, tok, &sp->xen.vif_regex)) == NULL) return NO;
+	      sp->xen.vif_regex_str = my_strdup(tok->str);
+	      break;
+	    case HSPTOKEN_VBD:
+	      if((tok = expectFile(sp, tok, &sp->xen.vbd)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_REFRESH_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->xen.refreshVMListSecs, 60, 3600)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_FORGET_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->xen.forgetVMSecs, 60, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
+
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	  
+	case HSPOBJ_DOCKER:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_REFRESH_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->docker.refreshVMListSecs, 60, 3600)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_FORGET_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->docker.forgetVMSecs, 60, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_ULOG:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_GROUP:
+	    case HSPTOKEN_ULOGGROUP:
+	      if((tok = expectInteger32(sp, tok, &sp->ulog.group, 1, 32)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_PROBABILITY:
+	    case HSPTOKEN_ULOGPROBABILITY:
+	      if((tok = expectDouble(sp, tok, &sp->ulog.probability, 0.0, 1.0)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_NFLOG:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_GROUP:
+	    case HSPTOKEN_NFLOGGROUP:
+	      if((tok = expectInteger32(sp, tok, &sp->nflog.group, 1, 32)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_PROBABILITY:
+	    case HSPTOKEN_NFLOGPROBABILITY:
+	      if((tok = expectDouble(sp, tok, &sp->nflog.probability, 0.0, 1.0)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+  
 	case HSPOBJ_PCAP:
 	  {
-	    HSPPcap *pc = sp->sFlow->sFlowSettings_file->pcaps;
+	    HSPPcap *pc = sp->pcap.pcaps;
 	    switch(tok->stok) {
 	    case HSPTOKEN_DEV:
 	      if((tok = expectDevice(sp, tok, &pc->dev)) == NULL) return NO;
@@ -968,7 +1194,82 @@ extern int debug;
 	      if((tok = expectONOFF(sp, tok, &pc->promisc)) == NULL) return NO;
 	      break;
 	    default:
-	      parseError(sp, tok, "unexpected pcap setting", "");
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+  
+	case HSPOBJ_CUMULUS:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_SWITCHPORT:
+	      if((tok = expectRegex(sp, tok, &sp->cumulus.swp_regex)) == NULL) return NO;
+	      sp->cumulus.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_OVS:
+	  {
+	    switch(tok->stok) {
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	  
+	case HSPOBJ_JSON:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_UDPPORT:
+	    case HSPTOKEN_JSONPORT:
+	      if((tok = expectInteger32(sp, tok, &sp->json.port,0,65535)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_FIFO:
+	    case HSPTOKEN_JSONFIFO:
+	      // expect a file name such as "/tmp/hsflowd_json_fifo" that was created using mkfifo(1)
+	      if((tok = expectFile(sp, tok, &sp->json.FIFO)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	  
+	case HSPOBJ_OS10:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_UDPPORT:
+	      if((tok = expectInteger32(sp, tok, &sp->os10.port,0,65535)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SWITCHPORT:
+	      if((tok = expectRegex(sp, tok, &sp->os10.swp_regex)) == NULL) return NO;
+	      sp->os10.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+	  
+	case HSPOBJ_NVML:
+	  {
+	    switch(tok->stok) {
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
 	      break;
 	    }
@@ -984,18 +1285,18 @@ extern int debug;
     // we have a usable configuration...
 
     int parseOK = YES;
-
-    if(sp->sFlow == NULL) {
-      myLog(LOG_ERR, "parse error in %s : sFlow not found", sp->configFile);
+    
+    if(sp->sFlowSettings_file == NULL) {
+      myLog(LOG_ERR, "parse error in %s : sFlow {} not found", sp->configFile);
       parseOK = NO;
     }
     else {
-      if(sp->sFlow->sFlowSettings_file->numCollectors == 0 && sp->DNSSD == NO) {
+      if(sp->sFlowSettings_file->numCollectors == 0 && sp->DNSSD.DNSSD == NO) {
 	myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
 	parseOK = NO;
       }
       
-      for(HSPCollector *coll = sp->sFlow->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
+      for(HSPCollector *coll = sp->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
 	//////////////////////// collector /////////////////////////
 	if(coll->ipAddr.type == 0) {
 	  myLog(LOG_ERR, "parse error in %s : collector  has no IP", sp->configFile);
@@ -1004,11 +1305,11 @@ extern int debug;
       }
     }
     
-    if(sp->sFlow->sFlowSettings_file->ulogProbability > 0) {
-      sp->sFlow->sFlowSettings_file->ulogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->ulogProbability);
+    if(sp->ulog.probability > 0) {
+      sp->ulog.samplingRate = (uint32_t)(1.0 / sp->ulog.probability);
     }
-    if(sp->sFlow->sFlowSettings_file->nflogProbability > 0) {
-      sp->sFlow->sFlowSettings_file->nflogSamplingRate = (uint32_t)(1.0 / sp->sFlow->sFlowSettings_file->nflogProbability);
+    if(sp->nflog.probability > 0) {
+      sp->nflog.samplingRate = (uint32_t)(1.0 / sp->nflog.probability);
     }
     
     return parseOK;

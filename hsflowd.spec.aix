@@ -2,9 +2,9 @@ Summary: host sFlow daemon
 Name: hsflowd
 Version: 1.28.3
 Release: 1
-License: http://host-sflow.sourceforge.net/license.html
+License: http://sflow.net/license.html
 Group: Applications/Internet
-URL: http://host-sflow.sourceforge.net
+URL: http://sflow.net
 Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 #Requires(post): chkconfig

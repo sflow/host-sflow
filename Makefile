@@ -1,5 +1,5 @@
 # This software is distributed under the following license:
-# http://host-sflow.sourceforge.net/license.html
+# http://sflow.net/license.html
 
 # note - shell invocation with `` quotes is portable
 # between GNU and BSD make
@@ -47,7 +47,7 @@ dist:
 rpm:
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
-        MYREL=`./getRelease`; \
+	MYREL=`./getRelease`; \
 	MYTARBALL=$(PROG)-$$MYVER.tar.gz; \
 	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYTARBALL; \
 	MYSRCDIR=$(MY_RPM_TOP)/SOURCES; \
@@ -55,6 +55,27 @@ rpm:
 	mkdir -p $$MYSRCDIR; \
 	cp $$MYTARBALL $$MYSRCDIR; \
 	rpmbuild --define "_topdir $(MY_RPM_TOP)" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG).spec; \
+	echo "==============="; \
+	MYRPM="$(MY_RPM_TOP)/RPMS/$$MYARCH/$(PROG)-$$MYVER-$$MYREL.$$MYARCH.rpm"; \
+	MYSRPM="$(MY_RPM_TOP)/SRPMS/$(PROG)-$$MYVER-$$MYREL.src.rpm"; \
+	echo "copying new RPMs $$MYRPM and $$MYSRPM back to current directory"; \
+	cp $$MYRPM $$MYSRPM .
+
+xenrpm:
+	MYARCH=`uname -m`; \
+	MYVER=`./getVersion`; \
+	MYREL=`./getRelease`; \
+	VDIR=$(PROG)-$$MYVER; \
+	rm -rf /tmp/$$VDIR; \
+	mkdir /tmp/$$VDIR && cp -r * /tmp/$$VDIR && mv /tmp/$$VDIR . && tar cvzf $$VDIR.tar.gz $$VDIR; \
+	MYSRCDIR=$(MY_RPM_TOP)/SOURCES; \
+	rm -rf $$MYSRCDIR; \
+	mkdir -p $$MYSRCDIR; \
+	cp $$VDIR.tar.gz $$MYSRCDIR; \
+	mkdir $(MY_RPM_TOP)/SRPMS; \
+	mkdir $(MY_RPM_TOP)/RPMS; \
+	mkdir $(MY_RPM_TOP)/RPMS/x86_64; \
+	rpmbuild --define "_topdir $(MY_RPM_TOP)" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG)-xen.spec; \
 	echo "==============="; \
 	MYRPM="$(MY_RPM_TOP)/RPMS/$$MYARCH/$(PROG)-$$MYVER-$$MYREL.$$MYARCH.rpm"; \
 	MYSRPM="$(MY_RPM_TOP)/SRPMS/$(PROG)-$$MYVER-$$MYREL.src.rpm"; \
@@ -94,6 +115,8 @@ deb: $(PROG)
 	mkdir -p debian/DEBIAN; \
         mkdir -p debian/usr/sbin; \
 	mkdir -p debian/etc/init.d; \
+	mkdir -p debian/etc/hsflowd/modules; \
+	mkdir -p debian/lib/systemd/system; \
 	install DEBIAN_build/control debian/DEBIAN; \
 	sed -i -e s/_PACKAGE_/$(PROG)/g debian/DEBIAN/control; \
 	sed -i -e s/_VERSION_/$${MYVER}-$${MYREL}/g debian/DEBIAN/control; \
@@ -103,17 +126,17 @@ deb: $(PROG)
 	install -m 555 DEBIAN_build/postinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/prerm debian/DEBIAN; \
 	install -m 700 src/Linux/hsflowd debian/usr/sbin; \
+	install -m 755 src/Linux/mod_*.so debian/etc/hsflowd/modules; \
 	install -m 755 src/Linux/scripts/hsflowd.deb debian/etc/init.d/hsflowd; \
-	test -e src/Linux/sflowovsd && install -m 700 src/Linux/sflowovsd debian/usr/sbin; \
-	test -e src/Linux/sflowovsd && install -m 755 src/Linux/scripts/sflowovsd.deb debian/etc/init.d/sflowovsd; \
 	install -m 644 src/Linux/scripts/hsflowd.conf debian/etc; \
+	install -m 644 src/Linux/scripts/hsflowd.service debian/lib/systemd/system; \
         cd debian; \
 	find . -type d | xargs chmod 755; \
         md5sum `find usr etc -type f` > DEBIAN/md5sums; \
         cd ..; \
 	dpkg-deb --build debian hsflowd_$${MYVER}-$${MYREL}_$$MYARCH.deb
 
-xenserver: rpm
+xenserver: xenrpm
 	cd xenserver-ddk; $(MAKE) clean; $(MAKE)
 
 .PHONY: $(PROG) clean install schedule rpm xenserver

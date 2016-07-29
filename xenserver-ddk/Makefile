@@ -1,5 +1,5 @@
 # the following values must be changed
-SPEC := ../hsflowd.spec
+SPEC := ../hsflowd-xen.spec
 VENDOR_CODE := hostsflow
 VENDOR_NAME := Host sFlow
 LABEL = hsflowd-xenserver
@@ -14,7 +14,7 @@ RPM_VERSION := $(shell sed -ne 's/^Version: *//p' $(SPEC))
 RPM_RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC))
 
 # no changes below here
-RPMROOT := /usr/src/redhat
+RPMROOT := /tmp/HSFLOWD_RPM_TOP
 ARCH := $(shell uname -i)
 XENSERVER_VERSION := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$4)
 XENSERVER_BUILD := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$5)
@@ -38,7 +38,7 @@ build-tarball: build-rpms
 	cd $(PACKAGE) && build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) --no-iso --tarball $(patsubst %, %.$(ARCH).rpm, $(RPMS))
 
 build-rpms:
-	rpmbuild -bb --define "version $(RPM_VERSION)" --define "release $(RPM_RELEASE)" $(SPEC)
+	rpmbuild -bb --define "_topdir $(RPMROOT)" --define "version $(RPM_VERSION)" --define "release $(RPM_RELEASE)" $(SPEC)
 
 build-srctarballs:
 	tar zcvf $(RPMROOT)/SOURCES/$(PACKAGE_NAME)-$(RPM_VERSION).tar.gz $(PACKAGE_NAME)-$(RPM_VERSION)

@@ -1,375 +1,388 @@
 # This software is distributed under the following license:
-# http://host-sflow.sourceforge.net/license.html
+# http://sflow.net/license.html
 
-HEADERS= hsflowd.h hsflowtokens.h hsflow_ethtool.h sflowovsd.h cpu_utils.h Makefile
+FEATURES   ?= ULOG NFLOG PCAP DOCKER KVM XEN NVML OVS CUMULUS OS10
+BINDIR     ?= /usr/sbin
+INITDIR    ?= /etc/init.d
+CONFDIR    ?= /etc
+MODDIR     ?= /etc/hsflowd/modules
+SYSTEMDDIR ?= /lib/systemd/system
+
+$(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
+
+# INSTROOT may be passed in
+BIN_D=$(BINDIR)
+INIT_D=$(INITDIR)
+CONF_D=$(CONFDIR)
+MOD_D=$(MODDIR)
+ifneq ($(INSTROOT),)
+	BIN_D=$(INSTROOT)/$(BINDIR)
+	INIT_D=$(INSTROOT)/$(INITDIR)
+	CONF_D=$(INSTROOT)/$(CONFDIR)
+	MOD_D=$(INSTROOT)/$(MODDIR)
+endif
+
+#########  compilation flags  #########
+
+HEADERS= util.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h Makefile
 
 # compiler
 #CC= g++
 CC= gcc -std=gnu99
+LD=ld
 
 # optimization
-OPT_FULL = -O3 -DNDEBUG
-OPT_DEBUG = -g -ggdb
-ifeq ($(OPT),)
-	OPT=$(OPT_FULL)
+OPT_ALL= -O3 -DNDEBUG
+OPT_REG= -g -O2
+OPT_DBG= -g -ggdb
+ifndef OPT
+  OPT=$(OPT_REG)
 endif
 
-# base CFLAGS and LIBS
+# other source directories
 SFLOWDIR=../sflow
-CFLAGS += -I. -I$(SFLOWDIR) $(OPT) -Wall -Wstrict-prototypes -Wunused-value -D_GNU_SOURCE -DHSP_VERSION=$(VERSION) -DUTHEAP
-LIBS += $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+JSONDIR=../json
 
-# if ULOG is not set, assume it should be "yes" if the include file is present
-# (So you can use "make ULOG=no" to compile without this feature)
-ifeq ($(ULOG),)
-	ULOG=$(shell if test -r /usr/include/linux/netfilter_ipv4/ipt_ULOG.h; then echo "yes"; else echo "no"; fi)
-endif
-ifeq ($(ULOG),yes)
-	CFLAGS += -DHSP_ULOG
-endif
+# CFLAGS and LIBS - common
+CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
+LIBS_HSFLOWD= $(JSONDIR)/libjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl
 
-# if NFLOG is not set, assume it should be "yes" if the include file is present
-# (So you can use "make NFLOG=no" to compile without this feature)
-ifeq ($(NFLOG),)
-	NFLOG=$(shell if test -r /usr/include/libnfnetlink/libnfnetlink.h; then echo "yes"; else echo "no"; fi)
-endif
-ifeq ($(NFLOG),yes)
-#	CFLAGS += -I/usr/include/libnl3 -DHSP_NFLOG
-#	LIBS += -lnl-3 -lnl-nf-3
-	CFLAGS += -I/usr/include/libnfnetlink -DHSP_NFLOG
-	LIBS += -lnfnetlink
-endif
+CFLAGS_SHARED= -fPIC
+LDFLAGS_SHARED= -shared
 
-# make the inclusion of sflowovsd options
-WITH_SFLOWOVSD=yes
+# CFLAGS and LIBS - modules
+CFLAGS_JSON=
+LIBS_JSON=
 
-# Cumulus Linux
-ifeq ($(CUMULUS),)
-	CUMULUS=$(shell if test -r /etc/os-release && grep -c 'Cumulus Linux' /etc/os-release >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-endif
-# This turns on the use of ethtool for interface stats,
-# identifies switch ports for individual counter-export
-# and enables ULOG packet-sampling.
-ifeq ($(CUMULUS),yes)
-	CFLAGS += -DHSP_CUMULUS
-	WITH_SFLOWOVSD=no
-endif
+CFLAGS_DNSSD=
+LIBS_DNSSD=-lresolv
 
-# if JSON is not set, assume it should be "yes".
-# (So you can use "make JSON=no" to compile without this feature)
-ifeq ($(JSON),)
-	JSON=yes
-endif
-ifeq ($(JSON),yes)
-	JSONDIR=../json
-	CFLAGS += -DHSP_JSON -I$(JSONDIR)
-	LIBS += $(JSONDIR)/libjson.a -lm
-endif
+CFLAGS_XEN=
+LIBS_XEN= -lxenstore -lxenctrl
 
-# if RTMETRIC is not set, assume it should be "yes".
-# (So you can use "make RTMETRIC=no" to compile without this feature)
-ifeq ($(RTMETRIC),)
-	RTMETRIC=yes
-endif
-ifeq ($(RTMETRIC),yes)
-	CFLAGS += -DHSP_RTMETRIC
-endif
+CFLAGS_KVM= -DHSP_KVM -I/usr/include/libvirt -I/usr/include/libxml2
+LIBS_KVM= -lvirt -lxml2
 
-# if PCAP is not set, assume it should be "yes" if the include file is present
-# (So you can use "make PCAP=no" to compile without this feature)
-ifeq ($(PCAP),)
-	PCAP=$(shell if test -r /usr/include/pcap.h; then echo "yes"; else echo "no"; fi)
-endif
-ifeq ($(PCAP),yes)
-	CFLAGS += -DHSP_PCAP
-	LIBS += -lpcap
-endif
+CFLAGS_DOCKER=
+LIBS_DOCKER=
 
-# Docker containers
-# if DOCKER is not set, assume it should be "yes" if "docker ps" runs OK
-# (So you can use "make DOCKER=no" to compile without this feature)
-ifeq ($(DOCKER),)
-	DOCKER=$(shell if docker ps >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-endif
-ifeq ($(DOCKER),yes)
-	CFLAGS += -DHSP_DOCKER -I$(JSONDIR)
-	LIBS += $(JSONDIR)/libjson.a -lm -lcap
-endif
+CFLAGS_ULOG=
+LIBS_ULOG=
+
+CFLAGS_NFLOG= -I/usr/include/libnfnetlink
+LIBS_NFLOG= -lnfnetlink
+
+CFLAGS_PCAP=
+LIBS_PCAP=-lpcap
+
+CFLAGS_NVML= -I/usr/include/nvidia/gdk
+LIBS_NVML= -lnvidia-ml
+
+CFLAGS_CUMULUS=
+LIBS_CUMULUS=
+
+CFLAGS_OVS=
+LIBS_OVS=
+
+CFLAGS_OS10=
+LIBS_OS10=
+
+# common CFLAGS and LIBS	
+CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
+CFLAGS += -DUTHEAP
+CFLAGS += -DHSP_OPTICAL_STATS
+CFLAGS += -DHSP_MOD_DIR=$(MODDIR)
+CFLAGS += -Wall -Wstrict-prototypes -Wunused-value
+CFLAGS += -Wunused-function
+LIBS=
 
 # Check to see if container counters are under /sys/fs/cgroup/cpuacct/system.slice/ (Fedora)
 # or /sys/fs/cgroup/cpuacct/docker/ (Ubuntu). The docker directory on Ubuntu only
 # appears when the first container starts, so test for system.slice here.  This
 # difference stems originally from the fact that Ubuntu systemd does not use slices.
-ifeq ($(SYSTEM_SLICE),)
-	SYSTEM_SLICE=$(shell if test -r /sys/fs/cgroup/cpuacct/system.slice; then echo "yes"; else echo "no"; fi)
+ifndef SYSTEM_SLICE
+  SYSTEM_SLICE=$(shell if test -r /sys/fs/cgroup/cpuacct/system.slice; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(SYSTEM_SLICE),yes)
-	CFLAGS += -DHSP_SYSTEM_SLICE
-endif
-
-# if LIBVIRT is not set, then assume it should be "yes" if we find the library.
-# Could test for the include file too,  but somtimes it is there even if the
-# library is not.  Testing for libvirt-dev[el] might be better.
-ifeq ($(LIBVIRT),)
-	LIBVIRT=$(shell if ls /usr/lib/libvirt.* >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-endif
-
-# if XEN_DDK is not set, then assume it should be "yes" if we are on a Xenserver DDK (or equivalent) system.
-# Just test if the xenstore and xenctrl libs are present, and require the xenctrl.h include as well.
-ifeq ($(XEN_DDK),)
-	XEN_DDK=$(shell if ls /usr/lib*/libxenctrl.* >/dev/null 2>&1 && ls /usr/lib*/libxenstore.* >/dev/null 2>&1 && ls /usr/include/xenctrl.h >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-endif
-# to compile with xen-sources instead, specify XEN_ROOT.  e.g. XEN_ROOT=/root/xen-3.2.0
-
-# The options LIBVIRT=yes, XEN_DDK=yes and XEN_ROOT=<path> should be mutually exclusive.
-# Enforce that here, so that XEN_ROOT takes priority, then XEN_DDK, then LIBVIRT.  It might
-# work better to just have a TARGET=<xen|xensource|kvm|linux> options and insist that it be
-# set to something before we proceed (like haproxy)
-ifeq ($(LIBVIRT),yes)
-	XEN_DDK=no
-	XEN_ROOT=
-endif
-ifeq ($(XEN_DDK),yes)
-	LIBVIRT=no
-	XEN_ROOT=
-endif
-ifeq ($(XEN_ROOT),)
-else
-	LIBVIRT=no
-	XEN_DDK=no
-endif
-
-# translate the selection into compile flags
-ifeq ($(LIBVIRT),yes)
-	CFLAGS += -DHSP_VRT -I/usr/include/libvirt -I/usr/include/libxml2
-	LIBS += -lvirt -lxml2
-endif
-
-ifeq ($(XEN_ROOT),)
-else
-	include $(XEN_ROOT)/tools/Rules.mk
-	CFLAGS += -DHSP_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
-	CFLAGS += -Wno-declaration-after-statement # turn off "mixed declarations and code" warning
-	LIBS += -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
-endif
-
-ifeq ($(XEN_DDK),yes)
-	CFLAGS += -DHSP_XEN
-	LIBS += -lxenstore -lxenctrl
-endif
-
-
-# allow HSP_XEN_VBD_PATH to be overridden here.  For example: make HSP_XEN_VBD_PATH=/sys/devices
-ifeq ($(HSP_XEN_VBD_PATH),)
-else
-	CFLAGS += -DHSP_XEN_VBD_PATH=$(HSP_XEN_VBD_PATH)
+  CFLAGS += -DHSP_SYSTEM_SLICE
 endif
 
 # xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
 # /etc/redhat-release to get the version number as in xenserver-ddk/Makefile,  but then it
 # might not work properly for a XenSource build.  Seems safer to just check for the file:
-ifeq ($(XENSTORE_H),)
-	XENSTORE_H=$(shell if ls /usr/include/xenstore.h 2>&1 >/dev/null; then echo "yes"; else echo "no"; fi)
+ifndef XENSTORE_H	
+  XENSTORE_H=$(shell if ls /usr/include/xenstore.h 2>&1 >/dev/null; then echo "yes"; else echo "no"; fi)
 endif
 ifeq ($(XENSTORE_H),yes)
-	CFLAGS += -DHSP_XENSTORE_H
+  CFLAGS_XEN += -DHSP_XENSTORE_H
 endif
 
-# control how to read disk info from libvirt
-ifeq ($(VRTDSKPATH),yes)
-	CFLAGS += -DHSP_VRT_USE_DISKPATH
-endif
-
-# if NVML is not set, then assume it should be "yes" if the Nvidia library is present
-ifeq ($(NVML),)
-	NVML=$(shell if ls /usr/lib*/libnvidia-ml.so >/dev/null 2>&1; then echo "yes"; else echo "no"; fi)
-endif
-
-ifeq ($(NVML),yes)
-        # we also need the NVML headers, assume /usr/include/nvml
-	ifeq ($(NVML_HEADER_DIR),)
-		NVML_HEADER_DIR=/usr/include/nvml
-	endif
-	CFLAGS += -DHSP_NVML -I$(NVML_HEADER_DIR)
-	LIBS += -lnvidia-ml
-endif
-
-# set ETHTOOL_STATS=yes to enable the use of ethtool for discerning interface counter details
-ifeq ($(ETHTOOL_STATS),yes)
-	CFLAGS += -DHSP_ETHTOOL_STATS
-endif
-
-# set OPTICAL=yes to enable the use of ethtool for adding SFP/QSFP stats.  This extension
-# is experimental for now,  so it is off by default.
-ifeq ($(OPTICAL_STATS),yes)
-	CFLAGS += -DHSP_ETHTOOL_STATS -DHSP_OPTICAL_STATS
-endif
+#########  platform checks  #########
 
 # detect Debian systems
-ifeq ($(DEBIAN),)
-	DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
+ifndef DEBIAN
+  DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
 endif
 
 # detect Red Hat systems
-ifeq ($(REDHAT),)
-	REDHAT=$(shell if [ -r /etc/redhat-release ]; then echo "yes"; else echo "no"; fi)
+ifndef REDHAT
+  REDHAT=$(shell if [ -r /etc/redhat-release ]; then echo "yes"; else echo "no"; fi)
 endif
 
 HSFLOWD_INITSCRIPT=scripts/hsflowd
-SFLOWOVSD_INITSCRIPT=scripts/sflowovsd
+HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service
+
 ifeq ($(DEBIAN),yes)
-	HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
-	SFLOWOVSD_INITSCRIPT=scripts/sflowovsd.deb
+  HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
 endif
 ifeq ($(REDHAT),yes)
-	HSFLOWD_INITSCRIPT=scripts/hsflowd.redhat
-	SFLOWOVSD_INITSCRIPT=scripts/sflowovsd.redhat
-endif
-
-ifeq ($(BINDIR),)
-	BINDIR=/usr/sbin
-endif
-ifeq ($(INITDIR),)
-	INITDIR=/etc/init.d
-endif
-ifeq ($(CONFDIR),)
-	CONFDIR=/etc
+  HSFLOWD_INITSCRIPT=scripts/hsflowd.redhat
 endif
 
 INSTALL=install
 
-# INSTROOT may be passed in, e.g. RPM_BUILD_ROOT
-ifeq ($(INSTROOT),)
-	BIN_D=$(BINDIR)
-	INIT_D=$(INITDIR)
-	CONF_D=$(CONFDIR)
-else
-	BIN_D=$(INSTROOT)/$(BINDIR)
-	INIT_D=$(INSTROOT)/$(INITDIR)
-	CONF_D=$(INSTROOT)/$(CONFDIR)
-endif
+#########  object files  #########
 
-READ_OBJS=readInterfaces.o \
-          readCpuCounters.o \
-          readNvmlCounters.o \
-          readMemoryCounters.o \
-          readDiskCounters.o \
-          readHidCounters.o \
-          readNioCounters.o \
-	  readPackets.o \
-	  readJSON.o \
-	  readContainerCounters.o \
-	  readBroadcomCounters.o \
-	  readTcpipCounters.o
+OBJS_HSFLOWD= hsflowconfig.o \
+              hsflowd.o \
+	      evbus.o \
+              util.o \
+	      readInterfaces.o \
+              readCpuCounters.o \
+              readMemoryCounters.o \
+              readDiskCounters.o \
+              readHidCounters.o \
+              readNioCounters.o \
+	      readTcpipCounters.o \
+	      readPackets.o
 
-HSFLOW_OBJS= hsflowconfig.o \
-             dnsSD.o \
-             hsflowd.o \
-             hsflowd_xen.o \
-             hsflowd_vrt.o \
-             hsflowd_docker.o \
-             util.o
+OBJS_JSON=mod_json.o
+OBJS_DNSSD=mod_dnssd.o
+OBJS_XEN=mod_xen.o
+OBJS_KVM=mod_kvm.o
+OBJS_DOCKER=mod_docker.o
+OBJS_ULOG=mod_ulog.o
+OBJS_NFLOG=mod_nflog.o
+OBJS_PCAP=mod_pcap.o
+OBJS_NVML=mod_nvml.o
+OBJS_OVS=mod_ovs.o
+OBJS_CUMULUS=mod_cumulus.o
+OBJS_OS10=mod_os10.o
 
-SFLOWOVS_OBJS=sflowovsd.o util.o
-
-#### BUILD ####
-
-BUILDTGTS=hsflowd
-ifeq ($(WITH_SFLOWOVSD),yes)
-	BUILDTGTS += sflowovsd
-endif
+BUILDTGTS=hsflowd \
+          mod_json.so \
+          mod_dnssd.so \
+          $(FEATURES)
 
 all: $(BUILDTGTS)
 
-hsflowd: $(HSFLOW_OBJS) $(READ_OBJS)
-	$(CC) $(CFLAGS) -o $@ $(HSFLOW_OBJS) $(READ_OBJS) $(LIBS)
+#########  feature dependencies #########
 
-sflowovsd: $(SFLOWOVS_OBJS)
-	$(CC) $(CFLAGS) -o $@ $(SFLOWOVS_OBJS) $(LIBS)
+# Expected external dependencies:
+# ULOG requires linux/netfilter_ipv4/ipt_ULOG.h
+# NFLOG requires libnfnetlink/libnfnetlink.h
+# PCAP requires libpcap pcap.h
+# DOCKER requires `docker ps`
+# KVM requires libvirt
+# XEN requires libxenctrl libxenstore xenctrl.h xenstore.h
+# NVML requires libnvidia-ml nvml.h
 
-test_netns: test_netns.o util.o
-	$(CC) $(CFLAGS) -o $@ test_netns.o util.o $(LIBS)
+XEN: mod_xen.so OVS
 
-#### INSTALL ####
+KVM: mod_kvm.so
 
-INSTALLTGTS=install-hsflowd
-ifeq ($(WITH_SFLOWOVSD),yes)
-	INSTALLTGTS += install-sflowovsd
+DOCKER: mod_docker.so
+
+ULOG: mod_ulog.so
+
+NFLOG: mod_nflog.so
+
+PCAP: mod_pcap.so
+
+NVML: mod_nvml.so
+
+OVS: mod_ovs.so
+
+CUMULUS: mod_cumulus.so ULOG
+
+OS10: mod_os10.so
+
+#########  hsflowd  #########
+
+hsflowd: $(OBJS_HSFLOWD)
+	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
+
+#########  modules  #########
+
+mod_dnssd.o: mod_dnssd.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_DNSSD)
+
+mod_dnssd.so: $(OBJS_DNSSD)
+	$(LD) -o $@ $(OBJS_DNSSD) $(LDFLAGS_SHARED) $(LIBS_DNSSD)
+
+#----------------------------
+
+mod_json.o: mod_json.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_JSON)
+
+mod_json.so: $(OBJS_JSON)
+	$(LD) -o $@ $(OBJS_JSON) $(LDFLAGS_SHARED)
+
+#----------------------------
+
+
+mod_ulog.o: mod_ulog.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_ULOG)
+
+mod_ulog.so: $(OBJS_ULOG)
+	$(LD) -o $@ $(OBJS_ULOG) $(LDFLAGS_SHARED) $(LIBS_ULOG)
+
+#----------------------------
+
+
+mod_nflog.o: mod_nflog.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c  $(CFLAGS_NFLOG)
+
+mod_nflog.so: $(OBJS_NFLOG)
+	$(LD) -o $@ $(OBJS_NFLOG) $(LDFLAGS_SHARED) $(LIBS_NFLOG)
+
+#----------------------------
+
+
+mod_pcap.o: mod_pcap.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_PCAP)
+
+mod_pcap.so: $(OBJS_PCAP)
+	$(LD) -o $@ $(OBJS_PCAP) $(LDFLAGS_SHARED) $(LIBS_PCAP)
+
+#----------------------------
+
+
+mod_xen.o: mod_xen.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_XEN)
+
+mod_xen.so: $(OBJS_XEN)
+	$(LD) -o $@ $(OBJS_XEN) $(LDFLAGS_SHARED) $(LIBS_XEN)
+
+#----------------------------
+
+
+mod_kvm.o: mod_kvm.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_KVM)
+
+mod_kvm.so: $(OBJS_KVM)
+	$(LD) -o $@ $(OBJS_KVM) $(LDFLAGS_SHARED) $(LIBS_KVM)
+
+#----------------------------
+
+
+mod_docker.o: mod_docker.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_DOCKER)
+
+mod_docker.so: $(OBJS_DOCKER)
+	$(LD) -o $@ $(OBJS_DOCKER) $(LDFLAGS_SHARED) $(LIBS_DOCKER)
+
+#----------------------------
+
+
+mod_nvml.o: mod_nvml.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_NVML)
+
+mod_nvml.so: $(OBJS_NVML)
+	$(LD) -o $@ $(OBJS_NVML) $(LDFLAGS_SHARED) $(LIBS_NVML)
+
+#----------------------------
+
+
+mod_ovs.o: mod_ovs.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_OVS)
+
+mod_ovs.so: $(OBJS_OVS)
+	$(LD) -o $@ $(OBJS_OVS) $(LDFLAGS_SHARED) $(LIBS_OVS)
+
+#----------------------------
+
+
+mod_cumulus.o: mod_cumulus.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_CUMULUS)
+
+mod_cumulus.so: $(OBJS_CUMULUS)
+	$(LD) -o $@ $(OBJS_CUMULUS) $(LDFLAGS_SHARED) $(LIBS_CUMULUS)
+
+#----------------------------
+
+
+mod_os10.o: mod_os10.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_OS10)
+
+mod_os10.so: $(OBJS_OS10)
+	$(LD) -o $@ $(OBJS_OS10) $(LDFLAGS_SHARED) $(LIBS_OS10)
+
+
+#########  install  #########
+
+# if SYSTEMD is not set, then assume it should be "yes" if the directory is present
+ifndef SYSTEMD
+  SYSTEMD=$(shell if [ -d $(SYSTEMDDIR) ]; then echo "yes"; else echo "no"; fi)
 endif
 
-install: $(INSTALLTGTS)
-
-install-hsflowd: hsflowd
+install: $(BUILDTGTS)
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
-	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd; fi
 	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
-
-install-sflowovsd: sflowovsd
-	$(INSTALL) -d $(BIN_D)
-	$(INSTALL) -m 700 sflowovsd $(BIN_D)
-	if [ ! -e $(INIT_D)/sflowovsd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(SFLOWOVSD_INITSCRIPT) $(INIT_D)/sflowovsd; fi
-
-#### SCHEDULE ####
-
-# the chkconfig command may not be available in your VM, but all it does it to put the
-# necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
-# at the required runlevels.
-
-SCHEDULETGTS=schedule-hsflowd	
-ifeq ($(WITH_SFLOWOVSD),yes)	
-	SCHEDULETGTS += schedule-sflowovsd
-endif
-
-schedule: $(SCHEDULETGTS)
-
-schedule-hsflowd:
-ifeq ($(DEBIAN),yes)
-	update-rc.d hsflowd defaults
+ifeq ($(SYSTEMD),yes)
+	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMDDIR);
 else
+	$(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd;
+endif
+	$(INSTALL) -d $(MOD_D);	$(INSTALL) -m 755 *.so $(MOD_D)
+
+#########  schedule  #########
+
+schedule:
+ifeq ($(SYSTEMD),yes)
+	systemctl daemon-reload
+	systemctl enable hsflowd
+else
+  ifeq ($(DEBIAN),yes)
+	update-rc.d hsflowd defaults
+  else
 	/sbin/chkconfig --add hsflowd
 	/sbin/chkconfig --list hsflowd
+  endif
 endif
-schedule-sflowovsd:
-ifeq ($(DEBIAN),yes)
-	update-rc.d sflowovsd defaults
-else
-	/sbin/chkconfig --add sflowovsd
-	/sbin/chkconfig --list sflowovsd
-endif
-#### CLEAN ####
 
-clean: clean-hsflowd clean-sflowovsd
+#########  clean   #########
 
-clean-hsflowd:
-	rm -f $(HSFLOW_OBJS) $(READ_OBJS) hsflowd
+clean: 
+	rm -f hsflowd *.o *.so
 
-clean-sflowovsd:
-	rm -f $(SFLOWOVS_OBJS) sflowovsd
-
-#### dependencies ####
+#########  dependencies  #########
 
 .c.o: $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c
 
+evbus.o: evbus.c $(HEADERS)
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
-dnsSD.o: dnsSD.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
-hsflowd_xen.o: hsflowd_xen.c $(HEADERS)
-hsflowd_vrt.o: hsflowd_vrt.c $(HEADERS)
-hsflowd_docker.o: hsflowd_docker.c $(HEADERS)
 readInterfaces.o: readInterfaces.c $(HEADERS)
 readCpuCounters.o: readCpuCounters.c $(HEADERS)
-readNvmlCounters.o: readNvmlCounters.c $(HEADERS)
 readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
 readPackets.o: readPackets.c $(HEADERS)
-readJSON.o: readJSON.c $(HEADERS)
-sflowovsd.o: sflowovsd.c $(HEADERS)
 readContainerCounters.o: readContainerCounters.c $(HEADERS)
-readAsicCounters.o: readAsicCounters.c $(HEADERS)
-readBroadcomCounters.o: readBroadcomCounters.c $(HEADERS)
 readTcpipCounters.o: readTcpipCounters.c $(HEADERS)
-
+mod_json.o: mod_json.c $(HEADERS)
+mod_dnssd.o: mod_dnssd.c $(HEADERS)
+mod_xen.o: mod_xen.c $(HEADERS)
+mod_kvm.o: mod_kvm.c $(HEADERS)
+mod_docker.o: mod_docker.c $(HEADERS)
+mod_ulog.o: mod_ulog.c $(HEADERS)
+mod_nflog.o: mod_nflog.c $(HEADERS)
+mod_pcap.o: mod_pcap.c $(HEADERS)
+mod_nvml.o: mod_nvml.c $(HEADERS)
+mod_cumulus.o: mod_cumulus.c $(HEADERS)
+mod_ovs.o: mod_ovs.c $(HEADERS)
+mod_os10.o: mod_os10.c $(HEADERS)

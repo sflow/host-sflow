@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #if defined(__cplusplus)
@@ -15,8 +15,6 @@ extern "C" {
    code to fdisk should probably be consulted to find where it can
    be read off */
 #define ASSUMED_DISK_SECTOR_BYTES 512
-
-  extern int debug;
 
   /*_________________---------------------------__________________
     _________________     remote_mount          __________________

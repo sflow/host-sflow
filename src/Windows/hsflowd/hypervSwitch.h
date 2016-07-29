@@ -1,7 +1,7 @@
 /*
  * Copyright (c) 2011 InMon Corp. ALL RIGHTS RESERVED
  * This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #ifndef HYPERVSWITCH_H

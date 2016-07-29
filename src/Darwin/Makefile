@@ -1,5 +1,5 @@
 # This software is distributed under the following license:
-# http://host-sflow.sourceforge.net/license.html
+# http://sflow.net/license.html
 
 # specify XEN_ROOT path to compile with xen-sources
 # e.g. XEN_ROOT=/root/xen-3.2.0

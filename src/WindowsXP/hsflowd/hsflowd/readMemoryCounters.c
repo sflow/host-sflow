@@ -40,7 +40,7 @@ extern int debug;
 	//Memory\Cache Bytes(http://technet.microsoft.com/en-us/library/cc778082(v=ws.10).aspx)
 	//is not equivalent to Linux file system cache and there appears to be no
 	//equivalent concept to file system cache, so we leave cached as unknown.
-	//see discussion at http://sourceforge.net/mailarchive/message.php?msg_id=30319148
+	//see discussion at http://host-sflow.sourceforge.net/mailarchive/message.php?msg_id=30319148
 	mem->mem_cached = UNKNOWN_GAUGE_64;
 	mem->swap_in = UNKNOWN_COUNTER;
 	mem->swap_out = UNKNOWN_COUNTER;

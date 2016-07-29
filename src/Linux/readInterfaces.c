@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 #if defined(__cplusplus)
@@ -16,55 +16,6 @@ extern "C" {
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <linux/if_vlan.h>
-
-extern int debug;
-
-
-#if 0
-
-/*________________---------------------------__________________
-  ________________      readVLAN             __________________
-  ----------------___________________________------------------
-
-Rejected this way of looking up the VLAN because is was not
-portable back to Linux 2.4 kernels,  and because the /proc/net/vlan
-approach seemed more stable and portable.
-*/
-  int32_t readVLAN(char *devName, int fd)
-  {
-    // check in case it is just a sub-interface with a VLAN tag
-    // that we should ignore to avoid double-counting.  We'll still
-    // allow it through in case we are doing ULOG sampling and we
-    // want to record flows/counters against this interface.
-    int32_t vlan = HSP_VLAN_ALL;
-    // for some reason if_vlan.h has only 24 characters set aside
-    // for the device name, and no #define to capture that (like
-    // IFNAMSIZ above)
-#define HSP_VLAN_IFNAMSIZ 24
-    if(my_strlen(devName) < HSP_VLAN_IFNAMSIZ) {
-      struct vlan_ioctl_args vlargs;
-      vlargs.cmd = GET_VLAN_VID_CMD;
-      strcpy(vlargs.device1, devName);
-      if(ioctl(fd, SIOCGIFVLAN, &vlargs) < 0) {
-	if(debug) {
-	  myLog(LOG_ERR, "device %s Get SIOCGIFVLAN failed : %s",
-		devName,
-		strerror(errno));
-	}
-      }
-      else {
-	vlan = vlargs.u.VID;
-	if(debug) {
-	  myLog(LOG_INFO, "device %s is vlan interface for vlan %u",
-		devName,
-		vlan);
-	}
-      }
-    }
-    return vlan;
-  }
-
-#endif
 
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
@@ -95,7 +46,7 @@ approach seemed more stable and portable.
 	  if(adaptor &&
 	     vlan >= 0 && vlan < 4096) {
 	    ADAPTOR_NIO(adaptor)->vlan = vlan;
-	    if(debug) myLog(LOG_INFO, "adaptor %s has 802.1Q vlan %d", devName, vlan);
+	    myDebug(1, "adaptor %s has 802.1Q vlan %d", devName, vlan);
 	  }
 	}
       }
@@ -112,7 +63,7 @@ approach seemed more stable and portable.
 */
   void setAddressPriorities(HSP *sp)
   {
-    if(debug) myLog(LOG_INFO, "setAddressPriorities");
+    myDebug(1, "setAddressPriorities");
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByName, adaptor) {
       HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
@@ -170,12 +121,12 @@ approach seemed more stable and portable.
 		  &scope,
 		  &flags,
 		  devName) == 6) {
-	  if(debug) {
-	    myLog(LOG_INFO, "adaptor %s has v6 address %s with scope 0x%x",
-		  devName,
-		  addr,
-		  scope);
-	  }
+
+	  myDebug(1, "adaptor %s has v6 address %s with scope 0x%x",
+		devName,
+		addr,
+		scope);
+
 	  SFLAdaptor *adaptor = adaptorByName(sp, trimWhitespace(devName));
 	  if(adaptor) {
 	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
@@ -201,8 +152,6 @@ approach seemed more stable and portable.
     }
   }
 
-#if (HSP_ETHTOOL_STATS || HSP_DOCKER)
-
 /*________________---------------------------__________________
   ________________  staticStringsIndexOf     __________________
   ----------------___________________________------------------
@@ -216,9 +165,8 @@ approach seemed more stable and portable.
   }
 
 /*________________---------------------------__________________
-  ________________    read_ethtool_info      __________________
+  ________________   ethtool_num_counters    __________________
   ----------------___________________________------------------
-  return true if something changed
 */
 
   static int ethtool_num_counters(struct ifreq *ifr, int fd)
@@ -248,78 +196,122 @@ approach seemed more stable and portable.
     return 0;
   }
 
-#endif /* (HSP_ETHTOOL_STATS || HSP_DOCKER) */
 
+#ifdef ETHTOOL_GLINKSETTINGS
 
-  static int read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+/*________________-----------------------------__________________
+  ________________  ethtool_get_GLINKSETTINGS  __________________
+  ----------------_____________________________------------------
+*/
+
+/* New local definitions needed for updated  ethtool ioctl, ripped from upstream ethtool  */
+#define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32	(SCHAR_MAX)
+#define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NBITS	(32 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32)
+#define ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NBYTES (4 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32)
+#define ETHTOOL_DECLARE_LINK_MODE_MASK(name) uint32_t name[ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32]
+
+  struct ethtool_link_usettings {
+    struct {
+      __u8 transceiver;
+    } deprecated;
+    struct ethtool_link_settings base;
+    struct {
+      ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
+      ETHTOOL_DECLARE_LINK_MODE_MASK(advertising);
+      ETHTOOL_DECLARE_LINK_MODE_MASK(lp_advertising);
+    } link_modes;
+  };
+
+  
+  static bool ethtool_get_GLINKSETTINGS(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
-    // set device type from ethtool driver info - could also have gone
-    // to /sys/class/net/<device>/.
-    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-    struct ethtool_drvinfo drvinfo;
-    drvinfo.cmd = ETHTOOL_GDRVINFO;
-    ifr->ifr_data = (char *)&drvinfo;
-    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-      if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
-	adaptorNIO->devType = HSPDEV_BRIDGE;
-      else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
-	adaptorNIO->devType = HSPDEV_VETH;
-      else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
-	adaptorNIO->devType = HSPDEV_VIF;
-      else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
-	adaptorNIO->devType = HSPDEV_OVS;
-      else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
-	adaptorNIO->devType = HSPDEV_PHYSICAL;
-      else if(my_strlen(drvinfo.bus_info))
-	adaptorNIO->devType = HSPDEV_PHYSICAL;
-      else
-	adaptorNIO->devType = HSPDEV_OTHER;
-      
-      // optical data
-#ifdef HSP_TEST_QSFP
-      adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
-      adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
-      adaptorNIO->modinfo_tested = YES;
-#endif
-      
-#ifdef HSP_OPTICAL_STATS
-      /* avoid re-testing this every time in case it is slow */
-      if(!adaptorNIO->modinfo_tested) {
-	adaptorNIO->modinfo_tested = YES;
-	struct ethtool_modinfo modinfo = { 0 };
-	modinfo.cmd = ETHTOOL_GMODULEINFO;
-	ifr->ifr_data = (char *)&modinfo;
-	if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-	  myLog(LOG_INFO, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
-		adaptor->deviceName,
-		modinfo.eeprom_len,
-		modinfo.type);
-	  adaptorNIO->modinfo_len = modinfo.eeprom_len;
-	  adaptorNIO->modinfo_type = modinfo.type;
-	}
-	else {
-	  if(debug) myLog(LOG_INFO, "ETHTOOL_GMODULEINF0 %s failed : %s",
-			  adaptor->deviceName,
-			  strerror(errno));
-	}
-      }
-#endif /* HSP_OPTICAL_STATS */
-    }
-
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
     int changed = NO;
-    struct ethtool_cmd ecmd = { 0 };
-    ecmd.cmd = ETHTOOL_GSET;
-    ifr->ifr_data = (char *)&ecmd;
-    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-      uint32_t direction = ecmd.duplex ? 1 : 2;
+    int err;
+    struct {
+      struct ethtool_link_settings req;
+      __u32 link_mode_data[3 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
+    } ecmd;
+    
+    /* Handshake with kernel to determine number of words for link
+     * mode bitmaps. When requested number of bitmap words is not
+     * the one expected by kernel, the latter returns the integer
+     * opposite of what it is expecting. We request length 0 below
+     * (aka. invalid bitmap length) to get this info.
+     */
+    memset(&ecmd, 0, sizeof(ecmd));
+    ecmd.req.cmd = ETHTOOL_GLINKSETTINGS;
+    ifr->ifr_data = (void *)&ecmd;
+    err = ioctl(fd, SIOCETHTOOL, ifr);
+    if (err == 0) {
+      /* see above: we expect a strictly negative value from kernel.
+       */
+      if (ecmd.req.link_mode_masks_nwords >= 0
+          || ecmd.req.cmd != ETHTOOL_GLINKSETTINGS) {
+	return NO;
+      }
+      /* got the real ecmd.req.link_mode_masks_nwords,
+       * now send the real request
+       */
+      ecmd.req.cmd = ETHTOOL_GLINKSETTINGS;
+      ecmd.req.link_mode_masks_nwords = -ecmd.req.link_mode_masks_nwords;
+      err = ioctl(fd, SIOCETHTOOL, ifr);
+      if (err < 0) {
+	return NO;
+      }
+      
+      uint32_t direction = ecmd.req.duplex ? 1 : 2;
       if(direction != adaptor->ifDirection) {
 	changed = YES;
       }
       adaptor->ifDirection = direction;
-      uint64_t ifSpeed_mb = ecmd.speed;
+      uint64_t ifSpeed_mb = ecmd.req.speed;
       // ethtool_cmd_speed(&ecmd) is available in newer systems and uses the
+      // speed_hi field too,  but we would need to run autoconf-style
+      // tests to see if it was there and we are trying to avoid that.
+      if(ifSpeed_mb == (uint16_t)-1 ||
+	 ifSpeed_mb == (uint32_t)-1) {
+        // unknown
+        if(adaptor->ifSpeed != 0) {
+          changed = YES;
+        }
+        adaptor->ifSpeed = 0;
+      }
+      else {
+        uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
+        if(adaptor->ifSpeed != ifSpeed_bps) {
+          changed = YES;
+        }
+        adaptor->ifSpeed = ifSpeed_bps;
+      }
+    }
+    return changed;
+  }
+
+#endif /* ETHTOOL_GLINKSETTINGS */
+
+/*________________--------------------------__________________
+  ________________  ethtool_get_GSET        __________________
+  ----------------__________________________------------------
+*/
+  
+  static bool ethtool_get_GSET(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  {
+    // Try to get the ethtool info for this interface so we can infer the
+    // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
+    int changed = NO;
+    struct ethtool_cmd ecmd_legacy = { 0 };
+    ecmd_legacy.cmd = ETHTOOL_GSET;
+    ifr->ifr_data = (char *)&ecmd_legacy;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      uint32_t direction = ecmd_legacy.duplex ? 1 : 2;
+      if(direction != adaptor->ifDirection) {
+	changed = YES;
+      }
+      adaptor->ifDirection = direction;
+      uint64_t ifSpeed_mb = ecmd_legacy.speed;
+      // ethtool_cmd_speed(&ecmd_legacy) is available in newer systems and uses the
       // speed_hi field too,  but we would need to run autoconf-style
       // tests to see if it was there and we are trying to avoid that.
       if(ifSpeed_mb == (uint16_t)-1 ||
@@ -337,79 +329,186 @@ approach seemed more stable and portable.
 	}
 	adaptor->ifSpeed = ifSpeed_bps;
       }
-#if (HSP_ETHTOOL_STATS || HSP_DOCKER)
-      // see if the ethtool stats block can give us multicast/broadcast counters too
-      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-      adaptorNIO->et_nfound=0;
-      adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
-      if(adaptorNIO->et_nctrs) {
-	struct ethtool_gstrings *ctrNames;
-	uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
-	ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
-	ctrNames->cmd = ETHTOOL_GSTRINGS;
-	ctrNames->string_set = ETH_SS_STATS;
-	ctrNames->len = adaptorNIO->et_nctrs;
-	ifr->ifr_data = (char *)ctrNames;
-	if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-	  // copy out one at a time to make sure we have null-termination
-	  char cname[ETH_GSTRING_LEN+1];
-	  cname[ETH_GSTRING_LEN] = '\0';
-	  for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
-	    memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
-	    if(debug) myLog(LOG_INFO, "ethtool counter %s is at index %d", cname, ii);
-	    // then see if this is one of the ones we want,
-	    // and record the index if it is.
-#ifdef HSP_ETHTOOL_STATS
-	    if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
-	      adaptorNIO->et_idx_mcasts_in = ii+1;
-	      adaptorNIO->et_nfound++;
-	    }
-	    else if(staticStringsIndexOf(HSP_ethtool_mcasts_out_names, cname) != -1) {
-	      adaptorNIO->et_idx_mcasts_out = ii+1;
-	      adaptorNIO->et_nfound++;
-	    }
-	    else if(staticStringsIndexOf(HSP_ethtool_bcasts_in_names, cname) != -1) {
-	      adaptorNIO->et_idx_bcasts_in = ii+1;
-	      adaptorNIO->et_nfound++;
-	    }
-	    else if(staticStringsIndexOf(HSP_ethtool_bcasts_out_names, cname) != -1) {
-	      adaptorNIO->et_idx_bcasts_out = ii+1;
-	      adaptorNIO->et_nfound++;
-	    }
+    }
+    return changed;
+  }
+      
+#if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO )
+
+/*________________---------------------------__________________
+  ________________  ethtool_get_GMODULEINFO  __________________
+  ----------------___________________________------------------
+*/
+  static bool ethtool_get_GMODULEINFO(struct ifreq *ifr, int fd, SFLAdaptor *adaptor) {
+    /* avoid re-testing this every time in case it is slow */
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    // optical data
+#ifdef HSP_TEST_QSFP
+    adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
+    adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
+    adaptorNIO->modinfo_tested = YES;
 #endif
-#ifdef HSP_DOCKER
-	    if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
-	      // Now go ahead and make the call to get the peer_ifindex. This should
-	      // work for veth pairs. If the container's device is a macvlan then it's
-	      // peer ifIndex will be reported as 0.
-	      // Understanding where a macvlan connects to can be
-	      // gleaned from a netlink call to RTM_GETLINK,  where the IFLA_LINK
-	      // attribute should have the ifIndex of the interface that the macvlan
-	      // is on.  See https://github.com/jbenc/plotnetcfg.  However we don't
-	      // really need that information to correctly model a macvlan setup as
-	      // an sFlow bridge,  so we don't even try to get it here.
+    if(!adaptorNIO->modinfo_tested) {
+      adaptorNIO->modinfo_tested = YES;
+      struct ethtool_modinfo modinfo = { 0 };
+      modinfo.cmd = ETHTOOL_GMODULEINFO;
+      ifr->ifr_data = (char *)&modinfo;
+      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+	myLog(LOG_INFO, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
+	      adaptor->deviceName,
+	      modinfo.eeprom_len,
+	      modinfo.type);
+	adaptorNIO->modinfo_len = modinfo.eeprom_len;
+	adaptorNIO->modinfo_type = modinfo.type;
+	return YES;
+      }
+      else {
+	myDebug(1, "ETHTOOL_GMODULEINF0 %s failed : %s",
+		adaptor->deviceName,
+		strerror(errno));
+      }
+    }
+    return NO;
+  }
+#endif /* HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO */
+
+
+/*________________---------------------------__________________
+  ________________  ethtool_get_GDRVINFO     __________________
+  ----------------___________________________------------------
+*/
+
+  static bool ethtool_get_GDRVINFO(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  {
+    // set device type from ethtool driver info - could also have gone
+    // to /sys/class/net/<device>/.
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    struct ethtool_drvinfo drvinfo;
+    drvinfo.cmd = ETHTOOL_GDRVINFO;
+    ifr->ifr_data = (char *)&drvinfo;
+    if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+      EnumHSPDevType devType = HSPDEV_OTHER;
+      if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
+	devType = HSPDEV_BRIDGE;
+      else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
+	devType = HSPDEV_VETH;
+      else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
+	devType = HSPDEV_VIF;
+      else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
+	devType = HSPDEV_OVS;
+      else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
+	devType = HSPDEV_PHYSICAL;
+      else if(my_strlen(drvinfo.bus_info))
+	devType = HSPDEV_PHYSICAL;
+
+      if(adaptorNIO->devType != devType) {
+	adaptorNIO->devType = devType;
+	return YES;
+      }
+    }
+    return NO;
+  }
+
+
+/*________________---------------------------__________________
+  ________________  ethtool_get_GSTATS       __________________
+  ----------------___________________________------------------
+*/
+
+  static void ethtool_get_GSTATS(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  {
+    // see if the ethtool stats block can give us multicast/broadcast counters too
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    adaptorNIO->et_nfound=0;
+    adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
+    if(adaptorNIO->et_nctrs) {
+      struct ethtool_gstrings *ctrNames;
+      uint32_t bytes = sizeof(*ctrNames) + (adaptorNIO->et_nctrs * ETH_GSTRING_LEN);
+      ctrNames = (struct ethtool_gstrings *)my_calloc(bytes);
+      ctrNames->cmd = ETHTOOL_GSTRINGS;
+      ctrNames->string_set = ETH_SS_STATS;
+      ctrNames->len = adaptorNIO->et_nctrs;
+      ifr->ifr_data = (char *)ctrNames;
+      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
+	// copy out one at a time to make sure we have null-termination
+	char cname[ETH_GSTRING_LEN+1];
+	cname[ETH_GSTRING_LEN] = '\0';
+	for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
+	  memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
+	  myDebug(1, "ethtool counter %s is at index %d", cname, ii);
+	  // then see if this is one of the ones we want,
+	  // and record the index if it is.
+	  if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
+	    adaptorNIO->et_idx_mcasts_in = ii+1;
+	    adaptorNIO->et_nfound++;
+	  }
+	  else if(staticStringsIndexOf(HSP_ethtool_mcasts_out_names, cname) != -1) {
+	    adaptorNIO->et_idx_mcasts_out = ii+1;
+	    adaptorNIO->et_nfound++;
+	  }
+	  else if(staticStringsIndexOf(HSP_ethtool_bcasts_in_names, cname) != -1) {
+	    adaptorNIO->et_idx_bcasts_in = ii+1;
+	    adaptorNIO->et_nfound++;
+	    }
+	  else if(staticStringsIndexOf(HSP_ethtool_bcasts_out_names, cname) != -1) {
+	    adaptorNIO->et_idx_bcasts_out = ii+1;
+	    adaptorNIO->et_nfound++;
+	  }
+	  if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
+	    // Now go ahead and make the call to get the peer_ifindex. This should
+	    // work for veth pairs. If the container's device is a macvlan then it's
+	    // peer ifIndex will be reported as 0.
+	    // Understanding where a macvlan connects to can be
+	    // gleaned from a netlink call to RTM_GETLINK,  where the IFLA_LINK
+	    // attribute should have the ifIndex of the interface that the macvlan
+	    // is on.  See https://github.com/jbenc/plotnetcfg.  However we don't
+	    // really need that information to correctly model a macvlan setup as
+	    // an sFlow bridge,  so we don't even try to get it here.
 	      struct ethtool_stats *et_stats = (struct ethtool_stats *)my_calloc(bytes);
 	      et_stats->cmd = ETHTOOL_GSTATS;
 	      et_stats->n_stats = adaptorNIO->et_nctrs;
 	      ifr->ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
 		adaptor->peer_ifIndex = et_stats->data[ii];
-		UTHashAdd(sp->adaptorsByPeerIndex, adaptor, YES);
-		if(debug) myLog(LOG_INFO, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
-				adaptor->deviceName,
-				adaptor->ifIndex,
-				adaptor->peer_ifIndex);
+		UTHashAdd(sp->adaptorsByPeerIndex, adaptor);
+		myDebug(1, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
+			adaptor->deviceName,
+			adaptor->ifIndex,
+			adaptor->peer_ifIndex);
 	      }
-	    }
-#endif
 	  }
 	}
-	my_free(ctrNames);
       }
-#endif
+      my_free(ctrNames);
     }
+  }
+
+
+/*________________---------------------------__________________
+  ________________  read_ethtool_info        __________________
+  ----------------___________________________------------------
+*/
+
+  static bool read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  {
+    bool changed = NO;
+    
+    changed |= ethtool_get_GDRVINFO(ifr, fd, adaptor);
+    
+#if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO )
+    changed |= ethtool_get_GMODULEINFO(ifr, fd, adaptor);
+#endif
+
+#ifdef ETHTOOL_GLINKSETTINGS
+    changed |= ethtool_get_GLINKSETTINGS(ifr, fd, adaptor);
+#else
+    changed |= ethtool_get_GSET(ifr, fd, adaptor);
+#endif
+
+    ethtool_get_GSTATS(sp, ifr, fd, adaptor);
     return changed;
   }
+
 
 /*________________---------------------------__________________
   ________________      readInterfaces       __________________
@@ -455,9 +554,7 @@ approach seemed more stable and portable.
       // we set the ifr_name field to make our queries
       strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
       
-      if(debug > 1) {
-	myLog(LOG_INFO, "reading interface %s", devName);
-      }
+      myDebug(3, "reading interface %s", devName);
       
       // Get the flags for this interface
       if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
@@ -497,11 +594,9 @@ approach seemed more stable and portable.
       uint32_t ifIndex = 0;
       if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
 	// only complain about this if we are debugging
-	if(debug) {
-	  myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
+	myDebug(1, "device %s Get SIOCGIFINDEX failed : %s",
 		devName,
 		strerror(errno));
-	}
       }
       else {
 	ifIndex = ifr.ifr_ifindex;
@@ -527,10 +622,10 @@ approach seemed more stable and portable.
       }
       if(existing == NULL) {
 	ad_added++;
-	UTHashAdd(sp->adaptorsByName, adaptor, NO);
+	UTHashAdd(sp->adaptorsByName, adaptor);
 	// add to "all namespaces" collections too
-	if(gotMac) UTHashAdd(sp->adaptorsByMac, adaptor, YES);
-	if(ifIndex) UTHashAdd(sp->adaptorsByIndex, adaptor, YES);
+	if(gotMac) UTHashAdd(sp->adaptorsByMac, adaptor);
+	if(ifIndex) UTHashAdd(sp->adaptorsByIndex, adaptor);
       }
       
       // clear the mark so we don't free it below
@@ -548,31 +643,22 @@ approach seemed more stable and portable.
 	  adaptorNIO->modinfo_tested = NO;
 	}
 	else ad_wentdown++;
-	if(debug) {
-	  myLog(LOG_INFO, "adaptor %s %s",
+	myDebug(1, "adaptor %s %s",
 		adaptor->deviceName,
 		up ? "came up" : "went down");
-	}
       }
       adaptorNIO->up = up;
       adaptorNIO->loopback = loopback;
       adaptorNIO->bond_master = bond_master;
       adaptorNIO->bond_slave = bond_slave;
       adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
-#ifdef HSP_SWITCHPORT_REGEX
-      if(regexec(&sp->swp_regex, devName, 0, NULL, 0) == 0) {
-	adaptorNIO->switchPort = YES;
-      }
-#endif
       
       // Try to get the IP address for this interface
       if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
 	// only complain about this if we are debugging
-	if(debug) {
-	  myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s",
+	myDebug(1, "device %s Get SIOCGIFADDR failed : %s",
 		devName,
 		strerror(errno));
-	}
       }
       else {
 	if (ifr.ifr_addr.sa_family == AF_INET) {
@@ -626,195 +712,6 @@ approach seemed more stable and portable.
   return sp->adaptorsByName->entries;
 }
 
-#ifdef HSP_DOCKER
-
-/*________________---------------------------__________________
-  ________________   containerLinkCB         __________________
-  ----------------___________________________------------------
-  
-expecting lines of the form:
-VNIC: <ifindex> <device> <mac>
-*/
-
-  static int containerLinkCB(HSP *sp, HSPContainer *container, char *line) {
-    if(debug) myLog(LOG_INFO, "containerLinkCB: line=<%s>", line);
-    char deviceName[HSP_DOCKER_MAX_LINELEN];
-    char macStr[HSP_DOCKER_MAX_LINELEN];
-    uint32_t ifIndex;
-    if(sscanf(line, "VNIC: %u %s %s", &ifIndex, deviceName, macStr) == 3) {
-      u_char mac[6];
-      if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
-	SFLAdaptor *adaptor = adaptorListGet(container->vm->interfaces, deviceName);
-	if(adaptor == NULL) {
-	  adaptor = nioAdaptorNew(deviceName, mac, ifIndex);
-	  adaptorListAdd(container->vm->interfaces, adaptor);
-	  // add to "all namespaces" collections too
-	  UTHashAdd(sp->adaptorsByMac, adaptor, YES);
-	  UTHashAdd(sp->adaptorsByIndex, adaptor, YES);
-	  // mark it as a vm/container device
-	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
-	}
-	// clear the mark so we don't free it below
-	adaptor->marked = NO;
-      }
-    }
-    return YES;
-  }
-
-/*________________---------------------------__________________
-  ________________   readContainerInterfaces __________________
-  ----------------___________________________------------------
-*/
-
-#include <linux/version.h>
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0) || (__GLIBC__ <= 2 && __GLIBC_MINOR__ < 14))
-#ifndef CLONE_NEWNET
-#define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
-#endif
-  
-#define MY_SETNS(fd, nstype) syscall(__NR_setns, fd, nstype)
-#else
-#define MY_SETNS(fd, nstype) setns(fd, nstype)
-#endif
-
-  int readContainerInterfaces(HSP *sp, HSPContainer *container)  {
-    pid_t nspid = container->pid;
-    if(debug) myLog(LOG_INFO, "readContainerInterfaces: pid=%u", nspid);
-    if(nspid == 0) return 0;
-
-    // do the dirty work after a fork, so we can just exit afterwards,
-    // same as they do in "ip netns exec"
-    int pfd[2];
-    if(pipe(pfd) == -1) {
-      myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    pid_t cpid;
-    if((cpid = fork()) == -1) {
-      myLog(LOG_ERR, "fork() failed : %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-    if(cpid == 0) {
-      // in child
-      close(pfd[0]);   // close read-end
-      dup2(pfd[1], 1); // stdout -> write-end
-      dup2(pfd[1], 2); // stderr -> write-end
-      close(pfd[1]);
-      
-      // open /proc/<nspid>/ns/net
-      char topath[HSP_DOCKER_MAX_FNAME_LEN+1];
-      snprintf(topath, HSP_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
-      int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
-      if(nsfd < 0) {
-	fprintf(stderr, "cannot open %s : %s", topath, strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      
-      /* set network namespace
-	 CLONE_NEWNET means nsfd must refer to a network namespace
-      */
-      if(MY_SETNS(nsfd, CLONE_NEWNET) < 0) {
-	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-      
-      /* From "man 2 unshare":  This flag has the same effect as the clone(2)
-	 CLONE_NEWNS flag. Unshare the mount namespace, so that the calling
-	 process has a private copy of its namespace which is not shared with
-	 any other process. Specifying this flag automatically implies CLONE_FS
-	 as well. Use of CLONE_NEWNS requires the CAP_SYS_ADMIN capability. */
-      if(unshare(CLONE_NEWNS) < 0) {
-	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
-	exit(EXIT_FAILURE);
-      }
-
-      int fd = socket(PF_INET, SOCK_DGRAM, 0);
-      if(fd < 0) {
-	fprintf(stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
-	return 0;
-      }
-
-      FILE *procFile = fopen("/proc/net/dev", "r");
-      if(procFile) {
-	struct ifreq ifr;
-	memset(&ifr, 0, sizeof(ifr));
-	char line[MAX_PROC_LINE_CHARS];
-	int lineNo = 0;
-	while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
-	  if(lineNo++ < 2) continue; // skip headers
-	  char buf[MAX_PROC_LINE_CHARS];
-	  char *p = line;
-	  char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
-	  if(devName && my_strlen(devName) < IFNAMSIZ) {
-	    strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
-	    // Get the flags for this interface
-	    if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
-	      fprintf(stderr, "container device %s Get SIOCGIFFLAGS failed : %s",
-		      devName,
-		      strerror(errno));
-	    }
-	    else {
-	      int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
-	      int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
-
-	      if(up && !loopback) {
-		// try to get ifIndex next, because we only care about
-		// ifIndex and MAC when looking at container interfaces
-		if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
-		  // only complain about this if we are debugging
-		  if(debug) {
-		    fprintf(stderr, "container device %s Get SIOCGIFINDEX failed : %s",
-			  devName,
-			  strerror(errno));
-		  }
-		}
-		else {
-		  int ifIndex = ifr.ifr_ifindex;
-		  
-		  // Get the MAC Address for this interface
-		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
-		    if(debug) {
-		      fprintf(stderr, "device %s Get SIOCGIFHWADDR failed : %s",
-			      devName,
-			      strerror(errno));
-		    }
-		  }
-		  else {
-		    u_char macStr[13];
-		    printHex((u_char *)&ifr.ifr_hwaddr.sa_data, 6, macStr, 12, NO);
-		    // send this info back up the pipe to my my parent
-		    printf("VNIC: %u %s %s\n", ifIndex, devName, macStr);
-		  }
-		}
-	      }
-	    }
-	  }
-	}
-      }
-
-      // don't even bother to close file-descriptors,  just bail
-      exit(0);
-      
-    }
-    else {
-      // in parent
-      close(pfd[1]); // close write-end
-      // read from read-end
-      FILE *ovs;
-      if((ovs = fdopen(pfd[0], "r")) == NULL) {
-	myLog(LOG_ERR, "readContainerInterfaces: fdopen() failed : %s", strerror(errno));
-	return 0;
-      }
-      char line[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(sp, container, line);
-      fclose(ovs);
-      wait(NULL); // block here until child is done
-    }
-
-    return container->vm->interfaces->num_adaptors;
-  }
-
-#endif	
 
 #if defined(__cplusplus)
 } /* extern "C" */

@@ -1,5 +1,5 @@
 # This software is distributed under the following license:
-# http://host-sflow.sourceforge.net/license.html
+# http://sflow.net/license.html
 
 HEADERS= sflow_api.h sflow.h Makefile
 

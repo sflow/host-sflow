@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 
@@ -9,12 +9,10 @@ extern "C" {
 
 #include "hsflowd.h"
 
-  extern int debug;
-
-#ifdef HSP_JSON
-
-
-#ifdef HSP_RTMETRIC
+#include "cJSON.h"
+#define HSP_MAX_JSON_MSG_BYTES 10000
+#define HSP_READJSON_BATCH 100
+#define HSP_JSON_RCV_BUF 2000000
   
   typedef enum {
     RTMetricType_string = 0,
@@ -43,7 +41,36 @@ extern "C" {
 #define TAG_RTMETRIC ((4300 << 12) + 1002)
 #define TAG_RTFLOW ((4300 << 12) + 1003)
 
-#endif /* HSP_RTMETRIC */
+  typedef struct _HSPApplication {
+    char *application;
+    struct _HSPApplication *prev; // for UTQ
+    struct _HSPApplication *next; // for UTQ
+    // uint32_t hash;
+    uint32_t dsIndex;
+    uint16_t servicePort;
+    uint32_t service_port_clash;
+    uint32_t settings_revisionNo;
+    int json_counters;
+    int json_ops_counters;
+    time_t last_json_counters;
+    time_t last_json;
+#define HSP_COUNTER_SYNTH_TIMEOUT 120
+#define HSP_JSON_APP_TIMEOUT 7200
+    SFLSampler *sampler;
+    SFLPoller *poller;
+    SFLCounters_sample_element counters;
+  } HSPApplication;
+
+  typedef struct _HSP_mod_JSON {
+    EVBus *pollBus;
+    EVBus *packetBus;
+    int json_soc;
+    int json_soc6;
+    int json_fifo;
+    UTHash *applicationHT;
+    UTQ(HSPApplication) timeoutQ;
+    UTArray *pollActions;
+  } HSP_mod_JSON;
 
   /*_________________---------------------------__________________
     _________________  int counters and gauges  __________________
@@ -79,38 +106,49 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  static void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  static void agentCB_getCounters_JSON(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-    HSP *sp = (HSP *)magic;
+    EVMod *mod = (EVMod *)magic;
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
 
-    // we stashed a pointer to the application in the userData field
-    HSPApplication *application = (HSPApplication *)poller->userData;
+    assert(EVCurrentBus() == mdata->packetBus);
 
-    // are we receiving counter updates via JSON messages?
-    int json_ctrs = ((sp->clk - application->last_json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
-
-    if(json_ctrs != application->json_counters) {
-      // state transition - reset seq no
-      sfl_poller_resetCountersSeqNo(application->poller);
-      application->json_counters = json_ctrs;
-    }
-    
-    if(!json_ctrs) {
-      // The application is not sending counters, so send the synthesized
-      // app_operations counter block that we have been maintaining.
-      SFLADD_ELEMENT(cs, &application->counters);
-      SEMLOCK_DO(sp->sync_agent) {
-	sfl_poller_writeCountersSample(poller, cs);
-	// and any rtcount metrics that we have been collecting
+    SEMLOCK_DO(sp->sync_agent) {
+      // we stashed a pointer to the application in the userData field
+      HSPApplication *application = (HSPApplication *)poller->userData;
+      
+      if(application) {
+	// are we receiving counter updates via JSON messages?
+	int json_ctrs = ((mdata->packetBus->clk - application->last_json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
+	
+	if(json_ctrs != application->json_counters) {
+	  // state transition - reset seq no
+	  sfl_poller_resetCountersSeqNo(application->poller);
+	  application->json_counters = json_ctrs;
+	}
+	
+	if(!json_ctrs) {
+	  // The application is not sending counters, so send the synthesized
+	  // app_operations counter block that we have been maintaining.
+	  SFLADD_ELEMENT(cs, &application->counters);
+	  sfl_poller_writeCountersSample(poller, cs);
+	  // and any rtcount metrics that we have been collecting
+	}
       }
     }
   }
 
   static void agentCB_getCounters_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
-    HSP *sp = (HSP *)poller->magic;
-    UTArrayAdd(sp->pollActions, poller);
-    UTArrayAdd(sp->pollActions, agentCB_getCounters);
+    EVMod *mod = (EVMod *)poller->magic;
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    // this comes in on the pollBus tick, but we want to process it on the packetBus so just
+    // add it to this (sync'd) collection.  We only snapshot the counters at the point where
+    // we send them,  so it's OK for this extra inter-thread time-dither to happen.  The alternative
+    // would be to complicate the sflow agent library by allowing different pollers to get their
+    // ticks from different places. Not tempting.
+    UTArrayAdd(mdata->pollActions, poller);
   }
 
   /*_________________---------------------------__________________
@@ -122,8 +160,11 @@ extern "C" {
   static uint32_t service_port_clash = 0;
 #define HSP_SERVICE_PORT_CLASH_WARNINGS 3
 
-  static HSPApplication *addApplication(HSP *sp, char *application, uint16_t servicePort)
+  static HSPApplication *addApplication(EVMod *mod, char *application, uint16_t servicePort)
   {
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
     // assigning dsIndex:
     // 1: $$$ need to make it persistent on a restart - perhaps using hsflowd.c:assignVM_dsIndex()
     // 2: $$$ circle back and find a free one if we reach end of range
@@ -135,11 +176,11 @@ extern "C" {
     if(servicePort) {
       SFLPoller *poller = NULL;
       SEMLOCK_DO(sp->sync_agent) {
-	poller = sfl_agent_getPoller(sp->sFlow->agent, &dsi);
+	poller = sfl_agent_getPoller(sp->agent, &dsi);
       }
       if(poller) {
 	service_port_clash++;
-	if(debug || service_port_clash < HSP_SERVICE_PORT_CLASH_WARNINGS) {
+	if(getDebug() || service_port_clash < HSP_SERVICE_PORT_CLASH_WARNINGS) {
 	  myLog(LOG_ERR, "addApplication(%s) service port %d already allocated for another application",
 		application,
 		servicePort);
@@ -155,14 +196,14 @@ extern "C" {
     aa->servicePort = servicePort;
     uint32_t sampling_n = 0;
     uint32_t polling_secs = 0;
-    aa->settings_revisionNo = sp->sFlow->revisionNo;
-    lookupApplicationSettings(sp->sFlow->sFlowSettings, "app", application, &sampling_n, &polling_secs);
+    aa->settings_revisionNo = sp->revisionNo;
+    lookupApplicationSettings(sp->sFlowSettings, "app", application, &sampling_n, &polling_secs);
     // poller
     SEMLOCK_DO(sp->sync_agent) {
-      aa->poller = sfl_agent_addPoller(sp->sFlow->agent, &dsi, sp, agentCB_getCounters_request);
+      aa->poller = sfl_agent_addPoller(sp->agent, &dsi, mod, agentCB_getCounters_request);
       sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
       sfl_poller_set_sFlowCpReceiver(aa->poller, HSP_SFLOW_RECEIVER_INDEX);
-      // point to the application with the userData ptr
+      // point to the application with the userData ptr (within the critical block)
       aa->poller->userData = aa;
     }
     // more counter-block initialization
@@ -171,10 +212,10 @@ extern "C" {
     aa->counters.counterBlock.app.application.len = my_strlen(aa->application);
     // start off assuming that the application is going to send it's own counters
     aa->json_counters = YES;
-    aa->last_json_counters = sp->clk;
+    aa->last_json_counters = mdata->packetBus->clk;
     // sampler
     SEMLOCK_DO(sp->sync_agent) {
-      aa->sampler = sfl_agent_addSampler(sp->sFlow->agent, &dsi);
+      aa->sampler = sfl_agent_addSampler(sp->agent, &dsi);
       sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
       sfl_sampler_set_sFlowFsReceiver(aa->sampler, HSP_SFLOW_RECEIVER_INDEX);
     }
@@ -187,72 +228,54 @@ extern "C" {
     -----------------_____________________________------------------
   */
 
-  static HSPApplication *getApplication(HSP *sp, char *application, uint16_t servicePort)
+  static HSPApplication *getApplication(EVMod *mod, char *application, uint16_t servicePort)
   {
-    HSPApplication *aa = NULL;
-    if(sp->applicationHT_size == 0) {
-      // first time: initialize the hash table
-      sp->applicationHT_size = HSP_INITIAL_JSON_APP_HT_SIZE;
-      sp->applicationHT = (HSPApplication **)my_calloc(sp->applicationHT_size * sizeof(HSPApplication *));
-      sp->applicationHT_entries = 0;
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    HSPApplication search = { .application=application };
+    HSPApplication *aa = UTHashGet(mdata->applicationHT, &search);
+    if(aa) {
+      // unlink
+      UTQ_REMOVE(mdata->timeoutQ, aa);
+    }
+    else {
+      // create new application
+      myDebug(1, "adding new application: %s", application);
+      aa = addApplication(mod, application, servicePort);
+      if(aa)
+	UTHashAdd(mdata->applicationHT, aa);
     }
 
-    uint32_t hash = my_strhash(application);
-    uint32_t hashBkt = hash & (sp->applicationHT_size - 1);
-    aa = sp->applicationHT[hashBkt];
-    for(; aa; aa = aa->ht_nxt) {
-      if(hash == aa->hash && my_strequal(application, aa->application)) break;
-    }
-    if(aa == NULL) {
-      // create new application
-      if(debug) myLog(LOG_INFO, "adding new application: %s", application);
-      aa = addApplication(sp, application, servicePort);
-      if(aa) {
-	// add to HT
-	aa->hash = hash;
-	aa->ht_nxt = sp->applicationHT[hashBkt];
-	sp->applicationHT[hashBkt] = aa;
-	if(++sp->applicationHT_entries > sp->applicationHT_size) {
-	  /* grow the HT */
-	  uint32_t newSize = sp->applicationHT_size * 2;
-	  HSPApplication **newTable = (HSPApplication **)my_calloc(newSize * sizeof(HSPApplication *));
-	  for(uint32_t bkt = 0; bkt < sp->applicationHT_size; bkt++) {
-	    for(HSPApplication *aa = sp->applicationHT[bkt]; aa; ) {
-	      HSPApplication *next_aa = aa->ht_nxt;
-	      uint32_t newHashBkt = aa->hash & (newSize - 1);
-	      aa->ht_nxt = newTable[newHashBkt];
-	      newTable[newHashBkt] = aa;
-	      aa = next_aa;
-	    }
-	  }
-	  my_free(sp->applicationHT);
-	  sp->applicationHT = newTable;
-	  sp->applicationHT_size = newSize;
+    if(aa) {
+      // add to end of timeoutQ
+      UTQ_ADD_TAIL(mdata->timeoutQ, aa);
+      
+      // make sure the application wasn't already instantiated with another servicePort (or with no servicePort)
+      // This is just a warning,  though.  After all, things do change sometimes.
+      if(servicePort != aa->servicePort) {
+	if(getDebug() || aa->service_port_clash < HSP_SERVICE_PORT_CLASH_WARNINGS) {
+	  myLog(LOG_ERR, "Warning: conflicting servicePort for application %s (current=%d, offered=%d)",
+		application,
+		aa->servicePort,
+		servicePort);
 	}
       }
-    }
-
-    // make sure the application wasn't already instantiated with another servicePort (or with no servicePort)
-    // This is just a warning,  though.  After all, things do change sometimes.
-    if(servicePort != aa->servicePort) {
-      if(debug || aa->service_port_clash < HSP_SERVICE_PORT_CLASH_WARNINGS) {
-	myLog(LOG_ERR, "Warning: conflicting servicePort for application %s (current=%d, offered=%d)",
-	      application,
-	      aa->servicePort,
-	      servicePort);
+      
+      // check in case the configuration changed since the last time we looked
+      // could move this to agentCB_getCounters(), but the test is not expensive
+      // so doing it for every sample seems OK... and smoother than changing them
+      // all at once.  This way they change when the next sample comes in.
+      if(aa->settings_revisionNo != sp->revisionNo) {
+	uint32_t sampling_n = 0;
+	uint32_t polling_secs = 0;
+	aa->settings_revisionNo = sp->revisionNo;
+	lookupApplicationSettings(sp->sFlowSettings, "app", application, &sampling_n, &polling_secs);
+	SEMLOCK_DO(sp->sync_agent) {
+	  sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
+	  sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
+	}
       }
-    }
-
-    // check in case the configuration changed since the last time we looked
-    // could move this to agentCB_getCounters(), but the test is not expensive
-    // so doing it for every sample seems OK.
-    if(aa->settings_revisionNo != sp->sFlow->revisionNo) {
-      uint32_t sampling_n = 0;
-      uint32_t polling_secs = 0;
-      aa->settings_revisionNo = sp->sFlow->revisionNo;
-      lookupApplicationSettings(sp->sFlow->sFlowSettings, "app", application, &sampling_n, &polling_secs);
-      sfl_poller_set_sFlowCpInterval(aa->poller, polling_secs);
-      sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
     }
 
     return aa;
@@ -267,32 +290,33 @@ extern "C" {
     this program to grow too large.
   */
 
-  void json_app_timeout_check(HSP *sp)
+  void json_app_timeout_check(EVMod *mod)
   {
-    if(sp->applicationHT_entries) {
-      for(uint32_t bkt = 0; bkt < sp->applicationHT_size; bkt++) {
-	for(HSPApplication *prev = NULL, *aa = sp->applicationHT[bkt]; aa; ) {
-	  HSPApplication *next_aa = aa->ht_nxt;
-	  if((sp->clk - aa->last_json) > HSP_JSON_APP_TIMEOUT) {
-	    if(debug) myLog(LOG_INFO, "removing idle application: %s\n", aa->application);
-	    // unlink
-	    if(prev) prev->ht_nxt = next_aa;
-	    else sp->applicationHT[bkt] = next_aa;
-	    // remove sampler and poller
-	    SEMLOCK_DO(sp->sync_agent) {
-	      sfl_agent_removeSampler(sp->sFlow->agent, &aa->sampler->dsi);
-	      sfl_agent_removePoller(sp->sFlow->agent, &aa->poller->dsi);
-	    }
-	    // free
-	    my_free(aa->application);
-	    my_free(aa);
-	    // update the count
-	    sp->applicationHT_entries--;
-	  }
-	  else prev = aa;
-	  aa = next_aa;
-	}
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    assert(EVCurrentBus() == mdata->packetBus);
+
+    HSPApplication *aa;
+    UTQ_WALK(mdata->timeoutQ, aa) {
+      if((mdata->packetBus->clk - aa->last_json) <= HSP_JSON_APP_TIMEOUT) {
+	// we know everything after this point is current
+	break;
       }
+      else
+	myDebug(1, "removing idle application: %s\n", aa->application);
+      // remove from HT
+      UTHashDel(mdata->applicationHT, aa);
+      // remove sampler and poller
+      SEMLOCK_DO(sp->sync_agent) {
+	sfl_agent_removeSampler(sp->agent, &aa->sampler->dsi);
+	sfl_agent_removePoller(sp->agent, &aa->poller->dsi);
+      }
+      // may it was just added to the pollActions by the other thread?
+      UTArrayDel(mdata->pollActions, aa->poller);
+      // free
+      my_free(aa->application);
+      my_free(aa);
     }
   }
   
@@ -392,9 +416,7 @@ extern "C" {
     app->sampler->samplePool += sampling_n;
     // override the sampler's sampling_rate by filling it in here:
     fs.sampling_rate = sampling_n;
-    if(debug > 1) {
-      myLog(LOG_INFO, "sendAppSample (sampling_n=%d)", sampling_n);
-    }
+    myDebug(2, "sendAppSample (sampling_n=%d)", sampling_n);
     // and send it out
     SEMLOCK_DO(sp->sync_agent) {
       sfl_sampler_writeFlowSample(app->sampler, &fs);
@@ -407,9 +429,12 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-static void readJSON_flowSample(HSP *sp, cJSON *fs)
+static void readJSON_flowSample(EVMod *mod, cJSON *fs)
   {
-    if(debug > 1) logJSON(fs, "got flow sample");
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(getDebug() > 1) logJSON(fs, "got flow sample");
     cJSON *app = cJSON_GetObjectItem(fs, "app_name");
     uint16_t service_port = json_uint16(fs, "service_port");
     cJSON *as_client = cJSON_GetObjectItem(fs, "client");
@@ -417,10 +442,10 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
     if(sampling_n == 0) sampling_n = 1;
     
     if(app) {
-      HSPApplication *application = getApplication(sp, app->valuestring, service_port);
+      HSPApplication *application = getApplication(mod, app->valuestring, service_port);
       if(application) {
 	// remember that we heard from this application
-	application->last_json = sp->clk;
+	application->last_json = mdata->packetBus->clk;
 
 	cJSON *opn = cJSON_GetObjectItem(fs, "app_operation");
 	if(opn) {
@@ -562,18 +587,21 @@ static void readJSON_flowSample(HSP *sp, cJSON *fs)
     -----------------___________________________------------------
   */
 
-static void readJSON_counterSample(HSP *sp, cJSON *cs)
+  static void readJSON_counterSample(EVMod *mod, cJSON *cs)
   {
-    if(debug > 1) logJSON(cs, "got counter sample");
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(getDebug() > 1) logJSON(cs, "got counter sample");
     cJSON *app_name = cJSON_GetObjectItem(cs, "app_name");
     uint16_t service_port = json_uint16(cs, "service_port");
     if(app_name) {
-      HSPApplication *application = getApplication(sp, app_name->valuestring, service_port);
+      HSPApplication *application = getApplication(mod, app_name->valuestring, service_port);
       if(application) {
 	// remember that we heard from this application
-	application->last_json = sp->clk;
+	application->last_json = mdata->packetBus->clk;
 	// and remember that the application sent these counters
-	application->last_json_counters = sp->clk;
+	application->last_json_counters = mdata->packetBus->clk;
 
 	SFL_COUNTERS_SAMPLE_TYPE csample = { 0 };
 	// app_operations
@@ -651,8 +679,6 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       }
     }
   }
-
-#ifdef HSP_RTMETRIC
 
   /*_________________---------------------------__________________
     _________________     XDR encoding          __________________
@@ -836,11 +862,14 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     }
   */
 
-  static void readJSON_rtmetric(HSP *sp, cJSON *rtmetric)
+  static void readJSON_rtmetric(EVMod *mod, cJSON *rtmetric)
   {
-    if(debug > 1) logJSON(rtmetric, "got rtmetric");
+    // HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
 
-    SFLReceiver *receiver = sp->sFlow->agent->receivers;
+    if(getDebug() > 1) logJSON(rtmetric, "got rtmetric");
+
+    SFLReceiver *receiver = sp->agent->receivers;
     if(receiver == NULL)
       return;
 
@@ -853,7 +882,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     // iterate to pull out datasource name first
     for(cJSON *rtm = rtmetric->child; rtm; rtm = rtm->next) {
       if(!rtm->string) {
-	if(debug) logJSON(rtm, "expected named field");
+	if(getDebug()) logJSON(rtm, "expected named field");
 	continue;
       }
       // pick up optional datasource
@@ -862,7 +891,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	dsname = rtm->valuestring;
 	dsname_len = dsname_len_ok(dsname);
 	if(dsname_len == 0) {
-	  if(debug) myLog(LOG_ERR, "invalid datasource name: %s", dsname);
+	  myDebug(1, "invalid datasource name: %s", dsname);
 	  return; // bail completely on bad dsname
 	}
 	continue;
@@ -885,41 +914,37 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       
       uint32_t mname_len = rtmetric_len_ok(rtm->string);
       if(mname_len == 0) {
-	if(debug) {
-	  myLog(LOG_ERR, "invalid rtmetric key: <%s>", rtm->string);
-	}
+	myDebug(1, "invalid rtmetric key: <%s>", rtm->string);
 	return; // bail on bad key
       }
-
+      
       cJSON *field = cJSON_GetObjectItem(rtm, "value");
       uint32_t field_len = sizeof(double);
 
       if(field == NULL) {
-	if(debug) myLog(LOG_ERR, "rtmetric missing \"value\"");
+	myDebug(1, "rtmetric missing \"value\"");
 	return; // bail on missing value
       }
       if(field->type == cJSON_String) {
 	field_len = my_strlen(field->valuestring);
 	if(field_len > HSP_MAX_RTMETRIC_VAL_LEN) {
-	  if(debug) {
-	    myLog(LOG_ERR, "rtmetric field %s len(%u) > max(%u)",
-		  rtm->string,
-		  field_len,
+	  myDebug(1, "rtmetric field %s len(%u) > max(%u)",
+		rtm->string,
+		field_len,
 		  HSP_MAX_RTMETRIC_VAL_LEN);
-	  }
 	  return; // bail on field len error
 	}
       }
 
       cJSON *field_type = cJSON_GetObjectItem(rtm, "type");
       if(field_type == NULL) {
-	if(debug) myLog(LOG_ERR, "rtflow missing \"type\"");
+	myDebug(1, "rtflow missing \"type\"");
 	return; // bail on missing type
       }
 
       int rtmType = rtmetric_type(field_type->valuestring);
       if(rtmType == -1) {
-	if(debug) myLog(LOG_ERR, "rtmetric bad type");
+	myDebug(1, "rtmetric bad type");
 	return; // bail on bad/missing type
       }
 
@@ -981,7 +1006,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  xdr_enc_bytes(buf, mac, 6);
 	}
 	else {
-	  if(debug) logJSON(field, "failed to parse MAC address");
+	  if(getDebug()) logJSON(field, "failed to parse MAC address");
 	}
 	break;
       case RTFlowType_ip:
@@ -989,7 +1014,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  xdr_enc_bytes(buf, (u_char *)&addr.address.ip_v4.addr, 4);
 	}
 	else {
-	  if(debug) logJSON(field, "failed to parse IP address");
+	  if(getDebug()) logJSON(field, "failed to parse IP address");
 	}
 	break;
       case RTFlowType_ip6:
@@ -997,7 +1022,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	  xdr_enc_bytes(buf, (u_char *)&addr.address.ip_v6.addr, 16);
 	}
 	else {
-	  if(debug) logJSON(field, "failed to parse IP address");
+	  if(getDebug()) logJSON(field, "failed to parse IP address");
 	}
 	break;
       case RTFlowType_int32:
@@ -1055,9 +1080,12 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     }
   */
   
-  static void readJSON_rtflow(HSP *sp, cJSON *rtflow) {
-    if(debug > 1) logJSON(rtflow, "got rtflow");
-    SFLReceiver *receiver = sp->sFlow->agent->receivers;
+  static void readJSON_rtflow(EVMod *mod, cJSON *rtflow) {
+    // HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(getDebug() > 1) logJSON(rtflow, "got rtflow");
+    SFLReceiver *receiver = sp->agent->receivers;
     if(receiver == NULL)
       return;
     
@@ -1071,7 +1099,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     // iterate to pull out sampling_rate and datasource name first
     for(cJSON *rtf = rtflow->child; rtf; rtf = rtf->next) {
       if(!rtf->string) {
-	if(debug) logJSON(rtf, "expected named field");
+	if(getDebug()) logJSON(rtf, "expected named field");
 	continue;
       }
       // pick up optional sampling_rate setting
@@ -1087,14 +1115,14 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	dsname = rtf->valuestring;
 	dsname_len = dsname_len_ok(dsname);
 	if(dsname_len == 0) {
-	  if(debug) myLog(LOG_ERR, "invalid datasource name: %s", dsname);
+	  myDebug(1, "invalid datasource name: %s", dsname);
 	  return; // bail completely on bad dsname
 	}
 	continue;
       }
       // all other fields must be objects
       if(rtf->type != cJSON_Object) {
-	if(debug) logJSON(rtf, "expected object field");
+	if(getDebug()) logJSON(rtf, "expected object field");
 	continue;
       }
     }
@@ -1117,9 +1145,7 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       
       uint32_t fname_len = rtmetric_len_ok(rtf->string);
       if(fname_len == 0) {
-	if(debug) {
-	  myLog(LOG_ERR, "invalid rtflow key: <%s>", rtf->string);
-	}
+	myDebug(1, "invalid rtflow key: <%s>", rtf->string);
 	return; // bail on bad key
       }
 
@@ -1127,32 +1153,30 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
       uint32_t field_len = sizeof(double);
 
       if(field == NULL) {
-	if(debug) myLog(LOG_ERR, "rtflow missing \"value\"");
+	myDebug(1, "rtflow missing \"value\"");
 	return; // bail on missing value
       }
 
       if(field->type == cJSON_String) {
 	field_len = my_strlen(field->valuestring);
 	if(field_len > HSP_MAX_RTMETRIC_VAL_LEN) {
-	  if(debug) {
-	    myLog(LOG_ERR, "rtflow field %s len(%u) > max(%u)",
+	  myDebug(1, "rtflow field %s len(%u) > max(%u)",
 		  rtf->string,
 		  field_len,
 		  HSP_MAX_RTMETRIC_VAL_LEN);
-	  }
 	  return; // bail on field len error
 	}
       }
 
       cJSON *field_type = cJSON_GetObjectItem(rtf, "type");
       if(field_type == NULL) {
-	if(debug) myLog(LOG_ERR, "rtflow missing \"type\"");
+	myDebug(1, "rtflow missing \"type\"");
 	return; // bail on missing type
       }
 
       int rtfType = rtflow_type(field_type->valuestring);
       if(rtfType == -1) {
-	if(debug) myLog(LOG_ERR, "rtflow field bad type <%s>", field_type->valuestring);
+	myDebug(1, "rtflow field bad type <%s>", field_type->valuestring);
 	return; // bail on bad/missing type
       }
 
@@ -1173,16 +1197,16 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     }
   }
 
-#endif /* HSP_RTMETRIC */
-  
   /*_________________---------------------------__________________
     _________________      readJSON             __________________
     -----------------___________________________------------------
   */
 
-  int readJSON(HSP *sp, int soc)
+  static int readJSON(EVMod *mod, EVBus *bus, int soc, void *data)
   {
-    if(sp->sFlow->sFlowSettings == NULL) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(sp->sFlowSettings == NULL) {
       // config was turned off
       return 0;
     }
@@ -1193,20 +1217,18 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
 	// use read() so that it works for both UDP and FIFO inputs
 	int len = read(soc, buf, HSP_MAX_JSON_MSG_BYTES);
 	if(len <= 0) break;
-	if(debug > 1) myLog(LOG_INFO, "got JSON msg: %u bytes", len);
+	myDebug(2, "got JSON msg: %u bytes", len);
 	cJSON *top = cJSON_Parse(buf);
 	if(top) {
-	  if(debug > 1) logJSON(top, "got JSON message");
+	  if(getDebug()) logJSON(top, "got JSON message");
 	  cJSON *fs = cJSON_GetObjectItem(top, "flow_sample");
-	  if(fs) readJSON_flowSample(sp, fs);
+	  if(fs) readJSON_flowSample(mod, fs);
 	  cJSON *cs = cJSON_GetObjectItem(top, "counter_sample");
-	  if(cs) readJSON_counterSample(sp, cs);
-#ifdef HSP_RTMETRIC
+	  if(cs) readJSON_counterSample(mod, cs);
 	  cJSON *rtmetric = cJSON_GetObjectItem(top, "rtmetric");
-	  if(rtmetric) readJSON_rtmetric(sp, rtmetric);
+	  if(rtmetric) readJSON_rtmetric(mod, rtmetric);
 	  cJSON *rtflow = cJSON_GetObjectItem(top, "rtflow");
-	  if(rtflow) readJSON_rtflow(sp, rtflow);
-#endif /* HSP_RTMETRIC */
+	  if(rtflow) readJSON_rtflow(mod, rtflow);
 	  cJSON_Delete(top);
 	}
       }
@@ -1214,8 +1236,79 @@ static void readJSON_counterSample(HSP *sp, cJSON *cs)
     return batch;
   }
 
-#endif /* HSP_JSON */
-  
+  /*_________________---------------------------__________________
+    _________________    module init            __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_packet_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
+    if((evt->bus->clk % HSP_JSON_APP_TIMEOUT) == 0)
+      json_app_timeout_check(mod);
+  }
+
+  static void evt_packet_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
+    // pollActions collect pollers from the pollBus callbacks. Here we process
+    // them on the packet thread.  pollActions has sync so we can walk this way....
+    for(int ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {
+      SFLPoller *poller = (SFLPoller *)UTArrayAt(mdata->pollActions, ii);
+      if(poller) {
+	SFL_COUNTERS_SAMPLE_TYPE cs;
+	memset(&cs, 0, sizeof(cs));
+	agentCB_getCounters_JSON((void *)mod, poller, &cs);
+	UTArrayDelAt(mdata->pollActions, ii);
+      }
+    }
+  }
+
+  void mod_json(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    mod->data = my_calloc(sizeof(HSP_mod_JSON));
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    // use UTARRAY_SYNC here because two threads are involved:
+    mdata->pollActions = UTArrayNew(UTARRAY_SYNC);
+    // but the applicationHT is only ever accessed from the packetBus
+    mdata->applicationHT = UTHASH_NEW(HSPApplication, application, UTHASH_SKEY);
+    cJSON_Hooks hooks;
+    hooks.malloc_fn = my_calloc;
+    hooks.free_fn = my_free;
+    cJSON_InitHooks(&hooks);
+
+    mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
+    mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+
+    // we time out applications on the packetBus
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_packet_tick);
+    // the poller callbacks come in on the pollBus
+    // but we just capture them in the pollActions list and process
+    // counters in the packetBus thread too.
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TOCK), evt_packet_tock);
+
+    if(sp->json.port) {
+      // TODO: do we really need to bind to both "127.0.0.1" and "::1" ?
+      mdata->json_soc = UTSocketUDP("127.0.0.1", PF_INET, sp->json.port, HSP_JSON_RCV_BUF);
+      EVBusAddSocket(mod, mdata->packetBus, mdata->json_soc, readJSON, NULL);
+
+      mdata->json_soc6 = UTSocketUDP("::1", PF_INET6, sp->json.port, HSP_JSON_RCV_BUF);
+      EVBusAddSocket(mod, mdata->packetBus, mdata->json_soc6, readJSON, NULL);
+    }
+
+    if(sp->json.FIFO) {
+      // This makes it possible to use hsflowd from a container whose networking may be
+      // virtualized but where a directory such as /tmp is still accessible and shared.
+      if((mdata->json_fifo = open(sp->json.FIFO, O_RDONLY|O_NONBLOCK)) == -1) {
+	myLog(LOG_ERR, "json fifo open(%s, O_RDONLY|O_NONBLOCK) failed: %s",
+	      sp->json.FIFO,
+	      strerror(errno));
+      }
+      else {
+	EVBusAddSocket(mod, mdata->packetBus, mdata->json_fifo, readJSON, NULL);
+      }
+    }
+  }
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

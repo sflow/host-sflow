@@ -1,15 +1,13 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 1.29.3
+Version: 2.0.1
 Release: 1
-License: http://host-sflow.sourceforge.net/license.html
+License: http://sflow.net/license.html
 Group: Applications/Internet
-URL: http://host-sflow.sourceforge.net
+URL: http://sflow.net
 Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 Requires(post): chkconfig
-
-%define OpenVSwitchControl /usr/bin/ovs-vsctl
 
 %description
 This program implements the host sFlow(R) standard - sending
@@ -22,7 +20,7 @@ the Open VSwitch sFlow configuration.
 %setup
 
 %build
-make
+make FEATURES=%{features}
 
 %install
 rm -rf %{buildroot}
@@ -32,46 +30,20 @@ make INSTROOT=%{buildroot} install
 rm -rf %{buildroot}
 make clean
 
-
 %files
 %defattr(-,root,root,-)
 /usr/sbin/hsflowd
-/usr/sbin/sflowovsd
 %config(noreplace) /etc/hsflowd.conf
 /etc/init.d/hsflowd
-/etc/init.d/sflowovsd
+/lib/systemd/system/hsflowd.service
 %doc README LICENSE INSTALL.Linux
-
-%post
-# schedule daemon(s)
-/sbin/chkconfig --add hsflowd
-if [ -x %{OpenVSwitchControl} ]; then /sbin/chkconfig --add sflowovsd; fi
-# need this logic just for Xenserver package. It preserves config
-# across Xenserver upgrades by copying the config to another directory
-# so that we get a chance to merge the old and new configs.
-if [ -n "$XS_PREVIOUS_INSTALLATION" ]; then
-  # upgrade in progress
-  if [ -r $XS_PREVIOUS_INSTALLATION/etc/hsflowd.conf ]; then
-    mv -f /etc/hsflowd.conf /etc/hsflowd.conf.rpmnew
-    cp -fp $XS_PREVIOUS_INSTALLATION/etc/hsflowd.conf /etc
-  fi
-fi
-if [ -r /etc/hsflowd.conf -a -r /etc/hsflowd.conf.rpmnew ]; then
-  # merge new material from hsflowd.conf.rpmnew with hsflowd.conf
-  # which may contain changes.  (Nothing to do at the moment.)
-  # And remove the rpmnew file.
-  rm -f /etc/hsflowd.conf.rpmnew
-fi
-
-%preun
-if [ $1 = 0 ]; then
-  /sbin/service hsflowd stop > /dev/null 2>&1
-  /sbin/service sflowovsd stop > /dev/null 2>&1
-  /sbin/chkconfig --del hsflowd
-  /sbin/chkconfig --del sflowovsd
-fi
+/etc/hsflowd/modules/
 
 %changelog
+* Wed Jul 20 2016 nhm <neil.mckee@inmon.com>
+- add systemd service file
+- remove sflowovsd (now an hsflowd module)
+- remove automatic scheduling
 * Fri Oct 08 2010 nhm <nhm@noodle.sf.inmon.com>
 - move install from /usr/local/sbin to /usr/sbin
 * Mon Aug 30 2010 nhm <nhm@noodle.sf.inmon.com>

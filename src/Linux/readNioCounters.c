@@ -1,5 +1,5 @@
 /* This software is distributed under the following license:
- * http://host-sflow.sourceforge.net/license.html
+ * http://sflow.net/license.html
  */
 
 
@@ -8,16 +8,12 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
-#ifdef HSP_ETHTOOL_STATS
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <net/if.h>
 #include <linux/types.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
-#endif
-
-  extern int debug;
 
   /*_________________---------------------------__________________
     _________________ shareActorIDFromSlave     __________________
@@ -84,11 +80,9 @@ extern "C" {
 	    }
 	    
 	    if(my_strequal(tok_var, "System Identification")) {
-	      if(debug) {
-		myLog(LOG_INFO, "updateBondCounters: %s system identification %s",
+	      myDebug(1, "updateBondCounters: %s system identification %s",
 		      bond->deviceName,
 		      tok_val);
-	      }
 	      char sys_mac[MAX_PROC_LINE_CHARS];
 	      uint64_t code;
 	      if(sscanf(tok_val, "%"SCNu64"  %s", &code, sys_mac) == 2) {
@@ -102,11 +96,9 @@ extern "C" {
 	    }
 	    
 	    if(my_strequal(tok_var, "Partner Mac Address")) {
-	      if(debug) {
-		myLog(LOG_INFO, "updateBondCounters: %s partner mac is %s",
+	      myDebug(1, "updateBondCounters: %s partner mac is %s",
 		      bond->deviceName,
 		      tok_val);
-	      }
 	      if(hexToBinary((u_char *)tok_val,bond_nio->lacp.partnerSystemID, 6) != 6) {
 		myLog(LOG_ERR, "updateBondCounters: partner mac read error: %s", tok_val);
 	      }
@@ -114,9 +106,7 @@ extern "C" {
 	    
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      aggID = strtol(tok_val, NULL, 0);
-	      if(debug) {
-		myLog(LOG_INFO, "updateBondCounters: %s aggID %u", bond->deviceName, aggID);
-	      }
+	      myDebug(1, "updateBondCounters: %s aggID %u", bond->deviceName, aggID);
 	    }
 	  }
 	  
@@ -128,12 +118,10 @@ extern "C" {
 	    readingMaster = NO;
 	    currentSlave = adaptorByName(sp, trimWhitespace(tok_val));
 	    slave_nio = currentSlave ? ADAPTOR_NIO(currentSlave) : NULL;
-	    if(debug) {
-	      myLog(LOG_INFO, "updateBondCounters: bond %s slave %s %s",
-		    bond->deviceName,
-		    tok_val,
-		    currentSlave ? "found" : "not found");
-	    }
+	    myDebug(1, "updateBondCounters: bond %s slave %s %s",
+		  bond->deviceName,
+		  tok_val,
+		  currentSlave ? "found" : "not found");
 	    if(slave_nio) {
 	      // initialize from bond
 	      slave_nio->lacp.attachedAggID = bond->ifIndex;
@@ -244,8 +232,12 @@ extern "C" {
   */
 
   void readBondState(HSP *sp) {
+    assert(sp);
+    assert(sp->adaptorsByIndex);
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      assert(adaptor);
+      assert(ADAPTOR_NIO(adaptor) != NULL);
       if(ADAPTOR_NIO(adaptor)->bond_master)
 	updateBondCounters(sp, adaptor);
     }
@@ -268,11 +260,9 @@ extern "C" {
 	// frequency of access to th /proc/net/bonding file.
 	if(bond_nio->poller
 	   && nio->poller) {
-	  if(debug) {
-	    myLog(LOG_INFO, "sync polling so that slave %s goes with bond %s",
+	  myDebug(1, "sync polling so that slave %s goes with bond %s",
 		  adaptor->deviceName,
 		  bond->deviceName);
-	  }
 	  sfl_poller_synchronize_polling(nio->poller, bond_nio->poller);
 	}
       }
@@ -288,7 +278,7 @@ extern "C" {
   }
 
   
-#ifdef HSP_OPTICAL_STATS
+#if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM )
 
   /*_________________---------------------------__________________
     _________________    SFF8472 SFP Data       __________________
@@ -427,8 +417,7 @@ extern "C" {
     lane->rx_power_max = (rx_power_max / 10); // uW
     lane->rx_wavelength = wavelength; // same as tx_wavelength
 	  
-    if(debug) {
-      myLog(LOG_INFO, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+    myDebug(1, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
 	    lane->tx_wavelength,
 	    nio->sfp.module_temperature,
@@ -440,8 +429,7 @@ extern "C" {
 	    lane->rx_power,
 	    lane->rx_power_min,
 	    lane->rx_power_max);
-    }
-	  
+    
   out:
     if(eeprom)
       my_free(eeprom);
@@ -598,21 +586,19 @@ extern "C" {
       lane->rx_power_max = (rx_power_max / 10); // uW
       lane->rx_wavelength = wavelength; // same as tx_wavelength
 	  
-      if(debug) {
-	myLog(LOG_INFO, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
-	      adaptor->deviceName,
-	      ch,
-	      lane->tx_wavelength,
-	      nio->sfp.module_temperature,
-	      nio->sfp.module_supply_voltage,
-	      lane->tx_bias_current,
-	      lane->tx_power,
-	      lane->tx_power_min,
-	      lane->tx_power_max,
-	      lane->rx_power,
-	      lane->rx_power_min,
-	      lane->rx_power_max);
-      }
+      myDebug(1, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+	    adaptor->deviceName,
+	    ch,
+	    lane->tx_wavelength,
+	    nio->sfp.module_temperature,
+	    nio->sfp.module_supply_voltage,
+	    lane->tx_bias_current,
+	    lane->tx_power,
+	    lane->tx_power_min,
+	    lane->tx_power_max,
+	    lane->rx_power,
+	    lane->rx_power_min,
+	    lane->rx_power_max);
     }
 	  
   out:
@@ -620,32 +606,32 @@ extern "C" {
       my_free(eeprom);
   }
 
-#endif /* HSP_OPTICAL_STATS */
+#endif /* ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */
   
   /*_________________---------------------------__________________
     _________________    updateNioCounters      __________________
     -----------------___________________________------------------
   */
-  
+
   void updateNioCounters(HSP *sp, SFLAdaptor *filter) {
+
+    assert(EVCurrentBus() == sp->pollBus);
 
     if(filter == NULL) {
       // full refresh - but don't do anything if we just
       // refreshed all the numbers less than a second ago
-      if (sp->nio_last_update == sp->clk) {
+      if (sp->nio_last_update == sp->pollBus->clk) {
 	return;
       }
-      sp->nio_last_update = sp->clk;
+      sp->nio_last_update = sp->pollBus->clk;
     }
 
     FILE *procFile;
     procFile= fopen("/proc/net/dev", "r");
     if(procFile) {
-#ifdef HSP_ETHTOOL_STATS
       int fd = socket (PF_INET, SOCK_DGRAM, 0);
       struct ifreq ifr;
       memset (&ifr, 0, sizeof(ifr));
-#endif
       // ASCII numbers in /proc/diskstats may be 64-bit (if not now
       // then someday), so it seems safer to read into
       // 64-bit ints with scanf first,  then copy them
@@ -684,8 +670,6 @@ extern "C" {
 	      continue;
 	    
 	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-	    
-#ifdef HSP_ETHTOOL_STATS
 	    HSP_ethtool_counters et_ctrs = { 0 }, et_delta = { 0 };
 	    if (niostate->et_nfound) {
 	      // get the latest stats block for this device via ethtool
@@ -702,12 +686,12 @@ extern "C" {
 	      strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name));
 	      ifr.ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, &ifr) >= 0) {
-		if(debug > 2) {
+		if(getDebug() > 2) {
 		  for(int xx = 0; xx < et_stats->n_stats; xx++) {
-		    myLog(LOG_INFO, "ethtool counter for %s at index %d == %"PRIu64,
-			  adaptor->deviceName,
-			  xx,
-			  et_stats->data[xx]);
+		    myDebug(1, "ethtool counter for %s at index %d == %"PRIu64,
+			    adaptor->deviceName,
+			    xx,
+			    et_stats->data[xx]);
 		  }
 		}
 		if(niostate->et_idx_mcasts_in) {
@@ -730,7 +714,7 @@ extern "C" {
 	      my_free(et_stats);
 	    }
 
-#ifdef HSP_OPTICAL_STATS
+#if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM )
 	    if(filter) {
 	      // If we are refreshing stats for an individual device, then
 	      // check for SFP (lane) stats too. This operation can be slow so
@@ -743,13 +727,12 @@ extern "C" {
 	      case ETH_MODULE_SFF_8436: sff8436_read(adaptor, &ifr, fd); break;
 	      }
 	    }
-#endif /* HSP_OPTICAL_STATS */
-#endif /* HSP_ETHTOOL_STATS */
+#endif /*  ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */
 
 	    // have to detect discontinuities here, so use a full
 	    // set of latched counters and accumulators.
 	    int accumulate = niostate->last_update ? YES : NO;
-	    niostate->last_update = sp->clk;
+	    niostate->last_update = sp->pollBus->clk;
 	    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
 	    
 	    SFLHost_nio_counters delta;
@@ -800,7 +783,6 @@ extern "C" {
                       delta.pkts_out);
 		accumulate = NO;
 	      }
-#ifdef HSP_ETHTOOL_STATS
 	      if(et_delta.mcasts_in > HSP_MAX_NIO_DELTA64  ||
 		 et_delta.mcasts_out > HSP_MAX_NIO_DELTA64 ||
 		 et_delta.bcasts_in > HSP_MAX_NIO_DELTA64  ||
@@ -808,7 +790,6 @@ extern "C" {
 		myLog(LOG_ERR, "detected counter discontinuity in ethtool stats");
 		accumulate = NO;
 	      }
-#endif
 	    }
 	    
 	    if(accumulate) {
@@ -821,13 +802,11 @@ extern "C" {
 	      NIO_ACCUMULATE(pkts_out);
 	      NIO_ACCUMULATE(errs_out);
 	      NIO_ACCUMULATE(drops_out);
-#ifdef HSP_ETHTOOL_STATS
 #define ET_ACCUMULATE(field) niostate->et_total.field += et_delta.field
 	      ET_ACCUMULATE(mcasts_in);
 	      ET_ACCUMULATE(mcasts_out);
 	      ET_ACCUMULATE(bcasts_in);
 	      ET_ACCUMULATE(bcasts_out);
-#endif
 	    }
 	    
 #define NIO_LATCH(field) niostate->last_nio.field = field
@@ -839,16 +818,12 @@ extern "C" {
 	    NIO_LATCH(pkts_out);
 	    NIO_LATCH(errs_out);
 	    NIO_LATCH(drops_out);
-#ifdef HSP_ETHTOOL_STATS
 	    niostate->et_last = et_ctrs; // struct copy
-#endif
-
 	  }
 	}
       }
-#ifdef HSP_ETHTOOL_STATS
-      if(fd >= 0) close(fd);
-#endif
+      if(fd >= 0)
+	close(fd);
       fclose(procFile);
     }
   }
