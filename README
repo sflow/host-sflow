@@ -16,11 +16,11 @@ sources:
 
 git clone https://github.com/sflow/host-sflow
 
-If what you want is *still* not there, please subscribe to
-the host-sflow-discuss mailing list and send a request:
+Discussion group is here:
+  https://groups.google.com/group/host-sflow
 
-https://sourceforge.net/p/host-sflow/mailman/
-
+Was formerly here:
+  https://sourceforge.net/p/host-sflow/mailman/
 
 AUTHORS
 Neil McKee (neil.mckee@inmon.com)
