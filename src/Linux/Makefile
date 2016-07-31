@@ -203,7 +203,7 @@ NVML: mod_nvml.so
 
 OVS: mod_ovs.so
 
-CUMULUS: mod_cumulus.so ULOG
+CUMULUS: mod_cumulus.so
 
 OS10: mod_os10.so
 

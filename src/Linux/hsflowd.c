@@ -1313,9 +1313,18 @@ extern "C" {
     if(UTFileExists(HSP_CUMULUS_SWITCHPORT_CONFIG_PROG)) {
       myLog(LOG_INFO, "Detected Cumulus Linux");
       sp->cumulus.cumulus = YES;
+      // Cumulus Linux 2.5 or earlier uses ULOG group 1
+      // So it should be compiled with:
+      // make deb FEATURES="CUMULUS ULOG"
       sp->ulog.ulog = YES;
       sp->ulog.group = 1;
+      // Cumulus Linux 3.0 or later uses NFLOG group 1
+      // So it should be compiled with:
+      // make deb FEATURES="CUMULUS NFLOG"
+      sp->nflog.nflog = YES;
+      sp->nflog.group = 1;
     }
+
     if(UTFileExists(HSP_OS10_SWITCHPORT_CONFIG_PROG)) {
       myLog(LOG_INFO, "Detected OS10");
       sp->os10.os10 = YES;

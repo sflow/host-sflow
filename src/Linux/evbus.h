@@ -115,6 +115,7 @@ extern "C" {
 
   EVMod *EVInit(void *data);
   EVMod *EVLoadModule(EVMod *mod, char *name, char *mod_dir);
+  EVMod *EVGetModule(EVMod *lmod, char *name);
   EVBus *EVGetBus(EVMod *mod, char *name, bool create);
   EVEvent *EVGetEvent(EVBus *bus, char *name);
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb);

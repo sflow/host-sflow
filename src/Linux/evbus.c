@@ -169,6 +169,16 @@ extern "C" {
     return mod;
   }
 
+  EVMod *EVGetModule(EVMod *lmod, char *name) {
+    EVMod *mod;
+    SEMLOCK_DO(lmod->root->sync) {
+      EVRoot *root = lmod->root;
+      EVMod search = { .name = name };
+      mod = UTHashGet(root->modules, &search);
+    }
+    return mod;
+  }
+
   static bool pipeRead(EVBus *bus, int fd, void *buf, size_t bytes) {
     size_t expected = bytes;
     while(expected) {

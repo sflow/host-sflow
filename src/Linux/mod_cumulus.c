@@ -242,9 +242,13 @@ extern "C" {
     myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     
     markSwitchPorts(mod);
-    sp->hardwareSampling = setSwitchPortSamplingRates(sp,
-						      sp->sFlowSettings,
-						      sp->ulog.group); // TODO: still ulog?
+
+    // channel number depends on whether we are using ULOG or NFLOG (though it
+    // defaults to 1 in either case)
+    EVMod *nflogMod = EVGetModule(mod, "mod_nflog");
+    int channel = (nflogMod && nflogMod->libHandle) ? sp->nflog.group : sp->ulog.group;
+
+    sp->hardwareSampling = setSwitchPortSamplingRates(sp, sp->sFlowSettings, channel);
   }
 
   /*_________________---------------------------__________________
