@@ -975,7 +975,8 @@ extern "C" {
 	myDebug(1, "evt_config_changed: first valid configuration");
 
 	// print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
-	malloc_stats();
+	if(debug(1))
+          malloc_stats();
 	
 	// add a <physicalEntity> poller to represent the whole physical host
 	SFLDataSource_instance dsi;
