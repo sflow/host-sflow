@@ -326,7 +326,7 @@ ifndef SYSTEMD
   SYSTEMD=$(shell if [ -d $(SYSTEMDDIR) ]; then echo "yes"; else echo "no"; fi)
 endif
 
-install: $(BUILDTGTS)
+install:
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
