@@ -297,7 +297,6 @@ extern "C" {
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NFLOG *mdata = (HSP_mod_NFLOG *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
 
     setSamplingRate(mod);
 
@@ -323,7 +322,6 @@ extern "C" {
   */
 
   static void evt_intf_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     setSamplingRate(mod);
   }
 

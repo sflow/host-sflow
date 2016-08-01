@@ -312,7 +312,6 @@ static regex_t *entryRegex = NULL;
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
 
     markSwitchPorts(mod);
     sp->hardwareSampling = setSamplingRate(mod);
@@ -335,7 +334,6 @@ static regex_t *entryRegex = NULL;
   */
 
   static void evt_intf_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     evt_config_changed(mod, evt, data, dataLen);
   }
 

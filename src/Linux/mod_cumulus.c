@@ -123,7 +123,6 @@ extern "C" {
     HSP_mod_CUMULUS *mdata = (HSP_mod_CUMULUS *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     memset(&mdata->bcmElem, 0, sizeof(mdata->bcmElem));
     mdata->bcmElem.tag = SFLCOUNTERS_BCM_TABLES;
     if(readBroadcomCounters(sp, &mdata->bcmElem.counterBlock.bcm_tables)) {
@@ -239,7 +238,6 @@ extern "C" {
 
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     
     markSwitchPorts(mod);
 

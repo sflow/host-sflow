@@ -452,7 +452,6 @@ extern "C" {
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     if((evt->bus->clk % mdata->refreshVMListSecs) == 0
        && sp->sFlowSettings) {
       configVMs(mod);
@@ -461,7 +460,6 @@ extern "C" {
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     // now we can execute pollActions without holding on to the semaphore
     for(uint32_t ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {
       SFLPoller *poller = (SFLPoller *)UTArrayAt(mdata->pollActions, ii);
@@ -476,7 +474,6 @@ extern "C" {
     SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
     mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
@@ -488,7 +485,6 @@ extern "C" {
   }
 
   static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     if(mdata->virConn) {
       virConnectClose(mdata->virConn);

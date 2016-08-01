@@ -1242,14 +1242,12 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
   */
 
   static void evt_packet_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     if((evt->bus->clk % HSP_JSON_APP_TIMEOUT) == 0)
       json_app_timeout_check(mod);
   }
 
   static void evt_packet_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     // pollActions collect pollers from the pollBus callbacks. Here we process
     // them on the packet thread.  pollActions has sync so we can walk this way....
     for(int ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {

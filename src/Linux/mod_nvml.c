@@ -156,7 +156,6 @@ extern "C" {
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
     HSP_mod_NVML *mdata = (HSP_mod_NVML *)mod->data;
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     memset(&mdata->nvmlElem, 0, sizeof(mdata->nvmlElem));
     mdata->nvmlElem.tag = SFLCOUNTERS_HOST_GPU_NVML;
     if(readNvmlCounters(mod, &mdata->nvmlElem.counterBlock.host_gpu_nvml)) {
@@ -165,12 +164,10 @@ extern "C" {
   }
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     nvml_tick(mod);
   }
 
   static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     nvml_stop(mod);
   }
 

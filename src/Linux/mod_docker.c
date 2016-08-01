@@ -706,7 +706,6 @@ VNIC: <ifindex> <device> <mac>
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     if((evt->bus->clk % mdata->refreshVMListSecs) == 0
        && sp->sFlowSettings) {
       configVMs(mod);
@@ -715,7 +714,6 @@ VNIC: <ifindex> <device> <mac>
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     // now we can execute pollActions without holding on to the semaphore
     for(uint32_t ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {
       SFLPoller *poller = (SFLPoller *)UTArrayAt(mdata->pollActions, ii);
@@ -730,7 +728,6 @@ VNIC: <ifindex> <device> <mac>
     SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
 
     if(sp->kvm.kvm) {
       // if we make kvm and docker mutually exclusive, this check will be unnecessary
@@ -745,10 +742,6 @@ VNIC: <ifindex> <device> <mac>
     mdata->vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
     mdata->vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
     SFLADD_ELEMENT(cs, &mdata->vnodeElem);
-  }
-
-  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
   }
 
   /*_________________---------------------------__________________
@@ -772,7 +765,6 @@ VNIC: <ifindex> <device> <mac>
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_FINAL), evt_final);
   }
 
 #if defined(__cplusplus)

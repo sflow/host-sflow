@@ -213,7 +213,6 @@ extern "C" {
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     // read pcap stats to get drops - will go out with
     // packet samples sent from readPackets.c
     BPFSoc *bpfs;
@@ -233,7 +232,6 @@ extern "C" {
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
 
     if(mdata->pcap_configured) {
       // already configured the first time (when we still had root privileges)

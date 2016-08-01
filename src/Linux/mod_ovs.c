@@ -556,7 +556,6 @@ extern "C" {
   }
 
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     setState(mod, SFVSSTATE_READCONFIG);
   }
 

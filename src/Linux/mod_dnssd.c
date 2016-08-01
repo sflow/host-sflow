@@ -296,7 +296,6 @@ extern "C" {
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myLog(LOG_INFO, "event %s.%s dataLen=%u", mod->name, evt->name, dataLen);
     if(--mdata->countdown <= 0) {
       // SIGSEGV on Fedora 14 if HSP_RLIMIT_MEMLOCK is non-zero, because calloc returns NULL.
       // Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or

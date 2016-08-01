@@ -399,7 +399,7 @@ extern "C" {
     }
 	  
     // populate sFlow structure
-    nio->sfp.lanes = (SFLLane *)UTHeapQReAlloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
+    nio->sfp.lanes = (SFLLane *)my_realloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
     nio->sfp.module_id = adaptor->ifIndex;
     nio->sfp.module_total_lanes = num_lanes;
     nio->sfp.module_supply_voltage = (voltage / 10); // mV
@@ -569,7 +569,7 @@ extern "C" {
     rx_power_min = ntohs(eew[256 + 25]);
 	  
     // populate sFlow structure
-    nio->sfp.lanes = (SFLLane *)UTHeapQReAlloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
+    nio->sfp.lanes = (SFLLane *)my_realloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
     nio->sfp.module_id = adaptor->ifIndex;
     nio->sfp.module_total_lanes = num_lanes;
     nio->sfp.module_supply_voltage = (voltage / 10); // mV
