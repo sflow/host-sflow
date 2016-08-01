@@ -356,7 +356,8 @@ extern "C" {
       if((test_clk < bus->clk)
 	 || (test_clk - bus->clk) > EV_MAX_TICKS) {
 	// avoid a busy-loop of ticks
-	myLog(LOG_INFO, "time jump detected on bus %s", bus->name);
+	if(bus->clk)
+	  myLog(LOG_INFO, "time jump detected on bus %s", bus->name);
 	bus->clk = test_clk - 1;
       }
       while(bus->clk < test_clk) {

@@ -299,7 +299,7 @@ extern "C" {
 	    if(ad == NULL) {
 	      ad = nioAdaptorNew(ifname, mac.mac, 0);
 	      if(UTHashAdd(sp->adaptorsByMac, ad) != NULL) {
-		myDebug(1, "Warning: kvm adaptor overwriting adaptorsByIndex");
+		myDebug(1, "Warning: kvm adaptor overwriting adaptorsByMac");
 	      }
 	    }
 	    adaptorListAdd(state->vm.interfaces, ad);
