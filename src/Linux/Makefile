@@ -1,7 +1,7 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-FEATURES   ?= ULOG NFLOG PCAP DOCKER KVM XEN NVML OVS CUMULUS OS10
+FEATURES_ALL= ULOG NFLOG PCAP DOCKER KVM XEN NVML OVS CUMULUS OS10
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
 CONFDIR    ?= /etc
@@ -10,16 +10,24 @@ SYSTEMDDIR ?= /lib/systemd/system
 
 $(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
 
+XTGTS= $(FEATURES)
+ifeq ("$(strip $(FEATURES))","ALL")
+  XTGTS= $(FEATURES_ALL)
+endif
+$(info $$XTGTS is [$(XTGTS)])
+
 # INSTROOT may be passed in
 BIN_D=$(BINDIR)
 INIT_D=$(INITDIR)
 CONF_D=$(CONFDIR)
 MOD_D=$(MODDIR)
+SYSTEMD_D=$(SYSTEMDDIR)
 ifneq ($(INSTROOT),)
 	BIN_D=$(INSTROOT)/$(BINDIR)
 	INIT_D=$(INSTROOT)/$(INITDIR)
 	CONF_D=$(INSTROOT)/$(CONFDIR)
 	MOD_D=$(INSTROOT)/$(MODDIR)
+	SYSTEMD_D=$(INSTROOT)/$(SYSTEMDDIR)
 endif
 
 #########  compilation flags  #########
@@ -48,7 +56,7 @@ CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
 LIBS_HSFLOWD= $(JSONDIR)/libjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl
 
 CFLAGS_SHARED= -fPIC
-LDFLAGS_SHARED= -shared
+LDFLAGS_SHARED= -shared --build-id
 
 # CFLAGS and LIBS - modules
 CFLAGS_JSON=
@@ -172,7 +180,7 @@ OBJS_OS10=mod_os10.o
 BUILDTGTS=hsflowd \
           mod_json.so \
           mod_dnssd.so \
-          $(FEATURES)
+          $(XTGTS)
 
 all: $(BUILDTGTS)
 
@@ -321,23 +329,23 @@ mod_os10.so: $(OBJS_OS10)
 
 #########  install  #########
 
-# if SYSTEMD is not set, then assume it should be "yes" if the directory is present
-ifndef SYSTEMD
-  SYSTEMD=$(shell if [ -d $(SYSTEMDDIR) ]; then echo "yes"; else echo "no"; fi)
-endif
-
 install:
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
-	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
-ifeq ($(SYSTEMD),yes)
-	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMDDIR);
-else
-	$(INSTALL) -d $(INIT_D); $(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd;
-endif
-	$(INSTALL) -d $(MOD_D);	$(INSTALL) -m 755 *.so $(MOD_D)
+	$(INSTALL) -d $(CONF_D)
+	$(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
+	$(INSTALL) -d $(SYSTEMD_D)
+	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMD_D)/hsflowd.service;
+	$(INSTALL) -d $(INIT_D)
+	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd;
+	$(INSTALL) -d $(MOD_D)
+	$(INSTALL) -m 755 *.so $(MOD_D)
 
 #########  schedule  #########
+
+ifndef SYSTEMD
+  SYSTEMD=$(shell if hash systemctl 2>/dev/null; then echo "yes"; else echo "no"; fi)
+endif
 
 schedule:
 ifeq ($(SYSTEMD),yes)

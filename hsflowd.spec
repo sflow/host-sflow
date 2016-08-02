@@ -20,7 +20,7 @@ the Open VSwitch sFlow configuration.
 %setup
 
 %build
-make FEATURES=%{features}
+make FEATURES=%{_FEATURES}
 
 %install
 rm -rf %{buildroot}

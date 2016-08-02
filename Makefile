@@ -54,7 +54,7 @@ rpm:
 	rm -rf $$MYSRCDIR; \
 	mkdir -p $$MYSRCDIR; \
 	cp $$MYTARBALL $$MYSRCDIR; \
-	rpmbuild --define "_topdir $(MY_RPM_TOP)" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG).spec; \
+	rpmbuild --define "_topdir $(MY_RPM_TOP)" --define "_FEATURES \"$(FEATURES)\"" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG).spec; \
 	echo "==============="; \
 	MYRPM="$(MY_RPM_TOP)/RPMS/$$MYARCH/$(PROG)-$$MYVER-$$MYREL.$$MYARCH.rpm"; \
 	MYSRPM="$(MY_RPM_TOP)/SRPMS/$(PROG)-$$MYVER-$$MYREL.src.rpm"; \

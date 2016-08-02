@@ -3,16 +3,24 @@ http://sflow.net/license.html
 
 To compile and install, try this:
 
-root> make
-root> make install
-root> make schedule
+% make
+% sudo make install
+% sudo make schedule
+
+To compile features that can be enabled in the config:
+
+% make FEATURES="ALL"
+
+Or you can specify them individually:
+
+% make FEATURES="ULOG NFLOG PCAP DOCKER KVM OVS"
 
 Edit /etc/hsflowd.conf for configuration.  The options are
 described in the comments there.
 
 To start the daemon, run:
 
-root> service hsflowd start
+% sudo service hsflowd start
 
 and check the syslog for errors.
 
@@ -20,7 +28,7 @@ To run in the debugger, change the Makefile to compile with -g,
 recompile, and then run with the "-dd" command line option to
 prevent daemonization:
 
-% gdb hsflowd
+% sudo gdb hsflowd
 gdb> set args -dd
 gdb> r
 
@@ -28,19 +36,19 @@ For more detailed logging,  using -ddd or -dddd.
 
 To build an rpm from a git repo, try:
 
-% make rpm
+% make rpm FEATURES="..."
 
 To build an rpm from a sources tarball hsflowd-<ver>.tar.gz,
 copy the tarball to your rpm SOURCES directory then run:
 
-% rpmbuild -ba hsflowd.spec
+% rpmbuild -ba hsflowd.spec --define _FEATURES "..."
 
 The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
 (where <ARCH> is i386 or x86_64 or ...)
 
 To build a Debian package, try:
 
-% make deb
+% make deb FEATURES="..."
 
 The hsflowd-<version>-<release>.deb package should appear
 in the current directory.

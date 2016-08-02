@@ -21,8 +21,8 @@ cd /tmp/iso
 cd 
 umount /tmp/iso
 
-If Open VSwitch is running (it is the default virtual
-switch in XenServer 6.0), then make sure /etc/hsflowd.conf
+If Open VSwitch is running (it is the default virtual switch
+in XenServer 6.0 and later), then make sure /etc/hsflowd.conf
 has the line:
 
   ovs {}

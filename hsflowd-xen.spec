@@ -20,11 +20,11 @@ the Open VSwitch sFlow configuration.
 %setup
 
 %build
-make FEATURES=XEN
+make FEATURES="XEN OVS"
 
 %install
 rm -rf %{buildroot}
-make INSTROOT=%{buildroot} FEATURES=XEN install
+make INSTROOT=%{buildroot} install
 
 %clean
 rm -rf %{buildroot}
@@ -48,6 +48,7 @@ if [ -n "$XS_PREVIOUS_INSTALLATION" ]; then
   if [ -r $XS_PREVIOUS_INSTALLATION/etc/hsflowd.conf ]; then
     mv -f /etc/hsflowd.conf /etc/hsflowd.conf.rpmnew
     cp -fp $XS_PREVIOUS_INSTALLATION/etc/hsflowd.conf /etc
+    # TODO: insert ovs {} ?
   fi
 fi
 
