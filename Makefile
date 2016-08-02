@@ -50,6 +50,9 @@ rpm:
 	MYREL=`./getRelease`; \
 	MYTARBALL=$(PROG)-$$MYVER.tar.gz; \
 	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYTARBALL; \
+	mkdir -p $(MY_RPM_TOP)/BUILD; \
+	mkdir -p $(MY_RPM_TOP)/SRPMS; \
+	mkdir -p $(MY_RPM_TOP)/RPMS; \
 	MYSRCDIR=$(MY_RPM_TOP)/SOURCES; \
 	rm -rf $$MYSRCDIR; \
 	mkdir -p $$MYSRCDIR; \
