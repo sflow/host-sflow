@@ -7,7 +7,7 @@ Group: Applications/Internet
 URL: http://sflow.net
 Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
-Requires(post): chkconfig
+%define debug_package %{nil}
 
 %description
 This program implements the host sFlow(R) standard - sending

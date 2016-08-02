@@ -56,7 +56,8 @@ CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
 LIBS_HSFLOWD= $(JSONDIR)/libjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl
 
 CFLAGS_SHARED= -fPIC
-LDFLAGS_SHARED= -shared --build-id
+LDFLAGS_SHARED= -shared
+# LDFLAGS_SHARED += --build-id
 
 # CFLAGS and LIBS - modules
 CFLAGS_JSON=
