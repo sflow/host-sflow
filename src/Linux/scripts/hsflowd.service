@@ -4,7 +4,7 @@ After=network.target remote-fs.target nss-lookup.target
 
 [Service]
 Type=simple
-ExecStart=/usr/sbin hsflowd -d
+ExecStart=/usr/sbin/hsflowd -u %m -d
 TimeoutStopSec=10
 
 [Install]
