@@ -186,15 +186,6 @@ all: $(BUILDTGTS)
 
 #########  feature dependencies #########
 
-# Expected external dependencies:
-# ULOG requires linux/netfilter_ipv4/ipt_ULOG.h
-# NFLOG requires libnfnetlink/libnfnetlink.h
-# PCAP requires libpcap pcap.h
-# DOCKER requires `docker ps`
-# KVM requires libvirt
-# XEN requires libxenctrl libxenstore xenctrl.h xenstore.h
-# NVML requires libnvidia-ml nvml.h
-
 XEN: mod_xen.so OVS
 
 KVM: mod_kvm.so
@@ -333,11 +324,11 @@ install:
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	$(INSTALL) -d $(CONF_D)
-	$(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
+	$(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D)
 	$(INSTALL) -d $(SYSTEMD_D)
-	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMD_D)/hsflowd.service;
+	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMD_D)/hsflowd.service
 	$(INSTALL) -d $(INIT_D)
-	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd;
+	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd
 	$(INSTALL) -d $(MOD_D)
 	$(INSTALL) -m 755 *.so $(MOD_D)
 

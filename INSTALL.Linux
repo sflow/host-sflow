@@ -18,6 +18,16 @@ Or you can specify them individually:
 Edit /etc/hsflowd.conf for configuration.  The options are
 described in the comments there.
 
+Module dependencies var from platform to platform, but
+the following packages usually have to be installed before
+the compilation will work:
+
+ NFLOG:  libnfnetlink-dev(el)
+ PCAP:  libpcap-dev(el)
+ KVM: libvirt-dev(el) libxml2-dev(el)
+ NVML: libnvidia-ml nvml.h
+ XEN: libxenctrl libxenstore xenctrl.h xenstore.h
+
 To start the daemon, run:
 
 % sudo service hsflowd start
