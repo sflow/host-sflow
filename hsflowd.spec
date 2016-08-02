@@ -9,6 +9,16 @@ Source0: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 %define debug_package %{nil}
 
+# minimize requirements - some modules included here may have additional requirements
+# that are not captured here, but they do not have to be enabled (dynamic loaded) for
+# the program to run.
+AutoReqProv: no
+Requires: ld-linux-x86-64.so.2()(64bit),libc.so.6(GLIBC_2.3.4)(64bit),libdl.so.2()(64bit),libm.so.6()(64bit),libpthread.so.0()(64bit),libresolv.so.2()(64bit)
+
+# for rpm backwards compatibility
+%define _binary_payload w9.gzdio
+%define _binary_filedigest_algorithm 1
+
 %description
 This program implements the host sFlow(R) standard - sending
 key performance metrics to an sFlow collector to enable
