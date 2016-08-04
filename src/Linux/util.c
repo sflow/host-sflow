@@ -1450,12 +1450,7 @@ extern "C" {
       pthread_mutex_init(oh->sync, NULL);
     }
     oh->cap = UTHASH_INIT;
-    // using my_os_calloc/my_os_free for bins since (1) they are
-    // powers of 2 and we don't want to incur ~50% overhead and
-    // (2) a large HT might leave a trail of retained buffers as
-    // it grows.  This assumes my_os_calloc does better with powers
-    // of 2 than UTHEAP does.
-    oh->bins = my_os_calloc(UTHASH_BYTES(oh));
+    oh->bins = my_calloc(UTHASH_BYTES(oh));
     oh->f_offset = f_offset;
     oh->f_len = (options & UTHASH_SKEY) ? 0 : f_len;
     return oh;
@@ -1467,11 +1462,10 @@ extern "C" {
     uint32_t old_cap = oh->cap;
     void **old_bins = oh->bins;
     oh->cap *= 2;
-
-    oh->bins = my_os_calloc(UTHASH_BYTES(oh));
+    oh->bins = my_calloc(UTHASH_BYTES(oh));
     for(uint32_t ii = 0; ii < old_cap; ii++)
       if(old_bins[ii]) hashAdd(oh, old_bins[ii]);
-    my_os_free(old_bins);
+    my_free(old_bins);
   }
   
   static uint32_t hashHash(UTHash *oh, void *obj) {
@@ -1567,7 +1561,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
 
   void UTHashFree(UTHash *oh) {
     if(oh == NULL) return;
-    my_os_free(oh->bins);
+    my_free(oh->bins);
     if(oh->sync) my_free(oh->sync);
     my_free(oh);
   } 
