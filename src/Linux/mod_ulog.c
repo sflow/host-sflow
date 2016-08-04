@@ -232,6 +232,9 @@ extern "C" {
     HSP_mod_ULOG *mdata = (HSP_mod_ULOG *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    if(sp->sFlowSettings == NULL)
+      return; // no config (yet - may be waiting for DNS-SD)
+
     setSamplingRate(mod);
 
     if(mdata->ulog_configured) {

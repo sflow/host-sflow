@@ -298,6 +298,9 @@ extern "C" {
     HSP_mod_NFLOG *mdata = (HSP_mod_NFLOG *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    if(sp->sFlowSettings == NULL)
+      return; // no config (yet - may be waiting for DNS-SD)
+
     setSamplingRate(mod);
 
     if(mdata->nflog_configured) {

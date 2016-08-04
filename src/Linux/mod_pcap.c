@@ -233,6 +233,9 @@ extern "C" {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    if(sp->sFlowSettings == NULL)
+      return; // no config (yet - may be waiting for DNS-SD)
+
     if(mdata->pcap_configured) {
       // already configured the first time (when we still had root privileges)
       return;

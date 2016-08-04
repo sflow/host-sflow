@@ -239,6 +239,9 @@ extern "C" {
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     
+    if(sp->sFlowSettings == NULL)
+      return; // no config (yet - may be waiting for DNS-SD)
+
     markSwitchPorts(mod);
 
     // channel number depends on whether we are using ULOG or NFLOG (though it

@@ -313,6 +313,9 @@ static regex_t *entryRegex = NULL;
     HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    if(sp->sFlowSettings == NULL)
+      return; // no config (yet - may be waiting for DNS-SD)
+
     markSwitchPorts(mod);
     sp->hardwareSampling = setSamplingRate(mod);
 
