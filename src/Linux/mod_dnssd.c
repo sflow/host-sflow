@@ -330,6 +330,9 @@ extern "C" {
     mdata->startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
     mdata->retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
 
+    // make sure we don't all hammer the DNS server immediately on restart
+    mdata->countdown = sfl_random(mdata->startDelay);
+
     // register call-backs
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     mdata->configStartEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_START);
