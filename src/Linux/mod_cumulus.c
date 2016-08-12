@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -22,7 +21,7 @@ extern "C" {
     -----------------___________________________------------------
     function to read an ASCII integer from a file
   */
-  
+
   static int readOneIntFile(char *path, uint64_t *p_ans) {
     int found = 0;
     FILE *intFile = fopen(path, "r");
@@ -38,7 +37,7 @@ extern "C" {
     -----------------___________________________------------------
     Called to get latest counters
   */
-  
+
   int readBroadcomCounters(HSP *sp, SFLBCM_tables *bcm) {
     uint64_t scratch64;
     uint64_t mode;
@@ -110,7 +109,7 @@ extern "C" {
     if(readOneIntFile(HSP_BCM_FILES "acl_info/egress/meters_total", &scratch64)) bcm->bcm_acl_egress_meters_max = scratch64;
     if(readOneIntFile(HSP_BCM_FILES "acl_info/egress/slices", &scratch64)) bcm->bcm_acl_egress_slices = scratch64;
     if(readOneIntFile(HSP_BCM_FILES "acl_info/egress/slices_total", &scratch64)) bcm->bcm_acl_egress_slices_max = scratch64;
-    
+
     return YES;
   }
 
@@ -122,7 +121,7 @@ extern "C" {
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_CUMULUS *mdata = (HSP_mod_CUMULUS *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
+    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     memset(&mdata->bcmElem, 0, sizeof(mdata->bcmElem));
     mdata->bcmElem.tag = SFLCOUNTERS_BCM_TABLES;
     if(readBroadcomCounters(sp, &mdata->bcmElem.counterBlock.bcm_tables)) {
@@ -136,12 +135,12 @@ extern "C" {
     return YES = hardware/kernel sampling configured OK
     return NO  = hardware/kernel sampling not set - assume 1:1 on ULOG/NFLOG
   */
-  
+
   static int execOutputLine(void *magic, char *line) {
     myDebug(1, "execOutputLine: %s", line);
     return YES;
   }
-  
+
   static int setSwitchPortSamplingRates(HSP *sp, HSPSFlowSettings *settings, uint32_t logGroup)
   {
     int hw_sampling = YES;
@@ -177,11 +176,11 @@ extern "C" {
 	  int status;
 	  if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	    if(WEXITSTATUS(status) != 0) {
-	      
+
 	      myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
 		    HSP_CUMULUS_SWITCHPORT_CONFIG_PROG,
 		    WEXITSTATUS(status));
-	      
+
 	      hw_sampling = NO;
 	      break;
 	    }
@@ -230,7 +229,7 @@ extern "C" {
       }
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________    evt_config_changed     __________________
     -----------------___________________________------------------
@@ -238,7 +237,7 @@ extern "C" {
 
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    
+
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
@@ -267,8 +266,15 @@ extern "C" {
   */
 
   void mod_cumulus(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     mod->data = my_calloc(sizeof(HSP_mod_CUMULUS));
     HSP_mod_CUMULUS *mdata = (HSP_mod_CUMULUS *)mod->data;
+
+    // we know there are no 32-bit counters
+    sp->nio_polling_secs = 0;
+
+    // TODO: should we try to cluster the counters a little?
+    // sp->syncPollingInterval = 5;
 
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
@@ -276,8 +282,6 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_CHANGED), evt_intf_changed);
   }
 
-  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

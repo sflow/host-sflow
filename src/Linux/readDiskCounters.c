@@ -28,7 +28,7 @@ int remote_mount(const char *device, const char *type)
      -- otherwise it would be marked as remote by the logic below
      because it has a ':' in it. */
   if(!strncmp(device, "ubi:", 4)) return NO;
-  
+
   return ((strchr(device,':') != NULL)
 	  || (!strcmp(type, "smbfs") && device[0]=='/' && device[1]=='/')
 	  || (!strncmp(type, "nfs", 3))
@@ -37,12 +37,11 @@ int remote_mount(const char *device, const char *type)
 	  || (!strcmp(type,"none")) );
 }
 
-
   /*_________________---------------------------__________________
     _________________     readDiskCounters      __________________
     -----------------___________________________------------------
   */
-  
+
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk) {
     int gotData = NO;
     FILE *procFile;
@@ -54,7 +53,7 @@ int remote_mount(const char *device, const char *type)
       // into the host_dsk structure from there.
       uint32_t majorNo;
       uint32_t minorNo;
-      
+
       uint64_t reads = 0;
       /* uint64_t reads_merged = 0;*/
       uint64_t sectors_read = 0;
@@ -103,7 +102,7 @@ int remote_mount(const char *device, const char *type)
 	}
       }
       fclose(procFile);
-      
+
       // accumulate the 64-bit counters (they may only be 32-bit counters in this OS)
       sp->diskIO.bytes_read += (total_sectors_read - sp->diskIO.last_sectors_read) * ASSUMED_DISK_SECTOR_BYTES;
       sp->diskIO.last_sectors_read = total_sectors_read;
@@ -163,12 +162,10 @@ int remote_mount(const char *device, const char *type)
       tdestroy(treeRoot, my_free);
       fclose(procFile);
     }
-    
+
     return gotData;
   }
-
 
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

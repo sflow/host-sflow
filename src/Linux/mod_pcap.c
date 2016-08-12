@@ -2,13 +2,12 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
-  
+
 #include "hsflowd.h"
-  
+
   // includes for setsockopt(SO_ATTACH_FILTER)
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -18,10 +17,10 @@ extern "C" {
 #include <linux/sockios.h>
 #include <linux/if_packet.h>
 #include <linux/filter.h>
-  
+
 #include <pcap.h>
 #define HSP_READPACKET_BATCH_PCAP 10000
-  
+
   typedef struct _BPFSoc {
     EVMod *module;
     char *deviceName;
@@ -58,14 +57,14 @@ extern "C" {
       // sampling disabled by setting to 0
       return;
     }
-    
+
     if(--MySkipCount == 0) {
       /* reached zero. Set the next skip */
       MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
 
       EVMod *mod = bpfs->module;
       HSP *sp = (HSP *)EVROOTDATA(mod);
-      
+
       // global MAC -> adaptor
       SFLMacAddress macdst,macsrc;
       memcpy(macdst.mac, buf, 6);
@@ -88,7 +87,7 @@ extern "C" {
 		dstdev->peer_ifIndex);
 	}
       }
-      
+
       takeSample(sp,
 		 srcdev,
 		 dstdev,
@@ -104,19 +103,19 @@ extern "C" {
 		 bpfs->samplingRate);
     }
   }
-  
-  int readPackets_pcap(EVMod *mod, EVBus *bus, int fd, void *data)
+
+  static void readPackets_pcap(EVMod *mod, EVSocket *sock, void *magic)
   {
-    BPFSoc *bpfs = (BPFSoc *)data;
+    BPFSoc *bpfs = (BPFSoc *)magic;
     int batch = pcap_dispatch(bpfs->pcap,
 			      HSP_READPACKET_BATCH_PCAP,
 			      readPackets_pcap_cb,
 			      (u_char *)bpfs);
     if(batch == -1) {
       myLog(LOG_ERR, "pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
-      // TODO: close the pcap socket so we don't spin?
+      // TODO: perhaps we should exit altogether in this case?
+      EVSocketClose(mod, sock);
     }
-    return batch;
   }
 
   /*_________________---------------------------__________________
@@ -157,14 +156,14 @@ extern "C" {
     }
     return ver;
   }
-    
+
   static int setKernelSampling(HSP *sp, BPFSoc *bpfs)
   {
     if(getDebug()) {
       myLog(LOG_INFO, "PCAP: setKernelSampling() kernel version (as int) == %"PRIu64,
 	    kernelVer64(sp));
     }
-    
+
     if(kernelVer64(sp) < 3019000L) {
       // kernel earlier than 3.19 == not new enough.
       // This would fail silently,  so we have to bail
@@ -175,7 +174,7 @@ extern "C" {
       myLog(LOG_ERR, "PCAP: warning: kernel too old for BPF sampling. Fall back on user-space sampling.");
       return NO;
     }
-    
+
     struct sock_filter code[] = {
       { 0x20,  0,  0, 0xfffff038 }, // ld rand
       { 0x94,  0,  0, 0x00000100 }, // mod #256
@@ -183,7 +182,7 @@ extern "C" {
       { 0x06,  0,  0, 0xffffffff }, // ret #-1
       { 0x06,  0,  0, 0000000000 }, // drop: ret #0
     };
-    
+
     // overwrite the sampling-rate
     code[1].k = bpfs->samplingRate;
     myDebug(1, "PCAP: sampling rate set to %u for dev=%s", code[1].k, bpfs->deviceName);
@@ -191,7 +190,7 @@ extern "C" {
       .len = 5, // ARRAY_SIZE(code),
       .filter = code,
     };
-    
+
     // install the filter
     int status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
     myDebug(1, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d", status);
@@ -240,7 +239,7 @@ extern "C" {
       // already configured the first time (when we still had root privileges)
       return;
     }
-    
+
     for(HSPPcap *pcap = sp->pcap.pcaps; pcap; pcap = pcap->nxt) {
       BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
       UTArrayAdd(mdata->bpf_socs, bpfs);
@@ -289,8 +288,7 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
   }
-  
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

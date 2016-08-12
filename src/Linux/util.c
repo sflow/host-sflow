@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -37,21 +36,25 @@ extern "C" {
 
   void UTStrBuf_append(UTStrBuf *buf, char *str) {
     int len = my_strlen(str);
-    UTStrBuf_need(buf, len);
-    memcpy(buf->buf + buf->len, str, len);
-    buf->len += len;
+    if(len) {
+      UTStrBuf_need(buf, len);
+      memcpy(buf->buf + buf->len, str, len);
+      buf->len += len;
+    }
   }
 
   int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...) {
-    int ans;
+    int ans = 0;
     va_list args;
     va_start(args, fmt);
     // vsnprintf will tell you what space it *would* need
     int needed = vsnprintf(NULL, 0, fmt, args);
-    UTStrBuf_need(buf, needed+1);
-    va_start(args, fmt);
-    ans =vsnprintf(buf->buf + buf->len, needed+1, fmt, args);
-    buf->len += needed;
+    if(needed > 0) {
+      UTStrBuf_need(buf, needed+1);
+      va_start(args, fmt);
+      ans = vsnprintf(buf->buf + buf->len, needed+1, fmt, args);
+      buf->len += needed;
+    }
     return ans;
   }
 
@@ -132,7 +135,7 @@ extern "C" {
     }
     return mem;
   }
-  
+
   void my_os_free(void *ptr)
   {
     if(ptr) SYS_FREE(ptr);
@@ -157,7 +160,7 @@ extern "C" {
   static UTHeapHeader *UTHeapQHdr(void *buf) {
     return (UTHeapHeader *)buf - 1;
   }
- 
+
   typedef struct _UTHeapRealm {
 #define UT_MAX_BUFFER_Q 32
     UTHeapHeader *bufferLists[UT_MAX_BUFFER_Q];
@@ -167,7 +170,7 @@ extern "C" {
 
   // separate realm for each thread
   static __thread UTHeapRealm utRealm;
-  
+
   static uint32_t UTHeapQSize(void *buf) {
     UTHeapHeader *utBuf = UTHeapQHdr(buf);
     return (1 << utBuf->h.queueIdx) - sizeof(UTHeapHeader);
@@ -206,7 +209,6 @@ extern "C" {
     // return a pointer to just after the header
     return (char *)utBuf + sizeof(UTHeapHeader);
   }
-
 
   /*_________________---------------------------__________________
     _________________    foreign thread free    __________________
@@ -304,7 +306,7 @@ extern "C" {
   */
 
   static uint32_t UTClockDesync = 0;
-  
+
   void UTClockDesync_uS(uint32_t uS) {
     UTClockDesync = (uS % 1000000);
   }
@@ -332,7 +334,6 @@ extern "C" {
     return now.tv_sec;
   }
 
-  
   /*_________________---------------------------__________________
     _________________     hashing               __________________
     -----------------___________________________------------------
@@ -370,7 +371,7 @@ extern "C" {
     _________________     safe string fns       __________________
     -----------------___________________________------------------
   */
-  
+
 #define UT_DEFAULT_MAX_STRLEN 65535
 
   uint32_t my_strnlen(const char *s, uint32_t max) {
@@ -392,7 +393,7 @@ extern "C" {
     memcpy(newStr, str, len);
     return newStr;
   }
-   
+
   int my_strnequal(char *s1, char *s2, uint32_t max) {
     if(s1 == s2) return YES;
     if(s1 == NULL || s2 == NULL) return NO;
@@ -401,25 +402,25 @@ extern "C" {
     if(len1 != len2) return NO;
     return (memcmp(s1, s2, len1) == 0);
   }
-   
+
   int my_strequal(char *s1, char *s2) {
     return my_strnequal(s1, s2, UT_DEFAULT_MAX_STRLEN);
   }
-  
+
   uint32_t my_strhash(char *str) {
     return hash_fnv1a(str, my_strlen(str));
   }
-  
+
   /*_________________---------------------------__________________
     _________________     setStr                __________________
     -----------------___________________________------------------
   */
-  
+
   void setStr(char **fieldp, char *str) {
     if(*fieldp) my_free(*fieldp);
     (*fieldp) = my_strdup(str);
   }
-  
+
 /*________________---------------------------__________________
   ________________    trimWhitespace         __________________
   ----------------___________________________------------------
@@ -428,20 +429,20 @@ extern "C" {
   char *trimWhitespace(char *str)
   {
     char *end;
-    
+
     // Trim leading space
     while(isspace(*str)) str++;
-    
+
     // Trim trailing space
     end = str + strlen(str) - 1;
     while(end > str && isspace(*end)) end--;
-    
+
     // Write new null terminator
     *(end+1) = 0;
-    
+
     return str;
   }
-    
+
   /*_________________---------------------------__________________
     _________________     string array          __________________
     -----------------___________________________------------------
@@ -506,7 +507,7 @@ extern "C" {
   }
 
    char *strArrayAt(UTStringArray *ar, int i) {
-    return ar->strs[i];
+     return(i < ar->n) ? ar->strs[i] : NULL;
   }
 
   static int mysortcmp(const void *p1, const void* p2) {
@@ -548,7 +549,7 @@ extern "C" {
     }
     return YES;
   }
-    
+
   int strArrayIndexOf(UTStringArray *ar, char *str) {
     //if(ar->sorted) {
     //  char **ptr = (char **)bsearch(&str, ar->strs, ar->n, sizeof(char *), mysortcmp);
@@ -559,7 +560,7 @@ extern "C" {
       if(my_strequal(str, ar->strs[i])) return i;
     }
     return -1;
-  } 
+  }
 
   static int isSeparator(char ch, char *separators) {
     if(separators == NULL) return NO;
@@ -581,16 +582,16 @@ extern "C" {
       // we terminate for sure.
       return NULL;
     }
-    
+
     // initialize buffer to empty string
     buf[0] = '\0';
-    
+
     if(a[0] == '\0') {
       // return the empty string and make sure we terminate next time
       *str = NULL;
       return buf;
     }
-    
+
     int buflast = buflen-1;
     int len = 0;
 
@@ -620,16 +621,16 @@ extern "C" {
 	  if(len < buflast) buf[len++] = a[0];
 	  a++;
 	}
-      }	
+      }
     }
     buf[len] = '\0';
-    
+
     if(!delim) {
       // skip separators again - in case there are no more tokens
       // and this takes us all the way to EOS
       while(a[0] != '\0' && isSeparator(a[0], sep)) a++;
     }
-    
+
     if(a[0] == '\0') {
       // at EOS, so indicate to the caller that there are no more tokens after this one
       *str = NULL;
@@ -645,10 +646,10 @@ extern "C" {
       }
       *str = a;
     }
-    
+
     return trim ? trimWhitespace(buf) : buf;
   }
-    
+
   /*_________________---------------------------__________________
     _________________        obj array          __________________
     -----------------___________________________------------------
@@ -662,7 +663,7 @@ extern "C" {
     }
     return ar;
   }
-  
+
   static void arrayGrowthCheck(UTArray *ar, int i) {
     if(ar->cap <= i) {
       uint32_t oldBytes = ar->cap * sizeof(void *);
@@ -680,7 +681,7 @@ extern "C" {
       ar->objs = newArray;
     }
   }
-  
+
   uint32_t UTArrayAdd(UTArray *ar, void *obj) {
     int offset = -1;
     SEMLOCK_DO(ar->sync) {
@@ -689,6 +690,15 @@ extern "C" {
       ar->objs[ar->n++] = obj;
     }
     return offset;
+  }
+
+  uint32_t UTArrayAddAll(UTArray *ar, UTArray *add) {
+    SEMLOCK_DO(ar->sync) {
+      arrayGrowthCheck(ar, (ar->n + add->n));
+      for(int ii = 0; ii < add->n; ii++)
+	ar->objs[ar->n++] = add->objs[ii];
+    }
+    return ar->n;
   }
 
   void *UTArrayDelAt(UTArray *ar, int i) {
@@ -715,7 +725,7 @@ extern "C" {
     }
     return ans;
   }
- 
+
   void UTArrayPut(UTArray *ar, void *obj, int i) {
     SEMLOCK_DO(ar->sync) {
       arrayGrowthCheck(ar, i);
@@ -730,22 +740,22 @@ extern "C" {
       ar->n = 0;
     }
   }
-  
+
   void UTArrayFree(UTArray *ar) {
     UTArrayReset(ar);
     if(ar->objs) my_free(ar->objs);
     if(ar->sync) my_free(ar->sync);
     my_free(ar);
   }
-  
+
   uint32_t UTArrayN(UTArray *ar) {
     return ar->n;
   }
-  
+
   void *UTArrayAt(UTArray *ar, int i) {
     return ar->objs[i];
   }
-  
+
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________
     ----------------___________________________------------------
@@ -771,9 +781,9 @@ extern "C" {
       }
       return NO;
     }
-  
+
     if(info == NULL) return NO;
-  
+
     if(info->ai_addr) {
       // answer is now in info - a linked list of answers with sockaddr values.
       // extract the address we want from the first one. $$$ should perhaps
@@ -826,7 +836,6 @@ extern "C" {
   {
     return (isdigit(c) ? (c)-'0': ((toupper(c))-'A')+10)  & 0xf;
   }
-  
 
   static u_char bin2hex(int nib)
   {
@@ -857,7 +866,7 @@ extern "C" {
 
     return b;
   }
-  
+
   int hexToBinary(u_char *hex, u_char *bin, uint32_t binLen)
   {
     // read from hex into bin, up to max binLen chars, return number written
@@ -865,7 +874,7 @@ extern "C" {
     u_char *b = bin;
     u_char c;
     uint32_t i = 0;
-    
+
     while((c = *h++) != '\0') {
       if(isxdigit(c)) {
 	u_char val = hex2bin(c);
@@ -896,7 +905,6 @@ extern "C" {
     return YES;
   }
 
-  
   int printUUID(const u_char *a, u_char *buf, int bufLen)
   {
     int b = 0;
@@ -909,7 +917,7 @@ extern "C" {
     b += printHex(a + 8, 2, buf + b, bufLen - b, NO);
     buf[b++] = '-';
     b += printHex(a + 10, 6, buf + b, bufLen - b, NO);
-    
+
     // should really be lowercase hex - fix that here
     for(int i = 0; i < b; i++) buf[i] = tolower(buf[i]);
 
@@ -922,7 +930,7 @@ extern "C" {
   uint32_t hashUUID(char *uuid) {
     return hash_fnv1a(uuid, 16);
   }
-  
+
   /*_________________---------------------------__________________
     _________________     printSpeed            __________________
     -----------------___________________________------------------
@@ -965,7 +973,7 @@ extern "C" {
     _________________     my_usleep             __________________
     -----------------___________________________------------------
   */
-  
+
   void my_usleep(uint32_t microseconds) {
     struct timeval timeout;
     timeout.tv_sec = 0;
@@ -984,7 +992,6 @@ extern "C" {
     }
   }
 
-    
   /*_________________---------------------------__________________
     _________________     myExec                __________________
     -----------------___________________________------------------
@@ -1027,7 +1034,7 @@ extern "C" {
     }
     else {
       // in parent
-      close(pfd[1]); // close write-end
+      while(close(pfd[1]) == -1 && errno == EINTR); // close write-end
       // read from read-end
       FILE *ovs;
       if((ovs = fdopen(pfd[0], "r")) == NULL) {
@@ -1043,12 +1050,12 @@ extern "C" {
 	}
       }
       fclose(ovs);
-      waitpid(cpid, pstatus, 0); // block here until child is done
+      // block here until child is done.
+      waitpid(cpid, pstatus, 0);
     }
     return ans;
   }
 
-    
   /*________________---------------------------__________________
     ________________      adaptor              __________________
     ----------------___________________________------------------
@@ -1084,12 +1091,12 @@ extern "C" {
       my_free(ad);
     }
   }
-    
+
   /*________________---------------------------__________________
     ________________      adaptorList          __________________
     ----------------___________________________------------------
   */
-  
+
   SFLAdaptorList *adaptorListNew()
   {
     SFLAdaptorList *adList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
@@ -1152,7 +1159,7 @@ extern "C" {
     }
     return (int)removed;
   }
-  
+
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev)
   {
     SFLAdaptor *ad;
@@ -1160,7 +1167,7 @@ extern "C" {
       if(my_strequal(ad->deviceName, dev)) return ad;
     return NULL;
   }
-  
+
   SFLAdaptor *adaptorListGet_ifIndex(SFLAdaptorList *adList, uint32_t ifIndex)
   {
     SFLAdaptor *ad;
@@ -1182,7 +1189,7 @@ extern "C" {
     }
     adList->adaptors[adList->num_adaptors++] = adaptor;
   }
-    
+
   /*________________---------------------------__________________
     ________________     UTTruncateOpenFile     __________________
     ----------------___________________________------------------
@@ -1200,12 +1207,12 @@ extern "C" {
     }
     return YES;
   }
-    
+
   /*________________---------------------------__________________
     ________________     UTFileExists          __________________
     ----------------___________________________------------------
   */
-  
+
   int UTFileExists(char *path) {
     struct stat statBuf;
     return (stat(path, &statBuf) == 0);
@@ -1215,7 +1222,7 @@ extern "C" {
     ________________      SFLAddress utils     __________________
     ----------------___________________________------------------
   */
-  
+
   char *SFLAddress_print(SFLAddress *addr, char *buf, size_t len) {
     return (char *)inet_ntop(addr->type == SFLADDRESSTYPE_IP_V6 ? AF_INET6 : AF_INET,
 			     &addr->address,
@@ -1250,7 +1257,7 @@ extern "C" {
       return a[0] == 127;
     }
   }
-  
+
   int SFLAddress_isSelfAssigned(SFLAddress *addr) {
     if(addr->type == SFLADDRESSTYPE_IP_V4) {
       // for IPv4, it's 169.254.*
@@ -1260,7 +1267,7 @@ extern "C" {
     }
     return NO;
   }
-  
+
   int SFLAddress_isLinkLocal(SFLAddress *addr) {
     if(addr->type == SFLADDRESSTYPE_IP_V6) {
       // FE80::/10
@@ -1272,7 +1279,7 @@ extern "C" {
 
   int SFLAddress_isUniqueLocal(SFLAddress *addr) {
     if(addr->type == SFLADDRESSTYPE_IP_V6) {
-      // FC00::/7                                                                                                                 
+      // FC00::/7
       return((addr->address.ip_v6.addr[0] & 0xFE) == 0xFC);
     }
     return NO;
@@ -1280,7 +1287,7 @@ extern "C" {
 
   int SFLAddress_isMulticast(SFLAddress *addr) {
     if(addr->type == SFLADDRESSTYPE_IP_V6) {
-      // FF00::/8                                                                                                                 
+      // FF00::/8
       return(addr->address.ip_v6.addr[0] == 0xFF);
     }
     else {
@@ -1290,7 +1297,7 @@ extern "C" {
     }
     return NO;
   }
-  
+
   void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask) {
     if((mask->type = addr->type) == SFLADDRESSTYPE_IP_V6) {
       for(int ii = 0; ii < 16; ii++) {
@@ -1301,13 +1308,13 @@ extern "C" {
       addr->address.ip_v4.addr &= mask->address.ip_v4.addr;
     }
   }
-  
+
   int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare) {
-    
+
     if(addr->type != compare->type) {
       return NO;
     }
-    
+
     if(addr->type == SFLADDRESSTYPE_IP_V6) {
       for(int ii = 0; ii < 16; ii++) {
 	if((addr->address.ip_v6.addr[ii] & mask->address.ip_v6.addr[ii]) != (compare->address.ip_v6.addr[ii] & mask->address.ip_v6.addr[ii])) return NO;
@@ -1367,7 +1374,7 @@ extern "C" {
       if(bits) ii[quad] = htonl(maskBitsToMask(bits));
     }
   }
-    
+
   int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits) {
     if(str == NULL) return NO;
     int len = my_strlen(str);
@@ -1400,7 +1407,7 @@ extern "C" {
       mask->type = addr->type;
       SFLAddress_maskBitsToMask(*maskBits, mask);
     }
-    
+
     // more checks
     if(addr->type != mask->type) {
       return NO;
@@ -1411,7 +1418,7 @@ extern "C" {
     if(addr->type == SFLADDRESSTYPE_IP_V6 && *maskBits > 128) {
       return NO;
     }
-    
+
     // apply mask to myself
     SFLAddress_mask(addr, mask);
 
@@ -1437,11 +1444,11 @@ extern "C" {
     a null-terminated string.  Added this for looking up the
     same SFLAdaptor objects by name, ifIndex peerIfIndex  and MAC.
   */
-  
+
 #define UTHASH_INIT 8 // must be power of 2
 
 #define UTHASH_BYTES(oh) ((oh)->cap * sizeof(void *))
-  
+
   UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, uint32_t options) {
     UTHash *oh = (UTHash *)my_calloc(sizeof(UTHash));
     oh->options = options;
@@ -1467,7 +1474,7 @@ extern "C" {
       if(old_bins[ii]) hashAdd(oh, old_bins[ii]);
     my_free(old_bins);
   }
-  
+
   static uint32_t hashHash(UTHash *oh, void *obj) {
     char *f = (char *)obj + oh->f_offset;
     if(oh->f_len == 0) {
@@ -1477,7 +1484,7 @@ extern "C" {
     // field is fixed-len
     return hash_fnv1a(f, oh->f_len);
   }
-  
+
   static uint32_t hashEqual(UTHash *oh, void *obj1, void *obj2) {
     char *f1 = (char *)obj1 + oh->f_offset;
     char *f2 = (char *)obj2 + oh->f_offset;
@@ -1488,7 +1495,7 @@ extern "C" {
 
   // oh->cap is always a power of 2, so we can just mask the bits
 #define UTHASH_WRAP(oh, pr) ((pr) & ((oh)->cap - 1))
-			     
+
 static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     uint32_t probe = hashHash(oh, obj);
     probe = UTHASH_WRAP(oh, probe);
@@ -1516,7 +1523,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     // return what was there before
     return found;
   }
-  
+
   void *UTHashAdd(UTHash *oh, void *obj) {
     void *overwritten;
     SEMLOCK_DO(oh->sync) {
@@ -1524,7 +1531,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     }
     return overwritten;
   }
-  
+
   void *UTHashGet(UTHash *oh, void *obj) {
     void *found = NULL;
     SEMLOCK_DO(oh->sync) {
@@ -1543,16 +1550,28 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     return found;
   }
 
-  void *UTHashDel(UTHash *oh, void *obj) {
+  static void *hashDelete(UTHash *oh, void *obj, bool identity) {
     void *found = NULL;
     SEMLOCK_DO(oh->sync) {
       int idx = hashSearch(oh, obj, &found);
-      if (found) {
+      if (found
+	  && (found == obj
+	      || identity == NO)) {
 	oh->bins[idx] = NULL;
 	oh->entries--;
       }
     }
     return found;
+  }
+
+  void *UTHashDel(UTHash *oh, void *obj) {
+    // delete this particular object
+    return hashDelete(oh, obj, YES);
+  }
+
+  void *UTHashDelKey(UTHash *oh, void *obj) {
+    // delete whatever is stored under this key
+    return hashDelete(oh, obj, NO);
   }
 
   uint32_t UTHashN(UTHash *oh) {
@@ -1564,7 +1583,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     my_free(oh->bins);
     if(oh->sync) my_free(oh->sync);
     my_free(oh);
-  } 
+  }
 
   /*_________________---------------------------__________________
     _________________   socket handling         __________________
@@ -1583,7 +1602,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
       myLog(LOG_ERR, "error opening socket: %s", strerror(errno));
       return 0;
     }
-      
+
     // set the socket to non-blocking
     int fdFlags = fcntl(soc, F_GETFL);
     fdFlags |= O_NONBLOCK;
@@ -1599,7 +1618,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     if(fcntl(soc, F_SETFD, fdFlags) < 0) {
       myLog(LOG_ERR, "ULOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
     }
-      
+
     // lookup bind address
     struct sockaddr *psockaddr = (family == PF_INET6) ?
       (struct sockaddr *)&myaddr_in6 :
@@ -1619,7 +1638,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
 	    sizeof(myaddr_in6) :
 	    sizeof(myaddr_in)) == -1) {
       myLog(LOG_ERR, "bind(%s) failed: %s", bindaddr, strerror(errno));
-      close(soc); 
+      close(soc);
       return 0;
     }
 
@@ -1649,7 +1668,6 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     return rx;
   }
 
-
   static int extract_int(char *str, int start, int end) {
     int len = end - start;
     if(start >= 0
@@ -1675,8 +1693,6 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     return NO;
   }
 
-    
-  
 #if defined(__cplusplus)
 }  /* extern "C" */
 #endif

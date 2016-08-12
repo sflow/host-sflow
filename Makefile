@@ -41,15 +41,15 @@ schedule:
 dist:
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
-	MYTARBALL=$(PROG)-$$MYVER.tar.gz; \
-	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYTARBALL;
+	MYTARBALL=$(PROG)-$$MYVER-$$MYREL.tar.gz; \
+	git archive HEAD --prefix=$(PROG)-$$MYVER-$$MYREL/ | gzip >$$MYTARBALL;
 
 rpm:
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
 	MYREL=`./getRelease`; \
 	MYTARBALL=$(PROG)-$$MYVER.tar.gz; \
-	git archive HEAD --prefix=$(PROG)-$$MYVER/ | gzip >$$MYTARBALL; \
+	git archive HEAD --prefix=$(PROG)-$$MYVER-$$MYREL/ | gzip >$$MYTARBALL; \
 	mkdir -p $(MY_RPM_TOP)/BUILD; \
 	mkdir -p $(MY_RPM_TOP)/SRPMS; \
 	mkdir -p $(MY_RPM_TOP)/RPMS; \
@@ -68,7 +68,7 @@ xenrpm:
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
 	MYREL=`./getRelease`; \
-	VDIR=$(PROG)-$$MYVER; \
+	VDIR=$(PROG)-$$MYVER-$$MYREL; \
 	rm -rf /tmp/$$VDIR; \
 	mkdir /tmp/$$VDIR && cp -r * /tmp/$$VDIR && mv /tmp/$$VDIR . && tar cvzf $$VDIR.tar.gz $$VDIR; \
 	MYSRCDIR=$(MY_RPM_TOP)/SOURCES; \

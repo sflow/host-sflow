@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -35,7 +34,6 @@ extern "C" {
     EVEvent *configEndEvent;
   } HSP_mod_DNSSD;
 
-    
   /*________________---------------------------__________________
     ________________       dnsSD_Request       __________________
     ----------------___________________________------------------
@@ -131,7 +129,7 @@ extern "C" {
 	myLog(LOG_ERR,"expected t=%d,c=%d, got t=%d,c=%d", rtype, C_IN, res_typ, res_cls);
 	return -1;
       }
-      
+
       switch(rtype) {
       case T_SRV:
 	{
@@ -142,26 +140,26 @@ extern "C" {
 	  uint32_t res_prt = (x[4] << 8)  | x[5];
 	  x += 6;
 	  res_payload -= 6;
-	  
+
 	  // still got room for an FQDN?
 	  if((endp - x) < HSP_MIN_DNAME) {
 	    myLog(LOG_ERR,"no room for target name -- only %d bytes left", (endp - x));
 	    return -1;
 	  }
-	  
+
 	  char fqdn[MAXDNAME];
 	  int ans_len = dn_expand(buf, endp, x, fqdn, MAXDNAME);
 	  if(ans_len == -1) {
 	    myLog(LOG_ERR,"dn_expand() failed");
 	    return -1;
 	  }
-	  
+
 	  // cross-check
 	  if(ans_len != res_payload) {
 	    myLog(LOG_ERR,"target name len cross-check failed");
 	    return -1;
 	  }
-	  
+
 	  if(ans_len < HSP_MIN_DNAME) {
 	    // just ignore this one -- e.g. might just be "."
 	  }
@@ -202,7 +200,7 @@ extern "C" {
 	      int ch = x[i];
 	      if(isalnum(ch)) printf("%c", ch);
 	      else printf("{%02x}", ch);
-	    } 
+	    }
 	    printf("\n");
 	  }
 
@@ -233,7 +231,7 @@ extern "C" {
     }
     return answer_count;
   }
-    
+
   /*________________---------------------------__________________
     ________________      dnsSD                __________________
     ----------------___________________________------------------
@@ -288,7 +286,7 @@ extern "C" {
 
     char cfgLine[EV_MAX_EVT_DATALEN];
     snprintf(cfgLine, EV_MAX_EVT_DATALEN, "%s=%s", (keyLen ? keyBuf : "collector"), valBuf);
-    
+
     // sending configEvent (pollBus) from here (configBus) means it will go via pipe
     EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
   }
@@ -300,14 +298,14 @@ extern "C" {
       // SIGSEGV on Fedora 14 if HSP_RLIMIT_MEMLOCK is non-zero, because calloc returns NULL.
       // Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
       // maybe we are supposed to fork the DNSSD thread before dropping privileges?
-      
+
       // we want the min ttl, so clear it here
       mdata->ttl = 0;
       // now make the requests
       EVEventTx(mod, mdata->configStartEvent, NULL, 0);
       int num_servers = dnsSD(mod, myDnsCB, sp->sFlowSettings_dnsSD); // will send config line events
       EVEventTx(mod, mdata->configEndEvent, &num_servers, sizeof(num_servers));
-	
+
       // whatever happens we might still learn a TTL (e.g. from the TXT record query)
       mdata->countdown = mdata->ttl ?: mdata->retryDelay;
       // but make sure it's sane
@@ -316,7 +314,7 @@ extern "C" {
 	mdata->countdown = HSP_DEFAULT_DNSSD_MINDELAY;
       }
       myDebug(1, "DNSSD polling delay set to %u seconds", mdata->countdown);
-    }  
+    }
   }
 
   /*_________________---------------------------__________________
@@ -346,4 +344,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

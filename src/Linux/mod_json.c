@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -13,7 +12,7 @@ extern "C" {
 #define HSP_MAX_JSON_MSG_BYTES 10000
 #define HSP_READJSON_BATCH 100
 #define HSP_JSON_RCV_BUF 2000000
-  
+
   typedef enum {
     RTMetricType_string = 0,
     RTMetricType_counter32,
@@ -34,7 +33,7 @@ extern "C" {
     RTFlowType_float,
     RTFlowType_double
   } EnumRTFlowType;
-  
+
 #define HSP_MAX_RTMETRIC_KEY_LEN 64
 #define HSP_MAX_RTMETRIC_VAL_LEN 255
 
@@ -105,7 +104,7 @@ extern "C" {
     _________________    agentCB_getCounters    __________________
     -----------------___________________________------------------
   */
-  
+
   static void agentCB_getCounters_JSON(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     EVMod *mod = (EVMod *)magic;
@@ -117,17 +116,17 @@ extern "C" {
     SEMLOCK_DO(sp->sync_agent) {
       // we stashed a pointer to the application in the userData field
       HSPApplication *application = (HSPApplication *)poller->userData;
-      
+
       if(application) {
 	// are we receiving counter updates via JSON messages?
 	int json_ctrs = ((mdata->packetBus->clk - application->last_json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
-	
+
 	if(json_ctrs != application->json_counters) {
 	  // state transition - reset seq no
 	  sfl_poller_resetCountersSeqNo(application->poller);
 	  application->json_counters = json_ctrs;
 	}
-	
+
 	if(!json_ctrs) {
 	  // The application is not sending counters, so send the synthesized
 	  // app_operations counter block that we have been maintaining.
@@ -155,7 +154,7 @@ extern "C" {
     _________________      addApplication       __________________
     -----------------___________________________------------------
   */
-  
+
   static uint32_t nextApplicationDSIndex = 0;
   static uint32_t service_port_clash = 0;
 #define HSP_SERVICE_PORT_CLASH_WARNINGS 3
@@ -219,7 +218,7 @@ extern "C" {
       sfl_sampler_set_sFlowFsPacketSamplingRate(aa->sampler, sampling_n);
       sfl_sampler_set_sFlowFsReceiver(aa->sampler, HSP_SFLOW_RECEIVER_INDEX);
     }
-    
+
     return aa;
   }
 
@@ -250,7 +249,7 @@ extern "C" {
     if(aa) {
       // add to end of timeoutQ
       UTQ_ADD_TAIL(mdata->timeoutQ, aa);
-      
+
       // make sure the application wasn't already instantiated with another servicePort (or with no servicePort)
       // This is just a warning,  though.  After all, things do change sometimes.
       if(servicePort != aa->servicePort) {
@@ -261,7 +260,7 @@ extern "C" {
 		servicePort);
 	}
       }
-      
+
       // check in case the configuration changed since the last time we looked
       // could move this to agentCB_getCounters(), but the test is not expensive
       // so doing it for every sample seems OK... and smoother than changing them
@@ -279,8 +278,7 @@ extern "C" {
     }
 
     return aa;
-  }      
-
+  }
 
   /*_________________---------------------------__________________
     _________________   json_app_timeout_check  __________________
@@ -319,7 +317,6 @@ extern "C" {
       my_free(aa);
     }
   }
-  
 
   /*_________________---------------------------__________________
     _________________       logJSON             __________________
@@ -332,7 +329,6 @@ extern "C" {
     myLog(LOG_INFO, "%s json=<%s>", msg, str);
     my_free(str);
   }
-
 
   /*_________________---------------------------__________________
     _________________     sendAppSample         __________________
@@ -352,7 +348,7 @@ extern "C" {
     else {
       fs.output = SFL_INTERNAL_INTERFACE;
     }
-    
+
     SFLFlow_sample_element appElem = { 0 };
     appElem.tag = SFLFLOW_APP;
     appElem.flowType.app.context.application.str = app->application;
@@ -396,21 +392,20 @@ extern "C" {
       targetElem.flowType.actor.actor.len = my_strnlen(actor_tgt, SFLAPP_MAX_ACTOR_LEN);
       SFLADD_ELEMENT(&fs, &targetElem);
     }
-      
+
     SFLFlow_sample_element ssockElem4 = { 0 };
     if(soc4) {
       ssockElem4.tag = SFLFLOW_EX_SOCKET4;
       ssockElem4.flowType.socket4 = *soc4;
       SFLADD_ELEMENT(&fs, &ssockElem4);
     }
-      
+
     SFLFlow_sample_element ssockElem6 = { 0 };
     if(soc6) {
       ssockElem6.tag = SFLFLOW_EX_SOCKET6;
       ssockElem6.flowType.socket6 = *soc6;
       SFLADD_ELEMENT(&fs, &ssockElem6);
     }
-
 
     // sample_pool
     app->sampler->samplePool += sampling_n;
@@ -422,7 +417,6 @@ extern "C" {
       sfl_sampler_writeFlowSample(app->sampler, &fs);
     }
   }
-
 
   /*_________________---------------------------__________________
     _________________      readJSON_flowSample  __________________
@@ -440,7 +434,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     cJSON *as_client = cJSON_GetObjectItem(fs, "client");
     uint32_t sampling_n = json_uint32(fs, "sampling_rate");
     if(sampling_n == 0) sampling_n = 1;
-    
+
     if(app) {
       HSPApplication *application = getApplication(mod, app->valuestring, service_port);
       if(application) {
@@ -457,13 +451,13 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	      status = SFLAPP_OTHER;
 	    }
 	  }
-	
+
 	  // update my version of the counters - even if we are not going to send them
 	  // because the application is sending them anyway.  It will be a good cross-check
 	  int ii = (uint)status;
 	  uint32_t *errorCounterArray = &application->counters.counterBlock.app.status_OK;
 	  errorCounterArray[ii] += sampling_n;
-	
+
 	  // decide if we are going to sample this transaction, based
 	  // on the ratio of sampling_n to the configured sampling rate
 	  // in the sampler.
@@ -497,7 +491,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	      cJSON *p_attrib = cJSON_GetObjectItem(parent_context, "attributes");
 	      if(p_attrib) parent_attributes = p_attrib->valuestring;
 	    }
-	  
+
 	    // optional fields: actors
 	    char *actor_initiator = NULL;
 	    char *actor_target = NULL;
@@ -613,7 +607,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	  sfl_poller_resetCountersSeqNo(application->poller);
 	  application->json_ops_counters = json_ops;
 	}
-	  
+
 	if(json_ops) {
 	  c_ops.tag = SFLCOUNTERS_APP;
 	  c_ops.counterBlock.app.application.str = app_name->valuestring;
@@ -689,7 +683,6 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     int cursor;
     uint32_t xdr[SFL_MAX_DATAGRAM_SIZE >> 2];
   } XDRBuf;
-
 
   static void xdr_init(XDRBuf *buf) {
     buf->cursor = 0;
@@ -904,20 +897,20 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     xdr_enc_str(&buf, dsname, dsname_len);
     uint32_t *fstart = xdr_ptr(&buf);
     xdr_enc_int32(&buf, 0); // will be num fields
-    
+
     for(cJSON *rtm = rtmetric->child; rtm; rtm = rtm->next) {
       // only want named objects now
       if(rtm->string == NULL ||
 	 rtm->type != cJSON_Object) {
 	continue;
       }
-      
+
       uint32_t mname_len = rtmetric_len_ok(rtm->string);
       if(mname_len == 0) {
 	myDebug(1, "invalid rtmetric key: <%s>", rtm->string);
 	return; // bail on bad key
       }
-      
+
       cJSON *field = cJSON_GetObjectItem(rtm, "value");
       uint32_t field_len = sizeof(double);
 
@@ -1079,7 +1072,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
       }
     }
   */
-  
+
   static void readJSON_rtflow(EVMod *mod, cJSON *rtflow) {
     // HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -1088,7 +1081,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     SFLReceiver *receiver = sp->agent->receivers;
     if(receiver == NULL)
       return;
-    
+
     XDRBuf buf;
     xdr_init(&buf);
     uint32_t sampling_rate = 1;
@@ -1142,7 +1135,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	 rtf->type != cJSON_Object) {
 	continue;
       }
-      
+
       uint32_t fname_len = rtmetric_len_ok(rtf->string);
       if(fname_len == 0) {
 	myDebug(1, "invalid rtflow key: <%s>", rtf->string);
@@ -1202,20 +1195,20 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     -----------------___________________________------------------
   */
 
-  static int readJSON(EVMod *mod, EVBus *bus, int soc, void *data)
+  static void readJSON(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
     if(sp->sFlowSettings == NULL) {
       // config was turned off
-      return 0;
+      return;
     }
     int batch = 0;
-    if(soc) {
+    if(sock->fd) {
       for( ; batch < HSP_READJSON_BATCH; batch++) {
 	char buf[HSP_MAX_JSON_MSG_BYTES];
 	// use read() so that it works for both UDP and FIFO inputs
-	int len = read(soc, buf, HSP_MAX_JSON_MSG_BYTES);
+	int len = read(sock->fd, buf, HSP_MAX_JSON_MSG_BYTES);
 	if(len <= 0) break;
 	myDebug(2, "got JSON msg: %u bytes", len);
 	cJSON *top = cJSON_Parse(buf);
@@ -1233,7 +1226,6 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	}
       }
     }
-    return batch;
   }
 
   /*_________________---------------------------__________________
@@ -1310,4 +1302,3 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

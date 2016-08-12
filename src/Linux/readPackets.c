@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -23,15 +22,15 @@ extern "C" {
 
     // device name was copied as userData
     char *devName = (char *)poller->userData;
-    
+
     if(devName) {
       // look up the adaptor objects
       SFLAdaptor *adaptor = adaptorByName(sp, devName);
       if(adaptor) {
-	
+
 	// make sure the counters are up to the second
 	updateNioCounters(sp, adaptor);
-	
+
 	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
 
 	// see if we were able to discern multicast and broadcast counters
@@ -89,7 +88,7 @@ extern "C" {
 	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, Discards);
 	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, Errors);
 	}
-	  
+
 	// add optional interface name struct
 	SFLCounters_sample_element pn_elem = { 0 };
 	pn_elem.tag = SFLCOUNTERS_PORTNAME;
@@ -116,7 +115,7 @@ extern "C" {
 	  sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
 	  SFLADD_ELEMENT(cs, &sfp_elem);
 	}
-	
+
 	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(poller, cs);
 	}
@@ -142,12 +141,9 @@ extern "C" {
     if(adaptorNIO->poller == NULL) {
       SFLDataSource_instance dsi;
       SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
-      uint32_t pollingInterval = sp->sFlowSettings ?
-	sp->sFlowSettings->pollingInterval :
-	SFL_DEFAULT_POLLING_INTERVAL;
       SEMLOCK_DO(sp->sync_agent) {
 	adaptorNIO->poller = sfl_agent_addPoller(sp->agent, &dsi, sp, agentCB_getCounters_interface_request);
-	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, pollingInterval);
+	sfl_poller_set_sFlowCpInterval(adaptorNIO->poller, sp->actualPollingInterval);
 	sfl_poller_set_sFlowCpReceiver(adaptorNIO->poller, HSP_SFLOW_RECEIVER_INDEX);
 	// remember the device name to make the lookups easier later.
 	// Don't want to point directly to the SFLAdaptor or SFLAdaptorNIO object
@@ -241,7 +237,7 @@ extern "C" {
 	ad_out = ad_out_global;
       }
     }
-	
+
     // For a MAC that we don't recognize,  we will assume
     // that it it's going out on the physical NIC.  That may
     // be the device that we tapped here (bpfs->device) or
@@ -255,7 +251,7 @@ extern "C" {
     // with a container or VM.  When readInterfaces() finds
     // a bridge it could try to establish the "external"
     // device for that bridge.
-    
+
     if(!bridgeModel) {
       // model this as a standalone host, so that
       // packets go to and from the "internal" interface.
@@ -272,7 +268,7 @@ extern "C" {
     }
 
     SFL_FLOW_SAMPLE_TYPE fs = { 0 };
- 
+
     // set the ingress and egress ifIndex numbers.
     // Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
     fs.input = ad_in ? ad_in->ifIndex : (internal_in ? SFL_INTERNAL_INTERFACE : 0);
@@ -322,7 +318,7 @@ extern "C" {
       }
 
       SFLSampler *sampler = getSampler(sp, sampler_dev);
-		  
+
       if(sampler) {
 	SFLFlow_sample_element hdrElem = { 0 };
 	hdrElem.tag = SFLFLOW_HEADER;
@@ -330,9 +326,9 @@ extern "C" {
 	uint32_t maxHdrLen = sampler->sFlowFsMaximumHeaderSize;
 	hdrElem.flowType.header.frame_length = pkt_len + FCS_bytes;
 	hdrElem.flowType.header.stripped = FCS_bytes;
-		    
+
 	u_char hdr[HSP_MAX_HEADER_BYTES];
-	
+
 	uint64_t mac_hdr_test=0;
 	if(mac_hdr && mac_len > 8) {
 	  memcpy(&mac_hdr_test, mac_hdr, 8);
@@ -369,7 +365,7 @@ extern "C" {
 	    hdrElem.flowType.header.frame_length += mac_len;
 	  }
 	}
-		    
+
 	SFLADD_ELEMENT(&fs, &hdrElem);
 	// submit the actual sampling rate so it goes out with the sFlow feed
 	// otherwise the sampler object would fill in his own (sub-sampling) rate.
@@ -381,13 +377,13 @@ extern "C" {
 	  actualSamplingRate = samplerNIO->sampling_n;
 	}
 	fs.sampling_rate = actualSamplingRate;
-		    
+
 	// estimate the sample pool from the samples.  Could maybe do this
 	// above with the (possibly more granular) ulogSamplingRate, but then
 	// we would have to look up the sampler object every time, which
 	// might be too expensive in the case where ulogSamplingRate==1.
 	sampler->samplePool += actualSamplingRate;
-		    
+
 	// accumulate any dropped-samples we detected against whichever sampler
 	// sends the next sample. This is not perfect,  but is likely to accrue
 	// drops against the point whose sampling-rate needs to be adjusted.
@@ -407,7 +403,7 @@ extern "C" {
     polling even if they are not sampling any packets (yet).  This
     will be called whenever the interfaces list is refreshed.
   */
-  
+
   int configSwitchPorts(HSP *sp)
   {
     // could do a mark-and-sweep here in case some ports have been
@@ -435,6 +431,13 @@ extern "C" {
       }
     }
 
+    // may want to cluster switch port polling into
+    // batches that will go out together -- mostly
+    // used when reading counters means reading all
+    // counters and it's expensive to do it.
+    if(sp->syncPollingInterval)
+      syncPolling(sp);
+
     // make sure slave ports are on the same
     // polling schedule as their bond master.
     syncBondPolling(sp);
@@ -442,8 +445,6 @@ extern "C" {
     return count;
   }
 
-  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

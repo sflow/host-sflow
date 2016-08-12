@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -88,14 +87,14 @@ extern "C" {
     myDebug(1, "state -> %s", SFVSStateNames[state]);
     mdata->state = state;
   }
-      
+
   /*_________________---------------------------__________________
     _________________      formatTargets        __________________
     -----------------___________________________------------------
     turn the collectors list into the targets string array and
     formatted targetStr.
   */
-  
+
   static void formatTargets(EVMod *mod) {
     HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
     strArrayReset(mdata->config.targets);
@@ -103,7 +102,7 @@ extern "C" {
       char target[SFVS_MAX_LINELEN];
       sprintf(target, "%s:%u",
 	      mdata->config.collectors[i].ip,
-	      mdata->config.collectors[i].port); 
+	      mdata->config.collectors[i].port);
       strArrayAdd(mdata->config.targets, target);
     }
     strArraySort(mdata->config.targets);
@@ -111,7 +110,6 @@ extern "C" {
     mdata->config.targetStr = strArrayStr(mdata->config.targets, "[", "\"", ", ", "]");
   }
 
-      
   /*_________________---------------------------__________________
     _________________      resetConfig          __________________
     -----------------___________________________------------------
@@ -128,7 +126,7 @@ extern "C" {
     strArrayReset(cfg->targets);
     setStr(&cfg->targetStr, NULL);
   }
-      
+
   /*_________________---------------------------__________________
     _________________      readConfig           __________________
     -----------------___________________________------------------
@@ -141,14 +139,14 @@ extern "C" {
   static bool readConfig(EVMod *mod)  {
     HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    
+
     resetConfig(&mdata->config);
-    
+
     if(sp->sFlowSettings == NULL)
       return NO;
-    
+
     mdata->config.sampling_n = sp->sFlowSettings->samplingRate;
-    mdata->config.polling_secs = sp->sFlowSettings->pollingInterval;
+    mdata->config.polling_secs = sp->actualPollingInterval;
     mdata->config.header_bytes = sp->sFlowSettings->headerBytes;
     char ipbuf[51];
     SFLAddress_print(&sp->agentIP, ipbuf, 50);
@@ -170,7 +168,7 @@ extern "C" {
     formatTargets(mod);
     return YES;
   }
-      
+
   /*_________________---------------------------__________________
     _________________     stripQuotes           __________________
     -----------------___________________________------------------
@@ -189,7 +187,7 @@ extern "C" {
     }
     return str;
   }
-    
+
   /*_________________---------------------------__________________
     _________________     syncOVS - utils       __________________
     -----------------___________________________------------------
@@ -465,7 +463,7 @@ extern "C" {
     }
     return NO; // only want the first line
   }
-  
+
   /*_________________---------------------------__________________
     _________________        syncOVS            __________________
     -----------------___________________________------------------
@@ -487,7 +485,7 @@ extern "C" {
     mdata->usingAtVar = NO;
     myExec((void *)mod, version_cmd, readVersion, line, SFVS_MAX_LINELEN, NULL);
     // adapt if OVS is upgraded under our feet
-    if(mdata->ovs10 == NO) mdata->useAtVar = YES; 
+    if(mdata->ovs10 == NO) mdata->useAtVar = YES;
     if(mdata->config.error
        || mdata->config.num_collectors == 0
        || (mdata->config.sampling_n == 0 && mdata->config.polling_secs == 0)) {
@@ -571,19 +569,19 @@ extern "C" {
     }
 
     switch(mdata->state) {
-      
+
     case SFVSSTATE_READCONFIG:
       if(readConfig(mod)) setState(mod, SFVSSTATE_SYNC);
       else setState(mod, SFVSSTATE_READCONFIG_FAILED);
       break;
-      
+
     case SFVSSTATE_SYNC:
       {
 	if(syncOVS(mod)) setState(mod, SFVSSTATE_SYNC_OK);
 	else setState(mod, SFVSSTATE_SYNC_FAILED);
       }
       break;
-      
+
     case SFVSSTATE_INIT:
     case SFVSSTATE_READCONFIG_FAILED:
     case SFVSSTATE_SYNC_SEARCH:
@@ -595,7 +593,7 @@ extern "C" {
       break;
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -621,4 +619,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

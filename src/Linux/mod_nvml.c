@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -78,13 +77,13 @@ extern "C" {
 
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________     readNvmlCounters      __________________
     -----------------___________________________------------------
     Called to get latest counters
   */
-  
+
   int readNvmlCounters(EVMod *mod, SFLHost_gpu_nvml *nvml) {
     HSP_mod_NVML *mdata = (HSP_mod_NVML *)mod->data;
    unsigned int i;
@@ -154,7 +153,7 @@ extern "C" {
   }
 
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
+    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_NVML *mdata = (HSP_mod_NVML *)mod->data;
     memset(&mdata->nvmlElem, 0, sizeof(mdata->nvmlElem));
     mdata->nvmlElem.tag = SFLCOUNTERS_HOST_GPU_NVML;
@@ -190,4 +189,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

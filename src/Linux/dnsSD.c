@@ -12,7 +12,7 @@ extern "C" {
 
 #define HSP_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
 #define HSP_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
-    
+
   /*________________---------------------------__________________
     ________________       dnsSD_Request       __________________
     ----------------___________________________------------------
@@ -108,7 +108,7 @@ extern "C" {
 	myLog(LOG_ERR,"expected t=%d,c=%d, got t=%d,c=%d", rtype, C_IN, res_typ, res_cls);
 	return -1;
       }
-      
+
       switch(rtype) {
       case T_SRV:
 	{
@@ -119,26 +119,26 @@ extern "C" {
 	  uint32_t res_prt = (x[4] << 8)  | x[5];
 	  x += 6;
 	  res_payload -= 6;
-	  
+
 	  // still got room for an FQDN?
 	  if((endp - x) < HSP_MIN_DNAME) {
 	    myLog(LOG_ERR,"no room for target name -- only %d bytes left", (endp - x));
 	    return -1;
 	  }
-	  
+
 	  char fqdn[MAXDNAME];
 	  int ans_len = dn_expand(buf, endp, x, fqdn, MAXDNAME);
 	  if(ans_len == -1) {
 	    myLog(LOG_ERR,"dn_expand() failed");
 	    return -1;
 	  }
-	  
+
 	  // cross-check
 	  if(ans_len != res_payload) {
 	    myLog(LOG_ERR,"target name len cross-check failed");
 	    return -1;
 	  }
-	  
+
 	  if(ans_len < HSP_MIN_DNAME) {
 	    // just ignore this one -- e.g. might just be "."
 	  }
@@ -179,7 +179,7 @@ extern "C" {
 	      int ch = x[i];
 	      if(isalnum(ch)) printf("%c", ch);
 	      else printf("{%02x}", ch);
-	    } 
+	    }
 	    printf("\n");
 	  }
 
@@ -210,7 +210,7 @@ extern "C" {
     }
     return answer_count;
   }
-    
+
   /*________________---------------------------__________________
     ________________      dnsSD                __________________
     ----------------___________________________------------------
@@ -230,4 +230,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

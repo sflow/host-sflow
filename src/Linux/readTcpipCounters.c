@@ -42,12 +42,12 @@ extern "C" {
     _________________    readTcpipCounters      __________________
     -----------------___________________________------------------
   */
-  
+
   int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp) {
     int count = 0;
     FILE *procFile;
     char line[MAX_PROC_LINE_CHARS];
-    
+
     procFile= fopen("/proc/net/snmp", "r");
     if(procFile) {
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
@@ -75,4 +75,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

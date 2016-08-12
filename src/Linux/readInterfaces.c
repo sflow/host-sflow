@@ -22,7 +22,6 @@ extern "C" {
   // (there can be more than this - fgets will chop for us)
 #define MAX_PROC_LINE_CHARS 160
 
-
 /*________________---------------------------__________________
   ________________      readVLANs            __________________
   ----------------___________________________------------------
@@ -73,7 +72,7 @@ extern "C" {
 						    adaptorNIO->loopback);
     }
   }
-  
+
 /*________________---------------------------__________________
   ________________  readIPv6Addresses        __________________
   ----------------___________________________------------------
@@ -196,7 +195,6 @@ extern "C" {
     return 0;
   }
 
-
 #ifdef ETHTOOL_GLINKSETTINGS
 
 /*________________-----------------------------__________________
@@ -222,7 +220,6 @@ extern "C" {
     } link_modes;
   };
 
-  
   static bool ethtool_get_GLINKSETTINGS(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
     // Try to get the ethtool info for this interface so we can infer the
@@ -233,7 +230,7 @@ extern "C" {
       struct ethtool_link_settings req;
       __u32 link_mode_data[3 * ETHTOOL_LINK_MODE_MASK_MAX_KERNEL_NU32];
     } ecmd;
-    
+
     /* Handshake with kernel to determine number of words for link
      * mode bitmaps. When requested number of bitmap words is not
      * the one expected by kernel, the latter returns the integer
@@ -260,7 +257,7 @@ extern "C" {
       if (err < 0) {
 	return NO;
       }
-      
+
       uint32_t direction = ecmd.req.duplex ? 1 : 2;
       if(direction != adaptor->ifDirection) {
 	changed = YES;
@@ -276,14 +273,14 @@ extern "C" {
         if(adaptor->ifSpeed != 0) {
           changed = YES;
         }
-        adaptor->ifSpeed = 0;
+        setAdaptorSpeed(adaptor, 0);
       }
       else {
         uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
         if(adaptor->ifSpeed != ifSpeed_bps) {
           changed = YES;
         }
-        adaptor->ifSpeed = ifSpeed_bps;
+        setAdaptorSpeed(adaptor, ifSpeed_bps);
       }
     }
     return changed;
@@ -295,8 +292,8 @@ extern "C" {
   ________________  ethtool_get_GSET        __________________
   ----------------__________________________------------------
 */
-  
-  static bool ethtool_get_GSET(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+
+  static bool ethtool_get_GSET(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
@@ -320,19 +317,19 @@ extern "C" {
 	if(adaptor->ifSpeed != 0) {
 	  changed = YES;
 	}
-	adaptor->ifSpeed = 0;
+	setAdaptorSpeed(sp, adaptor, 0);
       }
       else {
 	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
 	if(adaptor->ifSpeed != ifSpeed_bps) {
 	  changed = YES;
 	}
-	adaptor->ifSpeed = ifSpeed_bps;
+	setAdaptorSpeed(sp, adaptor, ifSpeed_bps);
       }
     }
     return changed;
   }
-      
+
 #if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO )
 
 /*________________---------------------------__________________
@@ -346,10 +343,10 @@ extern "C" {
 #ifdef HSP_TEST_QSFP
     adaptorNIO->modinfo_type = ETH_MODULE_SFF_8436;
     adaptorNIO->modinfo_len = ETH_MODULE_SFF_8436_LEN;
-    adaptorNIO->modinfo_tested = YES;
+    adaptorNIO->ethtool_GMODULEINFO = NO;
 #endif
-    if(!adaptorNIO->modinfo_tested) {
-      adaptorNIO->modinfo_tested = YES;
+    if(adaptorNIO->ethtool_GMODULEINFO) {
+      adaptorNIO->ethtool_GMODULEINFO = NO;
       struct ethtool_modinfo modinfo = { 0 };
       modinfo.cmd = ETHTOOL_GMODULEINFO;
       ifr->ifr_data = (char *)&modinfo;
@@ -371,7 +368,6 @@ extern "C" {
     return NO;
   }
 #endif /* HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO */
-
 
 /*________________---------------------------__________________
   ________________  ethtool_get_GDRVINFO     __________________
@@ -408,7 +404,6 @@ extern "C" {
     }
     return NO;
   }
-
 
 /*________________---------------------------__________________
   ________________  ethtool_get_GSTATS       __________________
@@ -471,7 +466,7 @@ extern "C" {
 	      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
 		adaptor->peer_ifIndex = et_stats->data[ii];
 		UTHashAdd(sp->adaptorsByPeerIndex, adaptor);
-		myDebug(1, "Interface %s (ifIndex=%u) has peer_ifindex=%u", 
+		myDebug(1, "Interface %s (ifIndex=%u) has peer_ifindex=%u",
 			adaptor->deviceName,
 			adaptor->ifIndex,
 			adaptor->peer_ifIndex);
@@ -483,7 +478,6 @@ extern "C" {
     }
   }
 
-
 /*________________---------------------------__________________
   ________________  read_ethtool_info        __________________
   ----------------___________________________------------------
@@ -492,33 +486,43 @@ extern "C" {
   static bool read_ethtool_info(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
     bool changed = NO;
-    
-    changed |= ethtool_get_GDRVINFO(ifr, fd, adaptor);
-    
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+
+    if(nio->ethtool_GDRVINFO) {
+      changed |= ethtool_get_GDRVINFO(ifr, fd, adaptor);
+    }
+
 #if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO )
-    changed |= ethtool_get_GMODULEINFO(ifr, fd, adaptor);
+    if(nio->ethtool_GMODULEINFO) {
+      changed |= ethtool_get_GMODULEINFO(ifr, fd, adaptor);
+    }
 #endif
 
 #ifdef ETHTOOL_GLINKSETTINGS
-    changed |= ethtool_get_GLINKSETTINGS(ifr, fd, adaptor);
+    if(nio->ethtool_GLINKSETTINGS) {
+      changed |= ethtool_get_GLINKSETTINGS(ifr, fd, adaptor);
+    }
 #else
-    changed |= ethtool_get_GSET(ifr, fd, adaptor);
+    if(nio->ethtool_GSET) {
+      changed |= ethtool_get_GSET(sp, ifr, fd, adaptor);
+    }
 #endif
 
-    ethtool_get_GSTATS(sp, ifr, fd, adaptor);
+    if(nio->ethtool_GSTATS) {
+      ethtool_get_GSTATS(sp, ifr, fd, adaptor);
+    }
     return changed;
   }
-
 
 /*________________---------------------------__________________
   ________________      readInterfaces       __________________
   ----------------___________________________------------------
 */
 
-  int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed)
-{
+  int readInterfaces(HSP *sp, bool full_discovery,  uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed)
+  {
   uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
-  
+
   { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
@@ -528,7 +532,7 @@ extern "C" {
   // a domain and collect the virtual interfaces for that domain in a
   // similar way.  It looks like we do that by just parsing the numbers
   // out of the interface name.
-  
+
   int fd = socket (PF_INET, SOCK_DGRAM, 0);
   if (fd < 0) {
     fprintf (stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
@@ -553,9 +557,9 @@ extern "C" {
       if(devNameLen == 0 || devNameLen >= IFNAMSIZ) continue;
       // we set the ifr_name field to make our queries
       strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
-      
+
       myDebug(3, "reading interface %s", devName);
-      
+
       // Get the flags for this interface
       if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
 	myLog(LOG_ERR, "device %s Get SIOCGIFFLAGS failed : %s",
@@ -571,12 +575,12 @@ extern "C" {
       int bond_slave = (ifr.ifr_flags & IFF_SLAVE) ? YES : NO;
       //int hasBroadcast = (ifr.ifr_flags & IFF_BROADCAST);
       //int pointToPoint = (ifr.ifr_flags & IFF_POINTOPOINT);
-      
+
       // used to ignore loopback interfaces here, and interfaces
       // that are currently marked down, but now those are
       // filtered at the point where we roll together the
       // counters, or build the list for export
-      
+
       // Try and get the MAC Address for this interface
       u_char macBytes[6];
       int gotMac = NO;
@@ -589,7 +593,7 @@ extern "C" {
 	memcpy(macBytes, (u_char *)&ifr.ifr_hwaddr.sa_data, 6);
 	gotMac = YES;
       }
-      
+
       // Try and get the ifIndex for this interface
       uint32_t ifIndex = 0;
       if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
@@ -601,46 +605,35 @@ extern "C" {
       else {
 	ifIndex = ifr.ifr_ifindex;
       }
-      
+
       // for now just assume that each interface has only one MAC.  It's not clear how we can
       // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
       // find or create a new "adaptor" entry
       SFLAdaptor *adaptor = nioAdaptorNew(devName, (gotMac ? macBytes : NULL), ifIndex);
+
+      bool addAdaptorToHT = YES;
       SFLAdaptor *existing = adaptorByName(sp, devName);
-      if(existing) {
-	if(adaptorEqual(adaptor, existing)) {
-	  // no change - use existing object
-	  adaptorFree(adaptor);
-	  adaptor = existing;
-	}
-	else {
-	  // there was a change - we'll put in the new one
-	  UTHashDel(sp->adaptorsByName, existing);
-	  adaptorFree(existing);
-	  existing = NULL;
-	}
+      if(existing
+	 && adaptorEqual(adaptor, existing)) {
+	// no change - use existing object
+	adaptorFree(adaptor);
+	adaptor = existing;
+	addAdaptorToHT = NO;
       }
-      if(existing == NULL) {
-	ad_added++;
-	UTHashAdd(sp->adaptorsByName, adaptor);
-	// add to "all namespaces" collections too
-	if(gotMac) UTHashAdd(sp->adaptorsByMac, adaptor);
-	if(ifIndex) UTHashAdd(sp->adaptorsByIndex, adaptor);
-      }
-      
+
       // clear the mark so we don't free it below
       adaptor->marked = NO;
-      
+
       // this flag might belong in the adaptorNIO struct
       adaptor->promiscuous = promisc;
-      
+
       // remember some useful flags in the userData structure
       HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
       if(adaptorNIO->up != up) {
 	if(up) {
 	  ad_cameup++;
 	  // trigger test for module eeprom data
-	  adaptorNIO->modinfo_tested = NO;
+	  adaptorNIO->ethtool_GMODULEINFO = YES;
 	}
 	else ad_wentdown++;
 	myDebug(1, "adaptor %s %s",
@@ -651,8 +644,7 @@ extern "C" {
       adaptorNIO->loopback = loopback;
       adaptorNIO->bond_master = bond_master;
       adaptorNIO->bond_slave = bond_slave;
-      adaptorNIO->vlan = HSP_VLAN_ALL; // may be modified below
-      
+
       // Try to get the IP address for this interface
       if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
 	// only complain about this if we are debugging
@@ -674,15 +666,37 @@ extern "C" {
 	// IP6 addr is now s->sin6_addr;
 	//}
       }
-      
-      // use ethtool to get info about direction/speed and more
-      if(read_ethtool_info(sp, &ifr, fd, adaptor) == YES) {
-	ad_changed++;
+
+      if(full_discovery) {
+	// allow modules to supply additional info on this adaptor
+	// (and influence ethtool data-gathering).  We broadcast this
+	// but it only really makes sense to receive it on the POLL_BUS
+	EVEventTxAll(sp->rootModule, HSPEVENT_INTF_READ, &adaptor, sizeof(adaptor));
+	// use ethtool to get info about direction/speed and more
+	if(read_ethtool_info(sp, &ifr, fd, adaptor) == YES) {
+	  ad_changed++;
+	}
       }
+
+      if(addAdaptorToHT) {
+	SFLAdaptor *replaced = UTHashAdd(sp->adaptorsByName, adaptor);
+	ad_added++;
+	// add to "all namespaces" collections too
+	if(gotMac) UTHashAdd(sp->adaptorsByMac, adaptor);
+	if(ifIndex) UTHashAdd(sp->adaptorsByIndex, adaptor);
+	// if we replaced one, make sure it is completely removed
+	if(replaced) {
+	  // TODO: is there still a race here? What if
+	  // packetBus module is still using this pointer?
+	  // Need RCU?
+	  deleteAdaptor(sp, replaced, YES);
+	}
+      }
+
     }
     fclose(procFile);
   }
-  
+
   close (fd);
 
   // now remove and free any that are still marked
@@ -711,7 +725,6 @@ extern "C" {
 
   return sp->adaptorsByName->entries;
 }
-
 
 #if defined(__cplusplus)
 } /* extern "C" */

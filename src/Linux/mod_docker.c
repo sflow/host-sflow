@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -24,7 +23,6 @@ extern "C" {
 
 #include "cJSON.h"
 
-
   typedef struct _HSPVMState_DOCKER {
     HSPVMState vm; // superclass: must come first
     char *id;
@@ -35,7 +33,7 @@ extern "C" {
     uint32_t marked:1;
     uint64_t memoryLimit;
   } HSPVMState_DOCKER;
-  
+
 #define HSP_DOCKER_CMD "/usr/bin/docker"
 #define HSP_NETNS_DIR "/var/run/netns"
 #define HSP_IP_CMD "/usr/sbin/ip"
@@ -59,7 +57,7 @@ extern "C" {
     _________________     readCgroupCounters    __________________
     -----------------___________________________------------------
   */
-  
+
   static int readCgroupCounters(char *cgroup, char *longId, char *fname, int nvals, HSPNameVal *nameVals, int multi) {
     int found = 0;
 
@@ -109,7 +107,7 @@ extern "C" {
     _________________  readContainerCounters    __________________
     -----------------___________________________------------------
   */
-  
+
   static int readContainerCounters(char *cgroup, char *longId, char *fname, int nvals, HSPNameVal *nameVals) {
     return readCgroupCounters(cgroup, longId, fname, nvals, nameVals, 0);
   }
@@ -120,7 +118,7 @@ extern "C" {
     Variant where the stats file has per-device numbers that need to be summed.
     The device id is assumed to be the first space-separated token on each line.
 */
-  
+
   static int readContainerCountersMulti(char *cgroup, char *longId, char *fname, int nvals, HSPNameVal *nameVals) {
     return readCgroupCounters(cgroup, longId, fname, nvals, nameVals, 1);
   }
@@ -128,7 +126,7 @@ extern "C" {
 /*________________---------------------------__________________
   ________________   containerLinkCB         __________________
   ----------------___________________________------------------
-  
+
 expecting lines of the form:
 VNIC: <ifindex> <device> <mac>
 */
@@ -172,7 +170,7 @@ VNIC: <ifindex> <device> <mac>
 #ifndef CLONE_NEWNET
 #define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
 #endif
-  
+
 #define MY_SETNS(fd, nstype) syscall(__NR_setns, fd, nstype)
 #else
 #define MY_SETNS(fd, nstype) setns(fd, nstype)
@@ -201,7 +199,7 @@ VNIC: <ifindex> <device> <mac>
       dup2(pfd[1], 1); // stdout -> write-end
       dup2(pfd[1], 2); // stderr -> write-end
       close(pfd[1]);
-      
+
       // open /proc/<nspid>/ns/net
       char topath[HSP_DOCKER_MAX_FNAME_LEN+1];
       snprintf(topath, HSP_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
@@ -210,7 +208,7 @@ VNIC: <ifindex> <device> <mac>
 	fprintf(stderr, "cannot open %s : %s", topath, strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      
+
       /* set network namespace
 	 CLONE_NEWNET means nsfd must refer to a network namespace
       */
@@ -218,7 +216,7 @@ VNIC: <ifindex> <device> <mac>
 	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      
+
       /* From "man 2 unshare":  This flag has the same effect as the clone(2)
 	 CLONE_NEWNS flag. Unshare the mount namespace, so that the calling
 	 process has a private copy of its namespace which is not shared with
@@ -269,7 +267,7 @@ VNIC: <ifindex> <device> <mac>
 		}
 		else {
 		  int ifIndex = ifr.ifr_ifindex;
-		  
+
 		  // Get the MAC Address for this interface
 		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
 		    myDebug(1, "device %s Get SIOCGIFHWADDR failed : %s",
@@ -291,7 +289,7 @@ VNIC: <ifindex> <device> <mac>
 
       // don't even bother to close file-descriptors,  just bail
       exit(0);
-      
+
     }
     else {
       // in parent
@@ -310,7 +308,6 @@ VNIC: <ifindex> <device> <mac>
 
     return container->vm.interfaces->num_adaptors;
   }
-
 
   static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors, int capacity)
   {
@@ -343,7 +340,7 @@ VNIC: <ifindex> <device> <mac>
 
     HSPVMState_DOCKER *container = (HSPVMState_DOCKER *)poller->userData;
     HSPVMState *vm = (HSPVMState *)&container->vm;
-    
+
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
@@ -351,21 +348,21 @@ VNIC: <ifindex> <device> <mac>
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, vm->uuid, 16);
- 
+
     // for containers we can show the same OS attributes as the parent
     hidElem.counterBlock.host_hid.machine_type = sp->machine_type;
     hidElem.counterBlock.host_hid.os_name = SFLOS_linux;
     hidElem.counterBlock.host_hid.os_release.str = sp->os_release;
     hidElem.counterBlock.host_hid.os_release.len = my_strlen(sp->os_release);
     SFLADD_ELEMENT(cs, &hidElem);
-      
+
     // host parent
     SFLCounters_sample_element parElem = { 0 };
     parElem.tag = SFLCOUNTERS_HOST_PAR;
     parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
     parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
     SFLADD_ELEMENT(cs, &parElem);
-    
+
     // VM Net I/O
     SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
@@ -381,7 +378,7 @@ VNIC: <ifindex> <device> <mac>
       readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, &peerAdaptors);
       SFLADD_ELEMENT(cs, &nioElem);
     }
-      
+
     // VM cpu counters [ref xenstat.c]
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
@@ -394,15 +391,15 @@ VNIC: <ifindex> <device> <mac>
       uint64_t cpu_total = 0;
       if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
       if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
-      
-      cpuElem.counterBlock.host_vrt_cpu.state = container->running ? 
+
+      cpuElem.counterBlock.host_vrt_cpu.state = container->running ?
 	SFL_VIR_DOMAIN_RUNNING :
 	SFL_VIR_DOMAIN_PAUSED;
       cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
       cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
       SFLADD_ELEMENT(cs, &cpuElem);
     }
-      
+
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
     HSPNameVal memVals[] = {
@@ -447,13 +444,13 @@ VNIC: <ifindex> <device> <mac>
 	dskElem.counterBlock.host_vrt_dsk.wr_bytes += dskValsB[1].nv_val64;
       }
     }
-    
+
     HSPNameVal dskValsO[] = {
       { "Read",0,0 },
       { "Write",0,0},
       { NULL,0,0},
     };
-    
+
     if(readContainerCountersMulti("blkio", container->id, "blkio.io_serviced_recursive", 2, dskValsO)) {
       if(dskValsO[0].nv_found) {
 	dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
@@ -481,7 +478,7 @@ VNIC: <ifindex> <device> <mac>
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     UTArrayAdd(mdata->pollActions, poller);
   }
-  
+
   /*_________________---------------------------__________________
     _________________   add and remove VM       __________________
     -----------------___________________________------------------
@@ -499,7 +496,7 @@ VNIC: <ifindex> <device> <mac>
     UTHashDel(mdata->vmsByID, container);
     removeAndFreeVM(mod, &container->vm);
   }
-  
+
   static HSPVMState_DOCKER *getContainer(EVMod *mod, char *id, int create) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     if(id == NULL) return NULL;
@@ -520,7 +517,7 @@ VNIC: <ifindex> <device> <mac>
     }
     return container;
   }
- 
+
   static int dockerInspectCB(void *magic, char *line) {
     // just append it to the string-buffer
     UTStrBuf *inspectBuf = (UTStrBuf *)magic;
@@ -677,12 +674,11 @@ VNIC: <ifindex> <device> <mac>
     }
   }
 
-
   /*_________________---------------------------__________________
     _________________    configVMs              __________________
     -----------------___________________________------------------
   */
-  
+
   static void configVMs(EVMod *mod) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     // mark and sweep
@@ -691,7 +687,7 @@ VNIC: <ifindex> <device> <mac>
     UTHASH_WALK(mdata->vmsByUUID, container) {
       container->vm.marked = YES;
     }
-    
+
     // 2. create new VM pollers, or clear the mark on existing ones
     configVMs_DOCKER(mod);
 
@@ -725,7 +721,7 @@ VNIC: <ifindex> <device> <mac>
   }
 
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
+    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
@@ -733,7 +729,7 @@ VNIC: <ifindex> <device> <mac>
       // if we make kvm and docker mutually exclusive, this check will be unnecessary
       return;
     }
-      
+
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
     mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
@@ -770,4 +766,3 @@ VNIC: <ifindex> <device> <mac>
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

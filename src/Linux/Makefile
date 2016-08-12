@@ -209,7 +209,7 @@ OS10: mod_os10.so
 
 #########  hsflowd  #########
 
-hsflowd: $(OBJS_HSFLOWD)
+hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
 
 #########  modules  #########
@@ -362,6 +362,7 @@ clean:
 .c.o: $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c
 
+util.o: util.c $(HEADERS)
 evbus.o: evbus.c $(HEADERS)
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)

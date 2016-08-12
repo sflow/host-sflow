@@ -1,11 +1,11 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 2.0.1
-Release: 1
+Version: 2.0.2
+Release: 6
 License: http://sflow.net/license.html
 Group: Applications/Internet
 URL: http://sflow.net
-Source0: %{name}-%{version}.tar.gz
+Source0: %{name}-%{version}-%{release}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 %define debug_package %{nil}
 

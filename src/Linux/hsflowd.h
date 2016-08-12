@@ -49,7 +49,8 @@ extern "C" {
   // define these here because we use them to trigger a module load
   // even when the module is not referenced in the config.
 #define HSP_CUMULUS_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
-#define HSP_OS10_SWITCHPORT_CONFIG_PROG "/opt/dell/os10/bin/nas_sflow_cli.py"
+#define HSP_OS10_SWITCHPORT_CONFIG_PROG "/opt/dell/os10/bin/cps_config_sflow"
+#define HSP_OS10_SWITCHPORT_SPEED_PROG "/opt/dell/os10/bin/os10-ethtool"
 
   typedef struct _HSPNameVal {
     char *nv_name;
@@ -181,7 +182,7 @@ extern "C" {
     VMTYPE_XEN,
     VMTYPE_KVM,
     VMTYPE_DOCKER} EnumVMType;
-  
+
   typedef struct _HSPVMState {
     char uuid[16];
     EnumVMType vmType;
@@ -193,7 +194,6 @@ extern "C" {
     UTStringArray *disks;
     SFLPoller *poller;
   } HSPVMState;
-
 
   typedef enum { IPSP_NONE=0,
 		 IPSP_LOOPBACK6,
@@ -234,6 +234,12 @@ extern "C" {
     bool switchPort:1;
     bool vm_or_container:1;
     bool modinfo_tested:1;
+    bool ethtool_GDRVINFO:1;
+    bool ethtool_GMODULEINFO:1;
+    bool ethtool_GLINKSETTINGS:1;
+    bool ethtool_GSET:1;
+    bool ethtool_GSTATS:1;
+    bool changed_speed:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -280,8 +286,6 @@ extern "C" {
     // allow mod_xen to write regex-extracted fields here
     int xen_domid;
     int xen_netid;
-    // OS10
-    int os10_port_id;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -296,28 +300,40 @@ extern "C" {
 #define HSPBUS_PACKET "packet" // pcap,ulog,nflog,json packet processing
 
 // The generic start,tick,tock,final,end events are defined in evbus.h
-#define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // building counter-sample
+#define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // (csample *) building counter-sample
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
-#define HSPEVENT_CONFIG_LINE "config_line"       // ...next config line
-#define HSPEVENT_CONFIG_END "config_end"         // end config lines
+#define HSPEVENT_CONFIG_LINE "config_line"       // (line)...next config line
+#define HSPEVENT_CONFIG_END "config_end"         // (n_servers *) end config lines
+#define HSPEVENT_CONFIG_FIRST "config_first"     // new config [first]
 #define HSPEVENT_CONFIG_CHANGED "config_changed" // new config
 #define HSPEVENT_CONFIG_DONE "config_done"       // after new config
-#define HSPEVENT_INTF_CHANGED "intf_changed"     // interface(s) changed
+#define HSPEVENT_INTF_READ "intf_read"           // (adaptor *) reading interface
+#define HSPEVENT_INTF_SPEED "intf_speed"         // (adaptor *) interface speed change
+#define HSPEVENT_INTF_CHANGED "intf_changed"     // some interface(s) changed
+#define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
 
   typedef struct _HSP {
     char *modulesPath;
     EVMod *rootModule;
     EVBus *pollBus;
 
-    // config settings (used to be separate HSPSFlow object)
+    // agent
     SFLAgent *agent;
-    pthread_mutex_t *sync_agent; // sync access to sFlow agent
+    pthread_mutex_t *sync_agent;
+    // main host poller
     SFLPoller *poller;
+
+    // config settings
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dnsSD;
     HSPSFlowSettings *sFlowSettings_dnsSD_prev;
     HSPSFlowSettings *sFlowSettings;
     char *sFlowSettings_str;
+
+    // resolve actual polling interval
+    uint32_t syncPollingInterval;
+    uint32_t minPollingInterval;
+    uint32_t actualPollingInterval;
 
     // agent/agentIP config results
     uint32_t revisionNo;
@@ -327,7 +343,7 @@ extern "C" {
     bool explicitAgentDevice;
     bool explicitAgentIP;
 
-    // config-file-only settings
+    // config-file-only settings by module
     struct {
       bool DNSSD;
       char *domain;
@@ -431,6 +447,7 @@ extern "C" {
     time_t nio_polling_secs;
 #define HSP_NIO_POLLING_SECS_32BIT 3
 
+    // refresh cycles
     bool refreshAdaptorList; // request flag
     uint32_t refreshAdaptorListSecs; // poll interval
     bool refreshVMList; // request flag
@@ -471,9 +488,9 @@ extern "C" {
   int selectAgentAddress(HSP *sp, int *p_changed);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
-    
+
   // read functions
-  int readInterfaces(HSP *sp, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
+  int readInterfaces(HSP *sp, bool full_discovery, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);
@@ -481,7 +498,9 @@ extern "C" {
   HSPAdaptorNIO *getAdaptorNIO(SFLAdaptorList *adaptorList, char *deviceName);
   void updateBondCounters(HSP *sp, SFLAdaptor *bond);
   void readBondState(HSP *sp);
+  void syncPolling(HSP *sp);
   void syncBondPolling(HSP *sp);
+  int accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs);
   void updateNioCounters(HSP *sp, SFLAdaptor *adaptor);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int configSwitchPorts(HSP *sp);
@@ -497,19 +516,17 @@ extern "C" {
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
   int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
   void adaptorHTPrint(UTHash *ht, char *prefix);
+  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed);
 
   // readPackets.c
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
 
-
   // VM lifecycle
   HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);
   void removeAndFreeVM(EVMod *mod, HSPVMState *state);
-
 
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
 
 #endif /* HSFLOWD_H */
-

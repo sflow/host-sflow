@@ -76,7 +76,7 @@ void sfl_poller_set_sFlowCpInterval(SFLPoller *poller, uint32_t sFlowCpInterval)
   /* Set the countersCountdown to be a randomly selected value between 1 and
      sFlowCpInterval. That way the counter polling would be desynchronised
      (on a 200-port switch, polling all the counters in one second could be harmful). */
-  poller->countersCountdown = sfl_random(sFlowCpInterval);
+  poller->countersCountdown = sFlowCpInterval ? sfl_random(sFlowCpInterval) : 0;
 }
 
 void sfl_poller_synchronize_polling(SFLPoller *poller, SFLPoller *master) {

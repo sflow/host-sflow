@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -21,7 +20,6 @@ extern "C" {
   typedef struct _HSP_mod_ULOG {
     EVBus *packetBus;
     bool ulog_configured;
-    int ulog_soc;
     uint32_t ulog_seqno;
     uint32_t ulog_drops;
     struct sockaddr_nl ulog_bind;
@@ -34,7 +32,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  int readPackets_ulog(EVMod *mod, EVBus *bus, int fd, void *data)
+  static void readPackets_ulog(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP_mod_ULOG *mdata = (HSP_mod_ULOG *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -44,21 +42,21 @@ extern "C" {
 
     if(sp->sFlowSettings == NULL) {
       // config was turned off
-      return 0;
+      return;
     }
 
     if(mdata->subSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
-      return 0;
+      return;
     }
 
     for( ; batch < HSP_READPACKET_BATCH_ULOG; batch++) {
       char buf[HSP_MAX_ULOG_MSG_BYTES];
-      int len = recvfrom(mdata->ulog_soc, buf, HSP_MAX_ULOG_MSG_BYTES, 0, NULL, NULL);
+      int len = recvfrom(sock->fd, buf, HSP_MAX_ULOG_MSG_BYTES, 0, NULL, NULL);
       if(len <= 0) break;
       myDebug(1, "got ULOG msg: %u bytes", len);
       for(struct nlmsghdr *msg = (struct nlmsghdr *)buf; NLMSG_OK(msg, len); msg=NLMSG_NEXT(msg, len)) {
-	
+
 	myDebug(1, "netlink (%u bytes left) msg [len=%u type=%u flags=0x%x seq=%u pid=%u]",
 		len,
 		msg->nlmsg_len,
@@ -66,7 +64,7 @@ extern "C" {
 		msg->nlmsg_flags,
 		msg->nlmsg_seq,
 		msg->nlmsg_pid);
-	
+
 	// check for drops indicated by sequence no
 	uint32_t droppedSamples = 0;
 	if(mdata->ulog_seqno) {
@@ -76,7 +74,7 @@ extern "C" {
 	  }
 	}
 	mdata->ulog_seqno = msg->nlmsg_seq;
-	
+
 	switch(msg->nlmsg_type) {
 	case NLMSG_NOOP:
 	case NLMSG_ERROR:
@@ -86,37 +84,36 @@ extern "C" {
 	case NLMSG_DONE: // last in multi-part
 	default:
 	  {
-	    
+
 	    if(--MySkipCount == 0) {
 	      /* reached zero. Set the next skip */
 	      uint32_t sr = mdata->subSamplingRate;
 	      MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
-	      
+
 	      /* and take a sample */
-	      
+
 	      // we're seeing type==111 on Fedora14
 	      //if(msg->nlmsg_flags & NLM_F_REQUEST) { }
 	      //if(msg->nlmsg_flags & NLM_F_MULTI) { }
 	      //if(msg->nlmsg_flags & NLM_F_ACK) { }
 	      //if(msg->nlmsg_flags & NLM_F_ECHO) { }
 	      ulog_packet_msg_t *pkt = NLMSG_DATA(msg);
-	      
+
 	      myDebug(LOG_INFO, "ULOG mark=%u ts=%s prefix=%s",
 		      pkt->mark,
 		      ctime(&pkt->timestamp_sec),
 		      pkt->prefix);
-	      
-	      
+
 	      SFLAdaptor *dev_in = NULL;
 	      SFLAdaptor *dev_out = NULL;
-	      
+
 	      if(pkt->indev_name[0]) {
 		dev_in = adaptorByName(sp, pkt->indev_name);
 	      }
 	      if(pkt->outdev_name[0]) {
 		dev_out = adaptorByName(sp, pkt->outdev_name);
 	      }
-	      
+
 	      takeSample(sp,
 			 dev_in,
 			 dev_out,
@@ -135,9 +132,7 @@ extern "C" {
 	}
       }
     }
-    return batch;
   }
-
 
   /*_________________---------------------------__________________
     _________________     openULOG              __________________
@@ -149,45 +144,45 @@ extern "C" {
     HSP_mod_ULOG *mdata = (HSP_mod_ULOG *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // open the netfilter socket to ULOG
-    mdata->ulog_soc = socket(PF_NETLINK, SOCK_RAW, NETLINK_NFLOG);
-    myDebug(1, "ULOG socket fd=%d", mdata->ulog_soc);
-    if(mdata->ulog_soc < 0) {
+    int fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_NFLOG);
+    myDebug(1, "ULOG socket fd=%d", fd);
+    if(fd < 0) {
       myLog(LOG_ERR, "openULOG() failed: %s\n", strerror(errno));
       return -1;
     }
     // set the socket to non-blocking
-    int fdFlags = fcntl(mdata->ulog_soc, F_GETFL);
+    int fdFlags = fcntl(fd, F_GETFL);
     fdFlags |= O_NONBLOCK;
-    if(fcntl(mdata->ulog_soc, F_SETFL, fdFlags) < 0) {
+    if(fcntl(fd, F_SETFL, fdFlags) < 0) {
       myLog(LOG_ERR, "ULOG fcntl(O_NONBLOCK) failed: %s", strerror(errno));
       return -1;
     }
-      
+
     // make sure it doesn't get inherited, e.g. when we fork a script
-    fdFlags = fcntl(mdata->ulog_soc, F_GETFD);
+    fdFlags = fcntl(fd, F_GETFD);
     fdFlags |= FD_CLOEXEC;
-    if(fcntl(mdata->ulog_soc, F_SETFD, fdFlags) < 0) {
+    if(fcntl(fd, F_SETFD, fdFlags) < 0) {
       myLog(LOG_ERR, "ULOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
       return -1;
     }
-      
+
     // bind
     mdata->ulog_bind.nl_family = AF_NETLINK;
     mdata->ulog_bind.nl_pid = getpid();
     // Note that the ulogGroup setting is only ever retrieved from the config file (i.e. not settable by DNSSD)
     mdata->ulog_bind.nl_groups = 1 << (sp->ulog.group - 1); // e.g. 16 => group 5
-    if(bind(mdata->ulog_soc, (struct sockaddr *)&mdata->ulog_bind, sizeof(mdata->ulog_bind)) == -1) {
+    if(bind(fd, (struct sockaddr *)&mdata->ulog_bind, sizeof(mdata->ulog_bind)) == -1) {
       myLog(LOG_ERR, "ULOG bind() failed: %s", strerror(errno));
       return -1;
     }
-    
+
     // increase receiver buffer size
     uint32_t rcvbuf = HSP_ULOG_RCV_BUF;
-    if(setsockopt(mdata->ulog_soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+    if(setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
       myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", HSP_ULOG_RCV_BUF, strerror(errno));
       // not a show-stopper
     }
-    return mdata->ulog_soc;
+    return fd;
   }
 
   /*_________________---------------------------__________________
@@ -246,9 +241,9 @@ extern "C" {
       // ULOG group is set, so open the netfilter socket to ULOG
       int fd = openULOG(mod);
       if(fd > 0)
-	EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_ulog, mod);
+	EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_ulog, NULL);
     }
-    
+
     mdata->ulog_configured = YES;
   }
 
@@ -274,8 +269,6 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTF_CHANGED), evt_intf_changed);
   }
 
-  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

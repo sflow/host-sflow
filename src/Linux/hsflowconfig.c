@@ -16,7 +16,7 @@ extern "C" {
 		 HSPTOKENTYPE_SYNTAX,
 		 HSPTOKENTYPE_OBJ,
 		 HSPTOKENTYPE_ATTRIB } EnumHSPTokenType;
-  
+
   // read the special tokens include twice,
   // first to generate the enum, then to
   // populate the special token lookup table
@@ -25,14 +25,14 @@ extern "C" {
 #include "hsflowtokens.h"
 #undef HSPTOKEN_DATA
     HSPTOKEN_NUM_TOKENS } EnumHSPSpecialToken;
-  
+
   typedef struct _HSPSpecialToken {
     EnumHSPSpecialToken tag;
     char *str;
     EnumHSPTokenType type;
     char *deprecated;
   } HSPSpecialToken;
-  
+
   static const HSPSpecialToken HSPSpecialTokens[] = {
 #define HSPTOKEN_DATA(tag, token, type, deprecated) { tag, token, type, deprecated },
 #include "hsflowtokens.h"
@@ -45,7 +45,7 @@ extern "C" {
     char *str;
     EnumHSPSpecialToken stok;
   } HSPToken;
-  
+
   typedef enum {
     HSPOBJ_HSP=0,
     HSPOBJ_SFLOW,
@@ -98,12 +98,11 @@ extern "C" {
 	  msg2);
   }
 
-
   /*_________________---------------------------__________________
     _________________      unexpected           __________________
     -----------------___________________________------------------
   */
-  
+
   static void unexpectedToken(HSP *sp, HSPToken *tok, EnumHSPObject level)
   {
     myLog(LOG_ERR, "parse error at <%s><%s> on line %d of %s : unexpected %s setting",
@@ -274,9 +273,9 @@ extern "C" {
     // sp->refreshAdaptorList = YES;
     return t;
   }
-  
+
   // expectDevice
-  
+
   static HSPToken *expectDevice(HSP *sp, HSPToken *tok, char **p_devName)
   {
     HSPToken *t = tok;
@@ -290,9 +289,9 @@ extern "C" {
     parseError(sp, tok, "expected device name", "");
     return NULL;
   }
-  
+
   // expectUUID
-  
+
   static HSPToken *expectUUID(HSP *sp, HSPToken *tok, char *uuid)
   {
     HSPToken *t = tok;
@@ -303,9 +302,9 @@ extern "C" {
     }
     return t;
   }
-  
+
   // expectFile
-  
+
   static HSPToken *expectFile(HSP *sp, HSPToken *tok, char **p_fileName)
   {
     HSPToken *t = tok;
@@ -322,9 +321,9 @@ extern "C" {
     parseError(sp, tok, "expected file name", "");
     return NULL;
   }
-  
+
   // expectRegex
-  
+
   static HSPToken *expectRegex(HSP *sp, HSPToken *tok, regex_t **pattern)
   {
     HSPToken *t = tok;
@@ -350,7 +349,7 @@ extern "C" {
     return col;
   }
 
-  void clearCollectors(HSPSFlowSettings *settings) 
+  void clearCollectors(HSPSFlowSettings *settings)
   {
     for(HSPCollector *coll = settings->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
@@ -412,7 +411,7 @@ extern "C" {
     _________________   getApplicationSettings  __________________
     -----------------___________________________------------------
   */
-  
+
   static HSPApplicationSettings *getApplicationSettings(HSPSFlowSettings *settings, char *app, int create)
   {
     HSPApplicationSettings *appSettings = settings->applicationSettings;
@@ -430,7 +429,7 @@ extern "C" {
     _________________   clearApplicationSettings __________________
     -----------------____________________________------------------
   */
-  
+
   void clearApplicationSettings(HSPSFlowSettings *settings)
   {
     for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; ) {
@@ -442,12 +441,11 @@ extern "C" {
     settings->applicationSettings = NULL;
   }
 
-
   /*_________________----------------------------__________________
     _________________   setApplicationSampling   __________________
     -----------------____________________________------------------
   */
-  
+
   void setApplicationSampling(HSPSFlowSettings *settings, char *app, uint32_t n)
   {
     HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
@@ -459,7 +457,7 @@ extern "C" {
     _________________   setApplicationPolling    __________________
     -----------------____________________________------------------
   */
-  
+
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs)
   {
     HSPApplicationSettings *appSettings = getApplicationSettings(settings, app, YES);
@@ -475,7 +473,7 @@ extern "C" {
     an application named "app.xyz.pqr.abc" and take precendence
     over a setting of sampling.app.xyz = 200
   */
-  
+
   int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling)
   {
     // in the config, the sFlow-APPLICATION settings should always start with sampling.app.<name> or polling.app.<name>
@@ -505,11 +503,11 @@ extern "C" {
 	}
       }
     }
-    
+
     if(prefix) {
       my_free(search);
     }
-    
+
     if(deepest) {
       if(p_polling && deepest->got_polling_secs) *p_sampling = deepest->polling_secs;
       if(p_sampling && deepest->got_sampling_n) *p_sampling = deepest->sampling_n;
@@ -518,12 +516,11 @@ extern "C" {
     return NO;
   }
 
-
   /*_________________----------------------------__________________
     _________________  lookupPacketSamplingRate  __________________
     -----------------____________________________------------------
   */
-  
+
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings)
   {
     assert(settings != NULL); // too soon! wait for config to be established
@@ -533,7 +530,7 @@ extern "C" {
     char *method = "global_default";
     if(adaptor) {
       HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-      
+
       if(adaptorNIO->up == NO) {
 	sampling_n = 0;
 	method = "interface_down";
@@ -557,7 +554,7 @@ extern "C" {
 	  }
 	}
       }
-      
+
       myDebug(1, "%s (speed=%"PRIu64") using %s sampling rate = %u",
 	      adaptor->deviceName,
 	      adaptor->ifSpeed,
@@ -587,7 +584,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  void clearAgentCIDRs(HSPSFlowSettings *settings) 
+  void clearAgentCIDRs(HSPSFlowSettings *settings)
   {
     for(HSPCIDR *cidr = settings->agentCIDRs; cidr; ) {
       HSPCIDR *next_cidr = cidr->nxt;
@@ -668,7 +665,6 @@ extern "C" {
     return tokens;
   }
 
-
   /*_________________---------------------------__________________
     _________________  agentAddressPriority     __________________
     -----------------___________________________------------------
@@ -698,7 +694,7 @@ extern "C" {
       // start by assuming it's a global IP
       ipPriority = IPSP_IP6_SCOPE_GLOBAL;
       // then check for other possibilities
-      
+
       // now allow the other parameters to override
       if(loopback || SFLAddress_isLoopback(addr)) {
 	ipPriority = IPSP_LOOPBACK6;
@@ -734,25 +730,24 @@ extern "C" {
 	myDebug(1, "testing CIDR at index %d", cidrIndex);
 	if(SFLAddress_maskEqual(addr, &cidr->mask, &cidr->ipAddr)) break;
       }
-      
+
       if(cidr) {
 	myDebug(1, "CIDR at index %d matched: boosting priority", cidrIndex);
-	boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES); 
+	boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES);
       }
     }
     else {
       myDebug(1, "agentAddressPriority: no config yet (so no CIDR boost)");
     }
-      
+
     return boosted_priority;
   }
-
 
   /*_________________---------------------------__________________
     _________________     selectAgentAddress    __________________
     -----------------___________________________------------------
   */
-  
+
   int selectAgentAddress(HSP *sp, int *p_changed) {
 
     int selected = NO;
@@ -815,7 +810,7 @@ extern "C" {
 	*p_changed = NO;
       }
     }
-    
+
     return selected;
   }
 
@@ -833,7 +828,7 @@ extern "C" {
     // could have used something like bison to make a complete parser with
     // strict rules,  but for simplicity we just allow the current object
     // to double as a state variable that determines what is allowed next.
-    
+
     for(HSPToken *tok = readTokens(sp); tok; tok = tok->nxt) {
 
       if(tok->stok
@@ -1044,7 +1039,7 @@ extern "C" {
 	    break;
 	  }
 	  break;
-	
+
 	case HSPOBJ_DNSSD:
 	  {
 	    switch(tok->stok) {
@@ -1059,7 +1054,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	
+
 	case HSPOBJ_COLLECTOR:
 	  {
 	    HSPCollector *col = sp->sFlowSettings_file->collectors;
@@ -1094,7 +1089,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	  
+
 	case HSPOBJ_XEN:
 	  {
 	    switch(tok->stok) {
@@ -1127,7 +1122,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	  
+
 	case HSPOBJ_DOCKER:
 	  {
 	    switch(tok->stok) {
@@ -1182,7 +1177,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-  
+
 	case HSPOBJ_PCAP:
 	  {
 	    HSPPcap *pc = sp->pcap.pcaps;
@@ -1200,7 +1195,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-  
+
 	case HSPOBJ_CUMULUS:
 	  {
 	    switch(tok->stok) {
@@ -1226,7 +1221,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	  
+
 	case HSPOBJ_JSON:
 	  {
 	    switch(tok->stok) {
@@ -1246,7 +1241,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	  
+
 	case HSPOBJ_OS10:
 	  {
 	    switch(tok->stok) {
@@ -1264,7 +1259,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	  
+
 	case HSPOBJ_NVML:
 	  {
 	    switch(tok->stok) {
@@ -1275,7 +1270,7 @@ extern "C" {
 	    }
 	  }
 	  break;
-	
+
 	default:
 	  parseError(sp, tok, "unexpected state", "");
 	}
@@ -1285,7 +1280,7 @@ extern "C" {
     // we have a usable configuration...
 
     int parseOK = YES;
-    
+
     if(sp->sFlowSettings_file == NULL) {
       myLog(LOG_ERR, "parse error in %s : sFlow {} not found", sp->configFile);
       parseOK = NO;
@@ -1295,7 +1290,7 @@ extern "C" {
 	myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
 	parseOK = NO;
       }
-      
+
       for(HSPCollector *coll = sp->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
 	//////////////////////// collector /////////////////////////
 	if(coll->ipAddr.type == 0) {
@@ -1304,19 +1299,17 @@ extern "C" {
 	}
       }
     }
-    
+
     if(sp->ulog.probability > 0) {
       sp->ulog.samplingRate = (uint32_t)(1.0 / sp->ulog.probability);
     }
     if(sp->nflog.probability > 0) {
       sp->nflog.samplingRate = (uint32_t)(1.0 / sp->nflog.probability);
     }
-    
+
     return parseOK;
   }
-  
 
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

@@ -58,7 +58,7 @@ extern "C" {
   int printUUID(const u_char *a, u_char *buf, int bufLen);
   uint32_t hashUUID(char *uuid);
   int printSpeed(const uint64_t speed, char *buf, int bufLen);
-  
+
   // logger
   void myLog(int syslogType, char *fmt, ...);
   void setDebug(int level);
@@ -180,6 +180,7 @@ extern "C" {
 
   UTArray *UTArrayNew(int flags);
   uint32_t UTArrayAdd(UTArray *ar, void *obj);
+  uint32_t UTArrayAddAll(UTArray *ar, UTArray *add);
   void UTArrayPut(UTArray *ar, void *obj, int i);
   bool UTArrayDel(UTArray *ar, void *obj);
   void *UTArrayDelAt(UTArray *ar, int i);
@@ -204,7 +205,7 @@ extern "C" {
   SFLAdaptor *adaptorNew(char *dev, u_char *macBytes, size_t userDataSize, uint32_t ifIndex);
   int adaptorEqual(SFLAdaptor *ad1, SFLAdaptor *ad2);
   void adaptorFree(SFLAdaptor *ad);
-  
+
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew(void);
   void adaptorListReset(SFLAdaptorList *adList);
@@ -229,7 +230,7 @@ extern "C" {
   int SFLAddress_isLinkLocal(SFLAddress *addr);
   int SFLAddress_isUniqueLocal(SFLAddress *addr);
   int SFLAddress_isMulticast(SFLAddress *addr);
-  void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask);  
+  void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask);
   int SFLAddress_maskEqual(SFLAddress *addr, SFLAddress *mask, SFLAddress *compare);
   int SFLAddress_parseCIDR(char *str, SFLAddress *addr, SFLAddress *mask, uint32_t *maskBits);
 
@@ -258,6 +259,7 @@ extern "C" {
   void *UTHashGet(UTHash *oh, void *obj);
   void *UTHashGetOrAdd(UTHash *oh, void *obj);
   void *UTHashDel(UTHash *oh, void *obj);
+  void *UTHashDelKey(UTHash *oh, void *obj);
   uint32_t UTHashN(UTHash *oh);
 
 #define UTHASH_WALK(oh, obj) for(uint32_t _ii=0; _ii<oh->cap; _ii++) if(((obj)=(typeof(obj))oh->bins[_ii]))
@@ -302,7 +304,7 @@ extern "C" {
     (q).tail = obj;				\
     (obj)->next = NULL;				\
   } while(0)
-  
+
 #define UTQ_INSERTAFTER(q, obj, after)			\
   do {							\
     (obj)->next = (after)->next;			\
@@ -311,7 +313,7 @@ extern "C" {
     else (q).tail = (obj);				\
     (after)->next = (obj);				\
   } while(0)
-  
+
 #define UTQ_REMOVE(q, obj)				\
   do {							\
     if((obj)->prev) (obj)->prev->next = (obj)->next;	\
@@ -320,7 +322,7 @@ extern "C" {
     else (q).tail = (obj)->prev;			\
     (obj)->next = (obj)->prev = NULL;			\
   } while(0)
-  
+
 #define UTQ_REMOVE_HEAD(q, result)		\
   do {						\
     result = (q).head;				\
@@ -340,4 +342,3 @@ extern "C" {
 #endif
 
 #endif /* UTIL_H */
-

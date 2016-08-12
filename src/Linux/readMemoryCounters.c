@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -13,7 +12,7 @@ extern "C" {
     _________________     readMemoryCounters    __________________
     -----------------___________________________------------------
   */
-  
+
   int readMemoryCounters(SFLHost_mem_counters *mem) {
     int gotData = NO;
     FILE *procFile;
@@ -57,8 +56,6 @@ extern "C" {
     return gotData;
   }
 
-
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

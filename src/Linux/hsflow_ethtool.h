@@ -43,4 +43,3 @@ extern "C" {
 #endif
 
 #endif /* HSFLOW_ETHTOOL_H */
-

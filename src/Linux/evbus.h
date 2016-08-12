@@ -28,7 +28,7 @@ extern "C" {
 #include "util.h"
 
   struct _EVMod; // fwd decl
-  
+
   typedef struct _EVRoot {
     UTHash *buses;
     UTHash *modules;
@@ -50,7 +50,7 @@ extern "C" {
   } EVMod;
 
 #define EVROOTDATA(m) (m)->root->rootModule->data
-    
+
   struct _EVSocket; // fwd decl
 
   typedef struct _EVBus {
@@ -61,24 +61,31 @@ extern "C" {
     int pipe[2];
     UTArray *sockets;
     UTArray *sockets_run;
+    UTArray *sockets_del;
     int select_mS;
 #define EVBUS_SELECT_MS 900
 #define EV_MAX_TICKS 60
     time_t clk;
     pthread_t *thread;
-    pid_t pid;
-    bool running;
-    bool stop;
+    int childCount;
+    bool socketsChanged:1;
+    bool running:1;
+    bool stop:1;
   } EVBus;
 
-  typedef int (*EVReadCB)(EVMod *mod, EVBus *bus, int fd, void *data);
+  typedef void (*EVReadCB)(EVMod *mod, struct _EVSocket *sock, void *magic);
 
   typedef struct _EVSocket {
-    struct _EVSocket *nxt;
+    EVBus *bus;
     int fd;
     EVMod *module;
     EVReadCB readCB;
-    void *data;
+    void *magic;
+    pid_t child_pid;
+    int child_status;
+    char *iobuf;
+    int iolen;
+    bool errOut;
   } EVSocket;
 
   struct _EVAction; // fwd decl
@@ -89,12 +96,12 @@ extern "C" {
     int id;
     UTArray *actions;
     UTArray *actions_run;
+    bool actionsChanged:1;
   } EVEvent;
 
   typedef void (*EVActionCB)(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);
 
   typedef struct _EVAction {
-    struct _EVAction *nxt;
     EVMod *module;
     EVActionCB actionCB;
   } EVAction;
@@ -121,27 +128,32 @@ extern "C" {
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb);
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);
   int EVEventTxAll(EVMod *mod, char *evt_name, void *data, size_t dataLen);
-  bool EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *data);
-  
+  EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic);
+  bool EVSocketClose(EVMod *mod, EVSocket *sock);
+
+#define EVSOCKETREAD_EOF 1
+#define EVSOCKETREAD_STR 2
+#define EVSOCKETREAD_AGAIN 4
+#define EVSOCKETREAD_ERR 8
+  int EVSocketReadLine(EVMod *mod, EVSocket *sock, char *buf, int bufLen);
+  pid_t EVBusExec(EVMod *mod, EVBus *bus, void *magic, char **cmd, EVReadCB readCB);
+
   // Use a more conservative stacksize here - partly because
   // we don't need more,  but mostly because Debian was refusing
   // to create the thread - I guess because it was enough to
   // blow through our mlockall() allocation.
-  // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
+  // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html
 #define EV_BUS_STACKSIZE 2000000
 
   void EVBusRunThread(EVBus *bus, size_t stacksize);
-  void EVBusRunProcess(EVBus *bus);
   void EVBusRun(EVBus *bus);
   void EVBusStop(EVBus *bus);
   EVBus *EVCurrentBus(void);
   void EVRun(EVBus *mainBus);
   void EVStop(EVMod *mod);
 
-
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
 
 #endif /* HSFLOWD_H */
-

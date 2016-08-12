@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -34,7 +33,7 @@ extern "C" {
     pthread_mutex_init(root->sync, NULL);
     return root->rootModule;
   }
-    
+
   EVBus *EVGetBus(EVMod *mod, char *name, bool create) {
     EVBus *bus;
     SEMLOCK_DO(mod->root->sync) {
@@ -49,6 +48,7 @@ extern "C" {
 	bus->eventList = UTArrayNew(UTARRAY_DFLT);
 	bus->sockets = UTArrayNew(UTARRAY_DFLT);
 	bus->sockets_run = UTArrayNew(UTARRAY_DFLT);
+	bus->sockets_del = UTArrayNew(UTARRAY_DFLT);
 	if(pipe(bus->pipe) == -1) {
 	  myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
 	  abort();
@@ -58,7 +58,7 @@ extern "C" {
 	// We probably want it to block because a full pipe may
 	// indicate some sort of rare meltdown and losing events
 	// to EWOULDBLOCK could make things worse.
-	
+
 	bus->select_mS = EVBUS_SELECT_MS;
 	bus->stop = NO;
       }
@@ -66,12 +66,12 @@ extern "C" {
     return bus;
   }
 
-  EVEvent *EVGetEvent(EVBus *bus, char *name) {
+  static EVEvent *getEvent(EVBus *bus, char *name, bool create) {
     EVEvent *evt;
     SEMLOCK_DO(bus->root->sync) {
       EVEvent search = { .name = name };
       evt = UTHashGet(bus->events, &search);
-      if(!evt) {
+      if(!evt && create) {
 	evt = (EVEvent *)my_calloc(sizeof(EVEvent));
 	evt->name = my_strdup(name);
 	UTHashAdd(bus->events, evt);
@@ -85,7 +85,11 @@ extern "C" {
     return evt;
   }
 
-  bool EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *data) {
+  EVEvent *EVGetEvent(EVBus *bus, char *name) {
+      return getEvent(bus, name, YES);
+  }
+
+  EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic) {
     EVSocket *sock = NULL;
     SEMLOCK_DO(mod->root->sync) {
       EVSocket search = { .fd = fd };
@@ -94,17 +98,42 @@ extern "C" {
       }
       else {
 	sock = (EVSocket *)my_calloc(sizeof(EVSocket));
+	sock->bus = bus;
 	sock->fd = fd;
 	sock->readCB = readCB;
 	sock->module = mod;
-	sock->data = data;
+	sock->magic = magic;
 	UTHashAdd(mod->root->sockets, sock);
 	UTArrayAdd(bus->sockets, sock);
+	bus->socketsChanged = YES;
       }
     }
-    return (sock != NULL);
+    return sock;
   }
-      
+
+  bool EVSocketClose(EVMod *mod, EVSocket *sock) {
+    EVSocket *deleted;
+    SEMLOCK_DO(mod->root->sync) {
+      EVSocket search = { .fd = sock->fd };
+      deleted = UTHashDelKey(mod->root->sockets, &search);
+      assert(deleted == sock);
+      if(sock->fd > 0) {
+	while(close(sock->fd) == -1 && errno == EINTR);
+	sock->fd = 0;
+      }
+      if(sock->child_pid) {
+	sock->bus->childCount--;
+	waitpid(sock->child_pid, &sock->child_status, 0);
+      }
+      // move it to the condenmed list
+      // (will be freed later when it's safer)
+      EVBus *bus = sock->bus;
+      UTArrayDel(bus->sockets, sock);
+      UTArrayAdd(bus->sockets_del, sock);
+      bus->socketsChanged = YES;
+    }
+    return (deleted != NULL);
+  }
 
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb) {
     EVAction *act = (EVAction *)my_calloc(sizeof(EVAction));
@@ -112,6 +141,7 @@ extern "C" {
     act->actionCB = cb;
     SEMLOCK_DO(mod->root->sync) {
       UTArrayAdd(evt->actions, act);
+      evt->actionsChanged = YES;
     }
   }
 
@@ -230,7 +260,7 @@ extern "C" {
 	    dataLen);
       return NO;
     }
-    
+
     struct iovec vec[2] = { { &hdr, sizeof(hdr) }, { data, dataLen } };
   try_again:
     if(writev(evt->bus->pipe[1], vec, 2) > 0) {
@@ -242,23 +272,11 @@ extern "C" {
     return NO;
   }
 
-  static void syncArrays(EVRoot *root, UTArray *ar1, UTArray *ar2) {
-    // Rebuild array that has to operate outside the semaphore protection
-    // (because we don't want to hold mod->root>sync while we invoke action
-    // or socket callback-functions in case those functions want to add
-    // actions, sockets, buses etc. themselves).  Could get the same
-    // effect using an atomic compare-and-exchange to add actions or sockets
-    // to a singly linked list, but this is just as good really, and more
-    // portable.
-
-    // Currently only handles new entries being added.  If we allow deletions
-    // then we can do it with a "changed" flag and a complete copy here.
-    if(UTArrayN(ar2) != UTArrayN(ar1)) {
-      SEMLOCK_DO(root->sync) {
-	for(int aa = UTArrayN(ar2); aa < UTArrayN(ar1); aa++)
-	  UTArrayAdd(ar2, UTArrayAt(ar1, aa));
-      }
-    }
+  static void freeSocket(EVSocket *sock) {
+    assert(sock->fd <= 0);
+    if(sock->iobuf)
+      my_free(sock->iobuf);
+    my_free(sock);
   }
 
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
@@ -266,7 +284,13 @@ extern "C" {
     if(evt->bus == threadBus) {
       // local event
       EVAction *act;
-      syncArrays(mod->root, evt->actions, evt->actions_run);
+      if(evt->actionsChanged) {
+	SEMLOCK_DO(mod->root->sync) {
+	  UTArrayReset(evt->actions_run);
+	  UTArrayAddAll(evt->actions_run, evt->actions);
+	  evt->actionsChanged = NO;
+	}
+      }
       UTARRAY_WALK(evt->actions_run, act) {
 	(*act->actionCB)(act->module, evt, data, dataLen);
 	sent++;
@@ -284,7 +308,10 @@ extern "C" {
     EVBus *bus;
     int sent = 0;
     UTHASH_WALK(mod->root->buses, bus) {
-      sent += EVEventTx(mod, EVGetEvent(bus, evt_name), data, dataLen);
+      // only tx if the event exists on the bus
+      EVEvent *evt = getEvent(bus, evt_name, NO);
+      if(evt)
+	sent += EVEventTx(mod, evt, data, dataLen);
     }
     return sent;
   }
@@ -298,7 +325,15 @@ extern "C" {
     FD_SET(bus->pipe[0], &readfds);
     max_fd = bus->pipe[0];
     // and other registered sockets
-    syncArrays(bus->root, bus->sockets, bus->sockets_run);
+    if(bus->socketsChanged) {
+      SEMLOCK_DO(bus->root->sync) {
+	UTArrayReset(bus->sockets_run);
+	UTArrayAddAll(bus->sockets_run, bus->sockets);
+	UTARRAY_WALK(bus->sockets_del, sock) freeSocket(sock);
+	UTArrayReset(bus->sockets_del);
+	bus->socketsChanged = NO;
+      }
+    }
     UTARRAY_WALK(bus->sockets_run, sock) {
       FD_SET(sock->fd, &readfds);
       if(sock->fd > max_fd)
@@ -317,7 +352,7 @@ extern "C" {
 	busRxPipe(bus, bus->pipe[0]);
       UTARRAY_WALK(bus->sockets_run, sock) {
 	if(FD_ISSET(sock->fd, &readfds))
-	  (*sock->readCB)(sock->module, bus, sock->fd, sock->data);
+	  (*sock->readCB)(sock->module, sock, sock->magic);
       }
     }
     else if(nfds < 0) {
@@ -329,7 +364,7 @@ extern "C" {
       }
     }
   }
-  
+
   static void *busRun(void *magic) {
     EVBus *bus = (EVBus *)magic;
     assert(bus->running == NO);
@@ -379,7 +414,7 @@ extern "C" {
     // we don't need more,  but mostly because Debian was refusing
     // to create the thread - I guess because it was enough to
     // blow through our mlockall() allocation.
-    // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html 
+    // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, stacksize);
@@ -391,28 +426,153 @@ extern "C" {
     }
   }
 
-  // TODO: test this
-  void EVBusRunProcess(EVBus *bus) {
-    bus->pid = fork();
-    if(bus->pid < 0) {
-      myLog(LOG_ERR,"Cannot fork child");
-      abort();
+  /*_________________---------------------------__________________
+    _________________     EVBusExec             __________________
+    -----------------___________________________------------------
+    like popen(), but more secure coz the shell doesn't get
+    to "reimagine" the args.  This should eventually take over
+    from myExec() in util.c
+  */
+
+  static void socketLineCopy(EVSocket *sock, int bytes, char *buf, int bufLen) {
+    int copyBytes = (bytes < bufLen) ? bytes : (bufLen-1);
+    if(copyBytes) memcpy(buf, sock->iobuf, copyBytes);
+    buf[copyBytes]='\0';
+  }
+
+  static bool socketLine(EVSocket *sock, char *buf, int bufLen) {
+    for(int ii = 0; ii < sock->iolen; ii++) {
+      char ch = sock->iobuf[ii];
+      if(ch == 10 || ch == 13 || ch == 0) {
+	socketLineCopy(sock, ii, buf, bufLen);
+	if(ch == 10 || ch == 13)
+	  ii++; // chomp
+	if(ch == 13 && sock->iobuf[ii] == 10)
+	  ii++; // chomp CRLF
+	sock->iolen -= ii;
+	if(sock->iolen)
+	  memmove(sock->iobuf, sock->iobuf + ii, sock->iolen); // shift to beginning
+	return YES;
+      }
     }
-    
-    if(bus->pid > 0) {
-      // in parent
+    return NO; // line-end not found
+  }
+
+  int EVSocketReadLine(EVMod *mod, EVSocket *sock, char *buf, int bufLen) {
+    // insist this is only called from the same thread that opened the socket
+    assert(sock->bus == threadBus);
+    assert(buf && bufLen > 1);
+    if(sock->fd <= 0)
+      return EVSOCKETREAD_EOF;
+
+    if(sock->iobuf == NULL) {
+      sock->iobuf = (char *)my_calloc(EV_MAX_EVT_DATALEN);
+      sock->iolen = 0;
+    }
+
+    // we may have another line from the last read
+    if(socketLine(sock, buf, bufLen))
+      return EVSOCKETREAD_STR;
+
+    // try to read more
+    char *fillStart = sock->iobuf + sock->iolen;
+    int fillMax = EV_MAX_EVT_DATALEN - sock->iolen;
+    int cc;
+  try_again:
+    cc = read(sock->fd, fillStart, fillMax);
+    if(cc < 0) {
+      if(errno == EAGAIN || errno == EINTR) goto try_again;
+      myLog(LOG_ERR, "EVSocketReadLine(): %s", strerror(errno));
+      EVSocketClose(mod, sock);
+      return EVSOCKETREAD_ERR;
+    }
+    if(cc == 0) {
+      // EOF
+      EVSocketClose(mod, sock);
+      // may have trailing line
+      if(sock->iolen) {
+	socketLineCopy(sock, sock->iolen, buf, bufLen);
+	return (EVSOCKETREAD_STR | EVSOCKETREAD_EOF);
+      }
+      return EVSOCKETREAD_EOF;
+    }
+
+    // got more, see if it completed a line
+    sock->iolen += cc;
+    if(socketLine(sock, buf, bufLen))
+      return EVSOCKETREAD_STR;
+
+    // need another read - please call me again
+    return EVSOCKETREAD_AGAIN;
+  }
+
+#if 0
+  // example pattern for asynchronous ASCII EVReadCB - e.g. with EVBusExec()
+  static void busExecReadCB(EVMod *mod, EVSocket *sock, void *magic)
+  {
+    char buf[EV_MAX_EVT_DATALEN];
+    int state;
+    // loop in case we got several complete lines in one read
+    while((state = EVSocketReadLine(mod, sock, buf, EV_MAX_EVT_DATALEN)) & EVSOCKETREAD_STR) {
+      myDebug(1, "busExecRead got %s line: <%s>", (sock->errOut ? "stderr" : "stdout"), buf);
+    }
+    if(state & EVSOCKETREAD_ERR) myDebug(1, "buxExecRead got error. status=%d", sock->child_status);
+    if(state & EVSOCKETREAD_EOF) myDebug(1, "buxExecRead got EOF. status=%d", sock->child_status);
+    return YES;
+  }
+#endif
+
+  pid_t EVBusExec(EVMod *mod, EVBus *bus, void *magic, char **cmd, EVReadCB readCB)
+  {
+    int outPipe[2];
+    int errPipe[2];
+    if(pipe(outPipe) == -1
+       || pipe(errPipe) == -1) {
+      myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+    pid_t cpid;
+    if((cpid = fork()) == -1) {
+      myLog(LOG_ERR, "fork() failed : %s", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+    if(cpid == 0) {
+      // in child
+      // close read-ends
+      while(close(outPipe[0]) == -1 && errno == EINTR);
+      while(close(errPipe[0]) == -1 && errno == EINTR);
+      // stdout > write-end 1 and stderr > write-end 2
+      while(dup2(outPipe[1], 1) == -1 && errno == EINTR);
+      while(dup2(errPipe[1], 2) == -1 && errno == EINTR);
+      // clean up
+      while(close(outPipe[1]) == -1 && errno == EINTR);
+      while(close(errPipe[1]) == -1 && errno == EINTR);
+      // and exec
+      char *env[] = { NULL };
+      if(execve(cmd[0], cmd, env) == -1) {
+	myLog(LOG_ERR, "execve() failed : errno=%d (%s)", errno, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
     }
     else {
-      // in child
-      // close read-end of pipe?
-      // TODO: does that mean the child can send to the master
-      // but the master cannot send to the child?  I guess we
-      // would need to have a second pipe to support 2-way.
-      close(bus->pipe[0]);
-      bus->pipe[0] = 0;
-      busRun(bus);
+      // in parent
+      bus->childCount++; // TODO: limit childCount. How?
+      // close write-ends
+      while(close(outPipe[1]) == -1 && errno == EINTR);
+      while(close(errPipe[1]) == -1 && errno == EINTR);
+      // read from read-ends
+      EVSocket *outSock = EVBusAddSocket(mod, bus, outPipe[0], readCB, magic);
+      outSock->child_pid = cpid; // only give this one the cpid
+      EVSocket *errSock = EVBusAddSocket(mod, bus, errPipe[0], readCB, magic);
+      errSock->errOut = YES; // mark this so we know it's stderr
     }
+    return cpid;
   }
+
+  /*_________________---------------------------__________________
+    _________________    bus run, stop          __________________
+    -----------------___________________________------------------
+  */
 
   void EVBusStop(EVBus *bus) {
     if(bus->running) {
@@ -420,10 +580,6 @@ extern "C" {
       if(bus->thread) {
 	pthread_join(*bus->thread, NULL);
 	bus->thread = NULL;
-      }
-      else if(bus->pid) {
-	// TODO: kill(bus->pid) and waitpid()
-	bus->pid = 0;
       }
     }
   }
@@ -456,8 +612,6 @@ extern "C" {
     }
   }
 
-
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

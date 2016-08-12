@@ -5,7 +5,7 @@ Release: 1
 License: http://sflow.net/license.html
 Group: Applications/Internet
 URL: http://sflow.net
-Source0: %{name}-%{version}.tar.gz
+Source0: %{name}-%{version}-%{release}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 Requires(post): chkconfig
 

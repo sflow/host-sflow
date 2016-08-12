@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -11,7 +10,6 @@ extern "C" {
 
 #include "libvirt.h"
 #include "libxml/xmlreader.h"
-
 
   typedef struct _HSPVMState_KVM {
     HSPVMState vm; // superclass: must come first
@@ -57,7 +55,7 @@ extern "C" {
 	  hidElem.counterBlock.host_hid.hostname.str = (char *)hname;
 	  hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
 	  virDomainGetUUID(domainPtr, hidElem.counterBlock.host_hid.uuid);
-	
+
 	  // char *osType = virDomainGetOSType(domainPtr); $$$
 	  hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;//$$$
 	  hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;//$$$
@@ -65,7 +63,7 @@ extern "C" {
 	  //hidElem.counterBlock.host_hid.os_release.len = 0;
 	  SFLADD_ELEMENT(cs, &hidElem);
 	}
-      
+
 	// host parent
 	SFLCounters_sample_element parElem = { 0 };
 	parElem.tag = SFLCOUNTERS_HOST_PAR;
@@ -84,7 +82,7 @@ extern "C" {
 	// accumulation and rollover-detection.
 	readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, vm->interfaces);
 	SFLADD_ELEMENT(cs, &nioElem);
-      
+
 	// VM cpu counters [ref xenstat.c]
 	SFLCounters_sample_element cpuElem = { 0 };
 	cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
@@ -101,7 +99,7 @@ extern "C" {
 	  cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domainInfo.nrVirtCpu;
 	  SFLADD_ELEMENT(cs, &cpuElem);
 	}
-      
+
 	SFLCounters_sample_element memElem = { 0 };
 	memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
 	if(domainInfoOK) {
@@ -110,7 +108,6 @@ extern "C" {
 	  SFLADD_ELEMENT(cs, &memElem);
 	}
 
-    
 	// VM disk I/O counters
 	SFLCounters_sample_element dskElem = { 0 };
 	dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
@@ -172,17 +169,17 @@ extern "C" {
 	  }
 	}
 	SFLADD_ELEMENT(cs, &dskElem);
-      
+
 	// include my slice of the adaptor list
 	SFLCounters_sample_element adaptorsElem = { 0 };
 	adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
 	adaptorsElem.counterBlock.adaptors = vm->interfaces;
 	SFLADD_ELEMENT(cs, &adaptorsElem);
-      
+
 	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(poller, cs);
 	}
-      
+
 	virDomainFree(domainPtr);
       }
     }
@@ -205,7 +202,6 @@ extern "C" {
     _________________    domain_xml_node        __________________
     -----------------___________________________------------------
   */
-
 
   static int domain_xml_path_equal(xmlNode *node, char *nodeName, ...) {
     if(node == NULL
@@ -243,7 +239,7 @@ extern "C" {
     }
     return NULL;
   }
-    
+
   static void domain_xml_interface(xmlNode *node, char **ifname, char **ifmac) {
     for(xmlNode *n = node; n; n = n->next) {
       if(domain_xml_path_equal(n, "target", "interface", "devices", NULL)) {
@@ -261,7 +257,7 @@ extern "C" {
     }
     if(node->children) domain_xml_interface(node->children, ifname, ifmac);
   }
-    
+
   static void domain_xml_disk(xmlNode *node, char **disk_path, char **disk_dev) {
     for(xmlNode *n = node; n; n = n->next) {
       if(domain_xml_path_equal(n, "source", "disk", "devices", NULL)) {
@@ -285,7 +281,7 @@ extern "C" {
     }
     if(node->children) domain_xml_disk(node->children, disk_path, disk_dev);
   }
-  
+
   static void domain_xml_node(HSP *sp, xmlNode *node, HSPVMState_KVM *state) {
     for(xmlNode *n = node; n; n = n->next) {
       if(domain_xml_path_equal(n, "interface", "devices", "domain", NULL)) {
@@ -323,7 +319,6 @@ extern "C" {
     }
   }
 
-  
   /*_________________---------------------------__________________
     _________________   add and remove VM       __________________
     -----------------___________________________------------------
@@ -344,7 +339,6 @@ extern "C" {
     }
     return state;
   }
-
 
   static void removeAndFreeVM_KVM(EVMod *mod, HSPVMState_KVM *state) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
@@ -428,7 +422,7 @@ extern "C" {
     _________________    configVMs              __________________
     -----------------___________________________------------------
   */
-  
+
   static void configVMs(EVMod *mod) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     // mark and sweep
@@ -437,7 +431,7 @@ extern "C" {
     UTHASH_WALK(mdata->vmsByUUID, state) {
       state->vm.marked = YES;
     }
-    
+
     // 2. create new VM pollers, or clear the mark on existing ones
     configVMs_KVM(mod);
 
@@ -471,7 +465,7 @@ extern "C" {
   }
 
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
+    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
@@ -531,4 +525,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

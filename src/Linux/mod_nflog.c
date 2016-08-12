@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -26,7 +25,6 @@ extern "C" {
     bool nflog_configured;
     // nflog packet sampling
     struct nfnl_handle *nfnl;
-    int nflog_soc;
     uint32_t nflog_seqno;
     uint32_t nflog_drops;
     uint32_t subSamplingRate;
@@ -38,23 +36,23 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  int readPackets_nflog(EVMod *mod, EVBus *bus, int fd, void *data)
+  static void readPackets_nflog(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP_mod_NFLOG *mdata = (HSP_mod_NFLOG *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     int batch = 0;
     static uint32_t MySkipCount=1;
-    
+
     if(sp->sFlowSettings == NULL) {
       // config was turned off
-      return 0;
+      return;
     }
 
     if(mdata->subSamplingRate == 0) {
       // packet sampling was disabled by setting desired rate to 0
-      return 0;
+      return;
     }
-    
+
     for( ; batch < HSP_READPACKET_BATCH_NFLOG; batch++) {
       u_char buf[HSP_MAX_NFLOG_MSG_BYTES];
       int len = nfnl_recv(mdata->nfnl,
@@ -79,7 +77,7 @@ extern "C" {
 		msg->nlmsg_seq,
 		msg->nlmsg_pid);
 	}
-	
+
 	// check for drops indicated by sequence no
 	uint32_t droppedSamples = 0;
 	if(mdata->nflog_seqno) {
@@ -89,7 +87,7 @@ extern "C" {
 	  }
 	}
 	mdata->nflog_seqno = msg->nlmsg_seq;
-	
+
 	switch(msg->nlmsg_type) {
 	case NLMSG_NOOP:
 	case NLMSG_ERROR:
@@ -107,7 +105,7 @@ extern "C" {
 	    int min_len = NLMSG_SPACE(sizeof(struct nfgenmsg));
 	    int attr_len = msg->nlmsg_len - NLMSG_ALIGN(min_len);
 	    struct nfattr *tb[NFULA_MAX] = { 0 };
-	    
+
 	    while (NFA_OK(attr, attr_len)) {
 	      if (NFA_TYPE(attr) <= NFULA_MAX) {
 		tb[NFA_TYPE(attr)-1] = attr;
@@ -125,14 +123,14 @@ extern "C" {
 	      // not a packet header msg, or no captured payload found
 	      continue;
 	    }
-	    
+
 	    myDebug(3, "capture payload (cap_len)=%d\n", cap_len);
-	    
+
 	    if(--MySkipCount == 0) {
 	      /* reached zero. Set the next skip */
 	      uint32_t sr = mdata->subSamplingRate;
 	      MySkipCount = sr == 1 ? 1 : sfl_random((2 * sr) - 1);
-	      
+
 	      /* and take a sample */
 	      char *prefix = nfnl_get_pointer_to_data(tb, NFULA_PREFIX, char);
 	      uint32_t ifin_phys = ntohl(nfnl_get_data(tb, NFULA_IFINDEX_PHYSINDEV, uint32_t));
@@ -144,8 +142,8 @@ extern "C" {
 	      uint32_t mark = ntohl(nfnl_get_data(tb, NFULA_MARK, uint32_t));
 	      uint32_t seq = ntohl(nfnl_get_data(tb, NFULA_SEQ, uint32_t));
 	      uint32_t seq_global = ntohl(nfnl_get_data(tb, NFULA_SEQ_GLOBAL, uint32_t));
-	      
-	      if(getDebug() > 1) { 
+
+	      if(getDebug() > 1) {
 		myLog(LOG_INFO, "NFLOG prefix: %s in: %u (phys=%u) out: %u (phys=%u) seq: %u seq_global: %u mark: %u\n",
 		      prefix,
 		      ifin,
@@ -156,7 +154,7 @@ extern "C" {
 		      seq_global,
 		      mark);
 	      }
-	      
+
 	      takeSample(sp,
 			 adaptorByIndex(sp, (ifin_phys ?: ifin)),
 			 adaptorByIndex(sp, (ifout_phys ?: ifout)),
@@ -175,9 +173,7 @@ extern "C" {
 	}
       }
     }
-    return batch;
   }
-
 
   /*_________________---------------------------__________________
     _________________     openNFLOG             __________________
@@ -227,34 +223,33 @@ extern "C" {
     if(!bind_group_nflog(mdata->nfnl, sp->nflog.group)) {
       myLog(LOG_ERR, "bind_group_nflog() failed\n");
       return -1;
-    }      
- 
+    }
+
     // increase receiver buffer size
     nfnl_set_rcv_buffer_size(mdata->nfnl, HSP_NFLOG_RCV_BUF);
 
     // get the fd
-    mdata->nflog_soc = nfnl_fd(mdata->nfnl);
-    myDebug(1, "NFLOG socket fd=%d", mdata->nflog_soc);
- 
+    int fd = nfnl_fd(mdata->nfnl);
+    myDebug(1, "NFLOG socket fd=%d", fd);
+
     // set the socket to non-blocking
-    int fdFlags = fcntl(mdata->nflog_soc, F_GETFL);
+    int fdFlags = fcntl(fd, F_GETFL);
     fdFlags |= O_NONBLOCK;
-    if(fcntl(mdata->nflog_soc, F_SETFL, fdFlags) < 0) {
+    if(fcntl(fd, F_SETFL, fdFlags) < 0) {
       myLog(LOG_ERR, "NFLOG fcntl(O_NONBLOCK) failed: %s", strerror(errno));
       return -1;
     }
-      
+
     // make sure it doesn't get inherited, e.g. when we fork a script
-    fdFlags = fcntl(mdata->nflog_soc, F_GETFD);
+    fdFlags = fcntl(fd, F_GETFD);
     fdFlags |= FD_CLOEXEC;
-    if(fcntl(mdata->nflog_soc, F_SETFD, fdFlags) < 0) {
+    if(fcntl(fd, F_SETFD, fdFlags) < 0) {
       myLog(LOG_ERR, "NFLOG fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
       return -1;
     }
 
-    return mdata->nflog_soc;
+    return fd;
   }
-
 
   /*_________________---------------------------__________________
     _________________     setSamplingRate       __________________
@@ -313,7 +308,7 @@ extern "C" {
       // socket to NFLOG while we are still root
       int fd = openNFLOG(mod);
       if(fd > 0)
-	EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_nflog, mod);
+	EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_nflog, NULL);
     }
 
     mdata->nflog_configured = YES;
@@ -341,9 +336,6 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTF_CHANGED), evt_intf_changed);
   }
 
-
-  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

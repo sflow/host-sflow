@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -36,7 +35,7 @@ extern "C" {
     _________________    updateBondCounters     __________________
     -----------------___________________________------------------
   */
-  
+
   void updateBondCounters(HSP *sp, SFLAdaptor *bond) {
     char procFileName[256];
     snprintf(procFileName, 256, "/proc/net/bonding/%s", bond->deviceName);
@@ -65,7 +64,7 @@ extern "C" {
 	if(sscanf(line, "%[^:]:%[^\n]", buf_var, buf_val) == 2) {
 	  char *tok_var = trimWhitespace(buf_var);
 	  char *tok_val = trimWhitespace(buf_val);
-	  
+
 	  if(readingMaster) {
 	    if(my_strequal(tok_var, "MII Status")) {
 	      if(my_strequal(tok_val, "up")) {
@@ -78,7 +77,7 @@ extern "C" {
 		bond_nio->lacp.portState.all = 0;
 	      }
 	    }
-	    
+
 	    if(my_strequal(tok_var, "System Identification")) {
 	      myDebug(1, "updateBondCounters: %s system identification %s",
 		      bond->deviceName,
@@ -94,7 +93,7 @@ extern "C" {
 		}
 	      }
 	    }
-	    
+
 	    if(my_strequal(tok_var, "Partner Mac Address")) {
 	      myDebug(1, "updateBondCounters: %s partner mac is %s",
 		      bond->deviceName,
@@ -103,13 +102,13 @@ extern "C" {
 		myLog(LOG_ERR, "updateBondCounters: partner mac read error: %s", tok_val);
 	      }
 	    }
-	    
+
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      aggID = strtol(tok_val, NULL, 0);
 	      myDebug(1, "updateBondCounters: %s aggID %u", bond->deviceName, aggID);
 	    }
 	  }
-	  
+
 	  // initially the data is for the bond, but subsequently
 	  // we get info about each slave. So we started with
 	  // (readingMaster=YES,currentSlave=NULL), and now we
@@ -127,7 +126,7 @@ extern "C" {
 	      slave_nio->lacp.attachedAggID = bond->ifIndex;
 	      memcpy(slave_nio->lacp.partnerSystemID, bond_nio->lacp.partnerSystemID, 6);
 	      memcpy(slave_nio->lacp.actorSystemID, bond_nio->lacp.actorSystemID, 6);
-	      
+
 	      // make sure the parent is going to export separate
 	      // counters if the slave is going to (because it was
 	      // marked as a switchPort):
@@ -140,7 +139,7 @@ extern "C" {
 	      }
 	    }
 	  }
-	  
+
 	  if(readingMaster == NO && slave_nio) {
 	    if(my_strequal(tok_var, "MII Status")) {
 	      if(my_strequal(tok_val, "up")) {
@@ -153,7 +152,7 @@ extern "C" {
 		slave_nio->lacp.portState.all = 0;
 	      }
 	    }
-	    
+
 	    if(my_strequal(tok_var, "Permanent HW addr")) {
 	      if(!gotActorID) {
 		// Still looking for our actorSystemID, so capture this here in case we
@@ -164,7 +163,7 @@ extern "C" {
 		}
 	      }
 	    }
-	    
+
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      uint32_t slave_aggID = strtol(tok_val, NULL, 0);
 	      if(slave_aggID == aggID) {
@@ -175,12 +174,12 @@ extern "C" {
 	  }
 	}
       }
-      
+
       if(aggregator_slave_nio && !gotActorID) {
 	// go back and fill in the actorSystemID on all the slave ports
 	shareActorIDFromSlave(sp, bond_nio, aggregator_slave_nio);
       }
-      
+
       fclose(procFile);
     }
   }
@@ -206,7 +205,7 @@ extern "C" {
 	  Actor Key: 17
 	  Partner Key: 17
 	  Partner Mac Address: 08:9e:01:f8:9b:45
-	  
+
 	  Slave Interface: swp3
 	  MII Status: up
 	  Speed: 1000 Mbps
@@ -268,7 +267,7 @@ extern "C" {
       }
     }
   }
-  
+
   void syncBondPolling(HSP *sp) {
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
@@ -277,14 +276,39 @@ extern "C" {
     }
   }
 
-  
+  /*_________________---------------------------__________________
+    _________________      syncPolling          __________________
+    -----------------___________________________------------------
+  */
+
+  void syncPolling(HSP *sp) {
+    if(sp->syncPollingInterval <= 1)
+      return;
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      if(nio->poller
+	 && nio->switchPort) {
+	uint32_t countdown = nio->poller->countersCountdown;
+	uint32_t nudgeBack = countdown % sp->syncPollingInterval;
+	uint32_t nudgeFwd = sp->syncPollingInterval - nudgeBack;
+	// take the smaller nudge - as long as it's in the future
+	if(nudgeBack < nudgeFwd
+	   && countdown > nudgeBack)
+	  nio->poller->countersCountdown -= nudgeBack;
+	else
+	  nio->poller->countersCountdown += nudgeFwd;
+      }
+    }
+  }
+
 #if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM )
 
   /*_________________---------------------------__________________
     _________________    SFF8472 SFP Data       __________________
     -----------------___________________________------------------
   */
-  
+
   static double sff8472_calibration(double reading, uint16_t *eew, uint32_t iscale, uint32_t ioffset)
   {
     // (reading * scale) + offset
@@ -293,10 +317,9 @@ extern "C" {
     double scale = (double)(scale16 >> 8) + ((double)(scale16 & 0xFF) / 256.0);
     return (reading * scale) + offset;
   }
-  
+
 #define SFF8472_CAL(x, e, i) (x) = sff8472_calibration((x), (e), (i), (i)+1)
 
-  
   static double sff8472_calibration_rxpwr(double reading, float *rxpwr)
   {
     // rxpwr[0],..,rxpwr[4] correspond to RX_PWR(4),..,RXPWR(0) in the spec
@@ -316,15 +339,14 @@ extern "C" {
   }
 #define SFF8472_CAL_RXPWR(x, ff) (x) = sff8472_calibration_rxpwr((x), (ff))
 
-  
   static void sff8472_read(SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
   {
     struct ethtool_eeprom *eeprom = NULL;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-    
+
     if(nio->modinfo_len < ETH_MODULE_SFF_8472_LEN)
       goto out;
-    
+
     eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8472_LEN);
     eeprom->cmd = ETHTOOL_GMODULEEEPROM;
     eeprom->len = ETH_MODULE_SFF_8472_LEN;
@@ -333,7 +355,7 @@ extern "C" {
       myLog(LOG_ERR, "SFF8036 ethtool ioctl failed: %s", strerror(errno));
       goto out;
     }
-    
+
     if(eeprom->data[0] != 0x03 ||
        eeprom->data[1] != 0x04) {
       goto out;
@@ -350,25 +372,25 @@ extern "C" {
     double temperature, voltage, bias_current;
     double tx_power, tx_power_max, tx_power_min;
     double rx_power, rx_power_max, rx_power_min;
-    
+
     uint16_t *eew = (uint16_t *)(eeprom->data);
 
     // wavelength
     if(!(eeprom->data[8] & 0x0c)) {
       wavelength = ntohs(eew[30]);
     }
-	  
+
     // temperature
     uint16_t temp16 = ntohs(eew[128 + 48]);
     temperature = (int8_t)(temp16 >> 8); // high byte in oC (signed)
     temperature += (double)(temp16 & 0xFF) / 256.0; // low byte in 1/256 oC
-	  
+
     // voltage
     voltage = ntohs(eew[128 + 49]);
-	  
+
     // bias current
     bias_current = ntohs(eew[128 + 50]);
-	  
+
     // power
     tx_power = ntohs(eew[128 + 51]);
     rx_power = ntohs(eew[128 + 52]);
@@ -397,7 +419,7 @@ extern "C" {
       SFF8472_CAL_RXPWR(rx_power_min, (float *)rxpwr);
       SFF8472_CAL_RXPWR(rx_power_max, (float *)rxpwr);
     }
-	  
+
     // populate sFlow structure
     nio->sfp.lanes = (SFLLane *)my_realloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
     nio->sfp.module_id = adaptor->ifIndex;
@@ -416,7 +438,7 @@ extern "C" {
     lane->rx_power_min = (rx_power_min / 10); // uW
     lane->rx_power_max = (rx_power_max / 10); // uW
     lane->rx_wavelength = wavelength; // same as tx_wavelength
-	  
+
     myDebug(1, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
 	    lane->tx_wavelength,
@@ -429,20 +451,20 @@ extern "C" {
 	    lane->rx_power,
 	    lane->rx_power_min,
 	    lane->rx_power_max);
-    
+
   out:
     if(eeprom)
       my_free(eeprom);
   }
-  
+
   static void sff8436_read(SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
   {
     struct ethtool_eeprom *eeprom = NULL;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-    
+
     if(nio->modinfo_len < ETH_MODULE_SFF_8436_LEN)
       goto out;
-    
+
     eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8436_LEN);
     eeprom->cmd = ETHTOOL_GMODULEEEPROM;
     eeprom->len = ETH_MODULE_SFF_8436_LEN;
@@ -493,7 +515,7 @@ extern "C" {
     if(bytes != ETH_MODULE_SFF_8436_LEN) {
       myLog(LOG_ERR, "test QSFP: hexToBinary failed (bytes=%d)", bytes);
     }
-#else    
+#else
     ifr->ifr_data = (char *)eeprom;
     if(ioctl(fd, SIOCETHTOOL, ifr) < 0) {
       myLog(LOG_ERR, "SFF8036 ethtool ioctl failed: %s", strerror(errno));
@@ -505,14 +527,14 @@ extern "C" {
     if(eeprom->data[0] != 0x0d) {
       goto out;
     }
-    
+
     uint32_t num_lanes = 4;
     uint16_t wavelength=0;
     double temperature, voltage, bias_current[4];
     double rx_power[4], rx_power_max, rx_power_min;
-    
+
     uint16_t *eew = (uint16_t *)(eeprom->data);
-    
+
     // wavelength - determined by transciever technology code
 #ifndef SFF8436_DEVICE_TECH_OFFSET
     // these defs should eventually appear in ethtool.h
@@ -535,7 +557,7 @@ extern "C" {
 #define SFF8436_TRANS_1310_VCSEL (1 << 4)
 #define SFF8436_TRANS_850_VCSEL (0 << 4)
 #endif
-    
+
     uint8_t tx_tech = (eeprom->data[SFF8436_DEVICE_TECH_OFFSET]
 		       & SFF8436_TRANS_TECH_MASK);
     switch (tx_tech) {
@@ -549,25 +571,25 @@ extern "C" {
     case SFF8436_TRANS_1550_VCSEL: wavelength = 1550; break;
     case SFF8436_TRANS_1490_DFB: wavelength = 1490; break;
     }
-    
+
     // temperature
     uint16_t temp16 = ntohs(eew[11]);
     temperature = (int8_t)(temp16 >> 8); // high byte in oC (signed)
     temperature += (double)(temp16 & 0xFF) / 256.0; // low byte in 1/256 oC
-	  
+
     // voltage
     voltage = ntohs(eew[13]);
-	  
+
     // channel stats
     for (int ch=0; ch < num_lanes; ch++) {
       rx_power[ch] = ntohs(eew[17 + ch]);
       bias_current[ch] = ntohs(eew[21 + ch]);
     }
-	  
+
     // power
     rx_power_max = ntohs(eew[256 + 24]);
     rx_power_min = ntohs(eew[256 + 25]);
-	  
+
     // populate sFlow structure
     nio->sfp.lanes = (SFLLane *)my_realloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
     nio->sfp.module_id = adaptor->ifIndex;
@@ -575,7 +597,7 @@ extern "C" {
     nio->sfp.module_supply_voltage = (voltage / 10); // mV
     nio->sfp.module_temperature = (temperature * 1000); // mC
     nio->sfp.num_lanes = num_lanes;
-    
+
     for (int ch=0; ch < num_lanes; ch++) {
       SFLLane *lane = &(nio->sfp.lanes[ch]);
       lane->lane_index = (ch + 1);
@@ -585,7 +607,7 @@ extern "C" {
       lane->rx_power_min = (rx_power_min / 10); // uW
       lane->rx_power_max = (rx_power_max / 10); // uW
       lane->rx_wavelength = wavelength; // same as tx_wavelength
-	  
+
       myDebug(1, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
 	    ch,
@@ -600,14 +622,116 @@ extern "C" {
 	    lane->rx_power_min,
 	    lane->rx_power_max);
     }
-	  
+
   out:
     if(eeprom)
       my_free(eeprom);
   }
 
 #endif /* ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */
-  
+
+  /*_________________---------------------------__________________
+    _________________  accumulateNioCounters    __________________
+    -----------------___________________________------------------
+  */
+
+  int accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs)
+  {
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    // have to detect discontinuities here, so use a full
+    // set of latched counters and accumulators.
+    int accumulate = nio->last_update ? YES : NO;
+    nio->last_update = sp->pollBus->clk;
+    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
+
+    SFLHost_nio_counters delta;
+    HSP_ethtool_counters et_delta;
+#define NIO_COMPUTE_DELTA(field) delta.field = ctrs->field - nio->last_nio.field
+    NIO_COMPUTE_DELTA(pkts_in);
+    NIO_COMPUTE_DELTA(errs_in);
+    NIO_COMPUTE_DELTA(drops_in);
+    NIO_COMPUTE_DELTA(pkts_out);
+    NIO_COMPUTE_DELTA(errs_out);
+    NIO_COMPUTE_DELTA(drops_out);
+
+    if(sp->nio_polling_secs == 0) {
+      // 64-bit byte counters
+      NIO_COMPUTE_DELTA(bytes_in);
+      NIO_COMPUTE_DELTA(bytes_out);
+    }
+    else {
+      // for case where byte counters are 32-bit,  we need
+      // to use 32-bit unsigned arithmetic to avoid spikes
+      delta.bytes_in = (uint32_t)ctrs->bytes_in - nio->last_bytes_in32;
+      delta.bytes_out = (uint32_t)ctrs->bytes_out - nio->last_bytes_out32;
+      nio->last_bytes_in32 = ctrs->bytes_in;
+      nio->last_bytes_out32 = ctrs->bytes_out;
+      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
+      // if we detect that the OS is using 64-bits then we can turn off the faster
+      // NIO polling. This should probably be done based on the kernel version or some
+      // other include-file definition, but it's not expensive to do it here like this:
+      if(ctrs->bytes_in > 0xFFFFFFFF || ctrs->bytes_out > 0xFFFFFFFF) {
+	myLog(LOG_INFO, "detected 64-bit counters - turn off faster polling");
+	sp->nio_polling_secs = 0;
+      }
+    }
+
+#define ET_COMPUTE_DELTA(field) et_delta.field = et_ctrs->field - nio->et_last.field
+    ET_COMPUTE_DELTA(mcasts_in);
+    ET_COMPUTE_DELTA(mcasts_out);
+    ET_COMPUTE_DELTA(bcasts_in);
+    ET_COMPUTE_DELTA(bcasts_out);
+
+    if(accumulate) {
+      // sanity check in case the counters were reset under out feet.
+      // normally we leave this to the upstream collector, but these
+      // numbers might be getting passed through from the hardware(?)
+      // so we treat them with particular distrust.
+      if(delta.bytes_in > maxDeltaBytes ||
+	 delta.bytes_out > maxDeltaBytes ||
+	 delta.pkts_in > HSP_MAX_NIO_DELTA32 ||
+	 delta.pkts_out > HSP_MAX_NIO_DELTA32) {
+	myLog(LOG_ERR, "detected counter discontinuity for %s: deltaBytes=%"PRIu64",%"PRIu64" deltaPkts=%u,%u",
+	      adaptor->deviceName,
+	      delta.bytes_in,
+	      delta.bytes_out,
+	      delta.pkts_in,
+	      delta.pkts_out);
+	accumulate = NO;
+      }
+      if(et_delta.mcasts_in > HSP_MAX_NIO_DELTA64  ||
+	 et_delta.mcasts_out > HSP_MAX_NIO_DELTA64 ||
+	 et_delta.bcasts_in > HSP_MAX_NIO_DELTA64  ||
+	 et_delta.bcasts_out > HSP_MAX_NIO_DELTA64) {
+	myLog(LOG_ERR, "detected counter discontinuity in ethtool stats");
+	accumulate = NO;
+      }
+    }
+
+    if(accumulate) {
+#define NIO_ACCUMULATE(field) nio->nio.field += delta.field
+      NIO_ACCUMULATE(bytes_in);
+      NIO_ACCUMULATE(pkts_in);
+      NIO_ACCUMULATE(errs_in);
+      NIO_ACCUMULATE(drops_in);
+      NIO_ACCUMULATE(bytes_out);
+      NIO_ACCUMULATE(pkts_out);
+      NIO_ACCUMULATE(errs_out);
+      NIO_ACCUMULATE(drops_out);
+#define ET_ACCUMULATE(field) nio->et_total.field += et_delta.field
+      ET_ACCUMULATE(mcasts_in);
+      ET_ACCUMULATE(mcasts_out);
+      ET_ACCUMULATE(bcasts_in);
+      ET_ACCUMULATE(bcasts_out);
+    }
+
+    // latch - with struct copy
+    nio->last_nio = *ctrs;
+    nio->et_last = *et_ctrs;
+
+    return accumulate;
+  }
+
   /*_________________---------------------------__________________
     _________________    updateNioCounters      __________________
     -----------------___________________________------------------
@@ -617,6 +741,9 @@ extern "C" {
 
     assert(EVCurrentBus() == sp->pollBus);
 
+    // notify modules in case they want to override
+    EVEventTx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_UPDATE_NIO), &filter, sizeof(filter));
+
     if(filter == NULL) {
       // full refresh - but don't do anything if we just
       // refreshed all the numbers less than a second ago
@@ -624,6 +751,13 @@ extern "C" {
 	return;
       }
       sp->nio_last_update = sp->pollBus->clk;
+    }
+    else {
+      if(ADAPTOR_NIO(filter)->last_update == sp->pollBus->clk) {
+	// the requested adaptor has fresh counters
+	// so nothing to do here
+	return;
+      }
     }
 
     FILE *procFile;
@@ -665,15 +799,25 @@ extern "C" {
 		  &drops_out) == 9) {
 	  SFLAdaptor *adaptor = adaptorByName(sp, deviceName);
 	  if(adaptor) {
-	    
+
 	    if(filter && (filter != adaptor))
 	      continue;
-	    
+
 	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-	    HSP_ethtool_counters et_ctrs = { 0 }, et_delta = { 0 };
+	    SFLHost_nio_counters ctrs = {
+	      .bytes_in = bytes_in,
+	      .pkts_in = (uint32_t)pkts_in,
+	      .errs_in = (uint32_t)errs_in,
+	      .drops_in = (uint32_t)drops_in,
+	      .bytes_out = bytes_out,
+	      .pkts_out = (uint32_t)pkts_out,
+	      .errs_out = (uint32_t)errs_out,
+	      .drops_out = (uint32_t)drops_out
+	    };
+	    HSP_ethtool_counters et_ctrs = { 0 };
 	    if (niostate->et_nfound) {
 	      // get the latest stats block for this device via ethtool
-	      // and read out the counters that we located by name.	
+	      // and read out the counters that we located by name.
 
 	      uint32_t bytes = sizeof(struct ethtool_stats);
 	      bytes += niostate->et_nctrs * sizeof(uint64_t);
@@ -694,22 +838,14 @@ extern "C" {
 			    et_stats->data[xx]);
 		  }
 		}
-		if(niostate->et_idx_mcasts_in) {
+		if(niostate->et_idx_mcasts_in)
 		  et_ctrs.mcasts_in = et_stats->data[niostate->et_idx_mcasts_in - 1];
-		  et_delta.mcasts_in = et_ctrs.mcasts_in - niostate->et_last.mcasts_in;
-		}
-		if(niostate->et_idx_mcasts_out) {
+		if(niostate->et_idx_mcasts_out)
 		  et_ctrs.mcasts_out = et_stats->data[niostate->et_idx_mcasts_out - 1];
-		  et_delta.mcasts_out = et_ctrs.mcasts_out - niostate->et_last.mcasts_out;
-		}
-		if(niostate->et_idx_bcasts_in) {
+		if(niostate->et_idx_bcasts_in)
 		  et_ctrs.bcasts_in = et_stats->data[niostate->et_idx_bcasts_in - 1];
-		  et_delta.bcasts_in = et_ctrs.bcasts_in - niostate->et_last.bcasts_in;
-		}
-		if(niostate->et_idx_bcasts_out) {
+		if(niostate->et_idx_bcasts_out)
 		  et_ctrs.bcasts_out = et_stats->data[niostate->et_idx_bcasts_out - 1];
-		  et_delta.bcasts_out = et_ctrs.bcasts_out - niostate->et_last.bcasts_out;
-		}
 	      }
 	      my_free(et_stats);
 	    }
@@ -729,96 +865,7 @@ extern "C" {
 	    }
 #endif /*  ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */
 
-	    // have to detect discontinuities here, so use a full
-	    // set of latched counters and accumulators.
-	    int accumulate = niostate->last_update ? YES : NO;
-	    niostate->last_update = sp->pollBus->clk;
-	    uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
-	    
-	    SFLHost_nio_counters delta;
-#define NIO_COMPUTE_DELTA(field) delta.field = field - niostate->last_nio.field
-	    NIO_COMPUTE_DELTA(pkts_in);
-	    NIO_COMPUTE_DELTA(errs_in);
-	    NIO_COMPUTE_DELTA(drops_in);
-	    NIO_COMPUTE_DELTA(pkts_out);
-	    NIO_COMPUTE_DELTA(errs_out);
-	    NIO_COMPUTE_DELTA(drops_out);
-	    
-	    if(sp->nio_polling_secs == 0) {
-	      // 64-bit byte counters
-	      NIO_COMPUTE_DELTA(bytes_in);
-	      NIO_COMPUTE_DELTA(bytes_out);
-	    }
-	    else {
-	      // for case where byte counters are 32-bit,  we need
-	      // to use 32-bit unsigned arithmetic to avoid spikes
-	      delta.bytes_in = (uint32_t)bytes_in - niostate->last_bytes_in32;
-	      delta.bytes_out = (uint32_t)bytes_out - niostate->last_bytes_out32;
-	      niostate->last_bytes_in32 = bytes_in;
-	      niostate->last_bytes_out32 = bytes_out;
-	      maxDeltaBytes = HSP_MAX_NIO_DELTA32;
-	      // if we detect that the OS is using 64-bits then we can turn off the faster
-	      // NIO polling. This should probably be done based on the kernel version or some
-	      // other include-file definition, but it's not expensive to do it here like this:
-	      if(bytes_in > 0xFFFFFFFF || bytes_out > 0xFFFFFFFF) {
-		myLog(LOG_INFO, "detected 64-bit counters in /proc/net/dev");
-		sp->nio_polling_secs = 0;
-	      }
-	    }
-	    
-	    if(accumulate) {
-	      // sanity check in case the counters were reset under out feet.
-	      // normally we leave this to the upstream collector, but these
-	      // numbers might be getting passed through from the hardware(?)
-	      // so we treat them with particular distrust.
-	      if(delta.bytes_in > maxDeltaBytes ||
-		 delta.bytes_out > maxDeltaBytes ||
-		 delta.pkts_in > HSP_MAX_NIO_DELTA32 ||
-		 delta.pkts_out > HSP_MAX_NIO_DELTA32) {
-		myLog(LOG_ERR, "detected counter discontinuity in /proc/net/dev for %s: deltaBytes=%"PRIu64",%"PRIu64" deltaPkts=%u,%u",
-                      adaptor->deviceName,
-                      delta.bytes_in,
-                      delta.bytes_out,
-                      delta.pkts_in,
-                      delta.pkts_out);
-		accumulate = NO;
-	      }
-	      if(et_delta.mcasts_in > HSP_MAX_NIO_DELTA64  ||
-		 et_delta.mcasts_out > HSP_MAX_NIO_DELTA64 ||
-		 et_delta.bcasts_in > HSP_MAX_NIO_DELTA64  ||
-		 et_delta.bcasts_out > HSP_MAX_NIO_DELTA64) {
-		myLog(LOG_ERR, "detected counter discontinuity in ethtool stats");
-		accumulate = NO;
-	      }
-	    }
-	    
-	    if(accumulate) {
-#define NIO_ACCUMULATE(field) niostate->nio.field += delta.field
-	      NIO_ACCUMULATE(bytes_in);
-	      NIO_ACCUMULATE(pkts_in);
-	      NIO_ACCUMULATE(errs_in);
-	      NIO_ACCUMULATE(drops_in);
-	      NIO_ACCUMULATE(bytes_out);
-	      NIO_ACCUMULATE(pkts_out);
-	      NIO_ACCUMULATE(errs_out);
-	      NIO_ACCUMULATE(drops_out);
-#define ET_ACCUMULATE(field) niostate->et_total.field += et_delta.field
-	      ET_ACCUMULATE(mcasts_in);
-	      ET_ACCUMULATE(mcasts_out);
-	      ET_ACCUMULATE(bcasts_in);
-	      ET_ACCUMULATE(bcasts_out);
-	    }
-	    
-#define NIO_LATCH(field) niostate->last_nio.field = field
-	    NIO_LATCH(bytes_in);
-	    NIO_LATCH(pkts_in);
-	    NIO_LATCH(errs_in);
-	    NIO_LATCH(drops_in);
-	    NIO_LATCH(bytes_out);
-	    NIO_LATCH(pkts_out);
-	    NIO_LATCH(errs_out);
-	    NIO_LATCH(drops_out);
-	    niostate->et_last = et_ctrs; // struct copy
+	    accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs);
 	  }
 	}
       }
@@ -827,13 +874,12 @@ extern "C" {
       fclose(procFile);
     }
   }
-  
 
   /*_________________---------------------------__________________
     _________________      readNioCounters      __________________
     -----------------___________________________------------------
   */
-  
+
   int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList) {
     int interface_count = 0;
     size_t devFilterLen = devFilter ? strlen(devFilter) : 0;
@@ -849,7 +895,7 @@ extern "C" {
       if(devFilter == NULL || !strncmp(devFilter, adaptor->deviceName, devFilterLen)) {
 	if(adList == NULL || adaptorListGet(adList, adaptor->deviceName) != NULL) {
 	  HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-	  
+
 	  // in the case where we are adding up across all
 	  // interfaces, be careful to avoid double-counting.
 	  // By leaving this test until now we make it possible
@@ -877,9 +923,7 @@ extern "C" {
     }
     return interface_count;
   }
-  
 
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

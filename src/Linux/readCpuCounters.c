@@ -14,7 +14,7 @@ extern "C" {
     _________________     readCpuCounters       __________________
     -----------------___________________________------------------
   */
-  
+
   int readCpuCounters(SFLHost_cpu_counters *cpu) {
     int gotData = NO;
     FILE *procFile;
@@ -168,8 +168,6 @@ extern "C" {
     return gotData;
   }
 
-
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

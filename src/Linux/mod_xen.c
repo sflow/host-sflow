@@ -2,7 +2,6 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
@@ -107,7 +106,7 @@ extern "C" {
   void closeXenHandles(EVMod *mod)
   {
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
-    
+
     if(HSP_XENCTRL_HANDLE_OK(mdata->xc_handle)) {
       xc_interface_close(mdata->xc_handle);
       mdata->xc_handle = 0;
@@ -199,7 +198,7 @@ extern "C" {
       snprintf(path, HSP_MAX_PATHLEN, "%s/tap-%s", vbd_path, ctrspec);
       file = fopen(path, "r");
     }
-    
+
     if(file) {
       if(usec) {
 	uint64_t requests, avg_usecs, max_usecs;
@@ -225,7 +224,7 @@ extern "C" {
     myDebug(1, "xen_vbd_counter: <%s> = %"PRIu64, path, ctr64);
     return ctr64;
   }
-  
+
   static int xen_collect_block_devices(EVMod *mod, HSPVMState_XEN *state) {
     // HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -264,7 +263,7 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     for(uint32_t i = 0; i < strArrayN(state->vm.volumes); i++) {
       char *vbd_dev = strArrayAt(state->vm.volumes, i);
-      myDebug(3, "reading VBD %s for dom_id %u", vbd_dev, state->domId); 
+      myDebug(3, "reading VBD %s for dom_id %u", vbd_dev, state->domId);
       dsk->rd_req += xen_vbd_counter(state->domId, vbd_dev, sp->xen.vbd, "rd_req", NO);
       dsk->rd_bytes += (xen_vbd_counter(state->domId, vbd_dev, sp->xen.vbd, "rd_sect", NO) * HSP_SECTOR_BYTES);
       dsk->wr_req += xen_vbd_counter(state->domId, vbd_dev, sp->xen.vbd, "wr_req", NO);
@@ -287,12 +286,12 @@ extern "C" {
     }
     EVMod *mod = (EVMod *)poller->magic;
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
-    
+
     if(xenHandlesOK(mod)) {
       HSP *sp = (HSP *)EVROOTDATA(mod);
-      
+
       xc_domaininfo_t domaininfo;
-      if(!sp->xen.update_dominfo) { 
+      if(!sp->xen.update_dominfo) {
 	// this optimization forces us to use the (stale) domaininfo from the last time
 	// we refreshed the VM list.  Most of these parameters change very rarely anyway
 	// so this is not a big sacrifice at all.
@@ -312,7 +311,7 @@ extern "C" {
 	  return;
 	}
       }
-      
+
       // host ID
       SFLCounters_sample_element hidElem = { 0 };
       hidElem.tag = SFLCOUNTERS_HOST_HID;
@@ -333,7 +332,7 @@ extern "C" {
 	//hidElem.counterBlock.host_hid.os_release.len = 0;
 	SFLADD_ELEMENT(cs, &hidElem);
       }
-      
+
       // host parent
       SFLCounters_sample_element parElem = { 0 };
       parElem.tag = SFLCOUNTERS_HOST_PAR;
@@ -411,7 +410,6 @@ extern "C" {
 		      SFL_DS_INDEX(poller->dsi),
 		      domaininfo.tot_pages);
 
-		      
       memElem.counterBlock.host_vrt_mem.memory = domaininfo.tot_pages * mdata->page_size;
       memElem.counterBlock.host_vrt_mem.maxMemory = (domaininfo.max_pages == UINT_MAX) ? -1 : (domaininfo.max_pages * mdata->page_size);
       SFLADD_ELEMENT(cs, &memElem);
@@ -450,7 +448,7 @@ extern "C" {
     // defer, since the agent mutex is currently held and we don't want to block it
     UTArrayAdd(mdata->pollActions, poller);
   }
-  
+
   /*_________________---------------------------__________________
     _________________   add and remove VM       __________________
     -----------------___________________________------------------
@@ -473,7 +471,6 @@ extern "C" {
     return state;
   }
 
-
   static void removeAndFreeVM_XEN(EVMod *mod, HSPVMState_XEN *state) {
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
     myDebug(1, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
@@ -488,7 +485,7 @@ extern "C" {
     _________________    configVMs              __________________
     -----------------___________________________------------------
   */
-  
+
   void configVMs_XEN(EVMod *mod) {
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -539,7 +536,7 @@ extern "C" {
 	      // strArrayReset(state->interfaces);
 	      strArrayReset(vm->volumes);
 	      // strArrayReset(state->disks);
-	      
+
 	      if(sp->xen.dsk) {
 		// pick up the list of block device numbers
 		xen_collect_block_devices(mod, state);
@@ -566,7 +563,7 @@ extern "C" {
     UTHASH_WALK(mdata->vmsByUUID, state) {
       state->vm.marked = YES;
     }
-    
+
     // 2. create new VM pollers, or clear the mark on existing ones
     configVMs_XEN(mod);
 
@@ -626,7 +623,7 @@ extern "C" {
       }
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________    evt_config_changed     __________________
     -----------------___________________________------------------
@@ -645,7 +642,6 @@ extern "C" {
   static void evt_intf_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     evt_config_changed(mod, evt, data, dataLen);
   }
-
 
   /*_________________---------------------------__________________
     _________________    tick, tock             __________________
@@ -679,7 +675,7 @@ extern "C" {
   */
 
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    SFL_COUNTERS_SAMPLE_TYPE *cs = (SFL_COUNTERS_SAMPLE_TYPE *)data;
+    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
@@ -723,4 +719,3 @@ extern "C" {
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

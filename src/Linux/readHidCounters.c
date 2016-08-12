@@ -13,7 +13,7 @@ extern "C" {
     _________________     readHidCounters       __________________
     -----------------___________________________------------------
   */
-  
+
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen)
   {
     struct utsname uu;
@@ -83,11 +83,10 @@ extern "C" {
       hid->os_release.str = rbuf;
       hid->os_release.len = len;
     }
-    
+
     return YES;
   }
 
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-

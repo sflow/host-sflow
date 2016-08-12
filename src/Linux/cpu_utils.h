@@ -18,4 +18,3 @@ extern "C" {
 #endif
 
 #endif /* CPU_UTILS_H */
-
