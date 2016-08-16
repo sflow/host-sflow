@@ -50,7 +50,6 @@ extern "C" {
   // even when the module is not referenced in the config.
 #define HSP_CUMULUS_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
 #define HSP_OS10_SWITCHPORT_CONFIG_PROG "/opt/dell/os10/bin/cps_config_sflow"
-#define HSP_OS10_SWITCHPORT_SPEED_PROG "/opt/dell/os10/bin/os10-ethtool"
 
   typedef struct _HSPNameVal {
     char *nv_name;
@@ -213,6 +212,7 @@ extern "C" {
     uint64_t mcasts_out;
     uint64_t bcasts_in;
     uint64_t bcasts_out;
+    uint64_t unknown_in;
   } HSP_ethtool_counters;
 
   typedef enum { HSPDEV_OTHER=0,
@@ -309,7 +309,7 @@ extern "C" {
 #define HSPEVENT_CONFIG_DONE "config_done"       // after new config
 #define HSPEVENT_INTF_READ "intf_read"           // (adaptor *) reading interface
 #define HSPEVENT_INTF_SPEED "intf_speed"         // (adaptor *) interface speed change
-#define HSPEVENT_INTF_CHANGED "intf_changed"     // some interface(s) changed
+#define HSPEVENT_INTFS_CHANGED "intfs_changed"     // some interface(s) changed
 #define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
 
   typedef struct _HSP {

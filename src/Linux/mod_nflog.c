@@ -315,11 +315,11 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    evt_intf_changed       __________________
+    _________________    evt_intfs_changed      __________________
     -----------------___________________________------------------
   */
 
-  static void evt_intf_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+  static void evt_intfs_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     setSamplingRate(mod);
   }
 
@@ -333,7 +333,7 @@ extern "C" {
     HSP_mod_NFLOG *mdata = (HSP_mod_NFLOG *)mod->data;
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
-    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTF_CHANGED), evt_intf_changed);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);
   }
 
 #if defined(__cplusplus)

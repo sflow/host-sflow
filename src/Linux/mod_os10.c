@@ -18,6 +18,14 @@ extern "C" {
 
 #define HSP_OS10_MIN_POLLING_INTERVAL 10
 
+// HSP_OS10_SWITCHPORT_CONFIG_PROG is defined in hsflowd.h
+// because it is used to auto-detect when we are on os10.
+
+#define HSP_OS10_SWITCHPORT_SPEED_PROG "/opt/dell/os10/bin/os10-ethtool"
+
+#define HSP_OS10_SWITCHPORT_STATS_PROG_0 "/opt/dell/os10/bin/os10-show-stats"
+#define HSP_OS10_SWITCHPORT_STATS_PROG_1 "ifstat"
+
   typedef struct _HSP_mod_OS10 {
     // active on two threads (buses)
     EVBus *packetBus;
@@ -194,78 +202,6 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________        getSpeed           __________________
-    -----------------___________________________------------------
-  */
-
-  // TODO: make this a parameter like the switchPort regex
-#define HSP_OS10_SPEED_REGEX "\\s+Speed\\s+:\\s+([0-9]+)"
-static regex_t *speedRegex = NULL;
-
-static int speedOutputLine(void *magic, char *line) {
-  if(!speedRegex) {
-    speedRegex = UTRegexCompile(HSP_OS10_SPEED_REGEX);
-    assert(speedRegex != NULL);
-  }
-  int speedMb = 0;
-  if(UTRegexExtractInt(speedRegex, line, 1, &speedMb, NULL, NULL)) {
-    myDebug(1, "got speedMb=%d\n", speedMb);
-    uint64_t speed64 = speedMb;
-    speed64 *= 1000000;
-    *(uint64_t *)magic = speed64;
-  }
-  return YES;
-}
-
-  static bool getSpeed(EVMod *mod, SFLAdaptor *adaptor) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-
-    if(niostate->switchPort == NO
-       || niostate->loopback
-       || niostate->bond_master) {
-      return NO;
-    }
-
-    UTStringArray *cmdline = strArrayNew();
-    strArrayAdd(cmdline, HSP_OS10_SWITCHPORT_SPEED_PROG);
-    // usage:  <prog> <interface>
-    strArrayAdd(cmdline, adaptor->deviceName);
-    strArrayAdd(cmdline, NULL); // trailing NULL
-#define HSP_MAX_EXEC_LINELEN 1024
-    char outputLine[HSP_MAX_EXEC_LINELEN];
-
-    if(debug(1)) {
-      char *cmd_str = strArrayStr(cmdline, NULL, NULL, " ", NULL);
-      myDebug(1, "exec command:[%s]", cmd_str);
-      my_free(cmd_str);
-    }
-
-    int status;
-    uint64_t speed;
-    if(myExec(&speed, strArray(cmdline), speedOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
-      if(WEXITSTATUS(status) != 0) {
-	myLog(LOG_ERR, "myExec(%s) exitStatus=%d",
-	      HSP_OS10_SWITCHPORT_SPEED_PROG,
-	      WEXITSTATUS(status));
-      }
-      else {
-	myDebug(1, "getSpeed(%s) succeeded", adaptor->deviceName);
-	// if this is a change of speed then it should trigger a
-	// sampling-rate setting below...
-	setAdaptorSpeed(sp, adaptor, speed);
-      }
-    }
-    else {
-      myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
-	    strArrayAt(cmdline, 0),
-	    adaptor->deviceName);
-    }
-    strArrayFree(cmdline);
-    return YES;
-  }
-
-  /*_________________---------------------------__________________
     _________________     setSamplingRate       __________________
     -----------------___________________________------------------
   */
@@ -362,61 +298,93 @@ static int speedOutputLine(void *magic, char *line) {
     return ans;
   }
 
-  static int pollOutputLine(void *magic, char *line) {
+#define OS10_DELLIF "dell-if/"
+#define OS10_IFSTATE "if/interfaces-state/interface/statistics"
+
+  static void setPollCurrent(EVMod *mod, SFLAdaptor *adaptor)
+  {
+    HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(mdata->poll_current != adaptor) {
+      // TODO: accumulate counters if changing from adaptor to adaptor (or NULL)
+      if(mdata->poll_current) {
+	accumulateNioCounters(sp, mdata->poll_current, &mdata->ctrs, &mdata->et_ctrs);
+	ADAPTOR_NIO(mdata->poll_current)->last_update = sp->pollBus->clk;
+      }
+      mdata->poll_current = adaptor;
+      memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
+      memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
+    }
+  }
+
+  static int pollAllOutputLine(void *magic, char *line) {
     EVMod *mod = (EVMod *)magic;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
     char tokbuf[HSP_MAX_EXEC_LINELEN];
-    UTStringArray *tokens = tokenize(line, " :", tokbuf, HSP_MAX_EXEC_LINELEN);
+    UTStringArray *tokens = tokenize(line, " =", tokbuf, HSP_MAX_EXEC_LINELEN);
     char *tok0 = strArrayAt(tokens, 0);
     char *tok1 = strArrayAt(tokens, 1);
-    if((my_strequal(tok0, "Statistics")
-	|| my_strequal(tok0, "Statstics")) // handle typo in script
-       && my_strequal(tok1, "for")
-       && my_strequal(strArrayAt(tokens, 2), "interface")) {
-      char *dev = strArrayAt(tokens, 3);
-      if(dev) {
-	// sanity check (while we are polling indvidual interfaces one at a time)
-	SFLAdaptor *poll_current = adaptorByName(sp, dev);
-	assert(poll_current == mdata->poll_current);
+    SFLMacAddress mac;
+    if(my_strequal(tok0, OS10_DELLIF OS10_IFSTATE "phys-address")) {
+      if(hexToBinary((u_char *)tok1, (u_char *)&mac.mac, 6) == 6) {
+	setPollCurrent(mod, adaptorByMac(sp, &mac));
       }
     }
-    else if (mdata->poll_current && tok0 && tok1) {
-      // parse counters for this interface
-      if(my_strequal(tok0, "rx_bytes")) mdata->ctrs.bytes_in = strtol(tok1, NULL, 0);
-      if(my_strequal(tok0, "tx_bytes")) mdata->ctrs.bytes_out = strtol(tok1, NULL, 0);
-      if(my_strequal(tok0, "rx_no_errors")) mdata->ctrs.pkts_in = strtol(tok1, NULL, 0);
-      if(my_strequal(tok0, "tx_no_errors")) mdata->ctrs.pkts_out = strtol(tok1, NULL, 0);
 
-      if(my_strequal(tok0, "rx_jabbers")
-	 || my_strequal(tok0, "rx_fragments")
-	 || my_strequal(tok0, "rx_align_errors")) mdata->ctrs.errs_in += strtol(tok1, NULL, 0);
+    if(mdata->poll_current == NULL)
+      return YES;
 
-      if(my_strequal(tok0, "rx_discards")) mdata->ctrs.drops_in = strtol(tok1, NULL, 0);
+    SFLAdaptor *adaptor = mdata->poll_current;
+    //HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
-      if(my_strequal(tok0, "rx_mcast_packets")) mdata->et_ctrs.mcasts_in = strtol(tok1, NULL, 0);
-      if(my_strequal(tok0, "tx_mcast_packets")) mdata->et_ctrs.mcasts_out = strtol(tok1, NULL, 0);
-      if(my_strequal(tok0, "rx_bcast_packets")) mdata->et_ctrs.bcasts_in = strtol(tok1, NULL, 0);
-      if(my_strequal(tok0, "tx_bcast_packets")) mdata->et_ctrs.bcasts_out = strtol(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "speed")) {
+      setAdaptorSpeed(sp, adaptor, strtoll(tok1, NULL, 0));
     }
+
+    if(my_strequal(tok0, OS10_IFSTATE "if-index")) {
+      uint32_t ifIndex = strtol(tok1, NULL, 0);
+      if(ifIndex != adaptor->ifIndex) {
+	myLog(LOG_ERR, "ifIndex mismatch for interface %s: %u", adaptor->deviceName, ifIndex);
+      }
+    }
+
+    if(my_strequal(tok0, OS10_IFSTATE "name")) {
+      if(tok1 && my_strequal(tok1, adaptor->deviceName) == NO) {
+	myLog(LOG_ERR, "name mismatch for interface %s != %s", tok1, adaptor->deviceName);
+      }
+    }
+
+    // TODO: handle these properly
+    if(my_strequal(tok0, OS10_IFSTATE "admin-status")) { }
+    if(my_strequal(tok0, OS10_IFSTATE "oper-status")) { }
+    if(my_strequal(tok0, OS10_IFSTATE "enabled")) { }
+    
+    if(my_strequal(tok0, OS10_IFSTATE "in-octets")) mdata->ctrs.bytes_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "out-octets")) mdata->ctrs.bytes_out = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "in-unicast-pkts")) mdata->ctrs.pkts_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "out-unicast-pkts")) mdata->ctrs.pkts_out = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "in-errors")) mdata->ctrs.errs_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "out-errors")) mdata->ctrs.errs_out = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "in-discards")) mdata->ctrs.drops_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "out-discards")) mdata->ctrs.drops_out = strtoll(tok1, NULL, 0);
+    
+    if(my_strequal(tok0, OS10_IFSTATE "in-unknown-protos")) mdata->et_ctrs.unknown_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "in-multicast-pkts")) mdata->et_ctrs.mcasts_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "out-multicast-pkts")) mdata->et_ctrs.mcasts_out = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "in-broadcast-pkts")) mdata->et_ctrs.bcasts_in = strtoll(tok1, NULL, 0);
+    if(my_strequal(tok0, OS10_IFSTATE "out-broadcast-pkts")) mdata->et_ctrs.bcasts_out = strtoll(tok1, NULL, 0);
+
     strArrayFree(tokens);
     return YES;
   }
 
-  static bool pollCounters(EVMod *mod, SFLAdaptor *adaptor) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
-
-    mdata->poll_current = adaptor;
-    memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
-    memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
-
+  static bool pollAllCounters(EVMod *mod) {
     UTStringArray *cmdline = strArrayNew();
-    strArrayAdd(cmdline, HSP_OS10_SWITCHPORT_SPEED_PROG);
-    // usage:  <prog> -S <interface>
-    strArrayAdd(cmdline, "-S");
-    strArrayAdd(cmdline, adaptor->deviceName);
+    strArrayAdd(cmdline, HSP_OS10_SWITCHPORT_STATS_PROG_0);
+    strArrayAdd(cmdline, HSP_OS10_SWITCHPORT_STATS_PROG_1);
     strArrayAdd(cmdline, NULL); // trailing NULL
+
 #define HSP_MAX_EXEC_LINELEN 1024
     char outputLine[HSP_MAX_EXEC_LINELEN];
 
@@ -427,21 +395,21 @@ static int speedOutputLine(void *magic, char *line) {
     }
 
     int status;
-    if(myExec(mod, strArray(cmdline), pollOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+    if(myExec(mod, strArray(cmdline), pollAllOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
       if(WEXITSTATUS(status) != 0) {
 	myLog(LOG_ERR, "myExec(%s) exitStatus=%d",
 	      HSP_OS10_SWITCHPORT_SPEED_PROG,
 	      WEXITSTATUS(status));
       }
       else {
-	myDebug(1, "pollCounters() succeeded");
-	accumulateNioCounters(sp, adaptor, &mdata->ctrs, &mdata->et_ctrs);
+	myDebug(1, "pollAllCounters() succeeded");
       }
     }
     else {
       myLog(LOG_ERR, "myExec() calling %s failed",
 	    strArrayAt(cmdline, 0));
     }
+    setPollCurrent(mod, NULL);
     strArrayFree(cmdline);
     return YES;
   }
@@ -511,19 +479,26 @@ static int speedOutputLine(void *magic, char *line) {
 
   static void evt_poll_intf_read(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     SFLAdaptor *adaptor = *(SFLAdaptor **)data;
-
     if(markSwitchPort(mod, adaptor)) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-      // get speed from script
-      getSpeed(mod, adaptor);
-      // and turn off the use of ethtool_GSET so it doesn't get the wrong speed
+      // turn off the use of ethtool_GSET so it doesn't get the wrong speed
       nio->ethtool_GSET = NO;
+      // TODO: possibly turn off these as well
+      // nio->ethtool_GDRVINFO = NO;
+      // nio->ethtool_GLINKSETTINGS = NO;
+      // nio->ethtool_GSTATS = NO;
     }
+  }
 
-    // TODO: possibly turn off these as well
-    // nio->ethtool_GDRVINFO = NO;
-    // nio->ethtool_GLINKSETTINGS = NO;
-    // nio->ethtool_GSTATS = NO;
+  /*_________________---------------------------__________________
+    _________________      evt_intfs_changed    __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_poll_intfs_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    // need to refresh speed/status meta-data for all interfaces
+    // may trigger sampling-rate setting if speed changes (see below)
+    pollAllCounters(mod);
   }
 
   /*_________________---------------------------__________________
@@ -547,29 +522,14 @@ static int speedOutputLine(void *magic, char *line) {
   */
 
   static void evt_poll_update_nio(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    SFLAdaptor *adaptor = *(SFLAdaptor **)data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
-
-    if(adaptor) {
-      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-      if(nio->switchPort && nio->up) {
-	pollCounters(mod, adaptor);
-	nio->last_update = sp->pollBus->clk;
-      }
-    }
-    else {
-      UTHASH_WALK(sp->adaptorsByName, adaptor) {
-	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	if(nio->switchPort && nio->up) {
-	  pollCounters(mod, adaptor);
-	  nio->last_update = sp->pollBus->clk;
-	}
-      }
-      // suppress the normal polling by indicating that it is fresh
-      sp->nio_last_update = sp->pollBus->clk;
-    }
+    
+    // always update all counters
+    pollAllCounters(mod);
+    sp->nio_last_update = sp->pollBus->clk;
   }
 
   /*_________________---------------------------__________________
@@ -585,6 +545,7 @@ static int speedOutputLine(void *magic, char *line) {
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
 
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_READ), evt_poll_intf_read);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_poll_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_SPEED), evt_poll_speed_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_UPDATE_NIO), evt_poll_update_nio);
 

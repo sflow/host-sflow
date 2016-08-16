@@ -525,7 +525,7 @@ extern "C" {
 	// test for switch ports
 	configSwitchPorts(sp); // in readPackets.c
 	// announce (e.g. to adjust sampling rates if ifSpeeds changed)
-	EVEventTxAll(sp->rootModule, HSPEVENT_INTF_CHANGED, NULL, 0);
+	EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
       }
     }
 

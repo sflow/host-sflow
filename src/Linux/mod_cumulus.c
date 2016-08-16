@@ -252,11 +252,11 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    evt_intf_changed       __________________
+    _________________    evt_intfs_changed      __________________
     -----------------___________________________------------------
   */
 
-  static void evt_intf_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+  static void evt_intfs_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     evt_config_changed(mod, evt, data, dataLen);
   }
 
@@ -279,7 +279,7 @@ extern "C" {
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_CHANGED), evt_intf_changed);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);
   }
 
 #if defined(__cplusplus)
