@@ -469,6 +469,7 @@ VNIC: <ifindex> <device> <mac>
     SFLADD_ELEMENT(cs, &adaptorsElem);
     SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(poller, cs);
+      sp->counterSampleQueued = YES;
     }
   }
 

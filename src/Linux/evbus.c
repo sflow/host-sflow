@@ -140,6 +140,8 @@ extern "C" {
     act->module = mod;
     act->actionCB = cb;
     SEMLOCK_DO(mod->root->sync) {
+      // Note that ordering is preserved here. The last one to
+      // as for an event will be the one that gets it last.
       UTArrayAdd(evt->actions, act);
       evt->actionsChanged = YES;
     }

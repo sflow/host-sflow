@@ -132,6 +132,7 @@ extern "C" {
 	  // app_operations counter block that we have been maintaining.
 	  SFLADD_ELEMENT(cs, &application->counters);
 	  sfl_poller_writeCountersSample(poller, cs);
+	  sp->counterSampleQueued = YES;
 	  // and any rtcount metrics that we have been collecting
 	}
       }
@@ -669,6 +670,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	// submit the counter sample
 	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(application->poller, &csample);
+	  sp->counterSampleQueued = YES;
 	}
       }
     }
@@ -1226,6 +1228,14 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	}
       }
     }
+    // may have queued one or more counter-samples during this read-batch.
+    // Since this is the packet bus they could come in at any time,  so
+    // waiting for the poll-bus tock() event to flush them is going to
+    // introduce time-dither.  On the other hand,  this could increase the
+    // number of datagrams/second sent by this host under very particular
+    // conditions (e.g. if the arrival rate is about 10 per second and each
+    // one is read on a different pass through this function).
+    flushCounters(mod);
   }
 
   /*_________________---------------------------__________________

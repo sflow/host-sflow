@@ -322,6 +322,7 @@ extern "C" {
     pthread_mutex_t *sync_agent;
     // main host poller
     SFLPoller *poller;
+    bool counterSampleQueued;
 
     // config settings
     HSPSFlowSettings *sFlowSettings_file;
@@ -505,6 +506,7 @@ extern "C" {
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int configSwitchPorts(HSP *sp);
   int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp);
+  void flushCounters(EVMod *mod);
 
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)

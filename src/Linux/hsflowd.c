@@ -305,6 +305,7 @@ extern "C" {
 
     SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(poller, cs);
+      sp->counterSampleQueued = YES;
     }
   }
 
@@ -476,7 +477,12 @@ extern "C" {
     // sync_receiver lock,  which is needed when the final
     // counter sample is submitted for XDR serialization.
     SEMLOCK_DO(sp->sync_agent) {
-      sfl_agent_tick(sp->agent, clk);
+      // only run the poller_tick()s here,  not the full agent_tick()
+      // we'll call receiver_flush at the end of this tick/tock cycle,
+      // and skip the sampler_tick() altogether.
+      // sfl_agent_tick(sp->agent, clk);
+      for(SFLPoller *pl = sp->agent->pollers; pl; pl = pl->nxt)
+	sfl_poller_tick(pl, clk);
     }
     // We can only get away with this scheme because the poller
     // objects are only ever removed and free by this thread.
@@ -535,6 +541,52 @@ extern "C" {
       sp->outputRevisionNo = sp->revisionNo;
     }
 
+  }
+
+  /*_________________---------------------------__________________
+    _________________    flushCounters          __________________
+    -----------------___________________________------------------
+    Use this to ensure that any sFlow datagram with a counter-sample
+    is flushed immediately.  While not required by the sFlow standard
+    this does help to ensure that counters arrive at the collector
+    promptly, rather than waiting for up to a second.  This reduces
+    the time-dither effect and makes successive counter deltas more
+    stable.  It is particularly helpful when the polling interval is
+    short.
+  */
+  
+  void flushCounters(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->counterSampleQueued) {
+      SEMLOCK_DO(sp->sync_agent) {
+	if(sp->counterSampleQueued) {
+	  sfl_receiver_flush(sp->agent->receivers);
+	  sp->counterSampleQueued = NO;
+	}
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________       tock                __________________
+    -----------------___________________________------------------
+  */
+  
+  static void evt_poll_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // we registered for this event after the other modules were loaded,  so
+    // unless they delay their registration for some reason we can assume
+    // that this is the last tock() action.  (Could add another event to the
+    // cycle in evbus.c if we really need to be sure).  Delaying the flush to
+    // here makes it more likely that counters will be flushed out promptly
+    // when they are freshly read.
+    SEMLOCK_DO(sp->sync_agent) {
+      // note - this used to happen inside sfl_agent_tick(), but we
+      // disaggregated that call so the pollers get their ticks first
+      // and the receiver flush happens at the end.
+      sfl_receiver_flush(sp->agent->receivers);
+      sp->counterSampleQueued = NO;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -1449,6 +1501,7 @@ extern "C" {
     // EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_DONE), evt_config_done);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TOCK), evt_poll_tock);
 
     if(sp->DNSSD.DNSSD) {
       EVLoadModule(sp->rootModule, "mod_dnssd", sp->modulesPath);
