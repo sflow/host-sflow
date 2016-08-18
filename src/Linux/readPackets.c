@@ -43,16 +43,29 @@ extern "C" {
 	uint32_t mcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
-	// only do this if we were able to find all four
-	// via ethtool, otherwise it would just be too weird...
-	if(adaptorNIO->et_nfound == 4) {
+	uint32_t unknown_in =  UNSUPPORTED_SFLOW_COUNTER32;
+
+	// more detailed counters may have been found via ethtool or equivalent:
+	if(adaptorNIO->et_found & HSP_ETCTR_MC_IN) {
 	  mcasts_in = (uint32_t)adaptorNIO->et_total.mcasts_in;
-	  bcasts_in = (uint32_t)adaptorNIO->et_total.bcasts_in;
-	  pkts_in -= (mcasts_in + bcasts_in);
-	  mcasts_out = (uint32_t)adaptorNIO->et_total.mcasts_out;
-	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
-	  pkts_out -= (mcasts_out + bcasts_out);
+	  pkts_in -= mcasts_in;
 	}
+	if(adaptorNIO->et_found & HSP_ETCTR_BC_IN) {
+	  bcasts_in = (uint32_t)adaptorNIO->et_total.bcasts_in;
+	  pkts_in -= bcasts_in;
+	}
+	if(adaptorNIO->et_found & HSP_ETCTR_MC_OUT) {
+	  mcasts_out = (uint32_t)adaptorNIO->et_total.mcasts_out;
+	  pkts_out -= mcasts_out;
+	}
+	if(adaptorNIO->et_found & HSP_ETCTR_BC_OUT) {
+	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
+	  pkts_out -= bcasts_out;
+	}
+	if(adaptorNIO->et_found & HSP_ETCTR_UNKN) {
+	  unknown_in = (uint32_t)adaptorNIO->et_total.unknown_in;
+	}
+
 	// generic interface counters
 	SFLCounters_sample_element elem = { 0 };
 	elem.tag = SFLCOUNTERS_GENERIC;
@@ -68,7 +81,7 @@ extern "C" {
 	elem.counterBlock.generic.ifInBroadcastPkts = bcasts_in;
 	elem.counterBlock.generic.ifInDiscards = adaptorNIO->nio.drops_in;
 	elem.counterBlock.generic.ifInErrors = adaptorNIO->nio.errs_in;
-	elem.counterBlock.generic.ifInUnknownProtos = UNSUPPORTED_SFLOW_COUNTER32;
+	elem.counterBlock.generic.ifInUnknownProtos = unknown_in;
 	elem.counterBlock.generic.ifOutOctets = adaptorNIO->nio.bytes_out;
 	elem.counterBlock.generic.ifOutUcastPkts = pkts_out;
 	elem.counterBlock.generic.ifOutMulticastPkts = mcasts_out;

@@ -106,6 +106,7 @@ extern "C" {
     nio->ethtool_GLINKSETTINGS = YES;
     nio->ethtool_GSET = YES;
     nio->ethtool_GSTATS = YES;
+    nio->procNetDev = YES;
     return adaptor;
   }
 

@@ -232,6 +232,7 @@ extern "C" {
     bool bond_master:1;
     bool bond_slave:1;
     bool switchPort:1;
+    bool os10Port:1;
     bool vm_or_container:1;
     bool modinfo_tested:1;
     bool ethtool_GDRVINFO:1;
@@ -239,6 +240,7 @@ extern "C" {
     bool ethtool_GLINKSETTINGS:1;
     bool ethtool_GSET:1;
     bool ethtool_GSTATS:1;
+    bool procNetDev:1;
     bool changed_speed:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
@@ -250,7 +252,12 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
     uint32_t et_nctrs; // how many in total
-    uint32_t et_nfound; // how many of the ones we wanted
+    uint32_t et_found; // bitmask of the ones we wanted
+#define HSP_ETCTR_MC_IN 1
+#define HSP_ETCTR_MC_OUT 2
+#define HSP_ETCTR_BC_IN 4
+#define HSP_ETCTR_BC_OUT 8
+#define HSP_ETCTR_UNKN 16
     // the offsets within the ethtool stats block
     uint8_t et_idx_mcasts_in;
     uint8_t et_idx_mcasts_out;

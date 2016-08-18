@@ -804,6 +804,10 @@ extern "C" {
 	      continue;
 
 	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+
+	    if(niostate->procNetDev == NO)
+	      continue;
+
 	    SFLHost_nio_counters ctrs = {
 	      .bytes_in = bytes_in,
 	      .pkts_in = (uint32_t)pkts_in,
@@ -815,7 +819,8 @@ extern "C" {
 	      .drops_out = (uint32_t)drops_out
 	    };
 	    HSP_ethtool_counters et_ctrs = { 0 };
-	    if (niostate->et_nfound) {
+	    if (niostate->ethtool_GSTATS
+		&& niostate->et_found) {
 	      // get the latest stats block for this device via ethtool
 	      // and read out the counters that we located by name.
 

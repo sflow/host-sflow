@@ -24,7 +24,7 @@ extern "C" {
 #define HSP_OS10_SWITCHPORT_SPEED_PROG "/opt/dell/os10/bin/os10-ethtool"
 
 #define HSP_OS10_SWITCHPORT_STATS_PROG_0 "/opt/dell/os10/bin/os10-show-stats"
-#define HSP_OS10_SWITCHPORT_STATS_PROG_1 "ifstat"
+#define HSP_OS10_SWITCHPORT_STATS_PROG_1 "if_stat"
 
   typedef struct _HSP_mod_OS10 {
     // active on two threads (buses)
@@ -36,6 +36,7 @@ extern "C" {
     uint32_t os10_seqno;
     uint32_t os10_drops;
     // counter polling
+    time_t last_poll;
     SFLAdaptor *poll_current;
     SFLHost_nio_counters ctrs;
     HSP_ethtool_counters et_ctrs;
@@ -299,15 +300,17 @@ extern "C" {
   }
 
 #define OS10_DELLIF "dell-if/"
-#define OS10_IFSTATE "if/interfaces-state/interface/statistics"
+#define OS10_IFSTATE "if/interfaces-state/interface/"
+#define OS10_STATS "statistics/"
+#define OS10_IF "if/interfaces/interface/"
 
   static void setPollCurrent(EVMod *mod, SFLAdaptor *adaptor)
   {
     HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     if(mdata->poll_current != adaptor) {
-      // TODO: accumulate counters if changing from adaptor to adaptor (or NULL)
-      if(mdata->poll_current) {
+      if(mdata->poll_current
+         && mdata->poll_current->ifSpeed != 0) {
 	accumulateNioCounters(sp, mdata->poll_current, &mdata->ctrs, &mdata->et_ctrs);
 	ADAPTOR_NIO(mdata->poll_current)->last_update = sp->pollBus->clk;
       }
@@ -326,55 +329,78 @@ extern "C" {
     char *tok0 = strArrayAt(tokens, 0);
     char *tok1 = strArrayAt(tokens, 1);
     SFLMacAddress mac;
-    if(my_strequal(tok0, OS10_DELLIF OS10_IFSTATE "phys-address")) {
+    if(my_strequal(tok0, OS10_DELLIF OS10_IF "phys-address")) {
       if(hexToBinary((u_char *)tok1, (u_char *)&mac.mac, 6) == 6) {
 	setPollCurrent(mod, adaptorByMac(sp, &mac));
       }
     }
 
-    if(mdata->poll_current == NULL)
-      return YES;
+    if(mdata->poll_current) {
+      SFLAdaptor *adaptor = mdata->poll_current;
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
-    SFLAdaptor *adaptor = mdata->poll_current;
-    //HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-
-    if(my_strequal(tok0, OS10_IFSTATE "speed")) {
-      setAdaptorSpeed(sp, adaptor, strtoll(tok1, NULL, 0));
-    }
-
-    if(my_strequal(tok0, OS10_IFSTATE "if-index")) {
-      uint32_t ifIndex = strtol(tok1, NULL, 0);
-      if(ifIndex != adaptor->ifIndex) {
-	myLog(LOG_ERR, "ifIndex mismatch for interface %s: %u", adaptor->deviceName, ifIndex);
+      if(my_strequal(tok0, OS10_IFSTATE "speed")) {
+	uint64_t speed =  strtoll(tok1, NULL, 0);
+	if(speed != 0) {
+	  myDebug(1, "found nonzero speed == %lu", speed);
+	}
+	setAdaptorSpeed(sp, adaptor, speed);
+      }
+      else if(my_strequal(tok0, OS10_IFSTATE "if-index")) {
+	uint32_t ifIndex = strtol(tok1, NULL, 0);
+	if(ifIndex != adaptor->ifIndex) {
+	  myLog(LOG_ERR, "ifIndex mismatch for interface %s: %u", adaptor->deviceName, ifIndex);
+	}
+      }
+      else if(my_strequal(tok0, OS10_IFSTATE "name")) {
+	if(tok1 && my_strequal(tok1, adaptor->deviceName) == NO) {
+	  myLog(LOG_ERR, "name mismatch for interface %s != %s", tok1, adaptor->deviceName);
+	}
+      }
+      else {
+	uint64_t val64 = strtoll(tok1, NULL, 0);
+	// TODO: handle these properly
+	if(my_strequal(tok0, OS10_IFSTATE "admin-status")) { }
+	else if(my_strequal(tok0, OS10_IFSTATE "oper-status")) { }
+	else if(my_strequal(tok0, OS10_IFSTATE "enabled")) { }
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-octets"))
+	  mdata->ctrs.bytes_in = val64;
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-octets"))
+	  mdata->ctrs.bytes_out = val64;
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "ether-rx-no-errors"))
+	  mdata->ctrs.pkts_in = val64; // includes bcasts and mcasts
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "ether-tx-no-errors"))
+	  mdata->ctrs.pkts_out = val64; // includes bcasts and mcasts
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-errors"))
+	  mdata->ctrs.errs_in = val64;
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-errors"))
+	  mdata->ctrs.errs_out = val64;
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-discards"))
+	  mdata->ctrs.drops_in = val64;
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-discards"))
+	  mdata->ctrs.drops_out = val64;
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-unknown-protos")) {
+	  mdata->et_ctrs.unknown_in = val64;
+	  nio->et_found |= HSP_ETCTR_UNKN;
+	}
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-multicast-pkts")) {
+	  mdata->et_ctrs.mcasts_in = val64;
+	  nio->et_found |= HSP_ETCTR_MC_IN;
+	}
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-multicast-pkts")) {
+	  mdata->et_ctrs.mcasts_out = val64;
+	  nio->et_found |= HSP_ETCTR_MC_OUT;
+	}
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-broadcast-pkts")) {
+	  mdata->et_ctrs.bcasts_in = val64;
+	  nio->et_found |= HSP_ETCTR_BC_IN;
+	}
+	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-broadcast-pkts")) {
+	  mdata->et_ctrs.bcasts_out = val64;
+	  nio->et_found |= HSP_ETCTR_BC_OUT;
+	}
       }
     }
-
-    if(my_strequal(tok0, OS10_IFSTATE "name")) {
-      if(tok1 && my_strequal(tok1, adaptor->deviceName) == NO) {
-	myLog(LOG_ERR, "name mismatch for interface %s != %s", tok1, adaptor->deviceName);
-      }
-    }
-
-    // TODO: handle these properly
-    if(my_strequal(tok0, OS10_IFSTATE "admin-status")) { }
-    if(my_strequal(tok0, OS10_IFSTATE "oper-status")) { }
-    if(my_strequal(tok0, OS10_IFSTATE "enabled")) { }
-    
-    if(my_strequal(tok0, OS10_IFSTATE "in-octets")) mdata->ctrs.bytes_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "out-octets")) mdata->ctrs.bytes_out = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "in-unicast-pkts")) mdata->ctrs.pkts_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "out-unicast-pkts")) mdata->ctrs.pkts_out = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "in-errors")) mdata->ctrs.errs_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "out-errors")) mdata->ctrs.errs_out = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "in-discards")) mdata->ctrs.drops_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "out-discards")) mdata->ctrs.drops_out = strtoll(tok1, NULL, 0);
-    
-    if(my_strequal(tok0, OS10_IFSTATE "in-unknown-protos")) mdata->et_ctrs.unknown_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "in-multicast-pkts")) mdata->et_ctrs.mcasts_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "out-multicast-pkts")) mdata->et_ctrs.mcasts_out = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "in-broadcast-pkts")) mdata->et_ctrs.bcasts_in = strtoll(tok1, NULL, 0);
-    if(my_strequal(tok0, OS10_IFSTATE "out-broadcast-pkts")) mdata->et_ctrs.bcasts_out = strtoll(tok1, NULL, 0);
-
     strArrayFree(tokens);
     return YES;
   }
@@ -436,6 +462,7 @@ extern "C" {
     }
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
     niostate->switchPort = switchPort;
+    niostate->os10Port = switchPort;
     return switchPort;
   }
 
@@ -482,11 +509,13 @@ extern "C" {
     if(markSwitchPort(mod, adaptor)) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
       // turn off the use of ethtool_GSET so it doesn't get the wrong speed
+      // and turn off other ethtool requests because they won't add to the picture
       nio->ethtool_GSET = NO;
-      // TODO: possibly turn off these as well
-      // nio->ethtool_GDRVINFO = NO;
-      // nio->ethtool_GLINKSETTINGS = NO;
-      // nio->ethtool_GSTATS = NO;
+      nio->ethtool_GLINKSETTINGS = NO;
+      nio->ethtool_GSTATS = NO;
+      nio->ethtool_GDRVINFO = NO;
+      // the /proc/net/dev counters are invalid too
+      nio->procNetDev = NO;
     }
   }
 
@@ -522,14 +551,24 @@ extern "C" {
   */
 
   static void evt_poll_update_nio(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+   SFLAdaptor *adaptor = *(SFLAdaptor **)data;
+   HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
+
+    // We only need to override behavior for a port-specific request
+    // so ignore the general updates with adaptor == NULL.  They are
+    // for refreshing the host-adaptor counters (eth0 etc.)
+    if(adaptor == NULL)
+      return;
     
-    // always update all counters
-    pollAllCounters(mod);
-    sp->nio_last_update = sp->pollBus->clk;
+    if(mdata->last_poll != sp->pollBus->clk) {
+      // update all counters in one go
+       pollAllCounters(mod);
+       mdata->last_poll = sp->pollBus->clk;
+    }
   }
 
   /*_________________---------------------------__________________

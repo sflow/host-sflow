@@ -414,7 +414,6 @@ extern "C" {
   {
     // see if the ethtool stats block can give us multicast/broadcast counters too
     HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-    adaptorNIO->et_nfound=0;
     adaptorNIO->et_nctrs = ethtool_num_counters(ifr, fd);
     if(adaptorNIO->et_nctrs) {
       struct ethtool_gstrings *ctrNames;
@@ -428,6 +427,7 @@ extern "C" {
 	// copy out one at a time to make sure we have null-termination
 	char cname[ETH_GSTRING_LEN+1];
 	cname[ETH_GSTRING_LEN] = '\0';
+	adaptorNIO->et_found = 0;
 	for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
 	  memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
 	  myDebug(1, "ethtool counter %s is at index %d", cname, ii);
@@ -435,19 +435,19 @@ extern "C" {
 	  // and record the index if it is.
 	  if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
 	    adaptorNIO->et_idx_mcasts_in = ii+1;
-	    adaptorNIO->et_nfound++;
+	    adaptorNIO->et_found |= HSP_ETCTR_MC_IN;
 	  }
 	  else if(staticStringsIndexOf(HSP_ethtool_mcasts_out_names, cname) != -1) {
 	    adaptorNIO->et_idx_mcasts_out = ii+1;
-	    adaptorNIO->et_nfound++;
+	    adaptorNIO->et_found |= HSP_ETCTR_MC_OUT;
 	  }
 	  else if(staticStringsIndexOf(HSP_ethtool_bcasts_in_names, cname) != -1) {
 	    adaptorNIO->et_idx_bcasts_in = ii+1;
-	    adaptorNIO->et_nfound++;
+	    adaptorNIO->et_found |= HSP_ETCTR_BC_IN;
 	    }
 	  else if(staticStringsIndexOf(HSP_ethtool_bcasts_out_names, cname) != -1) {
 	    adaptorNIO->et_idx_bcasts_out = ii+1;
-	    adaptorNIO->et_nfound++;
+	    adaptorNIO->et_found |= HSP_ETCTR_BC_OUT;
 	  }
 	  if(staticStringsIndexOf(HSP_ethtool_peer_ifindex_names, cname) != -1) {
 	    // Now go ahead and make the call to get the peer_ifindex. This should
