@@ -35,9 +35,29 @@ extern "C" {
     // sample processing
     uint32_t os10_seqno;
     uint32_t os10_drops;
+
     // counter polling
     time_t last_poll;
+
+    bool poll_phase_interface;
+
+    // the current interface we are getting counters for
     SFLAdaptor *poll_current;
+
+    // fields we collect before deciding on poll_current
+    struct {
+      SFLAdaptor *adaptor;
+      SFLMacAddress mac;
+      uint32_t ifIndex;
+      uint64_t speed;
+      bool enabled;
+      uint32_t mtu;
+      uint32_t operStatus;
+      uint32_t adminStatus;
+      bool duplex;
+    } poll;
+
+    // the counters
     SFLHost_nio_counters ctrs;
     HSP_ethtool_counters et_ctrs;
   } HSP_mod_OS10;
@@ -299,22 +319,59 @@ extern "C" {
     return ans;
   }
 
-#define OS10_DELLIF "dell-if/"
-#define OS10_IFSTATE "if/interfaces-state/interface/"
-#define OS10_STATS "statistics/"
-#define OS10_IF "if/interfaces/interface/"
+  static void checkByMac(EVMod *mod, SFLAdaptor *adaptor, SFLMacAddress *mac) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    SFLAdaptor *byMac = adaptorByMac(sp, mac);
+    if(byMac != adaptor) {
+      u_char macstr[13];
+      macstr[0] = '\0';
+      printHex(mac->mac, 6, macstr, 13, NO);
+      myDebug(1, "OS10 mac %s points to interface %s (not %s)",
+	      macstr,
+	      byMac ? byMac->deviceName : "<none>",
+	      adaptor->deviceName);
+    }
+  }
+
+  static void checkByIndex(EVMod *mod, SFLAdaptor *adaptor, uint32_t ifIndex) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    SFLAdaptor *byIndex = adaptorByIndex(sp, ifIndex);
+    if(byIndex != adaptor) {
+      myDebug(1, "OS10 ifIndex %u points to interface %s (not %s)",
+	      ifIndex,
+	      byIndex ? byIndex->deviceName : "<none>",
+	      adaptor->deviceName);
+    }
+  }
 
   static void setPollCurrent(EVMod *mod, SFLAdaptor *adaptor)
   {
     HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     if(mdata->poll_current != adaptor) {
-      if(mdata->poll_current
-         && mdata->poll_current->ifSpeed != 0) {
+      if(mdata->poll_current) {
+	// finished with this adaptor - accumulate counters
 	accumulateNioCounters(sp, mdata->poll_current, &mdata->ctrs, &mdata->et_ctrs);
 	ADAPTOR_NIO(mdata->poll_current)->last_update = sp->pollBus->clk;
       }
       mdata->poll_current = adaptor;
+      if(adaptor) {
+	// starting new adaptor - merge the interface-phase info
+	// we have already collected, and check the lookups.
+	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+	nio->up = mdata->poll.enabled;
+	mdata->et_ctrs.adminStatus = mdata->poll.adminStatus;
+	nio->et_found |= HSP_ETCTR_ADMIN;
+	mdata->et_ctrs.operStatus = mdata->poll.operStatus;
+	nio->et_found |= HSP_ETCTR_OPER;
+	setAdaptorSpeed(sp, adaptor, mdata->poll.speed);
+	adaptor->ifDirection = mdata->poll.duplex ? 1 : 2;
+	// check that we already have the right MAC and ifIndex
+	checkByMac(mod, adaptor, &mdata->poll.mac);
+	checkByIndex(mod, adaptor, mdata->poll.ifIndex);
+      }
+      // reset / clean up
+      memset(&mdata->poll, 0, sizeof(mdata->poll));
       memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
       memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
     }
@@ -324,83 +381,92 @@ extern "C" {
     EVMod *mod = (EVMod *)magic;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
+    // By making / a delimiter too we can ignore the prefix and look
+    // only at the last two or three tokens.
     char tokbuf[HSP_MAX_EXEC_LINELEN];
-    UTStringArray *tokens = tokenize(line, " =", tokbuf, HSP_MAX_EXEC_LINELEN);
-    char *tok0 = strArrayAt(tokens, 0);
-    char *tok1 = strArrayAt(tokens, 1);
-    SFLMacAddress mac;
-    if(my_strequal(tok0, OS10_DELLIF OS10_IF "phys-address")) {
-      if(hexToBinary((u_char *)tok1, (u_char *)&mac.mac, 6) == 6) {
-	setPollCurrent(mod, adaptorByMac(sp, &mac));
-      }
-    }
+    UTStringArray *tokens = tokenize(line, " /=", tokbuf, HSP_MAX_EXEC_LINELEN);
+    int nt = strArrayN(tokens);
+    if(nt < 3) goto out;
+    char *phase = strArrayAt(tokens, nt - 3);
+    char *var = strArrayAt(tokens, nt - 2);
+    char *val = strArrayAt(tokens, nt - 1);
+    if(! (phase && var && val)) goto out;
+    uint64_t val64 = strtoll(val, NULL, 0);
 
-    if(mdata->poll_current) {
+    // we can look up by MAC, ifIndex or name,  but name is
+    // the most reliable here because we use that to classify
+    // the switch ports in the first place.  The others are
+    // checked just for consistency.
+
+    // We expect phase to transition from "interface" to "stats" to
+    // "statistics". We just collect fields during the "interface" phase,
+    // then and decide which port we are looking at (poll_current)
+    // when it ends.
+
+    if(my_strequal(phase, "interface")) {
+      mdata->poll_phase_interface = YES;
+    }
+    else {
+      if(mdata->poll_phase_interface) {
+	// interface phase over - decision time:
+	setPollCurrent(mod, mdata->poll.adaptor);
+      }
+      mdata->poll_phase_interface = NO;
+    }
+     
+    if(mdata->poll_phase_interface) {
+      if(my_strequal(var, "phys-address")) {
+	if(hexToBinary((u_char *)val, (u_char *)&mdata->poll.mac.mac, 6) != 6) {
+	  myLog(LOG_ERR, "badly formatted MAC: %s", val);
+	}
+      }
+      else if(my_strequal(var, "speed")) mdata->poll.speed = val64;
+      else if(my_strequal(var, "duplex")) mdata->poll.speed = (bool)val64;
+      else if(my_strequal(var, "if-index")) mdata->poll.ifIndex = val64;
+      else if(my_strequal(var, "mtu")) 	mdata->poll.mtu = val64;
+      else if(my_strequal(var, "enabled")) mdata->poll.enabled = (bool)val64;
+      else if(my_strequal(var, "admin-status")) mdata->poll.adminStatus = val64;
+      else if(my_strequal(var, "oper-status")) 	mdata->poll.operStatus = val64;
+      else if(my_strequal(var, "name")) mdata->poll.adaptor = adaptorByName(sp, val);
+    }
+    else {
+      if(!mdata->poll_current)
+	goto out;
+
       SFLAdaptor *adaptor = mdata->poll_current;
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-
-      if(my_strequal(tok0, OS10_IFSTATE "speed")) {
-	uint64_t speed =  strtoll(tok1, NULL, 0);
-	if(speed != 0) {
-	  myDebug(1, "found nonzero speed == %lu", speed);
-	}
-	setAdaptorSpeed(sp, adaptor, speed);
+      
+      if(my_strequal(var, "in-octets"))  mdata->ctrs.bytes_in = val64;
+      else if(my_strequal(var, "out-octets")) mdata->ctrs.bytes_out = val64;
+      else if(my_strequal(var, "ether-rx-no-errors")) mdata->ctrs.pkts_in = val64; // includes bcasts and mcasts
+      else if(my_strequal(var, "ether-tx-no-errors")) mdata->ctrs.pkts_out = val64; // includes bcasts and mcasts
+      else if(my_strequal(var, "in-errors")) mdata->ctrs.errs_in = val64;
+      else if(my_strequal(var, "out-errors")) mdata->ctrs.errs_out = val64;
+      else if(my_strequal(var, "in-discards")) mdata->ctrs.drops_in = val64;
+      else if(my_strequal(var, "out-discards")) mdata->ctrs.drops_out = val64;
+      else if(my_strequal(var, "in-unknown-protos")) {
+	mdata->et_ctrs.unknown_in = val64;
+	nio->et_found |= HSP_ETCTR_UNKN;
       }
-      else if(my_strequal(tok0, OS10_IFSTATE "if-index")) {
-	uint32_t ifIndex = strtol(tok1, NULL, 0);
-	if(ifIndex != adaptor->ifIndex) {
-	  myLog(LOG_ERR, "ifIndex mismatch for interface %s: %u", adaptor->deviceName, ifIndex);
-	}
+      else if(my_strequal(var, "in-multicast-pkts")) {
+	mdata->et_ctrs.mcasts_in = val64;
+	nio->et_found |= HSP_ETCTR_MC_IN;
       }
-      else if(my_strequal(tok0, OS10_IFSTATE "name")) {
-	if(tok1 && my_strequal(tok1, adaptor->deviceName) == NO) {
-	  myLog(LOG_ERR, "name mismatch for interface %s != %s", tok1, adaptor->deviceName);
-	}
+      else if(my_strequal(var, "out-multicast-pkts")) {
+	mdata->et_ctrs.mcasts_out = val64;
+	nio->et_found |= HSP_ETCTR_MC_OUT;
       }
-      else {
-	uint64_t val64 = strtoll(tok1, NULL, 0);
-	// TODO: handle these properly
-	if(my_strequal(tok0, OS10_IFSTATE "admin-status")) { }
-	else if(my_strequal(tok0, OS10_IFSTATE "oper-status")) { }
-	else if(my_strequal(tok0, OS10_IFSTATE "enabled")) { }
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-octets"))
-	  mdata->ctrs.bytes_in = val64;
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-octets"))
-	  mdata->ctrs.bytes_out = val64;
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "ether-rx-no-errors"))
-	  mdata->ctrs.pkts_in = val64; // includes bcasts and mcasts
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "ether-tx-no-errors"))
-	  mdata->ctrs.pkts_out = val64; // includes bcasts and mcasts
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-errors"))
-	  mdata->ctrs.errs_in = val64;
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-errors"))
-	  mdata->ctrs.errs_out = val64;
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-discards"))
-	  mdata->ctrs.drops_in = val64;
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-discards"))
-	  mdata->ctrs.drops_out = val64;
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-unknown-protos")) {
-	  mdata->et_ctrs.unknown_in = val64;
-	  nio->et_found |= HSP_ETCTR_UNKN;
-	}
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-multicast-pkts")) {
-	  mdata->et_ctrs.mcasts_in = val64;
-	  nio->et_found |= HSP_ETCTR_MC_IN;
-	}
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-multicast-pkts")) {
-	  mdata->et_ctrs.mcasts_out = val64;
-	  nio->et_found |= HSP_ETCTR_MC_OUT;
-	}
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "in-broadcast-pkts")) {
-	  mdata->et_ctrs.bcasts_in = val64;
-	  nio->et_found |= HSP_ETCTR_BC_IN;
-	}
-	else if(my_strequal(tok0, OS10_IFSTATE OS10_STATS "out-broadcast-pkts")) {
-	  mdata->et_ctrs.bcasts_out = val64;
-	  nio->et_found |= HSP_ETCTR_BC_OUT;
-	}
+      else if(my_strequal(var, "in-broadcast-pkts")) {
+	mdata->et_ctrs.bcasts_in = val64;
+	nio->et_found |= HSP_ETCTR_BC_IN;
+      }
+      else if(my_strequal(var, "out-broadcast-pkts")) {
+	mdata->et_ctrs.bcasts_out = val64;
+	nio->et_found |= HSP_ETCTR_BC_OUT;
       }
     }
+
+  out:
     strArrayFree(tokens);
     return YES;
   }

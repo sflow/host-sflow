@@ -44,6 +44,7 @@ extern "C" {
 	uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
 	uint32_t unknown_in =  UNSUPPORTED_SFLOW_COUNTER32;
+	uint32_t ifStatus = adaptorNIO->up ? (SFLSTATUS_ADMIN_UP | SFLSTATUS_OPER_UP) : 0;
 
 	// more detailed counters may have been found via ethtool or equivalent:
 	if(adaptorNIO->et_found & HSP_ETCTR_MC_IN) {
@@ -65,6 +66,12 @@ extern "C" {
 	if(adaptorNIO->et_found & HSP_ETCTR_UNKN) {
 	  unknown_in = (uint32_t)adaptorNIO->et_total.unknown_in;
 	}
+	if((adaptorNIO->et_found & HSP_ETCTR_ADMIN)
+	   && (adaptorNIO->et_found & HSP_ETCTR_OPER)) {
+	  ifStatus = 0;
+	  if((adaptorNIO->et_last.adminStatus & 1)) ifStatus |= SFLSTATUS_ADMIN_UP;
+	  if((adaptorNIO->et_last.operStatus & 1)) ifStatus |= SFLSTATUS_OPER_UP;
+	}
 
 	// generic interface counters
 	SFLCounters_sample_element elem = { 0 };
@@ -73,7 +80,7 @@ extern "C" {
 	elem.counterBlock.generic.ifType = 6; // assume ethernet
 	elem.counterBlock.generic.ifSpeed = adaptor->ifSpeed;
 	elem.counterBlock.generic.ifDirection = adaptor->ifDirection;
-	elem.counterBlock.generic.ifStatus = adaptorNIO->up ? (SFLSTATUS_ADMIN_UP | SFLSTATUS_OPER_UP) : 0;
+	elem.counterBlock.generic.ifStatus = ifStatus;
 	elem.counterBlock.generic.ifPromiscuousMode = adaptor->promiscuous;
 	elem.counterBlock.generic.ifInOctets = adaptorNIO->nio.bytes_in;
 	elem.counterBlock.generic.ifInUcastPkts = pkts_in;

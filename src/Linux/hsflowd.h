@@ -213,7 +213,18 @@ extern "C" {
     uint64_t bcasts_in;
     uint64_t bcasts_out;
     uint64_t unknown_in;
+    uint32_t operStatus;
+    uint32_t adminStatus;
   } HSP_ethtool_counters;
+
+#define HSP_ETCTR_MC_IN  0x0001
+#define HSP_ETCTR_MC_OUT 0x0002
+#define HSP_ETCTR_BC_IN  0x0004
+#define HSP_ETCTR_BC_OUT 0x0008
+#define HSP_ETCTR_UNKN   0x0010
+#define HSP_ETCTR_OPER   0x0020
+#define HSP_ETCTR_ADMIN  0x0040
+  typedef uint32_t ETCTRFlags;
 
   typedef enum { HSPDEV_OTHER=0,
 		 HSPDEV_PHYSICAL,
@@ -252,13 +263,8 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
     uint32_t et_nctrs; // how many in total
-    uint32_t et_found; // bitmask of the ones we wanted
-#define HSP_ETCTR_MC_IN 1
-#define HSP_ETCTR_MC_OUT 2
-#define HSP_ETCTR_BC_IN 4
-#define HSP_ETCTR_BC_OUT 8
-#define HSP_ETCTR_UNKN 16
-    // the offsets within the ethtool stats block
+    ETCTRFlags et_found; // bitmask of the ones we wanted
+    // offsets within the ethtool stats block
     uint8_t et_idx_mcasts_in;
     uint8_t et_idx_mcasts_out;
     uint8_t et_idx_bcasts_in;
