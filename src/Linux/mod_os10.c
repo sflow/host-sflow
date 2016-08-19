@@ -356,24 +356,30 @@ extern "C" {
       }
       mdata->poll_current = adaptor;
       if(adaptor) {
-	// starting new adaptor - merge the interface-phase info
-	// we have already collected, and check the lookups.
+	// starting new adaptor
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	nio->up = mdata->poll.enabled;
-	mdata->et_ctrs.adminStatus = mdata->poll.adminStatus;
-	nio->et_found |= HSP_ETCTR_ADMIN;
-	mdata->et_ctrs.operStatus = mdata->poll.operStatus;
-	nio->et_found |= HSP_ETCTR_OPER;
-	setAdaptorSpeed(sp, adaptor, mdata->poll.speed);
-	adaptor->ifDirection = mdata->poll.duplex ? 1 : 2;
-	// check that we already have the right MAC and ifIndex
-	checkByMac(mod, adaptor, &mdata->poll.mac);
-	checkByIndex(mod, adaptor, mdata->poll.ifIndex);
+        if(!nio->switchPort) {
+          mdata->poll_current = NULL;
+        }
+        else {
+	  // apply the interface-phase info we have collected
+	  memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
+	  memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
+	  nio->up = mdata->poll.enabled;
+	  mdata->et_ctrs.adminStatus = mdata->poll.adminStatus;
+	  nio->et_found |= HSP_ETCTR_ADMIN;
+	  mdata->et_ctrs.operStatus = mdata->poll.operStatus;
+	  nio->et_found |= HSP_ETCTR_OPER;
+	  adaptor->ifDirection = mdata->poll.duplex ? 1 : 2;
+	  // setting the speed may trigger a sampling-rate change
+	  setAdaptorSpeed(sp, adaptor, mdata->poll.speed);
+	  // check that we already have the right MAC and ifIndex
+	  checkByMac(mod, adaptor, &mdata->poll.mac);
+	  checkByIndex(mod, adaptor, mdata->poll.ifIndex);
+	  // clear poll structure for next interface phase
+	  memset(&mdata->poll, 0, sizeof(mdata->poll));
+	}
       }
-      // reset / clean up
-      memset(&mdata->poll, 0, sizeof(mdata->poll));
-      memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
-      memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
     }
   }
 
@@ -421,7 +427,7 @@ extern "C" {
 	}
       }
       else if(my_strequal(var, "speed")) mdata->poll.speed = val64;
-      else if(my_strequal(var, "duplex")) mdata->poll.speed = (bool)val64;
+      else if(my_strequal(var, "duplex")) mdata->poll.duplex = (bool)val64;
       else if(my_strequal(var, "if-index")) mdata->poll.ifIndex = val64;
       else if(my_strequal(var, "mtu")) 	mdata->poll.mtu = val64;
       else if(my_strequal(var, "enabled")) mdata->poll.enabled = (bool)val64;
