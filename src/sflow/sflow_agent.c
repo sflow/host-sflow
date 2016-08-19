@@ -107,12 +107,12 @@ void sfl_agent_tick(SFLAgent *agent, time_t now)
   SFLPoller *pl;
 
   agent->now = now;
+  /* pollers use ticks to decide when to ask for counters */
+  for( pl = agent->pollers; pl != NULL; pl = pl->nxt) sfl_poller_tick(pl, now);
   /* receivers use ticks to flush send data */
   for( rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt) sfl_receiver_tick(rcv, now);
   /* samplers use ticks to decide when they are sampling too fast */
   for( sm = agent->samplers; sm != NULL; sm = sm->nxt) sfl_sampler_tick(sm, now);
-  /* pollers use ticks to decide when to ask for counters */
-  for( pl = agent->pollers; pl != NULL; pl = pl->nxt) sfl_poller_tick(pl, now);
 }
 
 /*_________________---------------------------__________________
