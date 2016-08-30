@@ -1590,7 +1590,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     -----------------___________________________------------------
   */
 
-  int UTSocketUDP(char *bindaddr, int family, uint16_t port, uint32_t bufferSize)
+  int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize)
   {
     struct sockaddr_in myaddr_in = { 0 };
     struct sockaddr_in6 myaddr_in6 = { 0 };
@@ -1642,10 +1642,25 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
       return 0;
     }
 
-    // increase receiver buffer size
-    uint32_t rcvbuf = bufferSize;
-    if(setsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
-      myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", bufferSize, strerror(errno));
+    // increase receiver buffer size - but only if the requested size
+    // is larger than we already got (sysctl net.core.rmem_default)
+    int rcvbuf=0;
+    socklen_t rcvbufsiz = sizeof(rcvbuf);
+    if(getsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &rcvbufsiz) < 0) {
+      myLog(LOG_ERR, "getsockopt(SO_RCVBUF) failed: %s", strerror(errno));
+    }
+    if(rcvbuf < bufferSize) {
+      // want more: submit the request
+      rcvbuf = bufferSize;
+      if(setsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
+	myLog(LOG_ERR, "setsockopt(SO_RCVBUF=%d) failed: %s", bufferSize, strerror(errno));
+      }
+      // see what we actually got
+      rcvbufsiz = sizeof(rcvbuf);
+      if(getsockopt(soc, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &rcvbufsiz) < 0) {
+	myLog(LOG_ERR, "getsockopt(SO_RCVBUF) failed: %s", strerror(errno));
+      }
+      myDebug(1, "UDP buffering requested=%d received=%d", bufferSize, rcvbuf);
     }
 
     return soc;

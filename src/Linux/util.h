@@ -220,7 +220,7 @@ extern "C" {
   // file utils
   int UTTruncateOpenFile(FILE *fptr);
   int UTFileExists(char *path);
-  int UTSocketUDP(char *bindaddr, int family, uint16_t port, uint32_t bufferSize);
+  int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize);
 
   // SFLAddress utils
   char *SFLAddress_print(SFLAddress *addr, char *buf, size_t len);
