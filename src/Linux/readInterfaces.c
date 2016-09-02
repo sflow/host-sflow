@@ -679,18 +679,11 @@ extern "C" {
       }
 
       if(addAdaptorToHT) {
-	SFLAdaptor *replaced = UTHashAdd(sp->adaptorsByName, adaptor);
 	ad_added++;
+	adaptorAddOrReplace(sp->adaptorsByName, adaptor);
 	// add to "all namespaces" collections too
-	if(gotMac) UTHashAdd(sp->adaptorsByMac, adaptor);
-	if(ifIndex) UTHashAdd(sp->adaptorsByIndex, adaptor);
-	// if we replaced one, make sure it is completely removed
-	if(replaced) {
-	  // TODO: is there still a race here? What if
-	  // packetBus module is still using this pointer?
-	  // Need RCU?
-	  deleteAdaptor(sp, replaced, YES);
-	}
+	if(gotMac) adaptorAddOrReplace(sp->adaptorsByMac, adaptor);
+	if(ifIndex) adaptorAddOrReplace(sp->adaptorsByIndex, adaptor);
       }
 
     }

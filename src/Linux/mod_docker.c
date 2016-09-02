@@ -54,6 +54,30 @@ extern "C" {
 #define HSP_DOCKER_MAX_STATS_LINELEN 512
 
   /*_________________---------------------------__________________
+    _________________    utils to help debug    __________________
+    -----------------___________________________------------------
+  */
+
+  char *containerStr(HSPVMState_DOCKER *container, char *buf, int bufLen) {
+    u_char uuidstr[100];
+    printUUID((u_char *)container->vm.uuid, uuidstr, 100);
+    snprintf(buf, bufLen, "name: %s hostname: %s uuid: %s id: %s",
+	     container->name,
+	     container->hostname,
+	     container->vm.uuid,
+	     container->id);
+    return buf;
+  }
+
+  void containerHTPrint(UTHash *ht, char *prefix) {
+    char buf[1024];
+    HSPVMState_DOCKER *container;
+    UTHASH_WALK(ht, container)
+      myLog(LOG_INFO, "%s: %s", prefix, containerStr(container, buf, 1024));
+  }
+
+
+  /*_________________---------------------------__________________
     _________________     readCgroupCounters    __________________
     -----------------___________________________------------------
   */
@@ -143,13 +167,21 @@ VNIC: <ifindex> <device> <mac>
 	if(adaptor == NULL) {
 	  adaptor = nioAdaptorNew(deviceName, mac, ifIndex);
 	  adaptorListAdd(container->vm.interfaces, adaptor);
-	  // add to "all namespaces" collections too
-	  if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL) {
-	    myDebug(1, "Warning: container adaptor overwriting adaptorsByMac");
-	  }
-	  if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL) {
-	    myDebug(1, "Warning: container adaptor overwriting adaptorsByIndex");
-	  }
+	  // add to "all namespaces" collections too - but only the ones where
+	  // the id is really global.  For example,  many containers can have
+	  // an "eth0" adaptor so we can't add it to sp->adaptorsByName.
+
+	  // And because the containers are likely to be ephemeral, don't
+	  // replace the global adaptor if it's already there.
+
+	  if(UTHashGet(sp->adaptorsByMac, adaptor) == NULL)
+	    if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL)
+	      myDebug(1, "Warning: container adaptor overwriting adaptorsByMac");
+
+	  if(UTHashGet(sp->adaptorsByIndex, adaptor) == NULL)
+	    if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL)
+	      myDebug(1, "Warning: container adaptor overwriting adaptorsByIndex");
+
 	  // mark it as a vm/container device
 	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
 	}
@@ -490,11 +522,22 @@ VNIC: <ifindex> <device> <mac>
     if(getDebug()) {
       myLog(LOG_INFO, "removeAndFreeVM: removing container with dsIndex=%u", container->vm.dsIndex);
     }
+
+    if(UTHashDel(mdata->vmsByID, container) == NULL) {
+      myLog(LOG_ERR, "UTHashDel (vmsByID) failed: container %s=%s", container->name, container->id);
+      if(debug(1))
+	containerHTPrint(mdata->vmsByID, "vmsByID");
+    }
+
+    if(UTHashDel(mdata->vmsByUUID, container) == NULL) {
+      myLog(LOG_ERR, "UTHashDel (vmsByUUID) failed: container %s=%s", container->name, container->id);
+      if(debug(1))
+	containerHTPrint(mdata->vmsByUUID, "vmsByUUID");
+    }
+
     if(container->id) my_free(container->id);
     if(container->name) my_free(container->name);
     if(container->hostname) my_free(container->hostname);
-    UTHashDel(mdata->vmsByUUID, container);
-    UTHashDel(mdata->vmsByID, container);
     removeAndFreeVM(mod, &container->vm);
   }
 
@@ -507,8 +550,12 @@ VNIC: <ifindex> <device> <mac>
        && create) {
       char uuid[16];
       // turn container ID into a UUID - just take the first 16 bytes of the id
-      parseUUID(id, uuid);
+      if(parseUUID(id, uuid) == NO) {
+	myLog(LOG_ERR, " parsing container UUID from <%s>", id);
+	abort();
+      }
       container = (HSPVMState_DOCKER *)getVM(mod, uuid, YES, sizeof(HSPVMState_DOCKER), VMTYPE_DOCKER, agentCB_getCounters_DOCKER_request);
+      assert(container != NULL);
       if(container) {
 	container->id = my_strdup(id);
 	// add to collections
@@ -650,8 +697,6 @@ VNIC: <ifindex> <device> <mac>
     UTHASH_WALK(mdata->vmsByID, container) {
       if(container->marked) {
 	myDebug(1, "delete container: %s=%s", container->name, container->id);
-	if(UTHashDel(mdata->vmsByID, container) == NO)
-	  myLog(LOG_ERR, "UTHashDel failed: container %s=%s", container->name, container->id);
 	removeAndFreeVM_DOCKER(mod, container);
       }
       else {
@@ -695,7 +740,7 @@ VNIC: <ifindex> <device> <mac>
     // 3. remove any VMs (and their pollers) that don't survive
     UTHASH_WALK(mdata->vmsByUUID, container) {
       if(container->vm.marked) {
-	removeAndFreeVM(mod, &container->vm);
+	removeAndFreeVM_DOCKER(mod, container);
       }
     }
   }
@@ -752,7 +797,7 @@ VNIC: <ifindex> <device> <mac>
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);
-    mdata->vmsByID = UTHASH_NEW(HSPVMState_DOCKER, id, YES);
+    mdata->vmsByID = UTHASH_NEW(HSPVMState_DOCKER, id, UTHASH_SKEY);
     mdata->pollActions = UTArrayNew(UTARRAY_DFLT);
     mdata->refreshVMListSecs = sp->docker.refreshVMListSecs ?: sp->refreshVMListSecs;
     mdata->forgetVMSecs = sp->docker.forgetVMSecs ?: sp->forgetVMSecs;

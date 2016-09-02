@@ -110,6 +110,18 @@ extern "C" {
     return adaptor;
   }
 
+  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad) {
+    SFLAdaptor *replaced = UTHashAdd(ht, ad);
+    if(replaced) {
+      char buf1[256], buf2[256];
+      myDebug(1, "adaptorAddOrReplace: replacing adaptor [%s] with [%s]",
+	      adaptorStr(replaced, buf1, 256),
+	      adaptorStr(ad, buf2, 256));
+      // TODO: should we delete the replaced one?
+      // adaptorFree(replaced);
+    }
+  }
+
   SFLAdaptor *adaptorByName(HSP *sp, char *dev) {
     SFLAdaptor ad = { .deviceName = trimWhitespace(dev) };
     return UTHashGet(sp->adaptorsByName, &ad);
@@ -130,13 +142,23 @@ extern "C" {
     return UTHashGet(sp->adaptorsByPeerIndex, &ad);
   }
 
+  static void deleteAdaptorFromHT(UTHash *ht, SFLAdaptor *ad, char *htname) {
+    char buf[256];
+    if(UTHashDel(ht, ad) != ad) {
+      myDebug(1, "WARNING: adaptor not deleted from %s : %s", htname, adaptorStr(ad, buf, 256));
+      if(debug(1))
+	 adaptorHTPrint(ht, htname);
+    }
+  }
+
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag) {
-    // use identity-delete UTHashDel rather than key-delete UTHashDelKey
-    UTHashDel(sp->adaptorsByName, ad);
-    UTHashDel(sp->adaptorsByIndex, ad);
-    UTHashDel(sp->adaptorsByPeerIndex, ad);
-    UTHashDel(sp->adaptorsByMac, ad);
-    if(freeFlag) adaptorFree(ad);
+    deleteAdaptorFromHT(sp->adaptorsByName, ad, "byName");
+    deleteAdaptorFromHT(sp->adaptorsByIndex, ad, "byIndex");
+    deleteAdaptorFromHT(sp->adaptorsByMac, ad, "byMac");
+    if(ad->peer_ifIndex)
+      deleteAdaptorFromHT(sp->adaptorsByPeerIndex, ad, "byPeerIndex");
+    if(freeFlag)
+      adaptorFree(ad);
   }
 
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag) {
@@ -159,20 +181,24 @@ extern "C" {
     return found;
   }
 
+  char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen) {
+    u_char macstr[13];
+    macstr[0] = '\0';
+    if(ad->num_macs) printHex(ad->macs[0].mac, 6, macstr, 13, NO);
+    snprintf(buf, bufLen, "ifindex: %u peer: %u nmacs: %u mac0: %s name: %s",
+	  ad->ifIndex,
+	  ad->peer_ifIndex,
+	  ad->num_macs,
+	  macstr,
+	  ad->deviceName);
+    return buf;
+  }
+
   void adaptorHTPrint(UTHash *ht, char *prefix) {
+    char buf[256];
     SFLAdaptor *ad;
-    UTHASH_WALK(ht, ad) {
-      u_char macstr[13];
-      macstr[0] = '\0';
-      if(ad->num_macs) printHex(ad->macs[0].mac, 6, macstr, 13, NO);
-      myLog(LOG_INFO, "%s: ifindex: %u peer: %u nmacs: %u mac0: %s name: %s",
-	    prefix,
-	    ad->ifIndex,
-	    ad->peer_ifIndex,
-	    ad->num_macs,
-	    macstr,
-	    ad->deviceName);
-    }
+    UTHASH_WALK(ht, ad)
+      myLog(LOG_INFO, "%s: %s", prefix, adaptorStr(ad, buf, 256));
   }
 
   static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors, int capacity)

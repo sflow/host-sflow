@@ -523,6 +523,7 @@ extern "C" {
 
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)
+  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad);
   SFLAdaptor *adaptorByName(HSP *sp, char *dev);
   SFLAdaptor *adaptorByMac(HSP *sp, SFLMacAddress *mac);
   SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex);
@@ -530,6 +531,7 @@ extern "C" {
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
   int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
+  char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen);
   void adaptorHTPrint(UTHash *ht, char *prefix);
   void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed);
 
