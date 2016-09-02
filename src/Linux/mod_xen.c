@@ -614,9 +614,17 @@ extern "C" {
 	  if(getDebug() > 3) myLog(LOG_INFO, "- xenstat_adaptors(): got MAC from xenstore: %s", macStr);
 	  // got it - but make sure there is a place to write it
 	  if(adaptor->num_macs > 0) {
-	    // OK, just overwrite the 'dummy' one that was there
-	    if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
+	    // OK, just overwrite the 'dummy' one that was there.
+	    SFLMacAddress mac;
+	    memset(&mac, 0, sizeof(mac));
+	    if(hexToBinary((u_char *)macStr, mac.mac, 6) != 6) {
 	      myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
+	    }
+	    else {
+	      // take care not to corrupt sp->adaptorsByMac
+	      UTHashDel(sp->adaptorsByMac, adaptor);
+	      adaptor->macs[0] = mac; // struct copy
+	      UTHashAdd(sp->adaptorsByMac, adaptor);
 	    }
 	  }
 	  free(macStr); // allocated by xs_read()
