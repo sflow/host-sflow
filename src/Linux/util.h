@@ -245,6 +245,7 @@ extern "C" {
     uint32_t f_len;
     uint32_t cap;
     uint32_t entries;
+    uint32_t dbins;
     uint32_t options;
   } UTHash;
 
@@ -262,7 +263,9 @@ extern "C" {
   void *UTHashDelKey(UTHash *oh, void *obj);
   uint32_t UTHashN(UTHash *oh);
 
-#define UTHASH_WALK(oh, obj) for(uint32_t _ii=0; _ii<oh->cap; _ii++) if(((obj)=(typeof(obj))oh->bins[_ii]))
+#define UTHASH_DBIN (void *)-1
+
+#define UTHASH_WALK(oh, obj) for(uint32_t _ii=0; _ii<oh->cap; _ii++) if(((obj)=(typeof(obj))oh->bins[_ii]) && (obj) != UTHASH_DBIN)
 
   regex_t *UTRegexCompile(char *pattern_str);
   int UTRegexExtractInt(regex_t *rx, char *str, int nvals, int *val1, int *val2, int *val3);

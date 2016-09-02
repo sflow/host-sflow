@@ -1465,14 +1465,16 @@ extern "C" {
 
   static void *hashAdd(UTHash *oh, void *obj);
 
-  static void hashGrow(UTHash *oh) {
+  static void hashRebuild(UTHash *oh, bool bigger) {
     uint32_t old_cap = oh->cap;
     void **old_bins = oh->bins;
-    oh->cap *= 2;
+    if(bigger) oh->cap *= 2;
     oh->bins = my_calloc(UTHASH_BYTES(oh));
     for(uint32_t ii = 0; ii < old_cap; ii++)
-      if(old_bins[ii]) hashAdd(oh, old_bins[ii]);
+      if(old_bins[ii] && old_bins[ii] != UTHASH_DBIN)
+	hashAdd(oh, old_bins[ii]);
     my_free(old_bins);
+    oh->dbins = 0;
   }
 
   static uint32_t hashHash(UTHash *oh, void *obj) {
@@ -1498,28 +1500,34 @@ extern "C" {
 
 static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     uint32_t probe = hashHash(oh, obj);
+    int32_t dbin = -1;
     probe = UTHASH_WRAP(oh, probe);
     for( ; oh->bins[probe]; probe=UTHASH_WRAP(oh,probe+1)) {
       void *entry = oh->bins[probe];
-      if(hashEqual(oh, obj, entry)) {
+      if(entry == UTHASH_DBIN) {
+	// remember first dbin
+	if(dbin == -1)  dbin = probe;
+      }
+      else if(hashEqual(oh, obj, entry)) {
 	(*found) = entry;
 	return probe;
       }
     }
+    // not found - reuse the dbin if we encountered one
     (*found) = NULL;
-    return probe;
+    return (dbin == -1) ? probe : dbin;
   }
 
   static void *hashAdd(UTHash *oh, void *obj) {
     // make sure there is room so the search cannot fail
     if(oh->entries > (oh->cap >> 1))
-      hashGrow(oh);
+      hashRebuild(oh, YES);
     // search for obj or empty slot
     void *found = NULL;
     uint32_t idx = hashSearch(oh, obj, &found);
     // put it here
     oh->bins[idx] = obj;
-    oh->entries++;
+    if(!found) oh->entries++;
     // return what was there before
     return found;
   }
@@ -1557,8 +1565,10 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
       if (found
 	  && (found == obj
 	      || identity == NO)) {
-	oh->bins[idx] = NULL;
+	oh->bins[idx] = UTHASH_DBIN;
 	oh->entries--;
+	if(++oh->dbins > (oh->cap >> 1))
+	  hashRebuild(oh, NO);
       }
     }
     return found;
