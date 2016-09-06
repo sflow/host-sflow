@@ -796,6 +796,10 @@ VNIC: <ifindex> <device> <mac>
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    // ask to retain root privileges
+    retainRootRequest(mod, "needed to run docker ps and docker inspect");
+    retainRootRequest(mod, "needed by mod_docker to probe for adaptors in other namespaces");
+
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_DOCKER, id, UTHASH_SKEY);
     mdata->pollActions = UTArrayNew(UTARRAY_DFLT);

@@ -270,6 +270,9 @@ extern "C" {
     mod->data = my_calloc(sizeof(HSP_mod_CUMULUS));
     HSP_mod_CUMULUS *mdata = (HSP_mod_CUMULUS *)mod->data;
 
+    // ask to retain root privileges
+    retainRootRequest(mod, "needed to set Cumulus switch-port sampling rates");
+
     // we know there are no 32-bit counters
     sp->nio_polling_secs = 0;
 

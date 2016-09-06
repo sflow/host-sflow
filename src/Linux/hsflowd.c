@@ -1114,6 +1114,28 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  void retainRootRequest(EVMod *mod, char *reason) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(!sp->retainRootReasons)
+      sp->retainRootReasons = strArrayNew();
+    strArrayAdd(sp->retainRootReasons, reason);
+  }
+
+  static bool retainRoot(HSP *sp) {
+    if(sp->retainRootReasons
+       && strArrayN(sp->retainRootReasons)) {
+      if(debug(1)) {
+	for(int ss = 0; ss < strArrayN(sp->retainRootReasons); ss++) {
+	  char *reason = strArrayAt(sp->retainRootReasons, ss);
+	  myLog(LOG_INFO, "retaining root privileges because: %s", reason);
+	}
+      }
+      return YES;
+    }
+    return NO;
+  }
+      
+
   static int getMyLimit(int resource, char *resourceName) {
     struct rlimit rlim = {0};
     if(getrlimit(resource, &rlim) != 0) {
@@ -1170,19 +1192,8 @@ extern "C" {
 
     }
 
-    if(sp->cumulus.cumulus
-       || sp->os10.os10) {
-      // For now we have to retain root privileges on Cumulus/OS10 because
-      // we need to exec the portsamp program any time the sampling-rate changes
-      // (which can happen if the ifSpeed changes on a port or if the config
-      // is changed via DNS-SD)
-      myDebug(1, "not relinquishing root privileges -- needed to set switch port sampling-rates");
-    }
-    else if(sp->docker.docker) {
-      // Similarly, when running Docker containers we still need more
-      // capabilities to be passed down so that we can run "docker ps -q"
-      // and "docker inspect <id>" successfully.
-      myDebug(1, "not relinquishing root privileges -- needed to read docker container info");
+    if(retainRoot(sp)) {
+      myDebug(1, "not relinquishing root privileges");
     }
     else {
       // set the real and effective group-id to 'nobody'

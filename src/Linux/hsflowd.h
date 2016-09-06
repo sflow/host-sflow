@@ -435,6 +435,7 @@ extern "C" {
     uint32_t outputRevisionNo;
     FILE *f_out;
     char *crashFile;
+    UTStringArray *retainRootReasons;
 
     // Identity
     char hostname[SFL_MAX_HOSTNAME_CHARS+1];
@@ -521,6 +522,10 @@ extern "C" {
   int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp);
   void flushCounters(EVMod *mod);
 
+  // capabilities
+  void retainRootRequest(EVMod *mod, char *reason);
+
+  // adaptors
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)
   void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad);

@@ -603,6 +603,8 @@ extern "C" {
     mod->data = my_calloc(sizeof(HSP_mod_OVS));
     HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
 
+    retainRootRequest(mod, "needed by mod_ovs to call ovs_vsctl and connect to OVSDB");
+
     mdata->cmd = strArrayNew();
     mdata->extras = strArrayNew();
     mdata->config.targets = strArrayNew();
