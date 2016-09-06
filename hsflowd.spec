@@ -27,7 +27,7 @@ the network. If Open VSwitch is present, will also control
 the Open VSwitch sFlow configuration.
 
 %prep
-%setup
+%setup -n %{name}-%{version}-%{release}
 
 %build
 make FEATURES=%{_FEATURES}
