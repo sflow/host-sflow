@@ -1474,11 +1474,12 @@ extern "C" {
     void **old_bins = oh->bins;
     if(bigger) oh->cap *= 2;
     oh->bins = my_calloc(UTHASH_BYTES(oh));
+    oh->entries = 0;
+    oh->dbins = 0;
     for(uint32_t ii = 0; ii < old_cap; ii++)
       if(old_bins[ii] && old_bins[ii] != UTHASH_DBIN)
 	hashAdd(oh, old_bins[ii]);
     my_free(old_bins);
-    oh->dbins = 0;
   }
 
   static uint32_t hashHash(UTHash *oh, void *obj) {
@@ -1511,6 +1512,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
       if(entry == UTHASH_DBIN) {
 	// remember first dbin
 	if(dbin == -1)  dbin = probe;
+	else if(dbin == probe) break; // all the way around!
       }
       else if(hashEqual(oh, obj, entry)) {
 	(*found) = entry;
@@ -1524,7 +1526,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
 
   static void *hashAdd(UTHash *oh, void *obj) {
     // make sure there is room so the search cannot fail
-    if(oh->entries > (oh->cap >> 1))
+    if(oh->entries >= (oh->cap >> 1))
       hashRebuild(oh, YES);
     // search for obj or empty slot
     void *found = NULL;
@@ -1571,7 +1573,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
 	      || identity == NO)) {
 	oh->bins[idx] = UTHASH_DBIN;
 	oh->entries--;
-	if(++oh->dbins > (oh->cap >> 1))
+	if(++oh->dbins >= (oh->cap >> 1))
 	  hashRebuild(oh, NO);
       }
     }
