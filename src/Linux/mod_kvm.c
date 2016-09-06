@@ -292,25 +292,28 @@ extern "C" {
 	  SFLMacAddress mac;
 	  memset(&mac, 0, sizeof(mac));
 	  if(hexToBinary((u_char *)ifmac, mac.mac, 6) == 6) {
-	    // allocate my own  adaptors so it's safe to free them later
-	    SFLAdaptor *ad = nioAdaptorNew(ifname, mac.mac, 0);
-	    SFLAdaptor *global_ad = adaptorByMac(sp, &mac);
-	    if(global_ad) {
-	      // copy index numbers to my private copy
-	      ad->ifIndex = global_ad->ifIndex;
-	      ad->peer_ifIndex = global_ad->peer_ifIndex;
+	    SFLAdaptor *adaptor = adaptorListGet(state->vm.interfaces, ifname);
+	    if(adaptor == NULL) {
+	      // allocate my own  adaptors so it's safe to free them later
+	      adaptor = nioAdaptorNew(ifname, mac.mac, 0);
+	      SFLAdaptor *global_ad = adaptorByMac(sp, &mac);
+	      if(global_ad) {
+		// copy index numbers to my private copy
+		adaptor->ifIndex = global_ad->ifIndex;
+		adaptor->peer_ifIndex = global_ad->peer_ifIndex;
+	      }
+	      else {
+		// not in global collection - add
+		// This may be a mistake since ifIndex is unknown
+		if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL)
+		  myDebug(1, "Warning: kvm adaptor overwriting adaptorsByMac");
+	      }
+	      adaptorListAdd(state->vm.interfaces, adaptor);
 	    }
-	    else {
-	      // not in global collection - add
-	      // This may be a mistake since ifIndex is unknown
-	      if(UTHashAdd(sp->adaptorsByMac, ad) != NULL)
-		myDebug(1, "Warning: kvm adaptor overwriting adaptorsByMac");
-	    }
-	    adaptorListAdd(state->vm.interfaces, ad);
 	    // mark it as a vm/container device
-	    ADAPTOR_NIO(ad)->vm_or_container = YES;
+	    ADAPTOR_NIO(adaptor)->vm_or_container = YES;
 	    // clear the mark so we don't free it
-	    ad->marked = NO;
+	    adaptor->marked = NO;
 	  }
 	}
       }
