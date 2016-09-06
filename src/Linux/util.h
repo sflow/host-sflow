@@ -252,7 +252,6 @@ extern "C" {
 #define UTHASH_DFLT 0
 #define UTHASH_SKEY 1
 #define UTHASH_SYNC 2
-#define UTHASH_HUGE 4
   UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, uint32_t options);
 #define UTHASH_NEW(t,f,o) UTHashNew(offsetof(t, f), sizeof(((t *)0)->f), (o))
   void UTHashFree(UTHash *oh);

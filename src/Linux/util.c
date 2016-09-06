@@ -1442,7 +1442,11 @@ extern "C" {
     A simple open-hash for structures, where the key is a field
     in the structure - either fixed-length (up to 64-bits) or
     a null-terminated string.  Added this for looking up the
-    same SFLAdaptor objects by name, ifIndex peerIfIndex  and MAC.
+    same SFLAdaptor objects by name, ifIndex, peerIfIndex  and MAC,
+    but it's used in other places too.
+    Uses linear probing:
+    http://www.cs.rmit.edu.au/online/blackboard/chapter/05/documents/contribute/chapter/05/linear-probing.html
+    entries can be deleted during a walk.
   */
 
 #define UTHASH_INIT 8 // must be power of 2
