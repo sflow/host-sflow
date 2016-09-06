@@ -1078,10 +1078,11 @@ extern "C" {
 
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    assert(sp->sFlowSettings);
+    // assert(sp->sFlowSettings);
     myDebug(1, "evt_config_first: first valid configuration");
 
-    if(sp->sFlowSettings->collectors == NULL) {
+    if(sp->sFlowSettings == NULL
+       || sp->sFlowSettings->collectors == NULL) {
       myLog(LOG_ERR, "evt_config_first: no collectors defined");
       if(!sp->DNSSD.DNSSD)
 	abort();
