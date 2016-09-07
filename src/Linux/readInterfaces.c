@@ -220,7 +220,7 @@ extern "C" {
     } link_modes;
   };
 
-  static bool ethtool_get_GLINKSETTINGS(struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  static bool ethtool_get_GLINKSETTINGS(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
   {
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
@@ -273,20 +273,20 @@ extern "C" {
         if(adaptor->ifSpeed != 0) {
           changed = YES;
         }
-        setAdaptorSpeed(adaptor, 0);
+        setAdaptorSpeed(sp, adaptor, 0);
       }
       else {
         uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
         if(adaptor->ifSpeed != ifSpeed_bps) {
           changed = YES;
         }
-        setAdaptorSpeed(adaptor, ifSpeed_bps);
+        setAdaptorSpeed(sp, adaptor, ifSpeed_bps);
       }
     }
     return changed;
   }
 
-#endif /* ETHTOOL_GLINKSETTINGS */
+#else /* ETHTOOL_GLINKSETTINGS */
 
 /*________________--------------------------__________________
   ________________  ethtool_get_GSET        __________________
@@ -329,6 +329,8 @@ extern "C" {
     }
     return changed;
   }
+
+#endif /* not ETHTOOL_GLINKSETTINGS */
 
 #if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO )
 
@@ -500,7 +502,7 @@ extern "C" {
 
 #ifdef ETHTOOL_GLINKSETTINGS
     if(nio->ethtool_GLINKSETTINGS) {
-      changed |= ethtool_get_GLINKSETTINGS(ifr, fd, adaptor);
+      changed |= ethtool_get_GLINKSETTINGS(sp, ifr, fd, adaptor);
     }
 #else
     if(nio->ethtool_GSET) {
