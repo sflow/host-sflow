@@ -1271,10 +1271,6 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     mdata->pollActions = UTArrayNew(UTARRAY_SYNC);
     // but the applicationHT is only ever accessed from the packetBus
     mdata->applicationHT = UTHASH_NEW(HSPApplication, application, UTHASH_SKEY);
-    cJSON_Hooks hooks;
-    hooks.malloc_fn = my_calloc;
-    hooks.free_fn = my_free;
-    cJSON_InitHooks(&hooks);
 
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
