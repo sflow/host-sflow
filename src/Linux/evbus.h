@@ -83,8 +83,8 @@ extern "C" {
     void *magic;
     pid_t child_pid;
     int child_status;
-    char *iobuf;
-    int iolen;
+    UTStrBuf *iobuf;
+    UTStrBuf *ioline;
     bool errOut;
   } EVSocket;
 
@@ -131,11 +131,19 @@ extern "C" {
   EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic);
   bool EVSocketClose(EVMod *mod, EVSocket *sock);
 
-#define EVSOCKETREAD_EOF 1
-#define EVSOCKETREAD_STR 2
-#define EVSOCKETREAD_AGAIN 4
-#define EVSOCKETREAD_ERR 8
-  int EVSocketReadLine(EVMod *mod, EVSocket *sock, char *buf, int bufLen);
+#define EVSOCKETREADLINE_INCBYTES EV_MAX_EVT_DATALEN
+
+  typedef enum {
+    EVSOCKETREAD_STR=0,
+    EVSOCKETREAD_AGAIN,
+    EVSOCKETREAD_EOF,
+    EVSOCKETREAD_BADF,
+    EVSOCKETREAD_ERR
+  } EnumEVSocketReadStatus;
+
+  typedef void (*EVSocketReadLineCB)(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic);
+
+  void EVSocketReadLines(EVMod *mod, EVSocket *sock, EVSocketReadLineCB lineCB, void *magic);
   pid_t EVBusExec(EVMod *mod, EVBus *bus, void *magic, char **cmd, EVReadCB readCB);
 
   // Use a more conservative stacksize here - partly because

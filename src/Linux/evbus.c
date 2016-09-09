@@ -46,7 +46,7 @@ extern "C" {
 	UTHashAdd(mod->root->buses, bus);
 	bus->events = UTHASH_NEW(EVEvent, name, UTHASH_SKEY);
 	bus->eventList = UTArrayNew(UTARRAY_DFLT);
-	bus->sockets = UTArrayNew(UTARRAY_DFLT);
+	bus->sockets = UTArrayNew(UTARRAY_PACK);
 	bus->sockets_run = UTArrayNew(UTARRAY_DFLT);
 	bus->sockets_del = UTArrayNew(UTARRAY_DFLT);
 	if(pipe(bus->pipe) == -1) {
@@ -277,7 +277,7 @@ extern "C" {
   static void freeSocket(EVSocket *sock) {
     assert(sock->fd <= 0);
     if(sock->iobuf)
-      my_free(sock->iobuf);
+      UTStrBuf_free(sock->iobuf);
     my_free(sock);
   }
 
@@ -436,93 +436,79 @@ extern "C" {
     from myExec() in util.c
   */
 
-  static void socketLineCopy(EVSocket *sock, int bytes, char *buf, int bufLen) {
-    int copyBytes = (bytes < bufLen) ? bytes : (bufLen-1);
-    if(copyBytes) memcpy(buf, sock->iobuf, copyBytes);
-    buf[copyBytes]='\0';
-  }
+  static bool socketLine(EVSocket *sock, size_t start) {
 
-  static bool socketLine(EVSocket *sock, char *buf, int bufLen) {
-    for(int ii = 0; ii < sock->iolen; ii++) {
-      char ch = sock->iobuf[ii];
+    char *iobuf = UTSTRBUF_STR(sock->iobuf);
+    size_t iolen = UTSTRBUF_LEN(sock->iobuf);
+
+    for(int ii = start; ii < iolen; ii++) {
+      char ch = iobuf[ii];
       if(ch == 10 || ch == 13 || ch == 0) {
-	socketLineCopy(sock, ii, buf, bufLen);
+	UTStrBuf_append_n(sock->ioline, iobuf, ii);
 	if(ch == 10 || ch == 13)
 	  ii++; // chomp
-	if(ch == 13 && sock->iobuf[ii] == 10)
+	if(ch == 13 && iobuf[ii] == 10)
 	  ii++; // chomp CRLF
-	sock->iolen -= ii;
-	if(sock->iolen)
-	  memmove(sock->iobuf, sock->iobuf + ii, sock->iolen); // shift to beginning
+	UTStrBuf_snip_prefix(sock->iobuf, ii);
 	return YES;
       }
     }
     return NO; // line-end not found
   }
 
-  int EVSocketReadLine(EVMod *mod, EVSocket *sock, char *buf, int bufLen) {
+  void EVSocketReadLines(EVMod *mod, EVSocket *sock, EVSocketReadLineCB lineCB, void *magic) {
+    // When reading lines, use a per-line callback so we can easily handle the case where
+    // a single read() call resulted in 0, 1 or >1 lines found,  or hit EOF with a trailing
+    // line in the buffer.
     // insist this is only called from the same thread that opened the socket
     assert(sock->bus == threadBus);
-    assert(buf && bufLen > 1);
     if(sock->fd <= 0)
-      return EVSOCKETREAD_EOF;
+      (*lineCB)(mod, sock, EVSOCKETREAD_BADF, magic);
 
-    if(sock->iobuf == NULL) {
-      sock->iobuf = (char *)my_calloc(EV_MAX_EVT_DATALEN);
-      sock->iolen = 0;
-    }
-
-    // we may have another line from the last read
-    if(socketLine(sock, buf, bufLen))
-      return EVSOCKETREAD_STR;
-
+    // allocate buffer so socket can accumulate data while looking for line-ends
+    if(sock->iobuf == NULL)
+      sock->iobuf = UTStrBuf_new();
+    // and another to report lines (or accumulate them if required)
+    if(sock->ioline == NULL)
+      sock->ioline = UTStrBuf_new();
+    
     // try to read more
-    char *fillStart = sock->iobuf + sock->iolen;
-    int fillMax = EV_MAX_EVT_DATALEN - sock->iolen;
+    UTStrBuf_need(sock->iobuf, UTSTRBUF_LEN(sock->iobuf) + EVSOCKETREADLINE_INCBYTES);
+    char *readStart = UTSTRBUF_STR(sock->iobuf) + UTSTRBUF_LEN(sock->iobuf);
     int cc;
   try_again:
-    cc = read(sock->fd, fillStart, fillMax);
+    cc = read(sock->fd, readStart, EVSOCKETREADLINE_INCBYTES);
     if(cc < 0) {
       if(errno == EAGAIN || errno == EINTR) goto try_again;
-      myLog(LOG_ERR, "EVSocketReadLine(): %s", strerror(errno));
+      myLog(LOG_ERR, "EVSocketReadLines(): %s", strerror(errno));
       EVSocketClose(mod, sock);
-      return EVSOCKETREAD_ERR;
+      (*lineCB)(mod, sock, EVSOCKETREAD_ERR, magic);
     }
-    if(cc == 0) {
+    else if(cc == 0) {
       // EOF
       EVSocketClose(mod, sock);
       // may have trailing line
-      if(sock->iolen) {
-	socketLineCopy(sock, sock->iolen, buf, bufLen);
-	return (EVSOCKETREAD_STR | EVSOCKETREAD_EOF);
+      if(UTSTRBUF_LEN(sock->iobuf)) {
+	UTStrBuf_append_n(sock->ioline, UTSTRBUF_STR(sock->iobuf), UTSTRBUF_LEN(sock->iobuf));
+	(*lineCB)(mod, sock, EVSOCKETREAD_STR, magic);
       }
-      return EVSOCKETREAD_EOF;
+      (*lineCB)(mod, sock, EVSOCKETREAD_EOF, magic);
     }
-
-    // got more, see if it completed a line
-    sock->iolen += cc;
-    if(socketLine(sock, buf, bufLen))
-      return EVSOCKETREAD_STR;
-
-    // need another read - please call me again
-    return EVSOCKETREAD_AGAIN;
-  }
-
-#if 0
-  // example pattern for asynchronous ASCII EVReadCB - e.g. with EVBusExec()
-  static void busExecReadCB(EVMod *mod, EVSocket *sock, void *magic)
-  {
-    char buf[EV_MAX_EVT_DATALEN];
-    int state;
-    // loop in case we got several complete lines in one read
-    while((state = EVSocketReadLine(mod, sock, buf, EV_MAX_EVT_DATALEN)) & EVSOCKETREAD_STR) {
-      myDebug(1, "busExecRead got %s line: <%s>", (sock->errOut ? "stderr" : "stdout"), buf);
+    else {
+      // got more, see if it completed a line - or more than one
+      size_t start = UTSTRBUF_LEN(sock->iobuf);
+      UTSTRBUF_LEN(sock->iobuf) += cc;
+      for(;;) {
+	if(socketLine(sock, start)) {
+	  (*lineCB)(mod, sock, EVSOCKETREAD_STR, magic);
+	  start = 0;
+	}
+	else break;
+      }
+      // please call again (when socket has data)
+      (*lineCB)(mod, sock, EVSOCKETREAD_AGAIN, magic);
     }
-    if(state & EVSOCKETREAD_ERR) myDebug(1, "buxExecRead got error. status=%d", sock->child_status);
-    if(state & EVSOCKETREAD_EOF) myDebug(1, "buxExecRead got EOF. status=%d", sock->child_status);
-    return YES;
   }
-#endif
 
   pid_t EVBusExec(EVMod *mod, EVBus *bus, void *magic, char **cmd, EVReadCB readCB)
   {
@@ -563,10 +549,10 @@ extern "C" {
       while(close(outPipe[1]) == -1 && errno == EINTR);
       while(close(errPipe[1]) == -1 && errno == EINTR);
       // read from read-ends
-      EVSocket *outSock = EVBusAddSocket(mod, bus, outPipe[0], readCB, magic);
-      outSock->child_pid = cpid; // only give this one the cpid
       EVSocket *errSock = EVBusAddSocket(mod, bus, errPipe[0], readCB, magic);
       errSock->errOut = YES; // mark this so we know it's stderr
+      EVSocket *outSock = EVBusAddSocket(mod, bus, outPipe[0], readCB, magic);
+      outSock->child_pid = cpid; // only give this one the cpid
     }
     return cpid;
   }
