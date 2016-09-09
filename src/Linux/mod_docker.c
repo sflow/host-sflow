@@ -827,8 +827,8 @@ VNIC: <ifindex> <device> <mac>
     }
   }
     
-  static void readDockerAPI(EVMod *mod, EVSocket *sock, void *magic_req) {
-    EVSocketReadLines(mod, sock, readDockerCB, magic_req);
+  static void readDockerAPI(EVMod *mod, EVSocket *sock, void *magic) {
+    EVSocketReadLines(mod, sock, readDockerCB, magic);
   }
 
   static void dockerAPIRequest(EVMod *mod, HSPDockerRequest *req) {
@@ -845,6 +845,14 @@ VNIC: <ifindex> <device> <mac>
 	myLog(LOG_ERR, "dockerAPIRequest - write(%s) returned %d != %u: %s",
 	      cmd, cc, len, strerror(errno));
     }
+  }
+
+  HSPDockerRequest *dockerRequest(EVMod *mod, UTStrBuf *cmd, HSPDockerCB jsonCB, bool lineByLine) {
+    HSPDockerRequest *req = (HSPDockerRequest *)my_calloc(sizeof(HSPDockerRequest));
+    req->request = cmd;
+    req->jsonCB = jsonCB;
+    req->lineByLine = lineByLine;
+    return req;
   }
 
   /*_________________---------------------------__________________
@@ -875,15 +883,8 @@ VNIC: <ifindex> <device> <mac>
     
     retainRootRequest(mod, "needed to access docker.sock");
     // start the event monitor before we capture the current state
-    HSPDockerRequest ev_req = { .request = UTStrBuf_wrap(HSP_DOCKER_REQ_CONTAINERS),
-				.jsonCB = dockerAPI_containers,
-				.lineByLine = NO };
-    dockerAPIRequest(mod, &ev_req);
-
-    HSPDockerRequest ct_req = { .request = UTStrBuf_wrap(HSP_DOCKER_REQ_EVENTS),
-				.jsonCB = dockerAPI_event,
-				.lineByLine = YES };
-    dockerAPIRequest(mod, &ct_req);
+    dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_EVENTS), dockerAPI_event, YES));
+    dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_CONTAINERS), dockerAPI_containers, NO));
 
     //char *cmd[] = { "/usr/bin/curl", "-g", "--unix-socket", "/var/run/docker.sock", "http:/events?filters={\"type\":[\"container\"]}", NULL };
     //EVBusExec(mod, mdata->pollBus, dockerAPI_event, cmd, readDockerAPI);
