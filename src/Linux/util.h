@@ -151,6 +151,7 @@ extern "C" {
   int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...);
   void UTStrBuf_reset(UTStrBuf *buf);
   size_t UTStrBuf_snip_prefix(UTStrBuf *buf, size_t prefix);
+  UTStrBuf *UTStrBuf_wrap(char *str);
   char *UTStrBuf_unwrap(UTStrBuf *buf);
   void UTStrBuf_free(UTStrBuf *buf);
 

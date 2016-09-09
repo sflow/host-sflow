@@ -433,7 +433,8 @@ extern "C" {
     -----------------___________________________------------------
     like popen(), but more secure coz the shell doesn't get
     to "reimagine" the args.  This should eventually take over
-    from myExec() in util.c
+    from myExec() in util.c.  Newline sequences LF, CR and CRLF
+    are all replaced with "\n".
   */
 
   static bool socketLine(EVSocket *sock, size_t start) {
@@ -445,6 +446,8 @@ extern "C" {
       char ch = iobuf[ii];
       if(ch == 10 || ch == 13 || ch == 0) {
 	UTStrBuf_append_n(sock->ioline, iobuf, ii);
+	if(ch != 0)
+	  UTStrBuf_append(sock->ioline, "\n");
 	if(ch == 10 || ch == 13)
 	  ii++; // chomp
 	if(ch == 13 && iobuf[ii] == 10)

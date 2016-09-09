@@ -84,6 +84,12 @@ extern "C" {
     UTStrBuf_nul_terminate(buf);
   }
   
+  UTStrBuf *UTStrBuf_wrap(char *str) {
+    UTStrBuf *buf = UTStrBuf_new();
+    UTStrBuf_append(buf, str);
+    return buf;
+  }
+
   char *UTStrBuf_unwrap(UTStrBuf *buf) {
     char *ans = buf->buf;
     my_free(buf);
