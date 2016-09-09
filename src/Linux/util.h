@@ -17,6 +17,7 @@ extern "C" {
 #include <errno.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <syslog.h>
 #include <assert.h>
 #include <fcntl.h>
@@ -140,11 +141,18 @@ extern "C" {
     size_t cap;
   } UTStrBuf;
 
-  UTStrBuf *UTStrBuf_new(size_t cap);
-  void UTStrBuf_grow(UTStrBuf *buf);
+#define UTSTRBUF_LEN(_b) (_b)->len
+#define UTSTRBUF_STR(_b) (_b)->buf
+#define UTSTRBUF_START 64
+  UTStrBuf *UTStrBuf_new(void);
+  void UTStrBuf_need(UTStrBuf *buf, size_t len);
   void UTStrBuf_append(UTStrBuf *buf, char *str);
+  void UTStrBuf_append_n(UTStrBuf *buf, char *str, size_t len);
   int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...);
+  void UTStrBuf_reset(UTStrBuf *buf);
+  size_t UTStrBuf_snip_prefix(UTStrBuf *buf, size_t prefix);
   char *UTStrBuf_unwrap(UTStrBuf *buf);
+  void UTStrBuf_free(UTStrBuf *buf);
 
   // string array
   typedef struct _UTStringArray {
@@ -172,18 +180,21 @@ extern "C" {
     void **objs;
     uint32_t n;
     uint32_t cap;
+    uint32_t options;
+    uint32_t dbins;
     pthread_mutex_t *sync;
   } UTArray;
 
 #define UTARRAY_DFLT 0
 #define UTARRAY_SYNC 1
-
+#define UTARRAY_PACK 2
   UTArray *UTArrayNew(int flags);
   uint32_t UTArrayAdd(UTArray *ar, void *obj);
   uint32_t UTArrayAddAll(UTArray *ar, UTArray *add);
   void UTArrayPut(UTArray *ar, void *obj, int i);
   bool UTArrayDel(UTArray *ar, void *obj);
   void *UTArrayDelAt(UTArray *ar, int i);
+  void UTArrayPack(UTArray *ar);
   void UTArrayReset(UTArray *ar);
   void UTArrayFree(UTArray *ar);
   uint32_t UTArrayN(UTArray *ar);
@@ -220,7 +231,10 @@ extern "C" {
   // file utils
   int UTTruncateOpenFile(FILE *fptr);
   int UTFileExists(char *path);
+
+  // sockets
   int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize);
+  int UTUnixDomainSocket(char *path);
 
   // SFLAddress utils
   char *SFLAddress_print(SFLAddress *addr, char *buf, size_t len);
@@ -252,6 +266,7 @@ extern "C" {
 #define UTHASH_DFLT 0
 #define UTHASH_SKEY 1
 #define UTHASH_SYNC 2
+#define UTHASH_IDTY 4
   UTHash *UTHashNew(uint32_t f_offset, uint32_t f_len, uint32_t options);
 #define UTHASH_NEW(t,f,o) UTHashNew(offsetof(t, f), sizeof(((t *)0)->f), (o))
   void UTHashFree(UTHash *oh);

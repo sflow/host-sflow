@@ -15,14 +15,19 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  UTStrBuf *UTStrBuf_new(size_t cap) {
+  static void UTStrBuf_nul_terminate(UTStrBuf *buf) {
+    buf->buf[buf->len] = '\0';
+  }
+
+  UTStrBuf *UTStrBuf_new() {
     UTStrBuf *buf = (UTStrBuf *)my_calloc(sizeof(UTStrBuf));
-    buf->buf = my_calloc(cap);
-    buf->cap = cap;
+    buf->cap = UTSTRBUF_START;
+    buf->buf = my_calloc(buf->cap);
+    UTStrBuf_nul_terminate(buf);
     return buf;
   }
 
-  void UTStrBuf_grow(UTStrBuf *buf) {
+  static void UTStrBuf_grow(UTStrBuf *buf) {
     buf->cap <<= 2;
     char *newbuf = (char *)my_calloc(buf->cap);
     memcpy(newbuf, buf->buf, buf->len);
@@ -30,17 +35,21 @@ extern "C" {
     buf->buf = newbuf;
   }
 
-  static void UTStrBuf_need(UTStrBuf *buf, size_t len) {
+  void UTStrBuf_need(UTStrBuf *buf, size_t len) {
     while((buf->len + len + 1) >= buf->cap) UTStrBuf_grow(buf);
   }
 
-  void UTStrBuf_append(UTStrBuf *buf, char *str) {
-    int len = my_strlen(str);
+  void UTStrBuf_append_n(UTStrBuf *buf, char *str, size_t len) {
     if(len) {
-      UTStrBuf_need(buf, len);
+      UTStrBuf_need(buf, len+1);
       memcpy(buf->buf + buf->len, str, len);
       buf->len += len;
+      UTStrBuf_nul_terminate(buf);
     }
+  }
+
+  void UTStrBuf_append(UTStrBuf *buf, char *str) {
+    UTStrBuf_append_n(buf, str, my_strlen(str));
   }
 
   int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...) {
@@ -58,10 +67,32 @@ extern "C" {
     return ans;
   }
 
+  size_t UTStrBuf_snip_prefix(UTStrBuf *buf, size_t prefix) {
+    if(buf->len <= prefix) {
+      buf->len = 0;
+    }
+    else {
+      buf->len -= prefix;
+      memmove(buf->buf, buf->buf + prefix, buf->len);
+    }
+    UTStrBuf_nul_terminate(buf);
+    return buf->len;
+  }
+
+  void UTStrBuf_reset(UTStrBuf *buf) {
+    buf->len = 0;
+    UTStrBuf_nul_terminate(buf);
+  }
+  
   char *UTStrBuf_unwrap(UTStrBuf *buf) {
     char *ans = buf->buf;
     my_free(buf);
     return ans;
+  }
+
+  void UTStrBuf_free(UTStrBuf *buf) {
+    if(buf->buf) my_free(buf->buf);
+    my_free(buf);
   }
 
   /*_________________---------------------------__________________
@@ -525,7 +556,7 @@ extern "C" {
   }
 
   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end) {
-    UTStrBuf *buf = UTStrBuf_new(256);
+    UTStrBuf *buf = UTStrBuf_new();
     if(start) UTStrBuf_append(buf, start);
     for(uint32_t i = 0; i < ar->n; i++) {
       if(i && delim) UTStrBuf_append(buf, delim);
@@ -657,6 +688,7 @@ extern "C" {
 
   UTArray *UTArrayNew(int flags) {
     UTArray *ar = (UTArray *)my_calloc(sizeof(UTArray));
+    ar->options = flags;
     if(flags & UTARRAY_SYNC) {
       ar->sync = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
       pthread_mutex_init(ar->sync, NULL);
@@ -682,6 +714,14 @@ extern "C" {
     }
   }
 
+  static void arrayDeleteCheck(UTArray *ar) {
+    ar->dbins++;
+    if(ar->options & UTARRAY_PACK
+       && ar->n > 8
+       && ar->dbins > (ar->n >> 1))
+      UTArrayPack(ar);
+  }
+    
   uint32_t UTArrayAdd(UTArray *ar, void *obj) {
     int offset = -1;
     SEMLOCK_DO(ar->sync) {
@@ -704,9 +744,11 @@ extern "C" {
   void *UTArrayDelAt(UTArray *ar, int i) {
     void *obj = NULL;
     SEMLOCK_DO(ar->sync) {
-      obj = ar->objs[i];
-      ar->objs[i] = NULL;
-      if(i == (ar->n - 1)) --ar->n;
+      if(i < ar->n) {
+	obj = ar->objs[i];
+	ar->objs[i] = NULL;
+	arrayDeleteCheck(ar);
+      }
     }
     return obj;
   }
@@ -717,9 +759,9 @@ extern "C" {
       for(uint32_t i = 0; i < ar->n; i++) {
 	if(ar->objs[i] == obj) {
 	  ar->objs[i] = NULL;
-	  if(i == (ar->n - 1)) --ar->n;
-	ans = YES;
-	break;
+	  arrayDeleteCheck(ar);
+	  ans = YES;
+	  break;
 	}
       }
     }
@@ -734,10 +776,27 @@ extern "C" {
     }
   }
 
+  void UTArrayPack(UTArray *ar) {
+    SEMLOCK_DO(ar->sync) {
+      int found = 0;
+      for(uint32_t i = 0; i < ar->n; i++) {
+	void *obj = ar->objs[i];
+	if(i > found && obj) {
+	  ar->objs[found++] = obj;
+	  ar->objs[i] = NULL;
+	}
+      }
+      ar->dbins = 0;
+      ar->n = found;
+    }
+  }
+
   void UTArrayReset(UTArray *ar) {
     SEMLOCK_DO(ar->sync) {
-      for(uint32_t i = 0; i < ar->n; i++) ar->objs[i] = NULL;
+      for(uint32_t i = 0; i < ar->n; i++)
+	ar->objs[i] = NULL;
       ar->n = 0;
+      ar->dbins = 0;
     }
   }
 
@@ -753,7 +812,9 @@ extern "C" {
   }
 
   void *UTArrayAt(UTArray *ar, int i) {
-    return ar->objs[i];
+    return ((i < ar->n)
+	    ? ar->objs[i]
+	    : NULL);
   }
 
   /*________________---------------------------__________________
@@ -1462,8 +1523,8 @@ extern "C" {
     }
     oh->cap = UTHASH_INIT;
     oh->bins = my_calloc(UTHASH_BYTES(oh));
-    oh->f_offset = f_offset;
-    oh->f_len = (options & UTHASH_SKEY) ? 0 : f_len;
+    oh->f_offset = (options & (UTHASH_IDTY)) ? 0 : f_offset;
+    oh->f_len = (options & (UTHASH_SKEY|UTHASH_IDTY)) ? 0 : f_len;
     return oh;
   }
 
@@ -1484,20 +1545,19 @@ extern "C" {
 
   static uint32_t hashHash(UTHash *oh, void *obj) {
     char *f = (char *)obj + oh->f_offset;
-    if(oh->f_len == 0) {
-      // field is ptr to null-terminated string
-      return my_strhash(*(char **)f);
-    }
-    // field is fixed-len
-    return hash_fnv1a(f, oh->f_len);
+    if(oh->f_len) return hash_fnv1a(f, oh->f_len);
+    else if(oh->options & UTHASH_IDTY) return (uint32_t)((uint64_t)obj);
+    return my_strhash(*(char **)f);
   }
 
-  static uint32_t hashEqual(UTHash *oh, void *obj1, void *obj2) {
+  static bool hashEqual(UTHash *oh, void *obj1, void *obj2) {
     char *f1 = (char *)obj1 + oh->f_offset;
     char *f2 = (char *)obj2 + oh->f_offset;
-    return (oh->f_len == 0)
-      ? my_strequal(*(char **)f1, *(char **)f2)
-      : (!memcmp(f1, f2, oh->f_len));
+    return (oh->f_len)
+      ? (!memcmp(f1, f2, oh->f_len))
+      : ((oh->options & UTHASH_IDTY)
+	 ? (obj1 == obj2)
+	 : my_strequal(*(char **)f1, *(char **)f2));
   }
 
   // oh->cap is always a power of 2, so we can just mask the bits
@@ -1680,6 +1740,24 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     }
 
     return soc;
+  }
+
+  int UTUnixDomainSocket(char *path) {
+    struct sockaddr_un addr;
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if(fd == -1) {
+      myLog(LOG_ERR, "UTUnixDomainSocket - socket() failed: %s", strerror(errno));
+      return -1;
+    }
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
+    if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+      myLog(LOG_ERR, "UTUnixDomainSocket - connect() failed: %s", strerror(errno));
+      close(fd);
+      return -1;
+    }
+    return fd;
   }
 
   /*_________________---------------------------__________________
