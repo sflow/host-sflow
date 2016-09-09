@@ -8,6 +8,7 @@ extern "C" {
 
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <net/if.h>
 #include <linux/types.h>
 #include <sys/prctl.h>
@@ -34,6 +35,11 @@ extern "C" {
     uint64_t memoryLimit;
   } HSPVMState_DOCKER;
 
+#define HSP_DOCKER_SOCK  "/var/run/docker.sock"
+#define HSP_DOCKER_HTTP " HTTP/1.1\nHost: " HSP_DOCKER_SOCK "\n\n"
+#define HSP_DOCKER_REQ_EVENTS "GET /events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
+#define HSP_DOCKER_REQ_CONTAINERS "GET /containers/json" HSP_DOCKER_HTTP
+
 #define HSP_DOCKER_CMD "/usr/bin/docker"
 #define HSP_NETNS_DIR "/var/run/netns"
 #define HSP_IP_CMD "/usr/sbin/ip"
@@ -42,6 +48,7 @@ extern "C" {
 #define HSP_DOCKER_SHORTID_LEN 12
 
   typedef struct _HSP_mod_DOCKER {
+    EVBus *pollBus;
     UTHash *vmsByUUID;
     UTHash *vmsByID;
     UTArray *pollActions;
@@ -52,6 +59,10 @@ extern "C" {
   } HSP_mod_DOCKER;
 
 #define HSP_DOCKER_MAX_STATS_LINELEN 512
+
+  typedef void (*dockerCB)(EVMod *mod, cJSON *obj);
+  static void dockerAPI_containers(EVMod *mod, cJSON *top);
+  static bool dockerAPIRequest(EVMod *mod, char *request, dockerCB handler);
 
   /*_________________---------------------------__________________
     _________________    utils to help debug    __________________
@@ -587,7 +598,7 @@ VNIC: <ifindex> <device> <mac>
       strArrayAdd(dockerInspect, container->id);
     }
     strArrayAdd(dockerInspect, NULL);
-    UTStrBuf *inspectBuf = UTStrBuf_new(1024);
+    UTStrBuf *inspectBuf = UTStrBuf_new();
     int inspectOK = myExec(inspectBuf,
 			   strArray(dockerInspect),
 			   dockerInspectCB,
@@ -752,6 +763,8 @@ VNIC: <ifindex> <device> <mac>
        && sp->sFlowSettings) {
       configVMs(mod);
     }
+
+    // dockerAPIRequest(mod, HSP_DOCKER_REQ_CONTAINERS, dockerAPI_containers);
   }
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
@@ -786,6 +799,69 @@ VNIC: <ifindex> <device> <mac>
     SFLADD_ELEMENT(cs, &mdata->vnodeElem);
   }
 
+
+  /*_________________---------------------------__________________
+    _________________    openDockerSocket       __________________
+    -----------------___________________________------------------
+  */
+
+  static void dockerAPI_event(EVMod *mod, cJSON *top) {
+    myDebug(1, "dockerAPI_event");
+  }
+  static void dockerAPI_containers(EVMod *mod, cJSON *top) {
+    myDebug(1, "dockerAPI_containers");
+  }
+
+  static void readDockerCB(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic) {
+    switch(status) {
+    case EVSOCKETREAD_STR:
+      {
+	myDebug(1, "readDockerAPI got line: <%s>", UTSTRBUF_STR(sock->ioline));
+	cJSON *top = cJSON_Parse(UTSTRBUF_STR(sock->ioline));
+	if(top && magic) {
+	  dockerCB handler = (dockerCB)magic;
+	  (*handler)(mod, top);
+	  cJSON_Delete(top);
+	}
+	// reset this buffer to consume line
+	UTStrBuf_reset(sock->ioline);
+      }
+      break;
+    case EVSOCKETREAD_AGAIN:
+      myDebug(1, "readDockerAPI EVSOCKETREAD_AGAIN (buffered=%u)", UTSTRBUF_LEN(sock->iobuf));
+      break;
+    case EVSOCKETREAD_BADF:
+      myDebug(1, "readDockerAPI bad file-descriptor=%d", sock->fd);
+      break;
+    case EVSOCKETREAD_ERR:
+      myDebug(1, "readDockerAPI got error");
+      break;
+    case EVSOCKETREAD_EOF:
+      myDebug(1, "readDockerAPI got EOF");
+      break;
+    }
+  }
+    
+  static void readDockerAPI(EVMod *mod, EVSocket *sock, void *magic) {
+    EVSocketReadLines(mod, sock, readDockerCB, magic);
+  }
+
+  static bool dockerAPIRequest(EVMod *mod, char *request, dockerCB handler) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    int fd = UTUnixDomainSocket(HSP_DOCKER_SOCK);
+    myDebug(1, "dockerAPIRequest(%s) fd==%d", request, fd);
+    if(fd != -1) {
+      EVBusAddSocket(mod, mdata->pollBus, fd, readDockerAPI, handler);
+      ssize_t bytes = my_strlen(request);
+    try_again:
+      if(write(fd, request, bytes) == bytes)
+	return YES; // assume no partial writes for these short requests
+      if(errno == EINTR) goto try_again;
+      myLog(LOG_ERR, "dockerAPIRequest - write(%s) failed: %s", request, strerror(errno));
+    }
+    return NO;
+  }
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -807,10 +883,18 @@ VNIC: <ifindex> <device> <mac>
     mdata->forgetVMSecs = sp->docker.forgetVMSecs ?: sp->forgetVMSecs;
 
     // register call-backs
-    EVBus *pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock);
-    EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
+    mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
+    
+    retainRootRequest(mod, "needed to access docker.sock");
+    // start the event monitor before we capture the current state
+    dockerAPIRequest(mod, HSP_DOCKER_REQ_CONTAINERS, dockerAPI_containers);
+    dockerAPIRequest(mod, HSP_DOCKER_REQ_EVENTS, dockerAPI_event);
+
+    //char *cmd[] = { "/usr/bin/curl", "-g", "--unix-socket", "/var/run/docker.sock", "http:/events?filters={\"type\":[\"container\"]}", NULL };
+    //EVBusExec(mod, mdata->pollBus, dockerAPI_event, cmd, readDockerAPI);
   }
 
 #if defined(__cplusplus)
