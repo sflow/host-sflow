@@ -840,7 +840,7 @@ extern "C" {
 
   char *sFlowSettingsString(HSP *sp, HSPSFlowSettings *settings)
   {
-    UTStrBuf *buf = UTStrBuf_new(1024);
+    UTStrBuf *buf = UTStrBuf_new();
 
     if(settings) {
       UTStrBuf_printf(buf, "hostname=%s\n", sp->hostname);

@@ -311,7 +311,9 @@ extern "C" {
 	sfl_agent_removeSampler(sp->agent, &aa->sampler->dsi);
 	sfl_agent_removePoller(sp->agent, &aa->poller->dsi);
       }
-      // may it was just added to the pollActions by the other thread?
+      // maybe it was just added to the pollActions by the other thread?
+      // Make sure it's not there by deleting it here.
+      // TODO: identity-hash would be faster here.
       UTArrayDel(mdata->pollActions, aa->poller);
       // free
       my_free(aa->application);
@@ -1261,13 +1263,17 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	UTArrayDelAt(mdata->pollActions, ii);
       }
     }
+    UTArrayPack(mdata->pollActions);
   }
 
   void mod_json(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     mod->data = my_calloc(sizeof(HSP_mod_JSON));
     HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
-    // use UTARRAY_SYNC here because two threads are involved:
+    // use UTARRAY_SYNC here because two threads are involved.
+    // TODO: an identity-hash (set) might work better for this?
+    // (cannot use UTHASH_PACK flag because we delete while we
+    // are iterating over the array)
     mdata->pollActions = UTArrayNew(UTARRAY_SYNC);
     // but the applicationHT is only ever accessed from the packetBus
     mdata->applicationHT = UTHASH_NEW(HSPApplication, application, UTHASH_SKEY);
