@@ -79,6 +79,22 @@ extern "C" {
     return buf->len;
   }
 
+  void UTStrBuf_chomp(UTStrBuf *buf) {
+    char *p = buf->buf + buf->len - 1;
+    if(*p == 13) {
+      *p-- = '\0'; // CR
+      buf->len--;
+    }
+    else if(*p == 10) {
+      *p-- = '\0'; // LF
+      buf->len--;
+      if(*p == 13) {
+	*p-- = '\0'; // CRLF
+	buf->len--;
+      }
+    }
+  }
+
   void UTStrBuf_reset(UTStrBuf *buf) {
     buf->len = 0;
     UTStrBuf_nul_terminate(buf);
@@ -87,6 +103,12 @@ extern "C" {
   UTStrBuf *UTStrBuf_wrap(char *str) {
     UTStrBuf *buf = UTStrBuf_new();
     UTStrBuf_append(buf, str);
+    return buf;
+  }
+
+  UTStrBuf *UTStrBuf_copy(UTStrBuf *from) {
+    UTStrBuf *buf = UTStrBuf_new();
+    UTStrBuf_append_n(buf, UTSTRBUF_STR(from), UTSTRBUF_LEN(from));
     return buf;
   }
 
@@ -422,7 +444,7 @@ extern "C" {
     return my_strnlen(s, UT_DEFAULT_MAX_STRLEN);
   }
 
-  char *my_strdup(char *str)
+  char *my_strdup(const char *str)
   {
     if(str == NULL) return NULL;
     uint32_t len = my_strlen(str);
@@ -431,7 +453,7 @@ extern "C" {
     return newStr;
   }
 
-  int my_strnequal(char *s1, char *s2, uint32_t max) {
+  int my_strnequal(const char *s1, const char *s2, uint32_t max) {
     if(s1 == s2) return YES;
     if(s1 == NULL || s2 == NULL) return NO;
     uint32_t len1 = my_strnlen(s1, max);
@@ -440,11 +462,11 @@ extern "C" {
     return (memcmp(s1, s2, len1) == 0);
   }
 
-  int my_strequal(char *s1, char *s2) {
+  int my_strequal(const char *s1, const char *s2) {
     return my_strnequal(s1, s2, UT_DEFAULT_MAX_STRLEN);
   }
 
-  uint32_t my_strhash(char *str) {
+  uint32_t my_strhash(const char *str) {
     return hash_fnv1a(str, my_strlen(str));
   }
 
@@ -787,9 +809,9 @@ extern "C" {
       int found = 0;
       for(uint32_t i = 0; i < ar->n; i++) {
 	void *obj = ar->objs[i];
-	if(i > found && obj) {
-	  ar->objs[found++] = obj;
+	if(obj) {
 	  ar->objs[i] = NULL;
+	  ar->objs[found++] = obj;
 	}
       }
       ar->dbins = 0;
@@ -1591,6 +1613,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   }
 
   static void *hashAdd(UTHash *oh, void *obj) {
+    if(obj == NULL) return NULL;
     // make sure there is room so the search cannot fail
     if(oh->entries >= (oh->cap >> 1))
       hashRebuild(oh, YES);
@@ -1613,6 +1636,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   }
 
   void *UTHashGet(UTHash *oh, void *obj) {
+    if(obj == NULL) return NULL;
     void *found = NULL;
     SEMLOCK_DO(oh->sync) {
       hashSearch(oh, obj, &found);
@@ -1621,6 +1645,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   }
 
   void *UTHashGetOrAdd(UTHash *oh, void *obj) {
+    if(obj == NULL) return NULL;
     void *found = NULL;
     SEMLOCK_DO(oh->sync) {
       hashSearch(oh, obj, &found);
@@ -1631,6 +1656,7 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   }
 
   static void *hashDelete(UTHash *oh, void *obj, bool identity) {
+    if(obj == NULL) return NULL;
     void *found = NULL;
     SEMLOCK_DO(oh->sync) {
       int idx = hashSearch(oh, obj, &found);
@@ -1655,6 +1681,12 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     // delete whatever is stored under this key
     return hashDelete(oh, obj, NO);
   }
+
+  void UTHashReset(UTHash *oh) {
+    memset(oh->bins, 0, UTHASH_BYTES(oh));
+    oh->entries = 0;
+    oh->dbins = 0;
+   }
 
   uint32_t UTHashN(UTHash *oh) {
     return oh->entries;

@@ -105,17 +105,6 @@ CFLAGS += -Wall -Wstrict-prototypes -Wunused-value
 CFLAGS += -Wunused-function
 LIBS=
 
-# Check to see if container counters are under /sys/fs/cgroup/cpuacct/system.slice/ (Fedora)
-# or /sys/fs/cgroup/cpuacct/docker/ (Ubuntu). The docker directory on Ubuntu only
-# appears when the first container starts, so test for system.slice here.  This
-# difference stems originally from the fact that Ubuntu systemd does not use slices.
-ifndef SYSTEM_SLICE
-  SYSTEM_SLICE=$(shell if test -r /sys/fs/cgroup/cpuacct/system.slice; then echo "yes"; else echo "no"; fi)
-endif
-ifeq ($(SYSTEM_SLICE),yes)
-  CFLAGS += -DHSP_SYSTEM_SLICE
-endif
-
 # xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
 # /etc/redhat-release to get the version number as in xenserver-ddk/Makefile,  but then it
 # might not work properly for a XenSource build.  Seems safer to just check for the file:

@@ -102,10 +102,10 @@ extern "C" {
   // safer string fns
   uint32_t my_strnlen(const char *s, uint32_t max);
   uint32_t my_strlen(const char *s);
-  char *my_strdup(char *str);
-  int my_strnequal(char *s1, char *s2, uint32_t max);
-  int my_strequal(char *s1, char *s2);
-  uint32_t my_strhash(char *str);
+  char *my_strdup(const char *str);
+  int my_strnequal(const char *s1, const char *s2, uint32_t max);
+  int my_strequal(const char *s1, const char *s2);
+  uint32_t my_strhash(const char *str);
 
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {
@@ -151,8 +151,10 @@ extern "C" {
   int UTStrBuf_printf(UTStrBuf *buf, char *fmt, ...);
   void UTStrBuf_reset(UTStrBuf *buf);
   size_t UTStrBuf_snip_prefix(UTStrBuf *buf, size_t prefix);
+  void UTStrBuf_chomp(UTStrBuf *buf);
   UTStrBuf *UTStrBuf_wrap(char *str);
   char *UTStrBuf_unwrap(UTStrBuf *buf);
+  UTStrBuf *UTStrBuf_copy(UTStrBuf *from);
   void UTStrBuf_free(UTStrBuf *buf);
 
   // string array
@@ -276,7 +278,8 @@ extern "C" {
   void *UTHashGetOrAdd(UTHash *oh, void *obj);
   void *UTHashDel(UTHash *oh, void *obj);
   void *UTHashDelKey(UTHash *oh, void *obj);
-  uint32_t UTHashN(UTHash *oh);
+  void UTHashReset(UTHash *oh);
+   uint32_t UTHashN(UTHash *oh);
 
 #define UTHASH_DBIN (void *)-1
 
@@ -354,7 +357,7 @@ extern "C" {
   } while(0)
 
 #define UTQ_WALK(q, ptr) for((ptr)=(q).head; (ptr); (ptr)=(ptr)->next)
-
+  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

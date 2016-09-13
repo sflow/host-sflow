@@ -445,13 +445,9 @@ extern "C" {
     for(int ii = start; ii < iolen; ii++) {
       char ch = iobuf[ii];
       if(ch == 10 || ch == 13 || ch == 0) {
+	if(ch == 10 || ch == 13) ii++; // CR or LF
+	if(ch == 13 && iobuf[ii] == 10) ii++; // CRLF
 	UTStrBuf_append_n(sock->ioline, iobuf, ii);
-	if(ch != 0)
-	  UTStrBuf_append(sock->ioline, "\n");
-	if(ch == 10 || ch == 13)
-	  ii++; // chomp
-	if(ch == 13 && iobuf[ii] == 10)
-	  ii++; // chomp CRLF
 	UTStrBuf_snip_prefix(sock->iobuf, ii);
 	return YES;
       }
