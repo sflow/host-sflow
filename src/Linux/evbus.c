@@ -274,10 +274,12 @@ extern "C" {
     return NO;
   }
 
-  static void freeSocket(EVSocket *sock) {
+  static void EVSocketFree(EVSocket *sock) {
     assert(sock->fd <= 0);
     if(sock->iobuf)
       UTStrBuf_free(sock->iobuf);
+    if(sock->ioline)
+      UTStrBuf_free(sock->ioline);
     my_free(sock);
   }
 
@@ -331,7 +333,7 @@ extern "C" {
       SEMLOCK_DO(bus->root->sync) {
 	UTArrayReset(bus->sockets_run);
 	UTArrayAddAll(bus->sockets_run, bus->sockets);
-	UTARRAY_WALK(bus->sockets_del, sock) freeSocket(sock);
+	UTARRAY_WALK(bus->sockets_del, sock) EVSocketFree(sock);
 	UTArrayReset(bus->sockets_del);
 	bus->socketsChanged = NO;
       }
