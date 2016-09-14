@@ -73,6 +73,7 @@ extern "C" {
     "paused",
     "stopped",
     "deleted",
+    "exited",
   };
 
   // patterns to substitute with cgroup, longid and counter-filename
@@ -1009,10 +1010,24 @@ VNIC: <ifindex> <device> <mac>
     UTArrayReset(mdata->eventQueue);
   }
 
+  /*_________________---------------------------__________________
+    _________________       logJSON             __________________
+    -----------------___________________________------------------
+  */
+
+  static void logJSON(int debugLevel, char *msg, cJSON *obj)
+  {
+    if(debug(debugLevel)) {
+      char *str = cJSON_Print(obj);
+      myLog(LOG_INFO, "%s json=<%s>", msg, str);
+      my_free(str);
+    }
+  }
+
   static void processDockerJSON(EVMod *mod, HSPDockerRequest *req, UTStrBuf *buf) {
     cJSON *top = cJSON_Parse(UTSTRBUF_STR(buf));
     if(top) {
-      myDebug(1, "processDockerJSON: <%s>", cJSON_Print(top));
+      logJSON(1, "processDockerJSON:", top);
       (*req->jsonCB)(mod, buf, top);
       cJSON_Delete(top);
     }
