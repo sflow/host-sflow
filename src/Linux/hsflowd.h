@@ -524,7 +524,7 @@ extern "C" {
 
   // capabilities
   void retainRootRequest(EVMod *mod, char *reason);
-
+  
   // adaptors
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)

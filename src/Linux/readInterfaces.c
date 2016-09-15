@@ -473,6 +473,7 @@ extern "C" {
 			adaptor->ifIndex,
 			adaptor->peer_ifIndex);
 	      }
+	      my_free(et_stats);
 	  }
 	}
       }

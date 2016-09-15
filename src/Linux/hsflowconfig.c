@@ -796,14 +796,15 @@ extern "C" {
 	// crown the winner
 	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(selectedAdaptor);
 	sp->agentIP = adaptorNIO->ipAddr;
+	if(sp->agentDevice) my_free(sp->agentDevice);
 	sp->agentDevice = my_strdup(selectedAdaptor->deviceName);
-	myDebug(1, "selectAgentAddress selected agentIP with highest priority");
+	myDebug(1, "selectAgentAddress selected agentIP with highest priority: device=%s", sp->agentDevice);
 	selected = YES;
       }
     }
 
     if(p_changed) {
-      if(SFLAddress_equal(&previous, &sp->agentIP)) {
+      if(!SFLAddress_equal(&previous, &sp->agentIP)) {
 	*p_changed = YES;
       }
       else {

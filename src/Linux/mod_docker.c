@@ -550,10 +550,8 @@ VNIC: <ifindex> <device> <mac>
       virState = SFL_VIR_DOMAIN_SHUTOFF;
       break;
     case HSP_CS_deleted:
-      virState = SFL_VIR_DOMAIN_SHUTDOWN;
-      break;
     case HSP_CS_exited:
-      virState = SFL_VIR_DOMAIN_CRASHED;
+      virState = SFL_VIR_DOMAIN_SHUTDOWN;
       break;
     case HSP_EV_UNKNOWN:
     default:
@@ -804,9 +802,9 @@ VNIC: <ifindex> <device> <mac>
   static void setContainerName(HSPVMState_DOCKER *container, const char *name) {
     char *str = (char *)name;
     if(str && str[0] == '/') str++; // consume leading '/'
-    if(my_strequal(name, container->name) == NO) {
+    if(my_strequal(str, container->name) == NO) {
       if(container->name) my_free(container->name);
-      container->name = my_strdup(name);
+      container->name = my_strdup(str);
     }
   }
 
@@ -1018,7 +1016,7 @@ VNIC: <ifindex> <device> <mac>
     if(debug(debugLevel)) {
       char *str = cJSON_Print(obj);
       myLog(LOG_INFO, "%s json=<%s>", msg, str);
-      my_free(str);
+      my_free(str); // TODO: get this fn from cJSON hooks
     }
   }
 
