@@ -94,7 +94,6 @@ extern "C" {
     EnumHSPContainerState state;
     uint32_t inspect_tx:1;
     uint32_t inspect_rx:1;
-    uint32_t finalize:1;
     uint64_t memoryLimit;
   } HSPVMState_DOCKER;
 
@@ -532,6 +531,37 @@ VNIC: <ifindex> <device> <mac>
     // VM cpu counters [ref xenstat.c]
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
+    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
+    SFL_UNDEF_COUNTER(cpuElem.counterBlock.host_vrt_cpu.cpuTime);
+
+    // map container->state into SFLVirDomainState
+    enum SFLVirDomainState virState = SFL_VIR_DOMAIN_NOSTATE;
+    switch(container->state) {
+    case HSP_CS_running:
+      virState = SFL_VIR_DOMAIN_RUNNING;
+      break;
+    case HSP_CS_created:
+      virState = SFL_VIR_DOMAIN_NOSTATE;
+      break;
+    case HSP_CS_paused:
+      virState = SFL_VIR_DOMAIN_PAUSED;
+      break;
+    case HSP_CS_stopped:
+      virState = SFL_VIR_DOMAIN_SHUTOFF;
+      break;
+    case HSP_CS_deleted:
+      virState = SFL_VIR_DOMAIN_SHUTDOWN;
+      break;
+    case HSP_CS_exited:
+      virState = SFL_VIR_DOMAIN_CRASHED;
+      break;
+    case HSP_EV_UNKNOWN:
+    default:
+      break;
+    }
+    cpuElem.counterBlock.host_vrt_cpu.state = virState;
+
+    // get cpu time if we can
     HSPNameVal cpuVals[] = {
       { "user",0,0 },
       { "system",0,0},
@@ -541,38 +571,10 @@ VNIC: <ifindex> <device> <mac>
       uint64_t cpu_total = 0;
       if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
       if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
-
-      // map container->state into SFLVirDomainState
-      enum SFLVirDomainState virState = SFL_VIR_DOMAIN_NOSTATE;
-      switch(container->state) {
-      case HSP_CS_running:
-	virState = SFL_VIR_DOMAIN_RUNNING;
-	break;
-      case HSP_CS_created:
-	virState = SFL_VIR_DOMAIN_NOSTATE;
-	break;
-      case HSP_CS_paused:
-	virState = SFL_VIR_DOMAIN_PAUSED;
-	break;
-      case HSP_CS_stopped:
-	virState = SFL_VIR_DOMAIN_SHUTOFF;
-	break;
-      case HSP_CS_deleted:
-	virState = SFL_VIR_DOMAIN_SHUTDOWN;
-	break;
-      case HSP_CS_exited:
-	virState = SFL_VIR_DOMAIN_CRASHED;
-	break;
-      case HSP_EV_UNKNOWN:
-      default:
-	break;
-      }
-      
-      cpuElem.counterBlock.host_vrt_cpu.state = virState;
       cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
-      cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
-      SFLADD_ELEMENT(&cs, &cpuElem);
     }
+    // always add this one - even if no counters found - so as to send the container state
+    SFLADD_ELEMENT(&cs, &cpuElem);
 
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
@@ -748,12 +750,8 @@ VNIC: <ifindex> <device> <mac>
     HSPVMState_DOCKER *container;
     UTHASH_WALK(mdata->pollActions, container) {
       getCounters_DOCKER(mod, container);
-      if(container->finalize) {
-	// this was the last sample - now free
-	removeAndFreeVM_DOCKER(mod, container);
-      }
-      UTHashDel(mdata->pollActions, container);
     }
+    UTHashReset(mdata->pollActions);
   }
 
   /*_________________---------------------------__________________
@@ -938,9 +936,8 @@ VNIC: <ifindex> <device> <mac>
 		      HSP_CS_names[st]);
 	      container->state = st;
 	    }
+	    container->lastEvent = ev;
 	    if(container->state == HSP_CS_running) {
-	      container->lastEvent = ev;
-	      container->finalize = NO;
 	      // TODO: is this name or hostname?
 	      setContainerName(container, ctname->valuestring);
 	      if(!container->inspect_tx) {
@@ -951,10 +948,12 @@ VNIC: <ifindex> <device> <mac>
 	    }
 	    else {
 	      // we are going to remove this one
-	      container->lastEvent = ev;
-	      container->finalize = YES;
-	      // send final counter-sample
-	      UTHashAdd(mdata->pollActions, container);
+	      // send final counter-sample. Have to
+	      // grab this now before the cgroup data
+	      // disappears from the filesystem...
+	      getCounters_DOCKER(mod, container);
+	      UTHashDel(mdata->pollActions, container);
+	      removeAndFreeVM_DOCKER(mod, container);
 	    }
 	  }
 	}
@@ -1204,12 +1203,12 @@ VNIC: <ifindex> <device> <mac>
   static void dockerClearAll(EVMod *mod) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     // clear everything out:
-    // 1. containers
+    // 1. pollActions
+    UTHashReset(mdata->pollActions);
+    // 2. containers
     HSPVMState_DOCKER *container;
     UTHASH_WALK(mdata->vmsByID, container)
       removeAndFreeVM_DOCKER(mod, container);
-    // 2. pollActions
-    UTHashReset(mdata->pollActions);
     // 3. event queue
     UTStrBuf *qbuf;
     UTARRAY_WALK(mdata->eventQueue, qbuf)
