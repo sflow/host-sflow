@@ -53,7 +53,7 @@ JSONDIR=../json
 
 # CFLAGS and LIBS - common
 CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
-LIBS_HSFLOWD= $(JSONDIR)/libjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl
+LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl
 
 CFLAGS_SHARED= -fPIC
 LDFLAGS_SHARED= -shared

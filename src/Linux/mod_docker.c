@@ -818,7 +818,6 @@ VNIC: <ifindex> <device> <mac>
   }
 
   static void dockerAPI_inspect(EVMod *mod, UTStrBuf *buf, cJSON *jcont) {
-    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     myDebug(1, "dockerAPI_inspect");
 
     cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
@@ -863,8 +862,8 @@ VNIC: <ifindex> <device> <mac>
       container->memoryLimit = (uint64_t)jmem->valuedouble;
 
     container->inspect_rx = YES;
-    // send initial counter-sample
-    UTHashAdd(mdata->pollActions, container);
+    // send initial counter-sample immediately
+    getCounters_DOCKER(mod, container);
   }
 
   static void inspectContainer(EVMod *mod, HSPVMState_DOCKER *container) {
