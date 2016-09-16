@@ -74,6 +74,10 @@ extern "C" {
       SFLAdaptor *tapdev = bpfs->promisc ? adaptorByName(sp, bpfs->deviceName) : NULL;
 
       if(getDebug() > 2) {
+	u_char mac_s[13], mac_d[13];
+	printHex(macsrc.mac, 6, mac_s, 13, NO);
+	printHex(macdst.mac, 6, mac_d, 13, NO);
+	myLog(LOG_INFO, "macsrc=%s, macdst=%s", mac_s, mac_d);
 	if(srcdev) {
 	  myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
 		srcdev->deviceName,

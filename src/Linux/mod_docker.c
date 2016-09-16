@@ -860,12 +860,13 @@ VNIC: <ifindex> <device> <mac>
       container->memoryLimit = (uint64_t)jmem->valuedouble;
 
     container->inspect_rx = YES;
+    // now that we have the pid,  we can probe for the MAC and peer-ifIndex
+    updateContainerAdaptors(mod, container);
     // send initial counter-sample immediately
     getCounters_DOCKER(mod, container);
   }
 
   static void inspectContainer(EVMod *mod, HSPVMState_DOCKER *container) {
-    updateContainerAdaptors(mod, container);
     UTStrBuf *req = UTStrBuf_new();
     UTStrBuf_printf(req, HSP_DOCKER_REQ_INSPECT_ID, container->id);
     dockerAPIRequest(mod, dockerRequest(mod, req, dockerAPI_inspect, NO));
@@ -967,23 +968,30 @@ VNIC: <ifindex> <device> <mac>
       cJSON *ct = cJSON_GetArrayItem(top, ii);
       cJSON *id = cJSON_GetObjectItem(ct, "Id");
       cJSON *names = cJSON_GetObjectItem(ct, "Names");
-      cJSON *networksettings = cJSON_GetObjectItem(ct, "NetworkSettings");
       cJSON *state = cJSON_GetObjectItem(ct, "State");
 					  
-      if(!id || !names || !networksettings || !state) break;
-					  
+      if(!id
+	 || !names
+	 //|| !networksettings
+	 || !state) break;
+
       cJSON *name0 = cJSON_GetArrayItem(names, 0); // TODO: extra '/' at front?
       if(!name0) break;
-      cJSON *networks = cJSON_GetObjectItem(networksettings, "Networks");
-      if(!networks) break;
-      cJSON *ingress = cJSON_GetObjectItem(networks, "ingress");
-      if(!ingress) break;
-      cJSON *macaddress = cJSON_GetObjectItem(ingress, "MacAddress");
-      if(!macaddress) break;
-      cJSON *ipamconfig = cJSON_GetObjectItem(ingress, "IPAMConfig");
-      if(!ipamconfig) break;
-      cJSON *ipv4address = cJSON_GetObjectItem(ipamconfig, "IPv4Address");
-      if(!ipv4address) break;
+
+#if 0
+      cJSON *networksettings = cJSON_GetObjectItem(ct, "NetworkSettings");
+      if(networksettings) {
+	cJSON *networks = cJSON_GetObjectItem(networksettings, "Networks");
+	if(networks) {
+	  cJSON *bridge = cJSON_GetObjectItem(networks, "bridge");
+	  if(bridge) {
+	    cJSON *macaddress = cJSON_GetObjectItem(bridge, "MacAddress");
+	    cJSON *ipv4address = cJSON_GetObjectItem(bridge, "IPAddress");
+	    // "GlobalIPv6Address" too ?
+	  }
+	}
+      }
+#endif
 
       HSPVMState_DOCKER *container = getContainer(mod, id->valuestring, YES);
       container->state = containerState(state->valuestring);
