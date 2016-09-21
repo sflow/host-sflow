@@ -268,13 +268,13 @@ extern "C" {
     return readCgroupCounters(mod, cgroup, longId, fname, nvals, nameVals, 1);
   }
 
-/*________________---------------------------__________________
-  ________________   containerLinkCB         __________________
-  ----------------___________________________------------------
-
-expecting lines of the form:
-VNIC: <ifindex> <device> <mac>
-*/
+  /*________________---------------------------__________________
+    ________________   containerLinkCB         __________________
+    ----------------___________________________------------------
+    
+    expecting lines of the form:
+    VNIC: <ifindex> <device> <mac>
+  */
 
   static int containerLinkCB(HSP *sp, HSPVMState_DOCKER *container, char *line) {
     myDebug(1, "containerLinkCB: line=<%s>", line);
@@ -461,6 +461,21 @@ VNIC: <ifindex> <device> <mac>
     return container->vm.interfaces->num_adaptors;
   }
 
+
+  /*________________---------------------------__________________
+    ________________   readContainerNIO        __________________
+    ----------------___________________________------------------
+   used to get these by extracting the totals for the adaptors
+   referred to by getContainerPeerAdaptors() -- i.e. the adaptors
+   in the global namespace that we know to be connected back to
+   that container.  But with Docker swarm we end up missing the
+   traffic that goes via the extra namespace that they create.
+   Since we have the container Pid,  we can reach in directly
+   to /proc/<pid>/net/dev and read from there.
+  */
+  
+#ifdef HSP_DOCKER_PEER_ADAPTORS_OK
+
   static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors, int capacity)
   {
     // we want the slice of global-namespace adaptors that are veth peers of the adaptors
@@ -484,6 +499,62 @@ VNIC: <ifindex> <device> <mac>
     return peerAdaptors->num_adaptors;
   }
 
+#else
+
+  static int readContainerNIO(EVMod *mod, HSPVMState_DOCKER *container, SFLHost_nio_counters *nio) {
+    char statsFileName[HSP_DOCKER_MAX_FNAME_LEN+1];
+    int interfaces = 0;
+    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, "/proc/%u/net/dev", container->pid);
+    FILE *procFile = fopen(statsFileName, "r");
+    if(procFile) {
+      uint64_t bytes_in = 0;
+      uint64_t pkts_in = 0;
+      uint64_t errs_in = 0;
+      uint64_t drops_in = 0;
+      uint64_t bytes_out = 0;
+      uint64_t pkts_out = 0;
+      uint64_t errs_out = 0;
+      uint64_t drops_out = 0;
+      // limit the number of chars we will read from each line
+      // (there can be more than this - fgets will chop for us)
+#define MAX_PROCDEV_LINE_CHARS 240
+      char line[MAX_PROCDEV_LINE_CHARS];
+      while(fgets(line, MAX_PROCDEV_LINE_CHARS, procFile)) {
+	char deviceName[MAX_PROCDEV_LINE_CHARS];
+	// assume the format is:
+	// Inter-|   Receive                                                |  Transmit
+	//  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+	if(sscanf(line, "%[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
+		  deviceName,
+		  &bytes_in,
+		  &pkts_in,
+		  &errs_in,
+		  &drops_in,
+		  &bytes_out,
+		  &pkts_out,
+		  &errs_out,
+		  &drops_out) == 9) {
+	  if(my_strequal(deviceName, "lo") == NO) {
+	    nio->bytes_in += bytes_in;
+	    nio->pkts_in += pkts_in;
+	    nio->errs_in += errs_in;
+	    nio->drops_in += drops_in;
+	    nio->bytes_out += bytes_out;
+	    nio->pkts_out += pkts_out;
+	    nio->errs_out += errs_out;
+	    nio->drops_out += drops_out;
+	  }
+	}
+      }
+    }
+    return interfaces;
+  }
+#endif
+  
+  /*________________---------------------------__________________
+    ________________   getCounters_DOCKER      __________________
+    ----------------___________________________------------------
+  */
   static void getCounters_DOCKER(EVMod *mod, HSPVMState_DOCKER *container)
   {
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -515,6 +586,8 @@ VNIC: <ifindex> <device> <mac>
     // VM Net I/O
     SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
+    
+#ifdef HSP_DOCKER_PEER_ADAPTORS_OK
     // conjure the list of global-namespace adaptors that are
     // actually veth adaptors peered to adaptors belonging to this
     // container, and make that the list of adaptors that we sum counters over.
@@ -527,6 +600,11 @@ VNIC: <ifindex> <device> <mac>
       readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, &peerAdaptors);
       SFLADD_ELEMENT(&cs, &nioElem);
     }
+#else
+    if(readContainerNIO(mod, container, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio)) {
+      SFLADD_ELEMENT(&cs, &nioElem);
+    }
+#endif
 
     // VM cpu counters [ref xenstat.c]
     SFLCounters_sample_element cpuElem = { 0 };
@@ -587,17 +665,12 @@ VNIC: <ifindex> <device> <mac>
       }
       if(memVals[1].nv_found && memVals[1].nv_val64 != (uint64_t)-1) {
 	uint64_t maxMem = memVals[1].nv_val64;
+	// allow the limit we got from docker inspect to override if it is lower
+	// (but it seems likely that it's always going to be the same number)
+	if(container->memoryLimit > 0
+	   && container->memoryLimit < maxMem)
+	  maxMem = container->memoryLimit;
 	memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
-	// Apply simple sanity check to see if this matches the
-	// container->memoryLimit number that we got from docker-inspect
-	if(getDebug()
-	   && container->memoryLimit != 0
-	   && maxMem != container->memoryLimit) {
-	  myLog(LOG_INFO, "warning: container %s memoryLimit=%"PRIu64" but readContainerCounters shows %"PRIu64,
-		container->name,
-		container->memoryLimit,
-		maxMem);
-	}
       }
       SFLADD_ELEMENT(&cs, &memElem);
     }

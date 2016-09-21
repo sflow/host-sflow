@@ -184,12 +184,16 @@ extern "C" {
       // packet is short enough to include them
       int chopped = packetLen - headerLen;
       int fcsBytes = (chopped < 4) ?  4 - chopped : 0;
-
+      uint32_t dsopts = (HSP_SAMPLEOPT_IF_SAMPLER
+			 | HSP_SAMPLEOPT_IF_POLLER
+			 | HSP_SAMPLEOPT_ASIC
+			 | HSP_SAMPLEOPT_OS10
+			 | HSP_SAMPLEOPT_INGRESS);
       takeSample(sp,
 		 dev_in,
 		 dev_out,
 		 NULL, // tap
-		 YES, // bridge
+		 dsopts,
 		 0, // hook
 		 pkt,
 		 14,

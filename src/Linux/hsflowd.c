@@ -1441,16 +1441,23 @@ extern "C" {
     if(UTFileExists(HSP_CUMULUS_SWITCHPORT_CONFIG_PROG)) {
       myLog(LOG_INFO, "Detected Cumulus Linux");
       sp->cumulus.cumulus = YES;
+      uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
+	| HSP_SAMPLEOPT_IF_POLLER
+	| HSP_SAMPLEOPT_ASIC
+	| HSP_SAMPLEOPT_DIRN_HOOK
+	| HSP_SAMPLEOPT_CUMULUS;
       // Cumulus Linux 2.5 or earlier uses ULOG group 1
       // So it should be compiled with:
       // make deb FEATURES="CUMULUS ULOG"
       sp->ulog.ulog = YES;
       sp->ulog.group = 1;
+      sp->ulog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_ULOG;
       // Cumulus Linux 3.0 or later uses NFLOG group 1
       // So it should be compiled with:
       // make deb FEATURES="CUMULUS NFLOG"
       sp->nflog.nflog = YES;
       sp->nflog.group = 1;
+      sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
     }
 
     if(UTFileExists(HSP_OS10_SWITCHPORT_CONFIG_PROG)) {

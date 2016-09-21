@@ -24,12 +24,14 @@ extern "C" {
   typedef struct _BPFSoc {
     EVMod *module;
     char *deviceName;
-    int soc;
+    SFLAdaptor *adaptor;
+    EVSocket *sock;
     uint32_t samplingRate;
     uint32_t subSamplingRate;
     uint32_t drops;
-    uint32_t isBridge:1;
-    uint32_t promisc:1;
+    bool promisc:1;
+    bool vport:1;
+    bool vport_set:1;
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
   } BPFSoc;
@@ -37,8 +39,9 @@ extern "C" {
   typedef struct _HSP_mod_PCAP {
     UTArray *bpf_socs;
     EVBus *packetBus;
-    bool pcap_configured;
   } HSP_mod_PCAP;
+
+  static void tap_close(EVMod *mod, BPFSoc *bpfs);
 
   /*_________________---------------------------__________________
     _________________      readPackets          __________________
@@ -66,37 +69,50 @@ extern "C" {
       HSP *sp = (HSP *)EVROOTDATA(mod);
 
       // global MAC -> adaptor
-      SFLMacAddress macdst,macsrc;
+      SFLMacAddress macdst = { 0 };
+      SFLMacAddress macsrc = { 0 };
       memcpy(macdst.mac, buf, 6);
       memcpy(macsrc.mac, buf+6, 6);
       SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
       SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
-      SFLAdaptor *tapdev = bpfs->promisc ? adaptorByName(sp, bpfs->deviceName) : NULL;
 
       if(getDebug() > 2) {
 	u_char mac_s[13], mac_d[13];
 	printHex(macsrc.mac, 6, mac_s, 13, NO);
 	printHex(macdst.mac, 6, mac_d, 13, NO);
-	myLog(LOG_INFO, "macsrc=%s, macdst=%s", mac_s, mac_d);
+	myLog(LOG_INFO, "PCAP: macsrc=%s, macdst=%s", mac_s, mac_d);
 	if(srcdev) {
-	  myLog(LOG_INFO, "srcdev=%s(%u)(peer=%u)",
+	  myLog(LOG_INFO, "PCAP: srcdev=%s(%u)(peer=%u)",
 		srcdev->deviceName,
 		srcdev->ifIndex,
 		srcdev->peer_ifIndex);
 	}
 	if(dstdev) {
-	  myLog(LOG_INFO, "dstdev=%s(%u)(peer=%u)",
+	  myLog(LOG_INFO, "PCAP: dstdev=%s(%u)(peer=%u)",
 		dstdev->deviceName,
 		dstdev->ifIndex,
 		dstdev->peer_ifIndex);
 	}
       }
 
+      uint32_t ds_options = (HSP_SAMPLEOPT_DEV_SAMPLER
+			     | HSP_SAMPLEOPT_DEV_POLLER);
+      bool isBridge = (ADAPTOR_NIO(bpfs->adaptor)->devType == HSPDEV_BRIDGE);
+      if(isBridge)
+	ds_options |= HSP_SAMPLEOPT_BRIDGE;
+      // ask for vport counters if vport=on in config, or
+      // if vport is not specified in config and the device
+      // is a bridge device.
+      if(bpfs->vport
+	 || (bpfs->vport_set == NO
+	     && isBridge))
+	ds_options |= HSP_SAMPLEOPT_IF_POLLER;
+
       takeSample(sp,
 		 srcdev,
 		 dstdev,
-		 tapdev,
-		 bpfs->isBridge,
+		 bpfs->adaptor,
+		 ds_options,
 		 0 /*hook*/,
 		 buf /* mac hdr*/,
 		 14 /* mac len */,
@@ -117,8 +133,8 @@ extern "C" {
 			      (u_char *)bpfs);
     if(batch == -1) {
       myLog(LOG_ERR, "pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
-      // TODO: perhaps we should exit altogether in this case?
-      EVSocketClose(mod, sock);
+      // may get here if the interface was removed
+      tap_close(mod, bpfs);
     }
   }
 
@@ -161,7 +177,7 @@ extern "C" {
     return ver;
   }
 
-  static int setKernelSampling(HSP *sp, BPFSoc *bpfs)
+  static int setKernelSampling(HSP *sp, BPFSoc *bpfs, int fd)
   {
     if(getDebug()) {
       myLog(LOG_INFO, "PCAP: setKernelSampling() kernel version (as int) == %"PRIu64,
@@ -195,8 +211,8 @@ extern "C" {
       .filter = code,
     };
 
-    // install the filter
-    int status = setsockopt(bpfs->soc, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
+    // install the sock_filter directly, rather than using pcap_setfilter()
+    int status = setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
     myDebug(1, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d", status);
     if(status == -1) {
       myLog(LOG_ERR, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
@@ -228,54 +244,91 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    evt_config_changed     __________________
+    _________________      tap_open             __________________
+    -----------------___________________________------------------
+  */
+  
+  static void tap_open(EVMod *mod, BPFSoc *bpfs) {
+    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    
+    bpfs->adaptor = adaptorByName(sp, bpfs->deviceName);
+    if(bpfs->adaptor == NULL) {
+      myLog(LOG_ERR, "PCAP: device %s not found", bpfs->deviceName);
+      return;
+    }
+    
+    bpfs->samplingRate = lookupPacketSamplingRate(bpfs->adaptor, sp->sFlowSettings);
+    bpfs->subSamplingRate = bpfs->samplingRate;
+    bpfs->pcap = pcap_open_live(bpfs->deviceName,
+				sp->sFlowSettings_file->headerBytes,
+				bpfs->promisc,
+				0, /* timeout==poll */
+				bpfs->pcap_err);
+    if(bpfs->pcap == NULL) {
+      myLog(LOG_ERR, "PCAP: device %s open failed", bpfs->deviceName);
+      return;
+    }
+    
+    myDebug(1, "PCAP: device %s opened OK", bpfs->deviceName);
+    int fd = pcap_fileno(bpfs->pcap);
+    setKernelSampling(sp, bpfs, fd);
+    bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
+  }
+
+  /*_________________---------------------------__________________
+    _________________      tap_close            __________________
+    -----------------___________________________------------------
+  */
+  
+  static void tap_close(EVMod *mod, BPFSoc *bpfs) {
+    bpfs->adaptor = NULL;
+    bpfs->sock->fd = -1;
+    if(bpfs->pcap) {
+      pcap_close(bpfs->pcap);
+      bpfs->pcap = NULL;
+    }
+    EVSocketClose(mod, bpfs->sock);
+    bpfs->sock = NULL;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    evt_config_first       __________________
     -----------------___________________________------------------
   */
 
-  static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+  static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-
-    if(sp->sFlowSettings == NULL)
-      return; // no config (yet - may be waiting for DNS-SD)
-
-    if(mdata->pcap_configured) {
-      // already configured the first time (when we still had root privileges)
-      return;
-    }
 
     for(HSPPcap *pcap = sp->pcap.pcaps; pcap; pcap = pcap->nxt) {
       BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
       UTArrayAdd(mdata->bpf_socs, bpfs);
       bpfs->module = mod;
-      SFLAdaptor *adaptor = adaptorByName(sp, pcap->dev);
-      if(adaptor == NULL) {
-	myLog(LOG_ERR, "PCAP: device not found: %s", pcap->dev);
-      }
-      else {
-	bpfs->deviceName = strdup(pcap->dev);
-	bpfs->isBridge = (ADAPTOR_NIO(adaptor)->devType == HSPDEV_BRIDGE);
-	bpfs->samplingRate = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
-	bpfs->subSamplingRate = bpfs->samplingRate;
-	bpfs->pcap = pcap_open_live(pcap->dev,
-				    sp->sFlowSettings_file->headerBytes,
-				    pcap->promisc,
-				    0, /* timeout==poll */
-				    bpfs->pcap_err);
-	if(bpfs->pcap) {
-	  myDebug(1, "PCAP: device %s opened OK", pcap->dev);
-	  bpfs->soc = pcap_fileno(bpfs->pcap);
-	  bpfs->promisc = pcap->promisc;
-	  setKernelSampling(sp, bpfs);
-	  EVBusAddSocket(mod, mdata->packetBus, bpfs->soc, readPackets_pcap, bpfs);
-	}
-	else {
-	  myDebug(1, "PCAP: device %s open failed", pcap->dev);
-	}
+      bpfs->deviceName = my_strdup(pcap->dev);
+      bpfs->promisc = pcap->promisc;
+      bpfs->vport = pcap->vport;
+      bpfs->vport_set = pcap->vport_set;
+      tap_open(mod, bpfs);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    evt_intfs_changed      __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_intfs_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // close sockets and remove adaptor references for anything that no longer exists
+    BPFSoc *bpfs;
+    UTARRAY_WALK(mdata->bpf_socs, bpfs) {
+      if(adaptorByName(sp, bpfs->deviceName) == NULL) {
+	// no longer found
+	tap_close(mod, bpfs);
       }
     }
-
-    mdata->pcap_configured = YES;
   }
 
   /*_________________---------------------------__________________
@@ -289,7 +342,8 @@ extern "C" {
     mdata->bpf_socs = UTArrayNew(UTARRAY_DFLT);
     // register call-backs
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
   }
 

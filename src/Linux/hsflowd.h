@@ -134,6 +134,8 @@ extern "C" {
     struct _HSPPcap *nxt;
     char *dev;
     bool promisc;
+    bool vport;
+    bool vport_set;
   } HSPPcap;
 
   typedef struct _HSPCIDR {
@@ -322,7 +324,7 @@ extern "C" {
 #define HSPEVENT_CONFIG_DONE "config_done"       // after new config
 #define HSPEVENT_INTF_READ "intf_read"           // (adaptor *) reading interface
 #define HSPEVENT_INTF_SPEED "intf_speed"         // (adaptor *) interface speed change
-#define HSPEVENT_INTFS_CHANGED "intfs_changed"     // some interface(s) changed
+#define HSPEVENT_INTFS_CHANGED "intfs_changed"   // some interface(s) changed
 #define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
 
   typedef struct _HSP {
@@ -409,12 +411,14 @@ extern "C" {
       uint32_t group;
       double probability;
       uint32_t samplingRate;
+      uint32_t ds_options;
     } ulog;
     struct {
       bool nflog;
       uint32_t group;
       double probability;
       uint32_t samplingRate;
+      uint32_t ds_options;
     } nflog;
     struct {
       bool pcap;
@@ -541,7 +545,22 @@ extern "C" {
   void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed);
 
   // readPackets.c
-  void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t isBridge, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
+#define HSP_SAMPLEOPT_BRIDGE      0x0001
+#define HSP_SAMPLEOPT_DEV_SAMPLER 0x0002
+#define HSP_SAMPLEOPT_DEV_POLLER  0x0004
+#define HSP_SAMPLEOPT_IF_SAMPLER  0x0008
+#define HSP_SAMPLEOPT_IF_POLLER   0x0010
+#define HSP_SAMPLEOPT_ULOG        0x0020
+#define HSP_SAMPLEOPT_NFLOG       0x0040
+#define HSP_SAMPLEOPT_PCAP        0x0080
+#define HSP_SAMPLEOPT_OS10        0x0100
+#define HSP_SAMPLEOPT_CUMULUS     0x0200
+#define HSP_SAMPLEOPT_INGRESS     0x0400
+#define HSP_SAMPLEOPT_EGRESS      0x0800
+#define HSP_SAMPLEOPT_DIRN_HOOK   0x1000
+#define HSP_SAMPLEOPT_ASIC        0x2000
+
+  void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
 
   // VM lifecycle
   HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);

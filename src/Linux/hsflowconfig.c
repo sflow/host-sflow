@@ -220,7 +220,6 @@ extern "C" {
       parseError(sp, tok, "expected 'on' or 'off'", "");
       return NULL;
     }
-    // enable or disable DNS server discovery
     (*arg) = (strcasecmp(t->str, "on") == 0);
     return t;
   }
@@ -1188,6 +1187,10 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_PROMISC:
 	      if((tok = expectONOFF(sp, tok, &pc->promisc)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_VPORT:
+	      if((tok = expectONOFF(sp, tok, &pc->vport)) == NULL) return NO;
+	      pc->vport_set = YES;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

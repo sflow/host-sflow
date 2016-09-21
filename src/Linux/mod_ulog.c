@@ -118,7 +118,7 @@ extern "C" {
 			 dev_in,
 			 dev_out,
 			 NULL,
-			 NO,
+ 			 sp->ulog.ds_options,
 			 pkt->hook,
 			 pkt->mac,
 			 pkt->mac_len,
