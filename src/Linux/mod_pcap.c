@@ -69,8 +69,9 @@ extern "C" {
       HSP *sp = (HSP *)EVROOTDATA(mod);
 
       // global MAC -> adaptor
-      SFLMacAddress macdst = { 0 };
-      SFLMacAddress macsrc = { 0 };
+      SFLMacAddress macdst, macsrc;
+      memset(&macdst, 0, sizeof(macdst));
+      memset(&macsrc, 0, sizeof(macsrc));
       memcpy(macdst.mac, buf, 6);
       memcpy(macsrc.mac, buf+6, 6);
       SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
