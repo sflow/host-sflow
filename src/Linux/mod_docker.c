@@ -534,7 +534,8 @@ extern "C" {
 		  &pkts_out,
 		  &errs_out,
 		  &drops_out) == 9) {
-	  if(my_strequal(deviceName, "lo") == NO) {
+	  if(my_strequal(trimWhitespace(deviceName), "lo") == NO) {
+	    interfaces++;
 	    nio->bytes_in += bytes_in;
 	    nio->pkts_in += pkts_in;
 	    nio->errs_in += errs_in;

@@ -275,6 +275,10 @@ extern "C" {
     int fd = pcap_fileno(bpfs->pcap);
     setKernelSampling(sp, bpfs, fd);
     bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
+    // assume we always want to get counters for anything we are tapping.
+    // Have to force this here in case there are no samples that would
+    // trigger it in readPackets.c:takeSample()
+    forceCounterPolling(sp, bpfs->adaptor);
   }
 
   /*_________________---------------------------__________________
