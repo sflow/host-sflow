@@ -547,6 +547,7 @@ extern "C" {
 	  }
 	}
       }
+      fclose(procFile);
     }
     return interfaces;
   }
