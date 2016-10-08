@@ -34,10 +34,13 @@ extern "C" {
 #include <sys/resource.h> // for setrlimit()
 #include <limits.h> // for UINT_MAX
 
-// for signal backtrace
+#if defined(__GLIBC__) || defined(__UCLIBC__)
+// for signal backtrace, if supported by libc
+#define HAVE_BACKTRACE 1
 #include <execinfo.h>
 #include <signal.h>
 #include <ucontext.h>
+#endif
 
 #include <regex.h> // for regex_t
 
