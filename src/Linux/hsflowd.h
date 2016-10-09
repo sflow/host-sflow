@@ -38,7 +38,6 @@ extern "C" {
 // for signal backtrace, if supported by libc
 #define HAVE_BACKTRACE 1
 #include <execinfo.h>
-#include <signal.h>
 #include <ucontext.h>
 #endif
 
