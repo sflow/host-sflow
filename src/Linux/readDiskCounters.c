@@ -11,6 +11,9 @@ extern "C" {
 #include <search.h> // for tfind,tsearch,tsdestroy
 #include <sys/statvfs.h> // for statvfs
 
+// For compability with other libc variants
+typedef int (*comparison_fn_t)(const void*, const void*);
+
 /* It looks like we could read this from "fdisk -l",  so the source
    code to fdisk should probably be consulted to find where it can
    be read off */

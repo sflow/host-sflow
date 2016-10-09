@@ -12,6 +12,7 @@ extern "C" {
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <stdarg.h>
 #include <string.h>
 #include <errno.h>
@@ -25,7 +26,12 @@ extern "C" {
 #include <sys/stat.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h> // for PRIu64 etc.
+
+#ifdef __GLIBC__
 #include "malloc.h" // for malloc_stats()
+#else
+#define malloc_stats() {}
+#endif
 
 #include <sys/wait.h>
 #include <ctype.h> // for isspace() etc.

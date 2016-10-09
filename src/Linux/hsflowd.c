@@ -767,6 +767,7 @@ extern "C" {
   */
 
   static void log_backtrace(int sig, siginfo_t *info) {
+#ifdef HAVE_BACKTRACE
 #define HSP_NUM_BACKTRACE_PTRS 50
     static void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
 
@@ -787,6 +788,7 @@ extern "C" {
     // thread info
     EVBus *bus = EVCurrentBus();
     fprintf(f_crash, "current bus: %s\n", (bus ? bus->name : "<none>"));
+#endif
   }
 
   /*_________________---------------------------__________________
