@@ -641,7 +641,7 @@ extern "C" {
     // have to detect discontinuities here, so use a full
     // set of latched counters and accumulators.
     int accumulate = nio->last_update ? YES : NO;
-    nio->last_update = sp->pollBus->clk;
+    nio->last_update = sp->pollBus->now.tv_sec;
     uint64_t maxDeltaBytes = HSP_MAX_NIO_DELTA64;
 
     SFLHost_nio_counters delta;
@@ -740,6 +740,7 @@ extern "C" {
   void updateNioCounters(HSP *sp, SFLAdaptor *filter) {
 
     assert(EVCurrentBus() == sp->pollBus);
+    time_t clk = sp->pollBus->now.tv_sec;
 
     // notify modules in case they want to override
     EVEventTx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_UPDATE_NIO), &filter, sizeof(filter));
@@ -747,13 +748,13 @@ extern "C" {
     if(filter == NULL) {
       // full refresh - but don't do anything if we just
       // refreshed all the numbers less than a second ago
-      if (sp->nio_last_update == sp->pollBus->clk) {
+      if (sp->nio_last_update == clk) {
 	return;
       }
-      sp->nio_last_update = sp->pollBus->clk;
+      sp->nio_last_update = clk;
     }
     else {
-      if(ADAPTOR_NIO(filter)->last_update == sp->pollBus->clk) {
+      if(ADAPTOR_NIO(filter)->last_update == clk) {
 	// the requested adaptor has fresh counters
 	// so nothing to do here
 	return;

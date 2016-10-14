@@ -69,6 +69,7 @@ extern "C" {
     UTHash *applicationHT;
     UTQ(HSPApplication) timeoutQ;
     UTArray *pollActions;
+    time_t next_app_timeout_check;
   } HSP_mod_JSON;
 
   /*_________________---------------------------__________________
@@ -119,7 +120,7 @@ extern "C" {
 
       if(application) {
 	// are we receiving counter updates via JSON messages?
-	int json_ctrs = ((mdata->packetBus->clk - application->last_json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
+	int json_ctrs = ((mdata->packetBus->now.tv_sec - application->last_json_counters) < HSP_COUNTER_SYNTH_TIMEOUT);
 
 	if(json_ctrs != application->json_counters) {
 	  // state transition - reset seq no
@@ -212,7 +213,7 @@ extern "C" {
     aa->counters.counterBlock.app.application.len = my_strlen(aa->application);
     // start off assuming that the application is going to send it's own counters
     aa->json_counters = YES;
-    aa->last_json_counters = mdata->packetBus->clk;
+    aa->last_json_counters = mdata->packetBus->now.tv_sec;
     // sampler
     SEMLOCK_DO(sp->sync_agent) {
       aa->sampler = sfl_agent_addSampler(sp->agent, &dsi);
@@ -296,9 +297,9 @@ extern "C" {
 
     assert(EVCurrentBus() == mdata->packetBus);
 
-    HSPApplication *aa;
-    UTQ_WALK(mdata->timeoutQ, aa) {
-      if((mdata->packetBus->clk - aa->last_json) <= HSP_JSON_APP_TIMEOUT) {
+    for(HSPApplication *aa = mdata->timeoutQ.head; aa; ) {
+      HSPApplication *next_aa = aa->next;
+      if((mdata->packetBus->now.tv_sec - aa->last_json) <= HSP_JSON_APP_TIMEOUT) {
 	// we know everything after this point is current
 	break;
       }
@@ -318,6 +319,7 @@ extern "C" {
       // free
       my_free(aa->application);
       my_free(aa);
+      aa = next_aa;
     }
   }
 
@@ -416,6 +418,8 @@ extern "C" {
     fs.sampling_rate = sampling_n;
     myDebug(2, "sendAppSample (sampling_n=%d)", sampling_n);
     // and send it out
+    EVBus *bus = EVCurrentBus();
+    sfl_agent_set_now(sp->agent, bus->now.tv_sec, bus->now.tv_nsec);
     SEMLOCK_DO(sp->sync_agent) {
       sfl_sampler_writeFlowSample(app->sampler, &fs);
     }
@@ -442,7 +446,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
       HSPApplication *application = getApplication(mod, app->valuestring, service_port);
       if(application) {
 	// remember that we heard from this application
-	application->last_json = mdata->packetBus->clk;
+	application->last_json = mdata->packetBus->now.tv_sec;
 
 	cJSON *opn = cJSON_GetObjectItem(fs, "app_operation");
 	if(opn) {
@@ -596,9 +600,9 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
       HSPApplication *application = getApplication(mod, app_name->valuestring, service_port);
       if(application) {
 	// remember that we heard from this application
-	application->last_json = mdata->packetBus->clk;
+	application->last_json = mdata->packetBus->now.tv_sec;
 	// and remember that the application sent these counters
-	application->last_json_counters = mdata->packetBus->clk;
+	application->last_json_counters = mdata->packetBus->now.tv_sec;
 
 	SFL_COUNTERS_SAMPLE_TYPE csample = { 0 };
 	// app_operations
@@ -1246,8 +1250,12 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
   */
 
   static void evt_packet_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    if((evt->bus->clk % HSP_JSON_APP_TIMEOUT) == 0)
+    HSP_mod_JSON *mdata = (HSP_mod_JSON *)mod->data;
+    time_t clk = evt->bus->now.tv_sec;
+    if(clk > mdata->next_app_timeout_check) {
       json_app_timeout_check(mod);
+      mdata->next_app_timeout_check = clk + HSP_JSON_APP_TIMEOUT;
+    }
   }
 
   static void evt_packet_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {

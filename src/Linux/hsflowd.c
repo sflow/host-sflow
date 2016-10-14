@@ -489,7 +489,7 @@ extern "C" {
 
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    time_t clk = evt->bus->clk;
+    time_t clk = evt->bus->now.tv_sec;
 
     // reset the pollActions
     UTArrayReset(sp->pollActions);
@@ -527,13 +527,16 @@ extern "C" {
 
     // possibly poll the nio counters to avoid 32-bit rollover
     if(sp->nio_polling_secs &&
-       ((clk % sp->nio_polling_secs) == 0)) {
+       clk >= sp->next_nio_poll) {
       updateNioCounters(sp, NULL);
+      sp->next_nio_poll = clk + sp->nio_polling_secs;
     }
 
     // refresh the interface list periodically or on request
-    if(sp->refreshAdaptorList || (clk % sp->refreshAdaptorListSecs) == 0) {
+    if(sp->refreshAdaptorList
+       || clk > sp->next_refreshAdaptorList) {
       sp->refreshAdaptorList = NO;
+      sp->next_refreshAdaptorList = clk + sp->refreshAdaptorListSecs;
       uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
       if(readInterfaces(sp, YES, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
 	myLog(LOG_ERR, "failed to re-read interfaces\n");
@@ -617,6 +620,21 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     tock - all buses      __________________
+    -----------------___________________________------------------
+    this fn called on tock by all buses (all threads) so be careful!
+  */
+
+  static void evt_all_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+#ifdef UTHEAP
+    // check for heap cleanup
+    UTHeapGC();
+#endif
+    // TODO: this would be a good place to test the memory footprint and
+    // bail out if it looks like we are leaking memory(?)
+  }
+
+  /*_________________---------------------------__________________
     _________________         initAgent         __________________
     -----------------___________________________------------------
   */
@@ -652,13 +670,15 @@ extern "C" {
     }
 
     SEMLOCK_DO(sp->sync_agent) {
-      time_t now = UTClockSeconds();
+      struct timespec ts;
+      EVClockMono(&ts);
+      time_t mono_now = ts.tv_sec;
       sp->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
       sfl_agent_init(sp->agent,
 		     &sp->agentIP,
 		     sp->subAgentId,
-		     now,
-		     now,
+		     mono_now,
+		     mono_now,
 		     sp,
 		     agentCB_alloc,
 		     agentCB_free,
@@ -1426,6 +1446,10 @@ extern "C" {
     sp->vmsByUUID = UTHASH_NEW(HSPVMState, uuid, UTHASH_DFLT);
     sp->vmsByDsIndex = UTHASH_NEW(HSPVMState, dsIndex, UTHASH_DFLT);
 
+    // IPv4 addresses can represent themselves directly
+    sp->localIP =  UTHASH_NEW(SFLAddress, address.ip_v4, UTHASH_DFLT);
+    sp->localIP6 = UTHASH_NEW(SFLAddress, address.ip_v6, UTHASH_DFLT);
+
     // read the host-id info up front, so we can include it in hsflowd.auto
     // (we'll read it again each time we send the counters)
     SFLCounters_sample_element hidElem = { 0 };
@@ -1494,11 +1518,6 @@ extern "C" {
     else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
     sfl_random_init(seed);
 
-    // desync the clock so we don't detect second rollovers
-    // at the same time as other hosts no matter what clock
-    // source we use...
-    UTClockDesync_uS(sfl_random(1000000));
-
     // initialize the faster polling of NIO counters
     // to avoid undetected 32-bit wraps
     sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
@@ -1525,6 +1544,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_docker", sp->modulesPath);
     if(sp->pcap.pcap)
       EVLoadModule(sp->rootModule, "mod_pcap", sp->modulesPath);
+    if(sp->tcp.tcp)
+      EVLoadModule(sp->rootModule, "mod_tcp", sp->modulesPath);
     if(sp->ulog.ulog)
       EVLoadModule(sp->rootModule, "mod_ulog", sp->modulesPath);
     if(sp->nflog.nflog)
@@ -1572,6 +1593,9 @@ extern "C" {
       // HSPEVENT_CONFIG_CHANGED right away.
       installSFlowSettings(sp, sp->sFlowSettings_file);
     }
+
+    // have every thread call in every second
+    EVEventRxAll(sp->rootModule, EVEVENT_TOCK, evt_all_tock);
 
     // start all buses, with pollBus in this thread
     EVRun(sp->pollBus);

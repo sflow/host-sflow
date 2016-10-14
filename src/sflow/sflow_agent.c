@@ -116,6 +116,28 @@ void sfl_agent_tick(SFLAgent *agent, time_t now)
 }
 
 /*_________________---------------------------__________________
+  _________________   sfl_agent_set_now       __________________
+  -----------------___________________________------------------
+Used to set a higher-precision "now" timestamp.
+*/
+
+void sfl_agent_set_now(SFLAgent *agent, time_t now, time_t now_nS)
+{
+  agent->now = now;
+  agent->now_nS = now_nS;
+}
+
+/*_________________---------------------------__________________
+  _________________   sfl_agent_uptime_mS     __________________
+  -----------------___________________________------------------
+*/
+
+uint32_t sfl_agent_uptime_mS(SFLAgent *agent)
+{
+  return ((agent->now - agent->bootTime) * 1000) + (agent->now_nS / 1000000);
+}
+
+/*_________________---------------------------__________________
   _________________   sfl_agent_addReceiver   __________________
   -----------------___________________________------------------
 */

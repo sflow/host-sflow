@@ -59,7 +59,7 @@ extern "C" {
 	// indicate some sort of rare meltdown and losing events
 	// to EWOULDBLOCK could make things worse.
 
-	bus->select_mS = EVBUS_SELECT_MS;
+	bus->select_mS = EVBUS_SELECT_MS_TICK;
 	bus->stop = NO;
       }
     }
@@ -144,6 +144,18 @@ extern "C" {
       // as for an event will be the one that gets it last.
       UTArrayAdd(evt->actions, act);
       evt->actionsChanged = YES;
+    }
+    if(my_strequal(evt->name, EVEVENT_DECI)) {
+      // shorten select timeout so we can deliver deciTicks
+      evt->bus->select_mS = EVBUS_SELECT_MS_DECI;
+    }
+  }
+
+  void EVEventRxAll(EVMod *mod, char *evt_name, EVActionCB cb) {
+    EVBus *bus;
+    UTHASH_WALK(mod->root->buses, bus) {
+      EVEvent *evt = getEvent(bus, evt_name, YES);
+      EVEventRx(mod, evt, cb);
     }
   }
 
@@ -320,10 +332,19 @@ extern "C" {
     return sent;
   }
 
+  void EVClockMono(struct timespec *ts) {
+    if(clock_gettime(CLOCK_MONOTONIC_COARSE, ts) == -1) {
+      myLog(LOG_ERR, "clock_gettime() failed: %s", strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+  }
+
   static void busRead(EVBus *bus) {
     EVSocket *sock;
     fd_set readfds;
     FD_ZERO(&readfds);
+    sigset_t emptyset;
+    sigemptyset(&emptyset);
     int max_fd = 0;
     // the input pipe
     FD_SET(bus->pipe[0], &readfds);
@@ -343,14 +364,21 @@ extern "C" {
       if(sock->fd > max_fd)
 	max_fd = sock->fd;
     }
-    struct timeval timeout;
+    struct timespec timeout;
     timeout.tv_sec = 0;
-    timeout.tv_usec = (bus->select_mS * 1000);
-    int nfds = select(max_fd + 1,
-		      &readfds,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      &timeout);
+    timeout.tv_nsec = bus->select_mS * 1000000;
+    int nfds = pselect(max_fd + 1,
+		       &readfds,
+		       (fd_set *)NULL,
+		       (fd_set *)NULL,
+		       &timeout,
+		       &emptyset);
+
+    // update clock - monotonic so that it is
+    // safe to set timeouts in the future...
+    EVClockMono(&bus->now);
+
+    // see if we got anything
     if(nfds > 0) {
       if(FD_ISSET(bus->pipe[0], &readfds))
 	busRxPipe(bus, bus->pipe[0]);
@@ -369,45 +397,55 @@ extern "C" {
     }
   }
 
+  int EVTimeDiff_nS(struct timespec *t1, struct timespec *t2) {
+    int secs = t2->tv_sec - t1->tv_sec;
+    int nanos = t2->tv_nsec - t1->tv_nsec;
+    // if(nanos < 0) {
+    //  secs--;
+    //  nanos += 1000000000;
+    // }
+    return (secs * 1000000000) + nanos;
+  }
+
   static void *busRun(void *magic) {
     EVBus *bus = (EVBus *)magic;
+    EVMod *mod = bus->root->rootModule;
     assert(bus->running == NO);
     threadBus = bus; // assign to thread-local var
     bus->running = YES;
     EVEvent *start = EVGetEvent(bus, EVEVENT_START);
     EVEvent *tick = EVGetEvent(bus, EVEVENT_TICK);
     EVEvent *tock = EVGetEvent(bus, EVEVENT_TOCK);
+    EVEvent *deci = EVGetEvent(bus, EVEVENT_DECI);
     EVEvent *final = EVGetEvent(bus, EVEVENT_FINAL);
     EVEvent *end = EVGetEvent(bus, EVEVENT_END);
 
-    EVEventTx(bus->root->rootModule, start, NULL, 0);
+    EVEventTx(mod, start, NULL, 0);
+
     for(;;) {
+
       if(bus->stop) {
-	EVEventTx(bus->root->rootModule, final, NULL, 0);
-	EVEventTx(bus->root->rootModule, end, NULL, 0);
+	EVEventTx(mod, final, NULL, 0);
+	EVEventTx(mod, end, NULL, 0);
 	break;
       }
 
       busRead(bus);
 
-      // check for second boundaries and generate ticks for the sFlow library
-      time_t test_clk = UTClockSeconds();
-      if((test_clk < bus->clk)
-	 || (test_clk - bus->clk) > EV_MAX_TICKS) {
-	// avoid a busy-loop of ticks
-	if(bus->clk)
-	  myLog(LOG_INFO, "time jump detected on bus %s", bus->name);
-	bus->clk = test_clk - 1;
-      }
-      while(bus->clk < test_clk) {
-	// TODO: this would be a good place to test the memory footprint and
-	// bail out if it looks like we are leaking memory(?)
-#ifdef UTHEAP
-	UTHeapGC();
-#endif
-	bus->clk++;
-	EVEventTx(bus->root->rootModule, tick, NULL, 0);
-	EVEventTx(bus->root->rootModule, tock, NULL, 0);
+      // Detect tick/deci boundaries.
+      // These tick/tock/deci events can skip if something
+      // blocks for too long in this thread,  so it's advisable
+      // to implement timeouts by comparing with a target time.
+      // We can do that more safely now that we are using a
+      // monotonic clock.
+      if(EVTimeDiff_nS(&bus->now_deci, &bus->now) > 100000000) {
+	bus->now_deci = bus->now;
+	EVEventTx(mod, deci, NULL, 0);
+	if(EVTimeDiff_nS(&bus->now_tick, &bus->now) > 1000000000) {
+	  bus->now_tick = bus->now;
+	  EVEventTx(mod, tick, NULL, 0);
+	  EVEventTx(mod, tock, NULL, 0);
+	}
       }
     }
     return NULL;
@@ -472,7 +510,7 @@ extern "C" {
     // and another to report lines (or accumulate them if required)
     if(sock->ioline == NULL)
       sock->ioline = UTStrBuf_new();
-    
+
     // try to read more
     UTStrBuf_need(sock->iobuf, UTSTRBUF_LEN(sock->iobuf) + EVSOCKETREADLINE_INCBYTES);
     char *readStart = UTSTRBUF_STR(sock->iobuf) + UTSTRBUF_LEN(sock->iobuf);

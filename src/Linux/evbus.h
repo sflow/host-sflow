@@ -63,9 +63,11 @@ extern "C" {
     UTArray *sockets_run;
     UTArray *sockets_del;
     int select_mS;
-#define EVBUS_SELECT_MS 900
-#define EV_MAX_TICKS 60
-    time_t clk;
+#define EVBUS_SELECT_MS_TICK 991
+#define EVBUS_SELECT_MS_DECI 91
+    struct timespec now;
+    struct timespec now_tick;
+    struct timespec now_deci;
     pthread_t *thread;
     int childCount;
     bool socketsChanged:1;
@@ -109,6 +111,7 @@ extern "C" {
 #define EVEVENT_START "_start"
 #define EVEVENT_TICK "_tick"
 #define EVEVENT_TOCK "_tock"
+#define EVEVENT_DECI "_deci"
 #define EVEVENT_FINAL "_final"
 #define EVEVENT_END "_end"
 
@@ -126,10 +129,12 @@ extern "C" {
   EVBus *EVGetBus(EVMod *mod, char *name, bool create);
   EVEvent *EVGetEvent(EVBus *bus, char *name);
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb);
+  void EVEventRxAll(EVMod *mod, char *evt_name, EVActionCB cb);
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);
   int EVEventTxAll(EVMod *mod, char *evt_name, void *data, size_t dataLen);
   EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic);
   bool EVSocketClose(EVMod *mod, EVSocket *sock);
+  void EVClockMono(struct timespec *ts);
 
 #define EVSOCKETREADLINE_INCBYTES EV_MAX_EVT_DATALEN
 
@@ -153,6 +158,7 @@ extern "C" {
   // http://www.mail-archive.com/xenomai-help@gna.org/msg06439.html
 #define EV_BUS_STACKSIZE 2000000
 
+  int EVTimeDiff_nS(struct timespec *t1, struct timespec *t2);
   void EVBusRunThread(EVBus *bus, size_t stacksize);
   void EVBusRun(EVBus *bus);
   void EVBusStop(EVBus *bus);

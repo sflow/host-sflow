@@ -58,6 +58,7 @@ extern "C" {
     HSPOBJ_ULOG,
     HSPOBJ_NFLOG,
     HSPOBJ_PCAP,
+    HSPOBJ_TCP,
     HSPOBJ_CUMULUS,
     HSPOBJ_NVML,
     HSPOBJ_OVS,
@@ -76,6 +77,7 @@ extern "C" {
     "ulog",
     "nflog",
     "pcap",
+    "tcp",
     "cumulus",
     "nvml",
     "ovs",
@@ -929,6 +931,11 @@ extern "C" {
 	    newPcap(sp);
 	    level[++depth] = HSPOBJ_PCAP;
 	    break;
+	  case HSPTOKEN_TCP:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->tcp.tcp = YES;
+	    level[++depth] = HSPOBJ_TCP;
+	    break;
 	  case HSPTOKEN_CUMULUS:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->cumulus.cumulus = YES;
@@ -1192,6 +1199,17 @@ extern "C" {
 	      if((tok = expectONOFF(sp, tok, &pc->vport)) == NULL) return NO;
 	      pc->vport_set = YES;
 	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_TCP:
+	  {
+	    switch(tok->stok) {
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

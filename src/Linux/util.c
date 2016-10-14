@@ -360,40 +360,6 @@ extern "C" {
 #endif /* UTHEAP */
 
   /*_________________---------------------------__________________
-    _________________     time tick support     __________________
-    -----------------___________________________------------------
-  */
-
-  static uint32_t UTClockDesync = 0;
-
-  void UTClockDesync_uS(uint32_t uS) {
-    UTClockDesync = (uS % 1000000);
-  }
-
-  time_t UTClockSeconds() {
-    // What we want is a second-rollover that does not sync at
-    // all with wall-clock or monotonic clock or any other
-    // kind of clock that might be sync'd between hosts.
-    // We might have used clock_gettime(CLOCK_MONOTONIC_RAW)
-    // to get the natural crystall oscillator drift effect,
-    // but that seems like it might be an expensive call, and
-    // it requires a newish kernel and it requires linking with
-    // -lrt.
-    // A more portable way is just to use a moderately
-    // inexpensive call,  and nudge it by a number of
-    // microseconds before we report the seconds part.
-    // Then that number can be passed in as a random
-    // number at startup time so that it's different for
-    // every agent.
-    struct timeval now;
-    gettimeofday(&now, NULL);
-    now.tv_usec += UTClockDesync;
-    if(now.tv_usec > 1000000)
-      now.tv_sec++;
-    return now.tv_sec;
-  }
-
-  /*_________________---------------------------__________________
     _________________     hashing               __________________
     -----------------___________________________------------------
     Don't expose this directly, so we can swap them out easily for

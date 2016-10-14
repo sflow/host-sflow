@@ -205,6 +205,47 @@ extern "C" {
     return adaptorNIO->sampler;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________     pendingSample         __________________
+    -----------------___________________________------------------
+  */
+
+  static HSPPendingSample *pendingSampleNew(SFLSampler *sampler, SFL_FLOW_SAMPLE_TYPE *fs)  {
+    HSPPendingSample *ps = (HSPPendingSample *)my_calloc(sizeof(HSPPendingSample));
+    ps->fs = fs;
+    ps->sampler = sampler;
+    ps->refCount = 1;
+    ps->ptrsToFree = UTArrayNew(UTARRAY_DFLT);
+    return ps;
+  }
+
+  void *pendingSample_calloc(HSPPendingSample *ps, size_t len) {
+    void *ptr = my_calloc(len);
+    UTArrayAdd(ps->ptrsToFree, ptr);
+    return ptr;
+  }
+
+  void holdPendingSample(HSPPendingSample *ps) {
+    ps->refCount++;
+  }
+
+  void releasePendingSample(HSP *sp, HSPPendingSample *ps)
+  {
+    if(--ps->refCount == 0) {
+      EVBus *bus = EVCurrentBus();
+      sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
+      SEMLOCK_DO(sp->sync_agent) {
+	sfl_sampler_writeFlowSample(ps->sampler, ps->fs);
+      }
+      void *ptr;
+      UTARRAY_WALK(ps->ptrsToFree, ptr) my_free(ptr);
+      UTArrayFree(ps->ptrsToFree);
+      my_free(ps->fs);
+      my_free(ps);
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________    takeSample             __________________
     -----------------___________________________------------------
@@ -298,12 +339,12 @@ extern "C" {
       }
     }
 
-    SFL_FLOW_SAMPLE_TYPE fs = { 0 };
+    SFL_FLOW_SAMPLE_TYPE *fs = my_calloc(sizeof(SFL_FLOW_SAMPLE_TYPE));
 
     // set the ingress and egress ifIndex numbers.
     // Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
-    fs.input = ad_in ? ad_in->ifIndex : (internal_in ? SFL_INTERNAL_INTERFACE : 0);
-    fs.output = ad_out ? ad_out->ifIndex : (internal_out ? SFL_INTERNAL_INTERFACE : 0);
+    fs->input = ad_in ? ad_in->ifIndex : (internal_in ? SFL_INTERNAL_INTERFACE : 0);
+    fs->output = ad_out ? ad_out->ifIndex : (internal_out ? SFL_INTERNAL_INTERFACE : 0);
 
     SFLAdaptor *sampler_dev = ad_tap;
     if(ad_tap
@@ -365,14 +406,14 @@ extern "C" {
     }
 
     // build the sampled header structure
-    SFLFlow_sample_element hdrElem = { 0 };
-    hdrElem.tag = SFLFLOW_HEADER;
+    HSPPendingSample *ps = pendingSampleNew(sampler, fs);
+    SFLFlow_sample_element *hdrElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
+    hdrElem->tag = SFLFLOW_HEADER;
     uint32_t FCS_bytes = 4;
     uint32_t maxHdrLen = sampler->sFlowFsMaximumHeaderSize;
-    hdrElem.flowType.header.frame_length = pkt_len + FCS_bytes;
-    hdrElem.flowType.header.stripped = FCS_bytes;
-    
-    u_char hdr[HSP_MAX_HEADER_BYTES];
+    hdrElem->flowType.header.header_bytes = (u_char *)pendingSample_calloc(ps, maxHdrLen);
+    hdrElem->flowType.header.frame_length = pkt_len + FCS_bytes;
+    hdrElem->flowType.header.stripped = FCS_bytes;
     
     uint64_t mac_hdr_test=0;
     if(mac_hdr && mac_len > 8) {
@@ -383,35 +424,34 @@ extern "C" {
        && mac_hdr_test != 0) {
       // set the header_protocol to ethernet and
       // reunite the mac header and payload in one buffer
-      hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
-      memcpy(hdr, mac_hdr, mac_len);
+      hdrElem->flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+      memcpy(hdrElem->flowType.header.header_bytes, mac_hdr, mac_len);
       maxHdrLen -= mac_len;
       uint32_t payloadBytes = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
-      memcpy(hdr + mac_len, cap_hdr, payloadBytes);
-      hdrElem.flowType.header.header_length = payloadBytes + mac_len;
-      hdrElem.flowType.header.header_bytes = hdr;
-      hdrElem.flowType.header.frame_length += mac_len;
+      memcpy(hdrElem->flowType.header.header_bytes + mac_len, cap_hdr, payloadBytes);
+      hdrElem->flowType.header.header_length = payloadBytes + mac_len;
+      hdrElem->flowType.header.frame_length += mac_len;
     }
     else {
-      // no need to copy - just point at the captured header
       u_char ipversion = cap_hdr[0] >> 4;
       if(ipversion != 4 && ipversion != 6) {
 	if(getDebug()) myLog(LOG_ERR, "received non-IP packet. Encapsulation is unknown");
+	// TODO: clean up and bail?
       }
       else {
 	if(mac_len == 0) {
 	  // assume ethernet was (or will be) the framing
 	  mac_len = 14;
 	}
-	hdrElem.flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
-	hdrElem.flowType.header.stripped += mac_len;
-	hdrElem.flowType.header.header_length = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
-	hdrElem.flowType.header.header_bytes = (u_char *)cap_hdr;
-	hdrElem.flowType.header.frame_length += mac_len;
+	hdrElem->flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
+	hdrElem->flowType.header.stripped += mac_len;
+	hdrElem->flowType.header.header_length = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
+	memcpy(hdrElem->flowType.header.header_bytes, cap_hdr, hdrElem->flowType.header.header_length);
+	hdrElem->flowType.header.frame_length += mac_len;
       }
     }
     // add to flow sample
-    SFLADD_ELEMENT(&fs, &hdrElem);
+    SFLADD_ELEMENT(fs, hdrElem);
 
     // submit the actual sampling rate so it goes out with the sFlow feed
     // otherwise the sampler object would fill in his own (sub-sampling) rate.
@@ -423,7 +463,7 @@ extern "C" {
     if(samplerNIO->sampling_n_set && samplerNIO->sampling_n) {
       actualSamplingRate = samplerNIO->sampling_n;
     }
-    fs.sampling_rate = actualSamplingRate;
+    fs->sampling_rate = actualSamplingRate;
     
     // estimate the sample pool from the samples.  Could maybe do this
     // above with the (possibly more granular) ulogSamplingRate, but then
@@ -435,10 +475,13 @@ extern "C" {
     // sends the next sample. This is not perfect,  but is likely to accrue
     // drops against the point whose sampling-rate needs to be adjusted.
     samplerNIO->netlink_drops += drops;
-    fs.drops = samplerNIO->netlink_drops;
-    SEMLOCK_DO(sp->sync_agent) {
-      sfl_sampler_writeFlowSample(sampler, &fs);
-    }
+    fs->drops = samplerNIO->netlink_drops;
+
+    // wrap it and send it out in case someone else wants to annotate it
+    if(sp->evt_flow_sample == NULL)
+      sp->evt_flow_sample = EVGetEvent(EVCurrentBus(), HSPEVENT_FLOW_SAMPLE);
+    EVEventTx(sp->rootModule, sp->evt_flow_sample, ps, sizeof(*ps));
+    releasePendingSample(sp, ps);
   }
 
   /*_________________---------------------------__________________

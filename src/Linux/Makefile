@@ -1,7 +1,7 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-FEATURES_ALL= ULOG NFLOG PCAP DOCKER KVM XEN NVML OVS CUMULUS OS10
+FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
 CONFDIR    ?= /etc
@@ -53,7 +53,7 @@ JSONDIR=../json
 
 # CFLAGS and LIBS - common
 CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
-LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl
+LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl -lrt
 
 CFLAGS_SHARED= -fPIC
 LDFLAGS_SHARED= -shared
@@ -83,6 +83,9 @@ LIBS_NFLOG= -lnfnetlink
 
 CFLAGS_PCAP=
 LIBS_PCAP=-lpcap
+
+CFLAGS_TCP=
+LIBS_TCP=
 
 CFLAGS_NVML= -I/usr/include/nvidia/gdk
 LIBS_NVML= -lnvidia-ml
@@ -162,6 +165,7 @@ OBJS_DOCKER=mod_docker.o
 OBJS_ULOG=mod_ulog.o
 OBJS_NFLOG=mod_nflog.o
 OBJS_PCAP=mod_pcap.o
+OBJS_TCP=mod_tcp.o
 OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
@@ -187,6 +191,8 @@ ULOG: mod_ulog.so
 NFLOG: mod_nflog.so
 
 PCAP: mod_pcap.so
+
+TCP: mod_tcp.so
 
 NVML: mod_nvml.so
 
@@ -243,6 +249,14 @@ mod_pcap.o: mod_pcap.c $(HEADERS)
 
 mod_pcap.so: $(OBJS_PCAP)
 	$(LD) -o $@ $(OBJS_PCAP) $(LDFLAGS_SHARED) $(LIBS_PCAP)
+
+#----------------------------
+
+mod_tcp.o: mod_tcp.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_TCP)
+
+mod_tcp.so: $(OBJS_TCP)
+	$(LD) -o $@ $(OBJS_TCP) $(LDFLAGS_SHARED) $(LIBS_TCP)
 
 #----------------------------
 
@@ -372,6 +386,7 @@ mod_docker.o: mod_docker.c $(HEADERS)
 mod_ulog.o: mod_ulog.c $(HEADERS)
 mod_nflog.o: mod_nflog.c $(HEADERS)
 mod_pcap.o: mod_pcap.c $(HEADERS)
+mod_tcp.o: mod_tcp.c $(HEADERS)
 mod_nvml.o: mod_nvml.c $(HEADERS)
 mod_cumulus.o: mod_cumulus.c $(HEADERS)
 mod_ovs.o: mod_ovs.c $(HEADERS)

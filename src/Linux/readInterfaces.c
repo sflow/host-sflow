@@ -100,7 +100,7 @@ extern "C" {
   }
 #endif
 
-  void readIPv6Addresses(HSP *sp)
+  void readIPv6Addresses(HSP *sp, UTHash *addrHT)
   {
     FILE *procFile = fopen("/proc/net/if_inet6", "r");
     if(procFile) {
@@ -132,6 +132,14 @@ extern "C" {
 	    SFLAddress v6addr;
 	    v6addr.type = SFLADDRESSTYPE_IP_V6;
 	    if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
+	      if(addrHT) {
+		// add to localIP6 lookup
+		if(UTHashGet(addrHT, &v6addr) == NULL) {
+		  SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
+		  *addrCopy = v6addr;
+		  UTHashAdd(addrHT, addrCopy);
+		}
+	      }
 	      // we interpret the scope from the address now
 	      // scope = remap_proc_net_if_inet6_scope(scope);
 	      EnumIPSelectionPriority ipPriority = agentAddressPriority(sp,
@@ -526,6 +534,9 @@ extern "C" {
   {
   uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
 
+  UTHash *newLocalIP = UTHASH_NEW(SFLAddress, address.ip_v4, UTHASH_DFLT);
+  UTHash *newLocalIP6 = UTHASH_NEW(SFLAddress, address.ip_v6, UTHASH_DFLT);
+
   { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
@@ -661,6 +672,12 @@ extern "C" {
 	  // IP addr is now s->sin_addr
 	  adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
 	  adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+	  // add to localIP hash too
+	  if(UTHashGet(newLocalIP, &adaptorNIO->ipAddr) == NULL) {
+	    SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
+	    *addrCopy = adaptorNIO->ipAddr;
+	    UTHashAdd(newLocalIP, addrCopy);
+	  }
 	}
 	//else if (ifr.ifr_addr.sa_family == AF_INET6) {
 	// not sure this ever happens - on a linux system IPv6 addresses
@@ -711,7 +728,7 @@ extern "C" {
   // different place. Depending on the address priorities this
   // may cause the adaptor's best-choice ipAddress to be
   // overwritten.
-  readIPv6Addresses(sp);
+  readIPv6Addresses(sp, newLocalIP6);
 
   if(p_added) *p_added = ad_added;
   if(p_removed) *p_removed = ad_removed;
@@ -719,6 +736,24 @@ extern "C" {
   if(p_wentdown) *p_wentdown = ad_wentdown;
   if(p_changed) *p_changed = ad_changed;
 
+  // swap in new localIP lookup tables
+  UTHash *oldLocalIP = sp->localIP;
+  UTHash *oldLocalIP6 = sp->localIP6;
+  sp->localIP = newLocalIP;
+  sp->localIP6 = newLocalIP6;
+  if(oldLocalIP) {
+    SFLAddress *ad;
+    UTHASH_WALK(oldLocalIP, ad)
+      my_free(ad);
+    UTHashFree(oldLocalIP);
+  }
+  if(oldLocalIP6) {
+    SFLAddress *ad;
+    UTHASH_WALK(oldLocalIP6, ad)
+      my_free(ad);
+    UTHashFree(oldLocalIP6);
+  }
+  
   return sp->adaptorsByName->entries;
 }
 

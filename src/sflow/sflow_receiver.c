@@ -560,6 +560,21 @@ static void putSocket6(SFLReceiver *receiver, SFLExtended_socket_ipv6 *socket6) 
     putNet32(receiver, socket6->remote_port);
 }
 
+static void putTCPInfo(SFLReceiver *receiver, SFLExtended_TCP_info *tcp_info) {
+    putNet32(receiver, tcp_info->dirn);
+    putNet32(receiver, tcp_info->snd_mss);
+    putNet32(receiver, tcp_info->rcv_mss);
+    putNet32(receiver, tcp_info->unacked);
+    putNet32(receiver, tcp_info->lost);
+    putNet32(receiver, tcp_info->retrans);
+    putNet32(receiver, tcp_info->pmtu);
+    putNet32(receiver, tcp_info->rtt);
+    putNet32(receiver, tcp_info->rttvar);
+    putNet32(receiver, tcp_info->snd_cwnd);
+    putNet32(receiver, tcp_info->reordering);
+    putNet32(receiver, tcp_info->min_rtt);
+}
+
 static uint32_t appCountersEncodingLength(SFLAPPCounters *appctrs) {
   uint32_t elemSiz = 0;
   elemSiz += stringEncodingLength(&appctrs->application);
@@ -669,6 +684,7 @@ static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_SOCKET4: elemSiz = XDRSIZ_SFLEXTENDED_SOCKET4;  break;
     case SFLFLOW_EX_PROXY_SOCKET6:
     case SFLFLOW_EX_SOCKET6: elemSiz = XDRSIZ_SFLEXTENDED_SOCKET6;  break;
+    case SFLFLOW_EX_TCP_INFO: elemSiz = XDRSIZ_SFLEXTENDED_TCP_INFO;  break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -801,6 +817,7 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_SOCKET4: putSocket4(receiver, &elem->flowType.socket4); break;
     case SFLFLOW_EX_PROXY_SOCKET6:
     case SFLFLOW_EX_SOCKET6: putSocket6(receiver, &elem->flowType.socket6); break;
+    case SFLFLOW_EX_TCP_INFO: putTCPInfo(receiver, &elem->flowType.tcp_info); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -815,6 +832,13 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
 
   // update the pktlen
   receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+
+  // if the sample pkt is full enough so that another packet-sample the same size would
+  // put it over the size threshold, then just send it now.  After all,  if we waited and then
+  // reacted when the next sample came we would just be sending the same datagram... only delayed.
+  if((receiver->sampleCollector.pktlen + packedSize) >= receiver->sFlowRcvrMaximumDatagramSize)
+    sendSample(receiver);
+
   return packedSize;
 }
 
@@ -1247,14 +1271,14 @@ static void sendSample(SFLReceiver *receiver)
 {  
   /* construct and send out the sample, then reset for the next one... */
   SFLAgent *agent = receiver->agent;
-  
+
   /* go back and fill in the header */
   receiver->sampleCollector.datap = receiver->sampleCollector.data;
   putNet32(receiver, SFLDATAGRAM_VERSION5);
   putAddress(receiver, &agent->myIP);
   putNet32(receiver, agent->subId);
   putNet32(receiver, ++receiver->sampleCollector.packetSeqNo);
-  putNet32(receiver,  (uint32_t)((agent->now - agent->bootTime) * 1000));
+  putNet32(receiver, sfl_agent_uptime_mS(agent));
   putNet32(receiver, receiver->sampleCollector.numSamples);
   
   /* send */

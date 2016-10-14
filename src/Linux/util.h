@@ -101,10 +101,6 @@ extern "C" {
 #define my_free my_os_free
 #endif
 
-  // desync'd timer-tick support
-  void UTClockDesync_uS(uint32_t uS);
-  time_t UTClockSeconds(void);
-
   // safer string fns
   uint32_t my_strnlen(const char *s, uint32_t max);
   uint32_t my_strlen(const char *s);

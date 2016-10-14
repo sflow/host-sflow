@@ -195,9 +195,10 @@ typedef struct _SFLAgent {
   SFLPoller  *pollers;    /* the list of samplers */
   SFLReceiver *receivers; /* the array of receivers */
   time_t bootTime;        /* time when we booted or started */
-  time_t now;             /* time now */
+  time_t now;             /* time now - seconds */
+  time_t now_nS;          /* time now - nanoseconds 0-1000000000 */
   SFLAddress myIP;        /* IP address of this node */
-  uint32_t subId;        /* sub_agent_id */
+  uint32_t subId;         /* sub_agent_id */
   void *magic;            /* ptr to pass back in logging and alloc fns */
   allocFn_t allocFn;
   freeFn_t freeFn;
@@ -304,6 +305,12 @@ uint32_t sfl_sampler_get_backoffThreshold(SFLSampler *sampler);
 
 /* call this once per second (N.B. not on interrupt stack i.e. not hard real-time) */
 void sfl_agent_tick(SFLAgent *agent, time_t now);
+
+/* call this to set more accurate "now" - e.g. to influence datagram timestamp */
+void sfl_agent_set_now(SFLAgent *agent, time_t now_S, time_t now_nS);
+
+/* convert stored "now" to mS since bootTime */
+uint32_t sfl_agent_uptime_mS(SFLAgent *agent);
 
 /* call this with each flow sample */
 void sfl_sampler_writeFlowSample(SFLSampler *sampler, SFL_FLOW_SAMPLE_TYPE *fs);

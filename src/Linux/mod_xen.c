@@ -50,6 +50,7 @@ extern "C" {
     uint32_t page_size;
     SFLCounters_sample_element vnodeElem;
     uint32_t refreshVMListSecs;
+    time_t next_refreshVMList;
     uint32_t forgetVMSecs;
   } HSP_mod_XEN;
 
@@ -660,9 +661,11 @@ extern "C" {
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if((evt->bus->clk % mdata->refreshVMListSecs) == 0
+    time_t clk = evt->bus->clk;
+    if(clk >= mdata->next_refreshVMList
        && sp->sFlowSettings) {
       configVMs(mod);
+      mdata->next_refreshVMList = clk + mdata->refreshVMListSecs;
     }
   }
 

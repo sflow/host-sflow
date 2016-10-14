@@ -314,10 +314,11 @@ extern "C" {
 
 #define HSPBUS_POLL "poll" // main thread
 #define HSPBUS_CONFIG "config" // DNS-SD
-#define HSPBUS_PACKET "packet" // pcap,ulog,nflog,json packet processing
+#define HSPBUS_PACKET "packet" // pcap,ulog,nflog,json,tcp packet processing
 
 // The generic start,tick,tock,final,end events are defined in evbus.h
 #define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // (csample *) building counter-sample
+#define HSPEVENT_FLOW_SAMPLE "flow_sample"       // (HSPPendingSample *) building flow-sample
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
 #define HSPEVENT_CONFIG_LINE "config_line"       // (line)...next config line
 #define HSPEVENT_CONFIG_END "config_end"         // (n_servers *) end config lines
@@ -329,10 +330,19 @@ extern "C" {
 #define HSPEVENT_INTFS_CHANGED "intfs_changed"   // some interface(s) changed
 #define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
 
+
+  typedef struct _HSPPendingSample {
+    SFL_FLOW_SAMPLE_TYPE *fs;
+    SFLSampler *sampler;
+    int refCount;
+    UTArray *ptrsToFree;
+  } HSPPendingSample;
+
   typedef struct _HSP {
     char *modulesPath;
     EVMod *rootModule;
     EVBus *pollBus;
+    EVEvent *evt_flow_sample;
 
     // agent
     SFLAgent *agent;
@@ -427,6 +437,9 @@ extern "C" {
       HSPPcap *pcaps;
       uint32_t numPcaps;
     } pcap;
+    struct {
+      bool tcp;
+    } tcp;
 
     // hardware sampling flag
     bool hardwareSampling;
@@ -467,10 +480,13 @@ extern "C" {
     time_t nio_last_update;
     time_t nio_polling_secs;
 #define HSP_NIO_POLLING_SECS_32BIT 3
+    time_t next_nio_poll;
 
     // refresh cycles
     bool refreshAdaptorList; // request flag
     uint32_t refreshAdaptorListSecs; // poll interval
+    time_t next_refreshAdaptorList; // deadline
+
     bool refreshVMList; // request flag
     uint32_t refreshVMListSecs; // poll interval (default)
     uint32_t forgetVMSecs; // age-out idle VM or container (default)
@@ -492,6 +508,9 @@ extern "C" {
     UTHash *vmsByUUID;
     UTHash *vmsByDsIndex;
 
+    // local IP addresses
+    UTHash *localIP;
+    UTHash *localIP6;
   } HSP;
 
   // expose some config parser fns
@@ -563,6 +582,9 @@ extern "C" {
 #define HSP_SAMPLEOPT_ASIC        0x2000
 
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
+  void *pendingSample_calloc(HSPPendingSample *ps, size_t len);
+  void holdPendingSample(HSPPendingSample *ps);
+  void releasePendingSample(HSP *sp, HSPPendingSample *ps);
   SFLPoller *forceCounterPolling(HSP *sp, SFLAdaptor *adaptor);
 
   // VM lifecycle

@@ -326,6 +326,33 @@ typedef struct _SFLExtended_vni {
    uint32_t vni;            /* virtual network identifier */
 } SFLExtended_vni;
 
+/* TCP connection state */
+/* Based on struct tcp_info in /usr/include/linux/tcp.h */
+/* opaque = flow_data; enterprise=0; format=2209 */
+
+typedef enum  {
+  PKTDIR_unknown  = 0,
+  PKTDIR_received = 1,
+  PKTDIR_sent     = 2
+} EnumPktDirection;
+
+typedef struct  _SFLExtended_TCP_info {
+  uint32_t dirn;        /* EnumPktDirection: Sampled packet direction */
+  uint32_t snd_mss;     /* Cached effective mss, not including SACKS */
+  uint32_t rcv_mss;     /* Max. recv. segment size */
+  uint32_t unacked;     /* Packets which are "in flight" */
+  uint32_t lost;        /* Lost packets */
+  uint32_t retrans;     /* Retransmitted packets */
+  uint32_t pmtu;        /* Last pmtu seen by socket */
+  uint32_t rtt;         /* smoothed RTT (microseconds) */
+  uint32_t rttvar;      /* RTT variance (microseconds) */
+  uint32_t snd_cwnd;    /* Sending congestion window */
+  uint32_t reordering;  /* Reordering */
+  uint32_t min_rtt;     /* Minimum RTT (microseconds) */
+} SFLExtended_TCP_info;
+
+#define  XDRSIZ_SFLEXTENDED_TCP_INFO 48
+
 /* Extended socket information,
    Must be filled in for all application transactions associated with a network socket
    Omit if transaction associated with non-network IPC  */
@@ -407,6 +434,7 @@ typedef struct {
 
 #define SFLAPP_MAX_ACTOR_LEN 64
 
+
 enum SFLFlow_type_tag {
   /* enterprise = 0, format = ... */
   SFLFLOW_HEADER    = 1,      /* Packet headers are sampled */
@@ -443,6 +471,7 @@ enum SFLFlow_type_tag {
   SFLFLOW_APP_CTXT          = 2203, /* enclosing server context */
   SFLFLOW_APP_ACTOR_INIT    = 2204, /* initiator */
   SFLFLOW_APP_ACTOR_TGT     = 2205, /* target */
+  SFLFLOW_EX_TCP_INFO       = 2209,
 };
 
 typedef union _SFLFlow_type {
@@ -472,6 +501,7 @@ typedef union _SFLFlow_type {
   SFLSampled_APP_ACTOR actor;
   SFLExtended_socket_ipv4 socket4;
   SFLExtended_socket_ipv6 socket6;
+  SFLExtended_TCP_info tcp_info;
 } SFLFlow_type;
 
 typedef struct _SFLFlow_sample_element {
