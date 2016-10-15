@@ -947,6 +947,28 @@ extern "C" {
       // announce the change
       if(firstConfig) EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
       EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_CHANGED, NULL, 0);
+      // delay the config-done event until every thread has processed the
+      // config change.  This is especially important the first time because
+      // we are about to drop priviledges.  If we plow on and do that here
+      // we will drop them before another module on another bus gets to, for
+      // example, open a pcap socket.  Use the handshake mechanism to get
+      // every bus to reply.  Then we know we can proceed.
+      sp->config_shake_countdown = EVBusCount(sp->rootModule);
+      EVEventTxAll(sp->rootModule, EVEVENT_HANDSHAKE, HSPEVENT_CONFIG_SHAKE, strlen(HSPEVENT_CONFIG_SHAKE));
+      // EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
+    }
+  }
+
+  /*_________________------------------------__________________
+    _________________   evt_config_shake     __________________
+    -----------------________________________------------------
+  */
+  
+  static void evt_config_shake(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    myDebug(1, "evt_config_shake: reply from %s", (char *)data);
+    if(--sp->config_shake_countdown == 0) {
+      myDebug(1, "evt_config_shake: sync complete");
       EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
     }
   }
@@ -1568,6 +1590,7 @@ extern "C" {
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_END), evt_config_end);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
     // EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_SHAKE), evt_config_shake);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_DONE), evt_config_done);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TOCK), evt_poll_tock);

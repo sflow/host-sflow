@@ -324,6 +324,7 @@ extern "C" {
 #define HSPEVENT_CONFIG_END "config_end"         // (n_servers *) end config lines
 #define HSPEVENT_CONFIG_FIRST "config_first"     // new config [first]
 #define HSPEVENT_CONFIG_CHANGED "config_changed" // new config
+#define HSPEVENT_CONFIG_SHAKE "config_shake"     // handkshake before done
 #define HSPEVENT_CONFIG_DONE "config_done"       // after new config
 #define HSPEVENT_INTF_READ "intf_read"           // (adaptor *) reading interface
 #define HSPEVENT_INTF_SPEED "intf_speed"         // (adaptor *) interface speed change
@@ -511,6 +512,9 @@ extern "C" {
     // local IP addresses
     UTHash *localIP;
     UTHash *localIP6;
+
+    // handshake countdown
+    int config_shake_countdown;
   } HSP;
 
   // expose some config parser fns

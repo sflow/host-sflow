@@ -34,6 +34,18 @@ extern "C" {
     return root->rootModule;
   }
 
+  uint32_t EVBusCount(EVMod *mod) {
+    return UTHashN(mod->root->buses);
+  }
+
+  static void evt_handshake(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    if(data) {
+      // expect name of event to reply with.  Use EVEventTxAll so that sender
+      // can just listen on his own bus only and avoid concurrency.
+      EVEventTxAll(mod, (char *)data, evt->bus->name, my_strlen(evt->bus->name));
+    }
+  }
+
   EVBus *EVGetBus(EVMod *mod, char *name, bool create) {
     EVBus *bus;
     SEMLOCK_DO(mod->root->sync) {
@@ -63,6 +75,10 @@ extern "C" {
 	bus->stop = NO;
       }
     }
+
+    EVEvent *handshake = EVGetEvent(bus, EVEVENT_HANDSHAKE);
+    EVEventRx(mod, handshake, evt_handshake);
+
     return bus;
   }
 
@@ -141,7 +157,7 @@ extern "C" {
     act->actionCB = cb;
     SEMLOCK_DO(mod->root->sync) {
       // Note that ordering is preserved here. The last one to
-      // as for an event will be the one that gets it last.
+      // ask for an event will be the one that gets it last.
       UTArrayAdd(evt->actions, act);
       evt->actionsChanged = YES;
     }

@@ -114,6 +114,7 @@ extern "C" {
 #define EVEVENT_DECI "_deci"
 #define EVEVENT_FINAL "_final"
 #define EVEVENT_END "_end"
+#define EVEVENT_HANDSHAKE "_handshake"
 
   typedef struct _EVEventHdr {
     uint32_t modId;
@@ -127,6 +128,7 @@ extern "C" {
   EVMod *EVLoadModule(EVMod *mod, char *name, char *mod_dir);
   EVMod *EVGetModule(EVMod *lmod, char *name);
   EVBus *EVGetBus(EVMod *mod, char *name, bool create);
+  uint32_t EVBusCount(EVMod *mod);
   EVEvent *EVGetEvent(EVBus *bus, char *name);
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb);
   void EVEventRxAll(EVMod *mod, char *evt_name, EVActionCB cb);

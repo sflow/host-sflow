@@ -267,7 +267,7 @@ extern "C" {
 				0, /* timeout==poll */
 				bpfs->pcap_err);
     if(bpfs->pcap == NULL) {
-      myLog(LOG_ERR, "PCAP: device %s open failed", bpfs->deviceName);
+      myLog(LOG_ERR, "PCAP: device %s open failed: %s", bpfs->deviceName, bpfs->pcap_err);
       return;
     }
     
