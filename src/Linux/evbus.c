@@ -333,7 +333,12 @@ extern "C" {
   }
 
   void EVClockMono(struct timespec *ts) {
-    if(clock_gettime(CLOCK_MONOTONIC_COARSE, ts) == -1) {
+    clockid_t monoClock = CLOCK_MONOTONIC;
+#ifdef CLOCK_MONOTONIC_COARSE
+    // more efficient if supported,  since we only need mS accuracy
+    monoClock = CLOCK_MONOTONIC_COARSE;
+#endif
+    if(clock_gettime(monoClock, ts) == -1) {
       myLog(LOG_ERR, "clock_gettime() failed: %s", strerror(errno));
       exit(EXIT_FAILURE);
     }
