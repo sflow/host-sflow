@@ -291,7 +291,7 @@ extern "C" {
     uint8_t *start = header->header_bytes;
     uint8_t *end = start + header->header_length;
     uint8_t *ptr = start;
-    uint16_t type_len;
+    uint16_t type_len = 0;
     
     switch(header->header_protocol) {
 

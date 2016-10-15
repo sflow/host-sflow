@@ -356,7 +356,7 @@ extern "C" {
       if(mdata->poll_current) {
 	// finished with this adaptor - accumulate counters
 	accumulateNioCounters(sp, mdata->poll_current, &mdata->ctrs, &mdata->et_ctrs);
-	ADAPTOR_NIO(mdata->poll_current)->last_update = sp->pollBus->clk;
+	ADAPTOR_NIO(mdata->poll_current)->last_update = sp->pollBus->now.tv_sec;
       }
       mdata->poll_current = adaptor;
       if(adaptor) {
@@ -640,10 +640,10 @@ extern "C" {
     if(adaptor == NULL)
       return;
     
-    if(mdata->last_poll != sp->pollBus->clk) {
+    if(mdata->last_poll != sp->pollBus->now.tv_sec) {
       // update all counters in one go
        pollAllCounters(mod);
-       mdata->last_poll = sp->pollBus->clk;
+       mdata->last_poll = sp->pollBus->now.tv_sec;
     }
   }
 

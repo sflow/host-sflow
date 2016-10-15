@@ -458,7 +458,7 @@ extern "C" {
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    time_t clk = evt->bus->clk;
+    time_t clk = evt->bus->now.tv_sec;
     if(clk >= mdata->next_refreshVMList
        && sp->sFlowSettings) {
       configVMs(mod);
