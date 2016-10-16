@@ -395,8 +395,9 @@ extern "C" {
       *l3_offset = (ptr - start);
       *ipproto = ptr[6];
       ptr += sizeof(struct ip6_hdr);
-      
-      while(ptr < end) {
+      bool decodingOptions = YES;
+      while(decodingOptions
+	    && ptr < end) {
 	switch(*ipproto) {
 	  // these we can skip
 	case 0:  // hop
@@ -404,13 +405,17 @@ extern "C" {
 	case 51: // auth
 	case 60: // dest options
 	  *ipproto = ptr[0];
-	  ptr += 8 * (ptr[1] + 1); // second byte gives option len in units of 8, not counting first 8
+	  // second byte gives option len in units of 8, not counting first 8
+	  ptr += 8 * (ptr[1] + 1);
 	  break;
-	  
-	  // the rest we cannot
-	case 44: // fragment
-	case 50: // encyption
+	  // the rest we cannot skip (or don't want to)
+	  // case 1: // ICMP6
+	  // case 6: // TCP
+	  // case 17: // UDP
+	  // case 44: // fragment
+	  // case 50: // encyption
 	default:
+	  decodingOptions = NO;
 	  break;
 	}
       }
