@@ -101,10 +101,13 @@ extern "C" {
   typedef struct _HSPTCPSample {
     struct _HSPTCPSample *prev; // timeoutQ
     struct _HSPTCPSample *next; // timeoutQ
-    HSPPendingSample *ps;
+    UTArray *samples; // HSPPendingSample
+    SFLAddress src;
+    SFLAddress dst;
+    bool flipped;
     struct inet_diag_req_v2 conn_req;
     struct timespec qtime;
-#define HSP_TCP_TIMEOUT_MS 200
+#define HSP_TCP_TIMEOUT_MS 400
     EnumPktDirection pktdirn;
   } HSPTCPSample;
     
@@ -117,6 +120,54 @@ extern "C" {
 
 
 
+  /*_________________---------------------------__________________
+    _________________     tcpSampleNew/Free     __________________
+    -----------------___________________________------------------
+  */
+  static HSPTCPSample *tcpSampleNew(void) {
+    HSPTCPSample *ts = (HSPTCPSample *)my_calloc(sizeof(HSPTCPSample));
+    ts->samples = UTArrayNew(UTARRAY_DFLT);
+    return ts;
+  }
+  
+  static void tcpSampleFree(HSPTCPSample *ts) {
+    UTArrayFree(ts->samples);
+    my_free(ts);
+  }
+
+  static char *tcpSamplePrint(HSPTCPSample *ts) {
+    static char buf[128];
+    char ip1[51],ip2[51];
+    snprintf(buf, 128, "TCPSample: %s - %s samples:%u %s",
+	     SFLAddress_print(&ts->src, ip1, 50),
+	     SFLAddress_print(&ts->dst, ip2, 50),
+	     UTArrayN(ts->samples),
+	     ts->flipped ? "FLIPPED": "");
+    return buf;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    diag_sockid_print      __________________
+    -----------------___________________________------------------
+  */
+
+  static char *diag_sockid_print(struct inet_diag_sockid *sockid) {
+    static char buf[256];
+    snprintf(buf, 256, "%08x:%08x:%08x:%08x %u - %08x:%08x:%08x:%08x %u if:%u",
+	     sockid->idiag_src[0],
+	     sockid->idiag_src[1],
+	     sockid->idiag_src[2],
+	     sockid->idiag_src[3],
+	     sockid->idiag_sport,
+	     sockid->idiag_dst[0],
+	     sockid->idiag_dst[1],
+	     sockid->idiag_dst[2],
+	     sockid->idiag_dst[3],
+	     sockid->idiag_dport,
+	     sockid->idiag_if);
+    return buf;
+  }
+	     
   /*_________________---------------------------__________________
     _________________      send_diag_msg        __________________
     -----------------___________________________------------------
@@ -177,34 +228,40 @@ extern "C" {
 	    readLen = sizeof(struct my_tcp_info);
 	  }
 	  memcpy(&tcpi, RTA_DATA(attr), readLen);
-	  myDebug(1, "TCP diag: RTT=%uuS (variance=%uuS) ", tcpi.tcpi_rtt, tcpi.tcpi_rttvar);
+	  myDebug(1, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
+		  tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
+		  diag_sockid_print(&diag_msg->id));
 	  // now see if we can get back to the sample that triggered this lookup
 	  HSPTCPSample search = { .conn_req.id = diag_msg->id };
 	  HSPTCPSample *found = UTHashDelKey(mdata->sampleHT, &search);
 	  if(found) {
+	    myDebug(1, "found TCPSample: %s RTT:%uuS", tcpSamplePrint(found));
 	    // unlink from Q
 	    UTQ_REMOVE(mdata->timeoutQ, found);
-	    // populate tcp_info structure
-	    SFLFlow_sample_element *tcpElem = pendingSample_calloc(found->ps, sizeof(SFLFlow_sample_element));
-	    tcpElem->tag = SFLFLOW_EX_TCP_INFO;
-	    tcpElem->flowType.tcp_info.dirn = found->pktdirn;
-	    tcpElem->flowType.tcp_info.snd_mss = tcpi.tcpi_snd_mss;
-	    tcpElem->flowType.tcp_info.rcv_mss = tcpi.tcpi_rcv_mss;
-	    tcpElem->flowType.tcp_info.unacked = tcpi.tcpi_unacked;
-	    tcpElem->flowType.tcp_info.lost = tcpi.tcpi_lost;
-	    tcpElem->flowType.tcp_info.retrans = tcpi.tcpi_total_retrans;
-	    tcpElem->flowType.tcp_info.pmtu = tcpi.tcpi_pmtu;
-	    tcpElem->flowType.tcp_info.rtt = tcpi.tcpi_rtt;
-	    tcpElem->flowType.tcp_info.rttvar = tcpi.tcpi_rttvar;
-	    tcpElem->flowType.tcp_info.snd_cwnd = tcpi.tcpi_snd_cwnd;
-	    tcpElem->flowType.tcp_info.reordering = tcpi.tcpi_reordering;
-	    tcpElem->flowType.tcp_info.min_rtt = tcpi.tcpi_min_rtt;
-	    // add to sample
-	    SFLADD_ELEMENT(found->ps->fs, tcpElem);
-	    // release sample
-	    releasePendingSample(sp, found->ps);
+	    HSPPendingSample *ps;
+	    UTARRAY_WALK(found->samples, ps) {
+	      // populate tcp_info structure
+	      SFLFlow_sample_element *tcpElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
+	      tcpElem->tag = SFLFLOW_EX_TCP_INFO;
+	      tcpElem->flowType.tcp_info.dirn = found->pktdirn;
+	      tcpElem->flowType.tcp_info.snd_mss = tcpi.tcpi_snd_mss;
+	      tcpElem->flowType.tcp_info.rcv_mss = tcpi.tcpi_rcv_mss;
+	      tcpElem->flowType.tcp_info.unacked = tcpi.tcpi_unacked;
+	      tcpElem->flowType.tcp_info.lost = tcpi.tcpi_lost;
+	      tcpElem->flowType.tcp_info.retrans = tcpi.tcpi_total_retrans;
+	      tcpElem->flowType.tcp_info.pmtu = tcpi.tcpi_pmtu;
+	      tcpElem->flowType.tcp_info.rtt = tcpi.tcpi_rtt;
+	      tcpElem->flowType.tcp_info.rttvar = tcpi.tcpi_rttvar;
+	      tcpElem->flowType.tcp_info.snd_cwnd = tcpi.tcpi_snd_cwnd;
+	      tcpElem->flowType.tcp_info.reordering = tcpi.tcpi_reordering;
+	      tcpElem->flowType.tcp_info.min_rtt = tcpi.tcpi_min_rtt;
+	      // add to sample
+	      SFLADD_ELEMENT(ps->fs, tcpElem);
+	      // release sample
+	      releasePendingSample(sp, ps);
+	    }
 	    // and free my control-block
-	    my_free(found);
+	    tcpSampleFree(found);
 	  }
 	}
 	attr = RTA_NEXT(attr, rtalen); 
@@ -232,7 +289,8 @@ extern "C" {
 	  if(nlh->nlmsg_type == NLMSG_DONE)
 	    break;
 	  if(nlh->nlmsg_type == NLMSG_ERROR){
-	    fprintf(stderr, "Error in netlink message\n");
+            struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
+	    myLog(LOG_ERR, "Error in netlink message: %d : %s", err_msg->error, strerror(-err_msg->error));
 	    break;
 	  }
 	  struct inet_diag_msg *diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
@@ -259,16 +317,19 @@ extern "C" {
 	break;
       }
       else {
-	myDebug(1, "removing timed-out request");
+	myDebug(1, "removing timed-out request (%s)", tcpSamplePrint(ts));
 	HSPTCPSample *next_ts = ts->next;
 	// remove from Q
 	UTQ_REMOVE(mdata->timeoutQ, ts);
 	// remove from HT
 	UTHashDel(mdata->sampleHT, ts);
-	// let the sample go
-	releasePendingSample(sp, ts->ps);
+	// let the samples go
+	HSPPendingSample *ps;
+	UTARRAY_WALK(ts->samples, ps) {
+	  releasePendingSample(sp, ps);
+	}
 	// free
-	my_free(ts);
+	tcpSampleFree(ts);
 	// walk
 	ts = next_ts;
       }
@@ -463,10 +524,16 @@ extern "C" {
 	    local_src = UTHashGet(sp->localIP6, &src) ? YES : NO;
 	    local_dst = UTHashGet(sp->localIP6, &dst) ? YES : NO;
 	  }
+          if(debug(2)) {
+            char ipb1[51], ipb2[51];
+            myDebug(2, "TCP sample ip_ver==%d local_src=%u local_dst=%u, src=%s dst=%s",
+		    ip_ver,local_src, local_dst,
+		    SFLAddress_print(&src,ipb1,50),
+		    SFLAddress_print(&dst,ipb2,50));
+          }
 	  if(local_src != local_dst) {
 	    // OK,  we are going to look this one up
-	    HSPTCPSample *tcpSample = (HSPTCPSample *)my_calloc(sizeof(HSPTCPSample));
-	    tcpSample->ps = (HSPPendingSample *)data;
+	    HSPTCPSample *tcpSample = tcpSampleNew();
 	    tcpSample->qtime = mdata->packetBus->now;
 	    tcpSample->pktdirn = local_src ? PKTDIR_sent : PKTDIR_received;
 	    // just the established TCP connections
@@ -479,6 +546,8 @@ extern "C" {
 	    // copy into inet_diag_sockid, but flip if we are the destination
 	    struct inet_diag_sockid *sockid = &tcpSample->conn_req.id;
 	    // addresses
+	    tcpSample->src = src;
+	    tcpSample->dst = dst;
 	    if(ip_ver == 4) {
 	      tcpSample->conn_req.sdiag_family = AF_INET;
 	      if(local_src) {
@@ -486,6 +555,7 @@ extern "C" {
 		memcpy(sockid->idiag_dst, &dst.address.ip_v4, 4);
 	      }
 	      else {
+		tcpSample->flipped = YES;
 		memcpy(sockid->idiag_src, &dst.address.ip_v4, 4);
 		memcpy(sockid->idiag_dst, &src.address.ip_v4, 4);
 	      }
@@ -516,13 +586,23 @@ extern "C" {
 	    // I have no cookie :(
 	    sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
 	    sockid->idiag_cookie[1] = INET_DIAG_NOCOOKIE;
-	    // add to HT and timeout queue
-	    UTHashAdd(mdata->sampleHT, tcpSample);
-	    UTQ_ADD_TAIL(mdata->timeoutQ, tcpSample);
 	    // put a hold on this one while we look it up
 	    holdPendingSample(ps);
-	    // send the netlink request
-	    send_diag_msg(mdata->nl_sock, &tcpSample->conn_req);
+	    HSPTCPSample *tsInQ = UTHashGet(mdata->sampleHT, tcpSample);
+	    if(tsInQ) {
+	      myDebug(1, "request already pending");
+	      UTArrayAdd(tsInQ->samples, ps);
+	      tcpSampleFree(tcpSample);
+	    }
+	    else {
+	      myDebug(1, "new request: %s", tcpSamplePrint(tcpSample));
+	      UTArrayAdd(tcpSample->samples, ps);
+	      // add to HT and timeout queue
+	      UTHashAdd(mdata->sampleHT, tcpSample);
+	      UTQ_ADD_TAIL(mdata->timeoutQ, tcpSample);
+	      // send the netlink request
+	      send_diag_msg(mdata->nl_sock, &tcpSample->conn_req);
+	    }
 	  }
 	}
       }
@@ -572,7 +652,8 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     mdata->sampleHT = UTHASH_NEW(HSPTCPSample, conn_req.id, UTHASH_DFLT);
     // trim the hash-key len to select only the socket part of inet_diag_sockid
-    mdata->sampleHT->f_len = 40;
+    // and leave out the interface and the cookie
+    mdata->sampleHT->f_len = 36;
     // register call-backs
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);

@@ -795,9 +795,11 @@ extern "C" {
   }
 
   void UTArrayFree(UTArray *ar) {
-    UTArrayReset(ar);
+    if(ar->sync) {
+      UTArrayReset(ar);
+      my_free(ar->sync);
+    }
     if(ar->objs) my_free(ar->objs);
-    if(ar->sync) my_free(ar->sync);
     my_free(ar);
   }
 
