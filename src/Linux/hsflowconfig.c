@@ -135,7 +135,7 @@ extern "C" {
 
   // expectInteger32
 
-  static uint32_t getMultiplier(char *str)
+  static uint32_t getMultiplier32(char *str)
   {
     uint32_t mult = 1;
     uint32_t len = my_strlen(str);
@@ -159,13 +159,96 @@ extern "C" {
       return NULL;
     }
     char *str = my_strdup(t->str); // take a copy so we can modify it
-    uint32_t mult = getMultiplier(str);
+    uint32_t mult = getMultiplier32(str);
     *arg = (mult * strtol(str, NULL, 0));
     my_free(str);
     if(*arg < minVal || *arg > maxVal) {
       parseError(sp, tok, "range error", "");
       return NULL;
     }
+    return t;
+  }
+
+
+  static uint64_t getMultiplier64(char *str)
+  {
+    uint64_t mult = 1;
+    uint32_t len = my_strlen(str);
+    char last = toupper(str[len - 1]);
+    if(last == 'K' || last == 'M' || last == 'G' || last == 'T' || last == 'P') {
+      // number of the form "100M" or "1G"
+      str[len - 1] = '\0'; // blat the K, M, G, T or P
+      if(last == 'K') mult = 1000LL;
+      if(last == 'M') mult = 1000000LL;
+      if(last == 'G') mult = 1000000000LL;
+      if(last == 'T') mult = 1000000000000LL;
+      if(last == 'P') mult = 1000000000000000LL;
+    }
+    return mult;
+  }
+
+#if 0  // expectInteger64 not needed yet
+
+  static HSPToken *expectInteger64(HSP *sp, HSPToken *tok, uint64_t *arg, uint64_t minVal, uint64_t maxVal)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || !isdigit(t->str[0])) {
+      parseError(sp, tok, "expected integer", "");
+      return NULL;
+    }
+    char *str = my_strdup(t->str); // take a copy so we can modify it
+    uint64_t mult = getMultiplier64(str);
+    *arg = (mult * strtoll(str, NULL, 0));
+    my_free(str);
+    if(*arg < minVal || *arg > maxVal) {
+      parseError(sp, tok, "range error", "");
+      return NULL;
+    }
+    return t;
+  }
+
+#endif // expectInteger64
+
+  static HSPToken *expectIntegerRange64(HSP *sp, HSPToken *tok, uint64_t *arg1, uint64_t *arg2, uint64_t minVal, uint64_t maxVal)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t == NULL || !isdigit(t->str[0])) {
+      parseError(sp, tok, "expected integer", "");
+      return NULL;
+    }
+    char *str = my_strdup(t->str); // take a copy so we can modify it
+    int len = my_strlen(str);
+    int len1 = strcspn(str, "-");
+    str[len1] = '\0';
+    uint64_t mult1 = getMultiplier64(str);
+    *arg1 = (mult1 * strtoll(str, NULL, 0));
+    if(*arg1 < minVal || *arg1 > maxVal) {
+      parseError(sp, tok, "range error", "");
+      return NULL;
+    }
+    if(len > len1) {
+      // we have at least a trailing '-' such as "1G-"
+      char *str2 = str + len1 + 1;
+      if(my_strlen(str2) == 0) {
+	// trailing dash. Allow that to mean "<max>"
+	*arg2 = maxVal;
+      }
+      else {
+	uint64_t mult2 = getMultiplier64(str2);
+	*arg2 = (mult2 * strtoll(str2, NULL, 0));
+	if(*arg2 < minVal || *arg2 > maxVal) {
+	  parseError(sp, tok, "range error", "");
+	  return NULL;
+	}
+      }
+    }
+    else {
+      // no second number - indicate by setting arg2 to 0
+      *arg2 = 0;
+    }
+    my_free(str);
     return t;
   }
 
@@ -1198,6 +1281,10 @@ extern "C" {
 	    case HSPTOKEN_VPORT:
 	      if((tok = expectONOFF(sp, tok, &pc->vport)) == NULL) return NO;
 	      pc->vport_set = YES;
+	      break;
+	    case HSPTOKEN_SPEED:
+	      if((tok = expectIntegerRange64(sp, tok, &pc->speed_min, &pc->speed_max, 0, LLONG_MAX)) == NULL) return NO;
+	      pc->speed_set = YES;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

@@ -16,6 +16,7 @@ extern "C" {
   FILE *f_crash = NULL;
 
   static void installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
+  static bool updatePollingInterval(HSP *sp);
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -917,6 +918,33 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________   pre_config_first        __________________
+    -----------------___________________________------------------
+  */
+
+  static void pre_config_first(HSP *sp) {
+    // make sure we are ready for someone to call getSampler/getPoller
+    updatePollingInterval(sp);
+    
+    // before we do anything else,  read the interfaces again - this time with a full discovery
+    // so that modules can weigh in if required,  and, for example, sampling-rates can be set
+    // correctly.
+    readInterfaces(sp, YES, NULL, NULL, NULL, NULL, NULL);
+    
+    // print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
+    if(debug(1))
+      malloc_stats();
+    
+    // add a <physicalEntity> poller to represent the whole physical host
+    SFLDataSource_instance dsi;
+    // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
+    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
+    sp->poller = sfl_agent_addPoller(sp->agent, &dsi, sp, agentCB_getCounters_request);
+    sfl_poller_set_sFlowCpInterval(sp->poller, sp->actualPollingInterval);
+    sfl_poller_set_sFlowCpReceiver(sp->poller, HSP_SFLOW_RECEIVER_INDEX);
+  }
+
+  /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
     -----------------___________________________------------------
 
@@ -945,7 +973,14 @@ extern "C" {
       sp->sFlowSettings = settings;
 
       // announce the change
-      if(firstConfig) EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
+      if(firstConfig) {
+	// make sure certain things are in place before we proceed. This
+	// could be done with an event such as CONFIG_PRE, but then
+	// we would have to handshake before raising CONFIG_FIRST
+	pre_config_first(sp);
+	// now offer it to the modules
+	EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
+      }
       EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_CHANGED, NULL, 0);
       // delay the config-done event until every thread has processed the
       // config change.  This is especially important the first time because
@@ -1131,26 +1166,15 @@ extern "C" {
       if(!sp->DNSSD.DNSSD)
 	abort();
     }
+  }
 
-    // make sure we are ready for someone to call getSampler/getPoller
-    updatePollingInterval(sp);
+  /*_________________---------------------------__________________
+    _________________     evt_config_changed    __________________
+    -----------------___________________________------------------
+  */
 
-    // before we do anything else,  read the interfaces again - this time with a full discovery
-    // so that modules can weigh in if required,  and, for example, sampling-rates can be set
-    // correctly.
-    readInterfaces(sp, YES, NULL, NULL, NULL, NULL, NULL);
-
-    // print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
-    if(debug(1))
-      malloc_stats();
-
-    // add a <physicalEntity> poller to represent the whole physical host
-    SFLDataSource_instance dsi;
-    // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
-    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
-    sp->poller = sfl_agent_addPoller(sp->agent, &dsi, sp, agentCB_getCounters_request);
-    sfl_poller_set_sFlowCpInterval(sp->poller, sp->actualPollingInterval);
-    sfl_poller_set_sFlowCpReceiver(sp->poller, HSP_SFLOW_RECEIVER_INDEX);
+  static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    myDebug(1, "main: evt_config_changed()");
   }
 
   /*_________________---------------------------__________________
@@ -1550,6 +1574,33 @@ extern "C" {
     // initialize event bus
     sp->rootModule = EVInit(sp);
 
+    // convenience ptr to the poll-bus
+    sp->pollBus = EVGetBus(sp->rootModule, HSPBUS_POLL, YES);
+
+    // register for events that we are going to handle here in the main pollBus thread.  The
+    // events that form the config sequence are requested here before the modules are loaded
+    // so that these functions are called first for each event. For example, a module callback
+    // for HSPEVENT_CONFIG_FIRST will be called after evt_config_first() here,  but before
+    // evt_config_done().
+
+    // Events to feed lines of configuration in one line at a time
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_START), evt_config_start);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_LINE), evt_config_line);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_END), evt_config_end);
+
+    // An event that is called once,  after the config is settled and
+    // interfaces have been fully discovered, but before privileges are dropped
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
+
+    // An event that is called for every config change.
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
+
+    // A handshake event for sync across threads - to make sure CONFIG_FIRST and CONFIG_CHANGED
+    // have been processed to completion by all threads (all buses) before CONFIG_DONE is sent.
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_SHAKE), evt_config_shake);
+    // CONFIG_DONE is where privileges are dropped (the first time).
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_DONE), evt_config_done);
+
     // load modules (except DNSSD - loaded below).
     // The module init functions can assume that the
     // config is loaded,  but they can't assume anything
@@ -1581,17 +1632,6 @@ extern "C" {
     if(sp->os10.os10)
       EVLoadModule(sp->rootModule, "mod_os10", sp->modulesPath);
 
-    // convenience ptr to the poll-bus
-    sp->pollBus = EVGetBus(sp->rootModule, HSPBUS_POLL, YES);
-
-    // register for events that we are going to handle here in the main pollBus thread
-    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_START), evt_config_start);
-    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_LINE), evt_config_line);
-    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_END), evt_config_end);
-    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
-    // EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
-    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_SHAKE), evt_config_shake);
-    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_DONE), evt_config_done);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TOCK), evt_poll_tock);
 

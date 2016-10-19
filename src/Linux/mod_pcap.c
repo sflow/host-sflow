@@ -238,7 +238,8 @@ extern "C" {
     BPFSoc *bpfs;
     UTARRAY_WALK(mdata->bpf_socs, bpfs) {
       struct pcap_stat stats;
-      if(pcap_stats(bpfs->pcap, &stats) == 0) {
+      if(bpfs->pcap
+	 && pcap_stats(bpfs->pcap, &stats) == 0) {
 	bpfs->drops = stats.ps_drop;
       }
     }
@@ -252,12 +253,6 @@ extern "C" {
   static void tap_open(EVMod *mod, BPFSoc *bpfs) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    
-    bpfs->adaptor = adaptorByName(sp, bpfs->deviceName);
-    if(bpfs->adaptor == NULL) {
-      myLog(LOG_ERR, "PCAP: device %s not found", bpfs->deviceName);
-      return;
-    }
     
     bpfs->samplingRate = lookupPacketSamplingRate(bpfs->adaptor, sp->sFlowSettings);
     bpfs->subSamplingRate = bpfs->samplingRate;
@@ -298,23 +293,76 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    evt_config_first       __________________
+    _________________     addBPFSocket          __________________
+    -----------------___________________________------------------
+  */
+  static void addBPFSocket(EVMod *mod,  HSPPcap *pcap, SFLAdaptor *adaptor) {
+    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
+    myDebug(1, "PCAP addBPFSocket(%s) speed=%"PRIu64, adaptor->deviceName, adaptor->ifSpeed);
+    BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
+    UTArrayAdd(mdata->bpf_socs, bpfs);
+    bpfs->module = mod;
+    bpfs->adaptor = adaptor;
+    bpfs->deviceName = adaptor->deviceName;
+    bpfs->promisc = pcap->promisc;
+    bpfs->vport = pcap->vport;
+    bpfs->vport_set = pcap->vport_set;
+    tap_open(mod, bpfs);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    evt_config_first        __________________
     -----------------___________________________------------------
   */
 
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    // the list of pcap {} sections may expand to a longer list of BPFSoc
+    // objects if we are matching with patterns or on ifSpeed etc.
     for(HSPPcap *pcap = sp->pcap.pcaps; pcap; pcap = pcap->nxt) {
-      BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
-      UTArrayAdd(mdata->bpf_socs, bpfs);
-      bpfs->module = mod;
-      bpfs->deviceName = my_strdup(pcap->dev);
-      bpfs->promisc = pcap->promisc;
-      bpfs->vport = pcap->vport;
-      bpfs->vport_set = pcap->vport_set;
-      tap_open(mod, bpfs);
+      if(pcap->dev) {
+	SFLAdaptor *adaptor = adaptorByName(sp, pcap->dev);
+	if(adaptor == NULL) {
+	  myLog(LOG_ERR, "PCAP: device %s not found", pcap->dev);
+	  continue;
+	}
+	addBPFSocket(mod, pcap, adaptor);
+      }
+      else if(pcap->speed_set) {
+	if(debug(1)) {
+	  char sp1[20], sp2[20];
+	  printSpeed(pcap->speed_min, sp1, 20);
+	  printSpeed(pcap->speed_max, sp2, 20);
+	  myDebug(1, "PCAP: searching devices with speed %s-%s", sp1, sp2);
+	}
+	SFLAdaptor *adaptor;
+	UTHASH_WALK(sp->adaptorsByName, adaptor) {
+	  if((adaptor->ifSpeed == pcap->speed_min && pcap->speed_max == 0)
+	     || (adaptor->ifSpeed >= pcap->speed_min
+		 && adaptor->ifSpeed <= pcap->speed_max)) {
+	    // passed the speed test,  but there may be other
+	    // reasons to reject this one:
+	    HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
+	    if(nio->bond_master) {
+	      myDebug(1, "not %s (bond_master)", adaptor->deviceName);
+	    }
+	    else if(nio->vlan != HSP_VLAN_ALL) {
+	      myDebug(1, "not %s (vlan=%u)", adaptor->deviceName, nio->vlan);
+	    }
+	    else if(nio->devType != HSPDEV_PHYSICAL
+		    && nio->devType != HSPDEV_OTHER) {
+	      myDebug(1, "not %s (devType=%s)",
+		      adaptor->deviceName,
+		      devTypeName(nio->devType));
+	    }
+	    else {
+	      // passed all the tests
+	      addBPFSocket(mod, pcap, adaptor);
+	    }
+	  }
+	}
+      }
     }
   }
 

@@ -32,7 +32,7 @@ extern "C" {
 #include <pwd.h> // for getpwnam()
 #include <grp.h>
 #include <sys/resource.h> // for setrlimit()
-#include <limits.h> // for UINT_MAX
+#include <limits.h> // for UINT_MAX, LLONG_MAX
 
 #if defined(__GLIBC__) || defined(__UCLIBC__)
 // for signal backtrace, if supported by libc
@@ -138,6 +138,9 @@ extern "C" {
     bool promisc;
     bool vport;
     bool vport_set;
+    uint64_t speed_min;
+    uint64_t speed_max;
+    bool speed_set;
   } HSPPcap;
 
   typedef struct _HSPCIDR {
@@ -535,6 +538,7 @@ extern "C" {
 
   // read functions
   int readInterfaces(HSP *sp, bool full_discovery, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
+  const char *devTypeName(EnumHSPDevType devType);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk);

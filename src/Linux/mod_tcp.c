@@ -206,6 +206,18 @@ extern "C" {
   {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    // user info.  Prefer getpwuid_r() if avaiable...
+    // struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
+    // myDebug(1, "diag_msg: UID=%u(%s) inode=%u",
+    // diag_msg->idiag_uid,
+    // uid_info->pw_name,
+    // diag_msg->idiag_inode);
+    // Theoretically we could follow the inode back to
+    // the socket and get the application (command line)
+    // but there does not seem to be a direct lookup
+    // for that.
+
     if(rtalen > 0) {
       struct rtattr *attr = (struct rtattr *)(diag_msg + 1);
       

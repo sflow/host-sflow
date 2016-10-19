@@ -379,6 +379,25 @@ extern "C" {
   }
 #endif /* HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO */
 
+
+/*________________---------------------------__________________
+  ________________      HSPDevTypeName       __________________
+  ----------------___________________________------------------
+*/
+
+  const char *devTypeName(EnumHSPDevType devType) {
+    switch(devType) {
+    case HSPDEV_OTHER: return "OTHER";
+    case HSPDEV_PHYSICAL: return "PHYSICAL";
+    case HSPDEV_VETH: return "VETH";
+    case HSPDEV_VIF: return "VIF";
+    case HSPDEV_OVS: return "OVS";
+    case HSPDEV_BRIDGE: return "BRIDGE";
+    default: break;
+    }
+    return "<out of range>";
+  }
+
 /*________________---------------------------__________________
   ________________  ethtool_get_GDRVINFO     __________________
   ----------------___________________________------------------
