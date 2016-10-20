@@ -173,12 +173,15 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+#define MAGIC_SEQ 0x50C00L
+
   static int send_diag_msg(int sockfd, struct inet_diag_req_v2 *conn_req) {
     struct nlmsghdr nlh = { 0 };
     nlh.nlmsg_len = NLMSG_LENGTH(sizeof(*conn_req));
     nlh.nlmsg_flags = NLM_F_REQUEST;
     nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
-    
+    nlh.nlmsg_seq = MAGIC_SEQ;
+
     struct iovec iov[2];
     iov[0].iov_base = (void*) &nlh;
     iov[0].iov_len = sizeof(nlh);
@@ -302,13 +305,19 @@ extern "C" {
 	    break;
 	  if(nlh->nlmsg_type == NLMSG_ERROR){
             struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
-	    myLog(LOG_ERR, "Error in netlink message: %d : %s", err_msg->error, strerror(-err_msg->error));
+	    // Frequently see:
+	    // "device or resource busy" (especially with NLM_F_DUMP set)
+	    // "netlink error" (IPv6 but connection not established)
+	    // so only log when debugging:
+	    myDebug(1, "Error in netlink message: %d : %s", err_msg->error, strerror(-err_msg->error));
 	    break;
 	  }
-	  struct inet_diag_msg *diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
-	  int rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
-	  parse_diag_msg(mod, diag_msg, rtalen);
-	  nlh = NLMSG_NEXT(nlh, numbytes); 
+	  if(nlh->nlmsg_seq == MAGIC_SEQ) {
+	    struct inet_diag_msg *diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
+	    int rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
+	    parse_diag_msg(mod, diag_msg, rtalen);
+	  }
+	  nlh = NLMSG_NEXT(nlh, numbytes);
 	}
       }
     }
@@ -530,7 +539,7 @@ extern "C" {
 	    local_dst = UTHashGet(sp->localIP, &dst) ? YES : NO;
 	  }
 	  else {
-	    src.type = dst.type = SFLADDRESSTYPE_IP_V4;
+	    src.type = dst.type = SFLADDRESSTYPE_IP_V6;
 	    memcpy(&src.address.ip_v6, hdr + offset_l3 + 8, 16);
 	    memcpy(&dst.address.ip_v6, hdr + offset_l3 + 24, 16);
 	    local_src = UTHashGet(sp->localIP6, &src) ? YES : NO;
