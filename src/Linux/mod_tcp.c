@@ -250,7 +250,7 @@ extern "C" {
 	  HSPTCPSample search = { .conn_req.id = diag_msg->id };
 	  HSPTCPSample *found = UTHashDelKey(mdata->sampleHT, &search);
 	  if(found) {
-	    myDebug(1, "found TCPSample: %s RTT:%uuS", tcpSamplePrint(found));
+	    myDebug(1, "found TCPSample: %s RTT:%uuS", tcpSamplePrint(found), tcpi.tcpi_rtt);
 	    // unlink from Q
 	    UTQ_REMOVE(mdata->timeoutQ, found);
 	    HSPPendingSample *ps;
