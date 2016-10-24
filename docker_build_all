@@ -1,0 +1,4 @@
+#!/bin/bash
+cd `dirname $0`
+./docker_build_on centos7
+./docker_build_on ubuntu16
