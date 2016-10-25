@@ -1,4 +1,6 @@
 #!/bin/bash
 cd `dirname $0`
-./docker_build_on centos7
-./docker_build_on ubuntu16
+for platform in `ls docker_build`; do
+   echo "============= docker_build_on $platform ================"
+   ./docker_build_on $platform;
+done

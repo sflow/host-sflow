@@ -48,10 +48,12 @@ extern "C" {
 
   EVBus *EVGetBus(EVMod *mod, char *name, bool create) {
     EVBus *bus;
+    bool new_bus = NO;
     SEMLOCK_DO(mod->root->sync) {
       EVBus rlm = { .name = name };
       bus = UTHashGet(mod->root->buses, &rlm);
       if(!bus && create) {
+	new_bus = YES;
 	bus = (EVBus *)my_calloc(sizeof(EVBus));
 	bus->root = mod->root;
 	bus->name = my_strdup(name);
@@ -76,8 +78,10 @@ extern "C" {
       }
     }
 
-    EVEvent *handshake = EVGetEvent(bus, EVEVENT_HANDSHAKE);
-    EVEventRx(mod, handshake, evt_handshake);
+    if(new_bus) {
+      EVEvent *handshake = EVGetEvent(bus, EVEVENT_HANDSHAKE);
+      EVEventRx(mod, handshake, evt_handshake);
+    }
 
     return bus;
   }
