@@ -3,20 +3,17 @@ http://sflow.net/license.html
 
 To compile and install, try this:
 
-% make
+% make FEATURES="ALL"
 % sudo make install
 % sudo make schedule
 
-To compile features that can be enabled in the config:
+Features can be specified individually:
 
-% make FEATURES="ALL"
-
-Or you can specify them individually:
-
-% make FEATURES="ULOG NFLOG PCAP DOCKER KVM OVS"
+% make FEATURES="ULOG NFLOG PCAP DOCKER KVM OVS TCP"
 
 Edit /etc/hsflowd.conf for configuration.  The options are
-described in the comments there.
+described here:
+http://sflow.net/host-sflow-linux-config.php
 
 Module dependencies var from platform to platform, but
 the following packages usually have to be installed before
@@ -34,9 +31,13 @@ To start the daemon, run:
 
 and check the syslog for errors.
 
-To run in the debugger, change the Makefile to compile with -g,
-recompile, and then run with the "-dd" command line option to
-prevent daemonization:
+To run in the debugger, first recompile like this:
+% make clean
+% make FEATURES="ALL" OPT=-g
+% sudo make install
+
+and then run with the "-dd" command line option to
+prevent daemonization and increase the logging level:
 
 % sudo gdb hsflowd
 gdb> set args -dd
@@ -44,21 +45,17 @@ gdb> r
 
 For more detailed logging,  using -ddd or -dddd.
 
-To build an rpm from a git repo, try:
+To build an rpm, try:
 
 % make rpm FEATURES="..."
-
-To build an rpm from a sources tarball hsflowd-<ver>.tar.gz,
-copy the tarball to your rpm SOURCES directory then run:
-
-% rpmbuild -ba hsflowd.spec --define _FEATURES "..."
-
-The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
-(where <ARCH> is i386 or x86_64 or ...)
 
 To build a Debian package, try:
 
 % make deb FEATURES="..."
 
-The hsflowd-<version>-<release>.deb package should appear
-in the current directory.
+And to use Docker to compile natively on other platforms (if required)
+you can try:
+
+% sudo ./docker_build_on <platform>
+
+Where <platform> is a directory under ./docker_build/

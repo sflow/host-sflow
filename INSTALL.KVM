@@ -6,8 +6,7 @@ Red Hat KVM Hypervisor
 
 To compile for a Red Hat KVM hypervisor:
 
-DDK> export LIBVIRT=yes
-DDK> make rpm
+% make rpm FEATURES="KVM"
 
 The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
 (where <ARCH> is i386 or x86_64 or ...)

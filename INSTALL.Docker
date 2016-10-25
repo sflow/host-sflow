@@ -4,7 +4,7 @@ http://sflow.net/license.html
 Compile/install
 ===============
 
-root> make DOCKER=yes PCAP=yes
+root> make FEATURES="DOCKER PCAP"
 root> make install
 
 Edit /etc/hsflowd.conf for configuration, then:
@@ -29,30 +29,19 @@ pcap { dev = docker0 }
 
 so that the traffic to and from the docker containers is
 monitored with sFlow.  Alternatively, if Open VSwitch is running,
-then starting sflowovsd will propagate sFlow configuration to
-the v-switch via ovs-vsctl(1):
+adding:
 
-root> service sflowovsd start
+ovs { }
 
-Debugging
-=========
-To run in the debugger, compile with:
-
-root> make DOCKER=yes PCAP=yes OPT=-g
-
-and run with the "-d" or "-dd" command line option to
-prevent daemonization and increase logging:
-
-root> gdb hsflowd
-gdb> set args -dd
-gdb> r
+will propagate your collector and sampling-rate information
+to the switch via ovs-vsctl(1).
 
 Packaging
 =========
 To build an rpm, try:
 
-% make DOCKER=yes PCAP=yes rpm
+% make rpm FEATURES="DOCKER PCAP"
 
 To build a Debian package, try:
 
-% make DOCKER=yes PCAP=yes deb
+% make deb FEATURES="DOCKER PCAP"
