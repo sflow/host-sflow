@@ -1,7 +1,7 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10
+FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 DBUS
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
 CONFDIR    ?= /etc
@@ -99,6 +99,9 @@ LIBS_OVS=
 CFLAGS_OS10=
 LIBS_OS10=
 
+CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
+LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
+
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += -DUTHEAP
@@ -170,6 +173,7 @@ OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
 OBJS_OS10=mod_os10.o
+OBJS_DBUS=mod_dbus.o
 
 BUILDTGTS=hsflowd \
           mod_json.so \
@@ -201,6 +205,8 @@ OVS: mod_ovs.so
 CUMULUS: mod_cumulus.so
 
 OS10: mod_os10.so
+
+DBUS: mod_dbus.so
 
 #########  hsflowd  #########
 
@@ -321,6 +327,14 @@ mod_os10.o: mod_os10.c $(HEADERS)
 mod_os10.so: $(OBJS_OS10)
 	$(LD) -o $@ $(OBJS_OS10) $(LDFLAGS_SHARED) $(LIBS_OS10)
 
+#----------------------------
+
+
+mod_dbus.o: mod_dbus.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_DBUS)
+
+mod_dbus.so: $(OBJS_DBUS)
+	$(LD) -o $@ $(OBJS_DBUS) $(LDFLAGS_SHARED) $(LIBS_DBUS)
 
 #########  install  #########
 
@@ -391,3 +405,4 @@ mod_nvml.o: mod_nvml.c $(HEADERS)
 mod_cumulus.o: mod_cumulus.c $(HEADERS)
 mod_ovs.o: mod_ovs.c $(HEADERS)
 mod_os10.o: mod_os10.c $(HEADERS)
+mod_dbus.o: mod_dbus.c $(HEADERS)

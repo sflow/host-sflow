@@ -187,7 +187,8 @@ extern "C" {
     VMTYPE_UNDEFINED=0,
     VMTYPE_XEN,
     VMTYPE_KVM,
-    VMTYPE_DOCKER} EnumVMType;
+    VMTYPE_DOCKER,
+    VMTYPE_DBUS } EnumVMType;
 
   typedef struct _HSPVMState {
     char uuid[16];
@@ -444,6 +445,9 @@ extern "C" {
     struct {
       bool tcp;
     } tcp;
+    struct {
+      bool dbus;
+    } dbus;
 
     // hardware sampling flag
     bool hardwareSampling;

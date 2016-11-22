@@ -1631,6 +1631,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_cumulus", sp->modulesPath);
     if(sp->os10.os10)
       EVLoadModule(sp->rootModule, "mod_os10", sp->modulesPath);
+    if(sp->dbus.dbus)
+      EVLoadModule(sp->rootModule, "mod_dbus", sp->modulesPath);
 
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TOCK), evt_poll_tock);
