@@ -30,7 +30,27 @@ extern "C" {
 #define HSP_DBUS_MAX_FNAME_LEN 255
 #define HSP_DBUS_MAX_STATS_LINELEN 512
 #define HSP_DBUS_WAIT_STARTUP 2
-
+  
+  typedef enum {
+    HSP_DBUS_PARSE_NONE=0,
+    HSP_DBUS_PARSE_LISTUNITS,
+    HSP_DBUS_PARSE_MAINPID,
+    HSP_DBUS_PARSE_CGROUP
+  } EnumHSPDBUSParse;
+  
+  typedef struct _HSPDbusUnit { // ssssssouso
+    char *unit_name;
+    char *unit_descr;
+    char *load_state;
+    char *active_state;
+    //char *sub_state;
+    //char *following;
+    //char *obj_path;
+    //uint32_t job_queued;
+    //char *job_type;
+    //char *job_obj_path;
+  } HSPDbusUnit;
+  
   // patterns to substitute with cgroup, longid and counter-filename
   static const char *HSP_CGROUP_PATHS[] = {
     "/sys/fs/cgroup/%s/dbus/%s/%s",
@@ -38,7 +58,7 @@ extern "C" {
     "/sys/fs/cgroup/%s/system.slice/dbus-%s.scope/%s",
     NULL
   };
-
+  
   typedef struct _HSPVMState_DBUS {
     HSPVMState vm; // superclass: must come first
     char *id;
@@ -60,6 +80,8 @@ extern "C" {
     // bool dbusFlush:1;
     uint32_t countdownToResync;
     int cgroupPathIdx;
+    uint32_t serial_ListUnits;
+    EnumHSPDBUSParse parsing;
   } HSP_mod_DBUS;
 
   static void dbusSynchronize(EVMod *mod);
@@ -96,79 +118,38 @@ extern "C" {
       myLog(LOG_INFO, "%s: %s", prefix, containerStr(container, buf, 1024));
   }
 
+  /*_________________---------------------------__________________
+    _________________    parseDbusElem          __________________
+    -----------------___________________________------------------
+  */
 
   static void indent(UTStrBuf *buf, int depth) {
     for(int ii = 0; ii < depth; ii++)
-      UTStrBuf_append(buf, " ");
+      UTStrBuf_append(buf, "  ");
   }
 
-  static void printDBusElem(DBusMessageIter *it, UTStrBuf *buf, int depth, char *suffix) {
-    indent(buf, depth);
+#define PRINT_DBUS_VAR(it,type,format,buf) do { \
+    type val;					\
+    dbus_message_iter_get_basic(it, &val);	\
+    UTStrBuf_printf(buf, format, val);		\
+  } while(0)
+  
+  static void parseDBusElem(DBusMessageIter *it, UTStrBuf *buf, bool ind, int depth, char *suffix) {
+    if(ind) indent(buf, depth);
     int atype = dbus_message_iter_get_arg_type(it);
     switch(atype) {
-    case DBUS_TYPE_INVALID:
-      break;
-    case DBUS_TYPE_STRING: {
-      char *val = NULL;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "\"%s\"", val);
-      break;
-    }
-    case DBUS_TYPE_OBJECT_PATH: {
-      char *val = NULL;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "obj=%s", val);
-      break;
-    }
-    case DBUS_TYPE_BYTE: {
-      uint8_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "0x%02x", val);
-      break;
-    }
-    case DBUS_TYPE_INT16: {
-      int16_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%d", val);
-      break;
-    }
-    case DBUS_TYPE_INT32: {
-      int32_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%d", val);
-      break;
-    }
-    case DBUS_TYPE_INT64: {
-      int64_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%"PRId64, val);
-      break;
-    }
-    case DBUS_TYPE_UINT16: {
-      uint16_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%u", val);
-      break;
-    }
-    case DBUS_TYPE_UINT32: {
-      uint16_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%u", val);
-      break;
-    }
-    case DBUS_TYPE_UINT64: {
-      uint64_t val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%"PRIu64, val);
-      break;
-    }
-    case DBUS_TYPE_DOUBLE: {
-      double val;
-      dbus_message_iter_get_basic(it, &val);
-      UTStrBuf_printf(buf, "%f", val);
-      break;
-    }
-    case DBUS_TYPE_BOOLEAN: {
+    case DBUS_TYPE_INVALID: break;
+    case DBUS_TYPE_STRING: PRINT_DBUS_VAR(it, char *, "\"%s\"", buf); break;
+    case DBUS_TYPE_OBJECT_PATH: PRINT_DBUS_VAR(it, char *, "obj=%s", buf); break;
+    case DBUS_TYPE_BYTE: PRINT_DBUS_VAR(it, uint8_t, "0x%02x", buf); break;
+    case DBUS_TYPE_INT16: PRINT_DBUS_VAR(it, int16_t, "%d", buf); break;
+    case DBUS_TYPE_INT32: PRINT_DBUS_VAR(it, int32_t, "%d", buf); break;
+    case DBUS_TYPE_INT64: PRINT_DBUS_VAR(it, int64_t, "%"PRId64, buf); break;
+    case DBUS_TYPE_UINT16: PRINT_DBUS_VAR(it, uint16_t, "%u", buf); break;
+    case DBUS_TYPE_UINT32: PRINT_DBUS_VAR(it, uint32_t, "%u", buf); break;
+    case DBUS_TYPE_UINT64: PRINT_DBUS_VAR(it, uint64_t, "%"PRIu64, buf); break;
+    case DBUS_TYPE_DOUBLE: PRINT_DBUS_VAR(it, double, "%f", buf); break;
+    case DBUS_TYPE_BOOLEAN: { 
       dbus_bool_t val;
       dbus_message_iter_get_basic(it, &val);
       UTStrBuf_printf(buf, "%s", val ? "true":"false");
@@ -178,26 +159,33 @@ extern "C" {
       DBusMessageIter sub;
       dbus_message_iter_recurse(it, &sub);
       UTStrBuf_printf(buf, "(");
-      printDBusElem(&sub, buf, 0, ")");
+      parseDBusElem(&sub, buf, NO, depth+1, ")");
       break;
     }
     case DBUS_TYPE_ARRAY: {
       DBusMessageIter sub;
       dbus_message_iter_recurse(it, &sub);
-      UTStrBuf_printf(buf, "[\n");
-      do printDBusElem(&sub, buf, depth+2, ",\n");
-      while (dbus_message_iter_next(&sub));
-      indent(buf, depth);
-      UTStrBuf_printf(buf, "]");
+      // handle empty array
+      int elemType = dbus_message_iter_get_arg_type(&sub);
+      if(elemType == DBUS_TYPE_INVALID) {
+	UTStrBuf_printf(buf, "[]");
+      }
+      else {
+	UTStrBuf_printf(buf, "[\n");
+	do parseDBusElem(&sub, buf, YES, depth+1, ",\n");
+	while (dbus_message_iter_next(&sub));
+	indent(buf, depth);
+	UTStrBuf_printf(buf, "]");
+      }
       break;
     }
     case DBUS_TYPE_DICT_ENTRY: {
       DBusMessageIter sub;
       dbus_message_iter_recurse(it, &sub);
       do {
-	printDBusElem(&sub, buf, depth+2, " => ");
+	parseDBusElem(&sub, buf, NO, depth+1, " => ");
 	dbus_message_iter_next(&sub);
-	printDBusElem(&sub, buf, 0, NULL);
+	parseDBusElem(&sub, buf, NO, depth+1, NULL);
       }
       while (dbus_message_iter_next(&sub));
       break;
@@ -206,7 +194,7 @@ extern "C" {
       DBusMessageIter sub;
       dbus_message_iter_recurse(it, &sub);
       UTStrBuf_printf(buf, "struct {\n");
-      do printDBusElem(&sub, buf, depth+2, ",\n");
+      do parseDBusElem(&sub, buf, YES, depth+1, ",\n");
       while (dbus_message_iter_next(&sub));
       indent(buf, depth);
       UTStrBuf_printf(buf, "}");
@@ -219,7 +207,13 @@ extern "C" {
     if(suffix) UTStrBuf_append(buf, suffix);
   }
 
-  static void printDBusMessage(EVMod *mod, DBusMessage *msg) {
+
+  /*_________________---------------------------__________________
+    _________________    parseDbusMessage       __________________
+    -----------------___________________________------------------
+  */
+
+  static void parseDBusMessage(EVMod *mod, DBusMessage *msg) {
     // HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     myLog(LOG_INFO, "DBUS: dbusCB got message");
     int mtype = dbus_message_get_type(msg);
@@ -255,7 +249,7 @@ extern "C" {
     UTStrBuf_printf(buf, ") {");
     DBusMessageIter iterator;
     if(dbus_message_iter_init(msg, &iterator)) {
-      do printDBusElem(&iterator, buf, 2, "\n");
+      do parseDBusElem(&iterator, buf, YES, 1, "\n");
       while (dbus_message_iter_next(&iterator));
     }
     UTStrBuf_append(buf, "}\n");
@@ -643,7 +637,7 @@ extern "C" {
 
 
   /*_________________---------------------------__________________
-    _________________    openDbusSocket         __________________
+    _________________   setContainerName        __________________
     -----------------___________________________------------------
   */
 
@@ -656,122 +650,121 @@ extern "C" {
     }
   }
 
-  static void dbusListUnits(EVMod *mod) {
+  /*_________________---------------------------__________________
+    _________________     dbusMethod            __________________
+    -----------------___________________________------------------
+  */
+
+  static uint32_t dbusMethod(EVMod *mod, char *target, char  *obj, char *interface, char *method, ...) {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-    DBusPendingCall *pending;
-    DBusMessage *msg = dbus_message_new_method_call("org.freedesktop.systemd1", // target for the method call
-						    "/org/freedesktop/systemd1", // object to call on
-						    "org.freedesktop.systemd1.Manager", // interface to call on
-						    "ListUnits" /*"ListJobs"*/); // method name
-    if(!msg) {
-      myLog(LOG_ERR, "dbus_message_new_method_call() failed");
-      return;
-    }
-
+    DBusMessage *msg = dbus_message_new_method_call(target, obj, interface, method);
     // append arguments
-    // send message and get a handle for a reply
-    if(!dbus_connection_send_with_reply(mdata->connection, msg, &pending, -1)) { // -1 is default timeout
-      myLog(LOG_ERR, "dbus_connection_send_with_reply() failed");
-      return;
+    DBusMessageIter iter;
+    dbus_message_iter_init_append(msg, &iter);
+    va_list args;
+    va_start(args, method);
+    for(;;) {
+      int type = va_arg(args, int);
+      void *arg = va_arg(args, void *);
+      if(type == DBUS_TYPE_INVALID || arg == NULL) break;
+      dbus_message_iter_append_basic(&iter, type, &arg);
     }
-    if(!pending) { 
-      myLog(LOG_ERR, "dbus_connection_send_with_reply() failed - pending == NULL");
-      return;
-    }
-
-    dbus_connection_flush(mdata->connection);
-    // free message
-    dbus_message_unref(msg);
-    
-    // block until we receive a reply
-    dbus_pending_call_block(pending);
-    
-    // get the reply message
-    msg = dbus_pending_call_steal_reply(pending);
-    if (!msg) {
-      myLog(LOG_ERR, "dbus_connection_call_steal_reply() failed");
-      return;
-    }
-    // free the pending message handle
-    dbus_pending_call_unref(pending);
-    printDBusMessage(mod, msg);
-    // free reply and close connection
+    va_end(args);
+    // send the message
+    uint32_t serial = 0;
+    dbus_connection_send(mdata->connection, msg, &serial);
     dbus_message_unref(msg);   
+    return serial;
   }
 
-  static void dbusGetUnit(EVMod *mod, char *unit_name) {
-    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-    DBusPendingCall *pending;
-    DBusMessage *msg = dbus_message_new_method_call("org.freedesktop.systemd1", // target for the method call
-						    "/org/freedesktop/systemd1", // object to call on
-						    "org.freedesktop.systemd1.Manager", // interface to call on
-						    "GetUnit"); // method name
-    if(!msg) {
-      myLog(LOG_ERR, "dbus_message_new_method_call() failed");
-      return;
-    }
-
-    // append arguments
-    DBusMessageIter args;
-    dbus_message_iter_init_append(msg, &args);
-    if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &unit_name)) { 
-      myLog(LOG_ERR, "dbus_connection_iter_append_basic() failed");
-      return;
-    }
-
-    // send message and get a handle for a reply
-    if(!dbus_connection_send_with_reply(mdata->connection, msg, &pending, -1)) { // -1 is default timeout
-      myLog(LOG_ERR, "dbus_connection_send_with_reply() failed");
-      return;
-    }
-    if(!pending) { 
-      myLog(LOG_ERR, "dbus_connection_send_with_reply() failed - pending == NULL");
-      return;
-    }
-
-    dbus_connection_flush(mdata->connection);
-    // free message
-    dbus_message_unref(msg);
-    // block until we receive a reply
-    dbus_pending_call_block(pending);
-    // get the reply message
-    msg = dbus_pending_call_steal_reply(pending);
-    if (!msg) {
-      myLog(LOG_ERR, "dbus_connection_call_steal_reply() failed");
-      return;
-    }
-    // free the pending message handle
-    dbus_pending_call_unref(pending);
-    printDBusMessage(mod, msg);
-    // free reply and close connection
-    dbus_message_unref(msg);   
-  }
+  /*_________________---------------------------__________________
+    _________________   dbusSynchronize         __________________
+    -----------------___________________________------------------
+  */
 
   static void dbusSynchronize(EVMod *mod) {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     // TODO: dbusClearAll(mod);
     mdata->dbusSync = NO;
     mdata->cgroupPathIdx = -1;
-    // send "ListJobs" request
-    // TODO: when are we in sync?  And do we need to queue the events while we
-    // process the jobs request, or does dbus get everything in the right order?
-    // What chance do we have of getting everything in the right order anyway?
-    // Perhaps we should just call listJobs every time and not worry about
-    // event-driven behavior?
-    // TODO: call subscribe
-    dbusListUnits(mod);
-    dbusGetUnit(mod, "inmsfd.service");
+    dbusMethod(mod,
+	       "org.freedesktop.systemd1",
+	       "/org/freedesktop/systemd1",
+	       "org.freedesktop.systemd1.Manager",
+	       "Subscribe");
+    mdata->serial_ListUnits = dbusMethod(mod,
+					 "org.freedesktop.systemd1",
+					 "/org/freedesktop/systemd1",
+					 "org.freedesktop.systemd1.Manager",
+					 "ListUnits");
+    dbusMethod(mod,
+	       "org.freedesktop.systemd1",
+	       "/org/freedesktop/systemd1",
+	       "org.freedesktop.systemd1.Manager",
+	       "GetUnit",
+	       DBUS_TYPE_STRING,
+	       "httpd.service");
+    dbusMethod(mod,
+	       "org.freedesktop.systemd1",
+	       "/org/freedesktop/systemd1/unit/httpd_2eservice",
+	       "org.freedesktop.DBus.Properties",
+	       "GetAll",
+	       DBUS_TYPE_STRING,
+	       "org.freedesktop.systemd1.Service");
+    dbusMethod(mod,
+	       "org.freedesktop.systemd1",
+	       "/org/freedesktop/systemd1/unit/httpd_2eservice",
+	       "org.freedesktop.DBus.Properties",
+	       "Get",
+	       DBUS_TYPE_STRING,
+	       "org.freedesktop.systemd1.Service",
+	       DBUS_TYPE_STRING,
+	       "MainPID");
+    dbusMethod(mod,
+	       "org.freedesktop.systemd1",
+	       "/org/freedesktop/systemd1/unit/httpd_2eservice",
+	       "org.freedesktop.DBus.Properties",
+	       "Get",
+	       DBUS_TYPE_STRING,
+	       "org.freedesktop.systemd1.Service",
+	       DBUS_TYPE_STRING,
+	       "ControlGroup");
+    // could try and get "MemoryCurrent" and "CPUUsageNSec" here, but since they
+    // are usually not limited,  these numbers are usually == (uint64_t)-1.  So
+    // it looks like we get a more predictable solution by taking the ControlGroup
+    // and looking for the list of process IDs under:
+    // /sys/fs/cgroup/systemd/system.slice/<service>/cgroup.procs
+    // then we can rip through /proc/<pid>/stat and add up the numbers.  The downside
+    // is that a service might have pids that come and go,  so we would lose data
+    // in that case.
   }
 
+
+  /*_________________---------------------------__________________
+    _________________    evt_config_first       __________________
+    -----------------___________________________------------------
+  */
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     mdata->countdownToResync = HSP_DBUS_WAIT_STARTUP;
   }
 
+  
+  /*_________________---------------------------__________________
+    _________________       dbusCB              __________________
+    -----------------___________________________------------------
+  */
+
 static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message, void *user_data)
 {
   EVMod *mod = user_data;
-  printDBusMessage(mod, message);
+  HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
+  mdata->parsing = HSP_DBUS_PARSE_NONE;
+  if(dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_METHOD_RETURN
+     && dbus_message_get_reply_serial(message) == mdata->serial_ListUnits) {
+    mdata->parsing = HSP_DBUS_PARSE_LISTUNITS;
+  }
+  parseDBusMessage(mod, message);
   // TODO:
   //if (dbus_message_is_signal(message, DBUS_INTERFACE_LOCAL, "Disconnected")) {
   //  myLog(LOG_ERR, "DBUS disconnected");
@@ -779,12 +772,22 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
   return DBUS_HANDLER_RESULT_HANDLED;
 }
 
+  /*_________________---------------------------__________________
+    _________________       readDBus            __________________
+    -----------------___________________________------------------
+  */
+
   static void readDBUS(EVMod *mod, EVSocket *sock, void *magic)
   {
     myLog(LOG_INFO, "DBUS: readDBUS");
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     dbus_connection_read_write_dispatch(mdata->connection, 0);
   }
+
+  /*_________________---------------------------__________________
+    _________________    addMatch               __________________
+    -----------------___________________________------------------
+  */
 
   static void addMatch(EVMod *mod, char *type) {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
