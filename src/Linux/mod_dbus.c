@@ -752,6 +752,7 @@ extern "C" {
 	  fclose(pidsFile);
 	  if(UTArrayN(unit->pids)) {
 	    getContainer(mod, unit, YES);
+
 	  }
 	}
       }
@@ -878,7 +879,8 @@ extern "C" {
 	       "org.freedesktop.systemd1.Manager",
 	       "Subscribe",
 	       HSP_dbusMethod_endargs);
-    dbusMethod(mod,
+
+    if(0) dbusMethod(mod,
 	       handler_listUnits,
 	       NULL,
 	       "org.freedesktop.systemd1",
@@ -886,23 +888,32 @@ extern "C" {
 	       "org.freedesktop.systemd1.Manager",
 	       "ListUnits",
 	       HSP_dbusMethod_endargs);
+
+
     /* dbusMethod(mod, */
+    /* 	       NULL, */
     /* 	       NULL, */
     /* 	       "org.freedesktop.systemd1", */
     /* 	       "/org/freedesktop/systemd1", */
     /* 	       "org.freedesktop.systemd1.Manager", */
     /* 	       "GetUnit", */
     /* 	       DBUS_TYPE_STRING, */
-    /* 	       "httpd.service"); */
+    /* 	       "httpd.service", */
+    /* 	       HSP_dbusMethod_endargs); */
+
+    dbusMethod(mod,
+	       NULL,
+    	       NULL,
+    	       "org.freedesktop.systemd1",
+    	       "/org/freedesktop/systemd1/unit/httpd_2eservice",
+    	       "org.freedesktop.DBus.Properties",
+    	       "GetAll",
+    	       DBUS_TYPE_STRING,
+    	       "org.freedesktop.systemd1.Service",
+	       HSP_dbusMethod_endargs);
+
     /* dbusMethod(mod, */
     /* 	       NULL, */
-    /* 	       "org.freedesktop.systemd1", */
-    /* 	       "/org/freedesktop/systemd1/unit/httpd_2eservice", */
-    /* 	       "org.freedesktop.DBus.Properties", */
-    /* 	       "GetAll", */
-    /* 	       DBUS_TYPE_STRING, */
-    /* 	       "org.freedesktop.systemd1.Service"); */
-    /* dbusMethod(mod, */
     /* 	       NULL, */
     /* 	       "org.freedesktop.systemd1", */
     /* 	       "/org/freedesktop/systemd1/unit/httpd_2eservice", */
@@ -911,7 +922,9 @@ extern "C" {
     /* 	       DBUS_TYPE_STRING, */
     /* 	       "org.freedesktop.systemd1.Service", */
     /* 	       DBUS_TYPE_STRING, */
-    /* 	       "MainPID"); */
+    /* 	       "MainPID", */
+    /* 	       HSP_dbusMethod_endargs); */
+
     /* dbusMethod(mod, */
     /* 	       NULL, */
     /* 	       "org.freedesktop.systemd1", */
