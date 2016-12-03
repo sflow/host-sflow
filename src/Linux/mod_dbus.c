@@ -50,6 +50,9 @@ extern "C" {
     char uuid[16];
     UTArray *pids;
     bool marked:1;
+    bool cpuAccounting:1;
+    bool memoryAccounting:1;
+    bool blockIOAccounting:1;
   } HSPDBusUnit;
   
   typedef struct _HSPVMState_DBUS {
@@ -72,7 +75,6 @@ extern "C" {
     bool dbusSync:1;
     // bool dbusFlush:1;
     uint32_t countdownToResync;
-    int cgroupPathIdx;
     uint32_t serial_ListUnits;
     regex_t *service_regex;
     regex_t *system_slice_regex;
@@ -398,10 +400,10 @@ extern "C" {
       while(fgets(line, MAX_PROC_LINELEN, statFile)) {
 	char var[MAX_PROC_TOKLEN];
 	uint64_t val64;
-	if(sscanf(line, "%s: %"SCNu64, var, &val64) == 2) {
-	  if(!strcmp(var, "read_bytes"))
+	if(sscanf(line, "%s %"SCNu64, var, &val64) == 2) {
+	  if(!strcmp(var, "read_bytes:"))
 	    dskio->rd_bytes += val64;
-	  else if(!strcmp(var, "write_bytes"))
+	  else if(!strcmp(var, "write_bytes:"))
 	    dskio->wr_bytes += val64;
 	}
       }
@@ -423,6 +425,45 @@ extern "C" {
       gotData |= readProcessIO(mod, (pid_t)pid64, dskio);
     }
     return gotData;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     readCgroupCounters    __________________
+    -----------------___________________________------------------
+  */
+
+  static bool readCgroupCounters(EVMod *mod, char *acct, char *cgroup, char *fname, int nvals, HSPNameVal *nameVals, bool multi) {
+    int found = 0;
+    char statsFileName[HSP_DBUS_MAX_FNAME_LEN+1];
+    snprintf(statsFileName, HSP_DBUS_MAX_FNAME_LEN, "/sys/fs/cgroup/%s%s/%s", acct, cgroup, fname);
+    FILE *statsFile = fopen(statsFileName, "r");
+    if(statsFile == NULL) {
+      myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
+    }
+    else {
+      char line[HSP_DBUS_MAX_STATS_LINELEN];
+      char var[HSP_DBUS_MAX_STATS_LINELEN];
+      uint64_t val64;
+      char *fmt = multi ?
+	"%*s %s %"SCNu64 :
+	"%s %"SCNu64 ;
+      while(fgets(line, HSP_DBUS_MAX_STATS_LINELEN, statsFile)) {
+	if(found == nvals && !multi) break;
+	if(sscanf(line, fmt, var, &val64) == 2) {
+	  for(int ii = 0; ii < nvals; ii++) {
+	    char *nm = nameVals[ii].nv_name;
+	    if(nm == NULL) break; // null name is double-check
+	    if(strcmp(var, nm) == 0)  {
+	      nameVals[ii].nv_found = YES;
+	      nameVals[ii].nv_val64 += val64;
+	      found++;
+	    }
+	  }
+        }
+      }
+      fclose(statsFile);
+    }
+    return (found > 0);
   }
   
   /*________________---------------------------__________________
@@ -491,28 +532,55 @@ extern "C" {
     // TODO: map service state into virState
     enum SFLVirDomainState virState = SFL_VIR_DOMAIN_NOSTATE;
     cpuElem.counterBlock.host_vrt_cpu.state = virState;
-    
-    // TODO: get from cpuAcct if there - otherwise:
-    uint64_t cpu_total = accumulateProcessCPU(mod, unit);
+
+    uint64_t cpu_total = 0;
+    if(unit->cpuAccounting) {
+      HSPNameVal cpuVals[] = {
+	{ "user",0,0 },
+	{ "system",0,0},
+	{ NULL,0,0},
+      };
+      if(readCgroupCounters(mod, "cpuacct", unit->cgroup, "cpuacct.stat", 2, cpuVals, NO)) {
+	if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
+	if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
+      }
+    }
+    if(cpu_total == 0) {
+      cpu_total = accumulateProcessCPU(mod, unit);
+    }
     cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
-      
-    // always add this one - even if no counters found - so as to send the container state
     SFLADD_ELEMENT(&cs, &cpuElem);
 
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-    // TODO: get from memoryAcct if there - otherwise:
-    uint64_t rss = accumulateProcessRAM(mod, unit);
+    uint64_t rss = 0;
+    if(unit->memoryAccounting) {
+      HSPNameVal memVals[] = {
+	{ "rss",0,0 }, // TODO: what about "total_rss"?
+	{ NULL,0,0},
+      };
+      if(readCgroupCounters(mod, "memory", unit->cgroup, "memory.stat", 2, memVals, NO)) {
+	if(memVals[0].nv_found) rss += memVals[0].nv_val64;
+      }
+    }
+    if(rss == 0) {
+      rss = accumulateProcessRAM(mod, unit);
+    }
     memElem.counterBlock.host_vrt_mem.memory = rss * 1024;
-    // TODO: get max memory from DBUS
+    // TODO: get max memory (from DBUS?)
     // memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
     SFLADD_ELEMENT(&cs, &memElem);
 
     // VM disk I/O counters
     SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-    // TODO: cgroup io accounting or:
-    accumulateProcessIO(mod, unit, &dskElem.counterBlock.host_vrt_dsk);
+    if(unit->blockIOAccounting) {
+      // TODO: not sure which file(s) to read
+    }
+    else {
+      // TODO: this requires root privileges
+      accumulateProcessIO(mod, unit, &dskElem.counterBlock.host_vrt_dsk);
+    }
     // TODO: fill in capacity, allocation, available fields
     SFLADD_ELEMENT(&cs, &dskElem);
 
@@ -674,6 +742,25 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    getDbusProperty        __________________
+    -----------------___________________________------------------
+  */
+  static void getDbusProperty(EVMod *mod, HSPDBusUnit *unit, HSPDBusHandler reqCB, char *property) {
+    dbusMethod(mod,
+	       reqCB,
+	       unit,
+	       "org.freedesktop.systemd1",
+	       unit->obj,
+	       "org.freedesktop.DBus.Properties",
+	       "Get",
+	       DBUS_TYPE_STRING,
+	       "org.freedesktop.systemd1.Service",
+	       DBUS_TYPE_STRING,
+	       property,
+	       HSP_dbusMethod_endargs);
+  }
+
+  /*_________________---------------------------__________________
     _________________     db_get, db_next       __________________
     -----------------___________________________------------------
     When decoding a particular method response we know what we are
@@ -717,6 +804,47 @@ extern "C" {
 #define DB_WALK(it, atype, val)  for(bool _more = YES; _more && db_get((it), (atype), (val)); _more = db_next(it))
 
   /*_________________---------------------------__________________
+    _________________   handler_<property>      __________________
+    -----------------___________________________------------------
+  */
+
+  static void handler_cpuAccounting(EVMod *mod, DBusMessage *dbm, void *magic) {
+    HSPDBusUnit *unit = (HSPDBusUnit *)magic;
+    DBusMessageIter it;
+    if(dbus_message_iter_init(dbm, &it)) {
+      DBusBasicValue val;
+      if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
+	myDebug(1, "UNIT CPUAccounting %u", val.bool_val);
+	unit->cpuAccounting = val.bool_val;
+      }
+    }
+  }
+
+  static void handler_memoryAccounting(EVMod *mod, DBusMessage *dbm, void *magic) {
+    HSPDBusUnit *unit = (HSPDBusUnit *)magic;
+    DBusMessageIter it;
+    if(dbus_message_iter_init(dbm, &it)) {
+      DBusBasicValue val;
+      if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
+	myDebug(1, "UNIT memoryAccounting %u", val.bool_val);
+	unit->memoryAccounting = val.bool_val;
+      }
+    }
+  }
+
+  static void handler_blockIOAccounting(EVMod *mod, DBusMessage *dbm, void *magic) {
+    HSPDBusUnit *unit = (HSPDBusUnit *)magic;
+    DBusMessageIter it;
+    if(dbus_message_iter_init(dbm, &it)) {
+      DBusBasicValue val;
+      if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
+	myDebug(1, "UNIT BlockIOAccounting %u", val.bool_val);
+	unit->blockIOAccounting = val.bool_val;
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________   handler_controlGroup    __________________
     -----------------___________________________------------------
   */
@@ -752,7 +880,9 @@ extern "C" {
 	  fclose(pidsFile);
 	  if(UTArrayN(unit->pids)) {
 	    getContainer(mod, unit, YES);
-
+	    getDbusProperty(mod, unit, handler_cpuAccounting, "CPUAccounting");
+	    getDbusProperty(mod, unit, handler_memoryAccounting, "MemoryAccounting");
+	    getDbusProperty(mod, unit, handler_blockIOAccounting, "BlockIOAccounting");
 	  }
 	}
       }
@@ -777,7 +907,7 @@ extern "C" {
 		   handler_controlGroup,
 		   unit,
 		   "org.freedesktop.systemd1",
-		   val.str,
+		   unit->obj,
 		   "org.freedesktop.DBus.Properties",
 		   "Get",
 		   DBUS_TYPE_STRING,
@@ -870,7 +1000,6 @@ extern "C" {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     // TODO: dbusClearAll(mod);
     mdata->dbusSync = NO;
-    mdata->cgroupPathIdx = -1;
     dbusMethod(mod,
 	       NULL,
 	       NULL,
@@ -880,7 +1009,7 @@ extern "C" {
 	       "Subscribe",
 	       HSP_dbusMethod_endargs);
 
-    if(0) dbusMethod(mod,
+    dbusMethod(mod,
 	       handler_listUnits,
 	       NULL,
 	       "org.freedesktop.systemd1",
@@ -901,8 +1030,9 @@ extern "C" {
     /* 	       "httpd.service", */
     /* 	       HSP_dbusMethod_endargs); */
 
-    dbusMethod(mod,
-	       NULL,
+    // just to see what the properties look like
+    if(0) dbusMethod(mod,
+    	       NULL,
     	       NULL,
     	       "org.freedesktop.systemd1",
     	       "/org/freedesktop/systemd1/unit/httpd_2eservice",
@@ -910,7 +1040,7 @@ extern "C" {
     	       "GetAll",
     	       DBUS_TYPE_STRING,
     	       "org.freedesktop.systemd1.Service",
-	       HSP_dbusMethod_endargs);
+    	       HSP_dbusMethod_endargs);
 
     /* dbusMethod(mod, */
     /* 	       NULL, */
@@ -937,12 +1067,8 @@ extern "C" {
     /* 	       "ControlGroup"); */
     // could try and get "MemoryCurrent" and "CPUUsageNSec" here, but since they
     // are usually not limited,  these numbers are usually == (uint64_t)-1.  So
-    // it looks like we get a more predictable solution by taking the ControlGroup
-    // and looking for the list of process IDs under:
-    // /sys/fs/cgroup/systemd/system.slice/<service>/cgroup.procs
-    // then we can rip through /proc/<pid>/stat and add up the numbers.  The downside
-    // is that a service might have pids that come and go,  so we would lose data
-    // in that case.
+    // we have to get the numbers from the cgroup accounting (if enabled) or fall
+    // back on getting the numbers from each process.
   }
 
 
@@ -1025,7 +1151,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     mdata->pollActions = UTHASH_NEW(HSPVMState_DBUS, id, UTHASH_IDTY);
     mdata->dbusRequests = UTHASH_NEW(HSPDBusRequest, serial, UTHASH_DFLT);
     mdata->units = UTHASH_NEW(HSPDBusUnit, name, UTHASH_SKEY);
-    mdata->cgroupPathIdx = -1;
 
     mdata->service_regex = UTRegexCompile(HSP_DBUS_SERVICE_REGEX);
     mdata->system_slice_regex = UTRegexCompile(HSP_DBUS_SYSTEM_SLICE_REGEX);
