@@ -439,6 +439,7 @@ extern "C" {
       SEMLOCK_DO(sp->sync_agent) {
 	sfl_poller_writeCountersSample(poller, cs);
 	sp->counterSampleQueued = YES;
+	sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
       }
     }
   }
