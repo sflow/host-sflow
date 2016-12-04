@@ -96,6 +96,7 @@ extern "C" {
 #ifdef HSP_DBUS_MONITOR
     bool subscribed;
 #endif
+    uint32_t page_size;
   } HSP_mod_SYSTEMD;
 
   /*_________________---------------------------__________________
@@ -422,6 +423,7 @@ extern "C" {
   */
   
   static uint64_t readProcessRAM(EVMod *mod, HSPDBusProcess *process) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     uint64_t rss = 0;
     char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
     sprintf(path, "/proc/%u/statm", process->pid);
@@ -444,7 +446,7 @@ extern "C" {
       }
       fclose(statFile);
     }
-    return rss;
+    return rss * mdata->page_size;
   }
   
   /*________________---------------------------__________________
@@ -453,7 +455,6 @@ extern "C" {
   */
   
   static uint64_t accumulateProcessRAM(EVMod *mod, HSPDBusUnit *unit) {
-    // HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     uint64_t rss = 0;
     HSPDBusProcess *process;
     UTHASH_WALK(unit->processes, process) {
@@ -484,9 +485,11 @@ extern "C" {
 	char var[MAX_PROC_TOKLEN];
 	uint64_t val64;
 	if(sscanf(line, "%s %"SCNu64, var, &val64) == 2) {
-	  if(!strcmp(var, "read_bytes:"))
+	  if(!strcmp(var, "read_bytes:")
+	     || !strcmp(var, "rchar:"))
 	    rd_bytes += val64;
-	  else if(!strcmp(var, "write_bytes:"))
+	  else if(!strcmp(var, "write_bytes:")
+		  || !strcmp(var, "wchar:"))
 	    wr_bytes += val64;
 	}
       }
@@ -509,7 +512,6 @@ extern "C" {
   */
   
   static bool accumulateProcessIO(EVMod *mod, HSPDBusUnit *unit, SFLHost_vrt_dsk_counters *dskio) {
-    // HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     bool gotData = NO;
     HSPDBusProcess *process;
     UTHASH_WALK(unit->processes, process) {
@@ -1272,6 +1274,15 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 
     if(sp->systemd.dropPriv == NO)
       retainRootRequest(mod, "needed to read /proc/<pid>/io (if cgroup BlockIOAccounting is off).");
+
+    // get page size for scaling memory pages->bytes
+#if defined(PAGESIZE)
+    mdata->page_size = PAGESIZE;
+#elif defined(PAGE_SIZE)
+    mdata->page_size = PAGE_SIZE;
+#else
+    mdata->page_size = sysconf(_SC_PAGE_SIZE);
+#endif
 
     // this mod operates entirely on the pollBus thread
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
