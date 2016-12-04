@@ -44,13 +44,15 @@ make clean
 %defattr(-,root,root,-)
 /usr/sbin/hsflowd
 %config(noreplace) /etc/hsflowd.conf
-%config(noreplace) /etc/dbus-1/system.d/hsflowd_dbus.conf
+%config(noreplace) /etc/dbus-1/system.d/org.sflow.hsflowd.conf
 /etc/init.d/hsflowd
 /lib/systemd/system/hsflowd.service
 %doc README LICENSE INSTALL.Linux
 /etc/hsflowd/modules/
 
 %changelog
+* Mon Dec 12 2016 nhm <neil.mckee@inmon.com>
+- add dbus config file
 * Wed Jul 20 2016 nhm <neil.mckee@inmon.com>
 - add systemd service file
 - remove sflowovsd (now an hsflowd module)
