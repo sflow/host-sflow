@@ -408,9 +408,11 @@ extern "C" {
   
   static uint64_t accumulateProcessCPU(EVMod *mod, HSPDBusUnit *unit) {
     HSPDBusProcess *process;
+    uint64_t unit_total = 0;
     UTHASH_WALK(unit->processes, process) {
-      unit->cntr.cpu_total += readProcessCPU(mod, process);
+      unit_total += readProcessCPU(mod, process);
     }
+    unit->cntr.cpu_total = unit_total;
     return unit->cntr.cpu_total;
   }
   
