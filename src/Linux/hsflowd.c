@@ -86,8 +86,11 @@ extern "C" {
 	if(result == -1 && errno != EINTR) {
 	  myLog(LOG_ERR, "socket sendto error: %s", strerror(errno));
 	}
-	if(result == 0) {
+	else if(result == 0) {
 	  myLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
+	}
+	else {
+	  sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
 	}
       }
     }
@@ -334,6 +337,7 @@ extern "C" {
     SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(poller, cs);
       sp->counterSampleQueued = YES;
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
     }
   }
 

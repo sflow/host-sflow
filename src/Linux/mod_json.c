@@ -134,6 +134,7 @@ extern "C" {
 	  SFLADD_ELEMENT(cs, &application->counters);
 	  sfl_poller_writeCountersSample(poller, cs);
 	  sp->counterSampleQueued = YES;
+	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
 	  // and any rtcount metrics that we have been collecting
 	}
       }
@@ -422,6 +423,7 @@ extern "C" {
     sfl_agent_set_now(sp->agent, bus->now.tv_sec, bus->now.tv_nsec);
     SEMLOCK_DO(sp->sync_agent) {
       sfl_sampler_writeFlowSample(app->sampler, &fs);
+      sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES]++;
     }
   }
 
@@ -677,6 +679,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(application->poller, &csample);
 	  sp->counterSampleQueued = YES;
+	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
 	}
       }
     }
@@ -962,6 +965,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 				  1,
 				  buf.xdr,
 				  (buf.cursor << 2));
+	sp->telemetry[HSP_TELEMETRY_RTMETRIC_SAMPLES]++;
       }
     }
   }
@@ -1194,6 +1198,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 				  1,
 				  buf.xdr,
 				  (buf.cursor << 2));
+	sp->telemetry[HSP_TELEMETRY_RTFLOW_SAMPLES]++;
       }
     }
   }

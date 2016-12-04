@@ -139,6 +139,7 @@ extern "C" {
 	SEMLOCK_DO(sp->sync_agent) {
 	  sfl_poller_writeCountersSample(poller, cs);
 	  sp->counterSampleQueued = YES;
+	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
 	}
       }
     }
@@ -237,6 +238,7 @@ extern "C" {
       sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
       SEMLOCK_DO(sp->sync_agent) {
 	sfl_sampler_writeFlowSample(ps->sampler, ps->fs);
+	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES]++;
       }
       void *ptr;
       UTARRAY_WALK(ps->ptrsToFree, ptr) my_free(ptr);

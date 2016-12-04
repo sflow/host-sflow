@@ -343,6 +343,25 @@ extern "C" {
     UTArray *ptrsToFree;
   } HSPPendingSample;
 
+  typedef enum {
+    HSP_TELEMETRY_FLOW_SAMPLES=0,
+    HSP_TELEMETRY_COUNTER_SAMPLES,
+    HSP_TELEMETRY_RTMETRIC_SAMPLES,
+    HSP_TELEMETRY_RTFLOW_SAMPLES,
+    HSP_TELEMETRY_DATAGRAMS,
+    HSP_TELEMETRY_NUM_COUNTERS
+  } EnumHSPTelemetry;
+
+#ifdef HSP_TELEMETRY_NAMES
+  static const char *HSPTelemetryNames[] = {
+    "flow_samples",
+    "counter_samples",
+    "rtmetric_samples",
+    "rtflow_samples",
+    "datagrams",
+  };
+#endif
+
   typedef struct _HSP {
     char *modulesPath;
     EVMod *rootModule;
@@ -527,6 +546,9 @@ extern "C" {
 
     // handshake countdown
     int config_shake_countdown;
+
+    uint64_t telemetry[HSP_TELEMETRY_NUM_COUNTERS];
+
   } HSP;
 
   // expose some config parser fns

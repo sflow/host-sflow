@@ -172,7 +172,7 @@ extern "C" {
 	  char srate[HSP_MAX_TOK_LEN];
 	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
 	  if(settings->samplingDirection & HSP_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
-	  if(settings->samplingDirection & HSP_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // ingress
+	  if(settings->samplingDirection & HSP_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // egress
 	  int status;
 	  if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	    if(WEXITSTATUS(status) != 0) {

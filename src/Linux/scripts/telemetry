@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# examples:
+# telemetry
+# telemetry GetAll
+# telemetry GetVersion
+# telemetry Get datagrams
+
+DB_OBJ="/org/sflow/hsflowd"
+DB_NAME="org.sflow.hsflowd"
+DB_INTF="org.sflow.hsflowd.telemetry"
+
+DBUS_SEND="dbus-send --system --type=method_call --print-reply --dest=${DB_NAME} ${DB_OBJ} ${DB_INTF}"
+		     
+if [ "$#" == "2" ]; then
+  CMD="${DBUS_SEND}.$1 string:$2";
+elif [ "$#" == "1" ]; then
+  CMD="${DBUS_SEND}.$1";
+else
+  CMD="${DBUS_SEND}.GetAll";
+fi
+
+$CMD | awk '/string/{var=$2} /int64/{print var,$2}'
