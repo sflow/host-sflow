@@ -23,12 +23,14 @@ INIT_D=$(INITDIR)
 CONF_D=$(CONFDIR)
 MOD_D=$(MODDIR)
 SYSTEMD_D=$(SYSTEMDDIR)
+DBUS_D=$(DBUSDIR)
 ifneq ($(INSTROOT),)
 	BIN_D=$(INSTROOT)/$(BINDIR)
 	INIT_D=$(INSTROOT)/$(INITDIR)
 	CONF_D=$(INSTROOT)/$(CONFDIR)
 	MOD_D=$(INSTROOT)/$(MODDIR)
 	SYSTEMD_D=$(INSTROOT)/$(SYSTEMDDIR)
+	DBUS_D=$(INSTROOT)/$(DBUSDIR)
 endif
 
 #########  compilation flags  #########
@@ -366,7 +368,7 @@ install:
 	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd
 	$(INSTALL) -d $(MOD_D)
 	$(INSTALL) -m 755 *.so $(MOD_D)
-	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUSDIR)
+	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
 
 #########  schedule  #########
 
