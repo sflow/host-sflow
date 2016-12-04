@@ -368,6 +368,7 @@ install:
 	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd
 	$(INSTALL) -d $(MOD_D)
 	$(INSTALL) -m 755 *.so $(MOD_D)
+	$(INSTALL) -d $(DBUS_D)
 	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
 
 #########  schedule  #########
