@@ -20,6 +20,8 @@ extern "C" {
 #include <sys/prctl.h>
 #include <sched.h>
 #include <dbus/dbus.h>
+#include <openssl/sha.h>
+
 #include "hsflowd.h"
 #include "cpu_utils.h"
 
@@ -192,6 +194,36 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    name_uuid              __________________
+    -----------------___________________________------------------
+  */
+
+  static void uuidgen_type5(HSP *sp, u_char *uuid, char *name) {
+    // Generate type 5 UUID (rfc 4122)
+    SHA_CTX ctx;
+    unsigned char sha_bits[SHA_DIGEST_LENGTH];
+    SHA1_Init(&ctx);
+    SHA1_Update(&ctx, sp->uuid, 16); // use sp->uuid as "namespace UUID"
+    SHA1_Update(&ctx, name, my_strlen(name));
+    // also hash in agent IP address in case sp->uuid is missing or not unique
+    SHA1_Update(&ctx,
+		&sp->agentIP.address,
+		(sp->agentIP.type == SFLADDRESSTYPE_IP_V6 ? 16 : 4));
+    SHA1_Final(sha_bits, &ctx);
+    // now generate a type-5 UUID according to the recipe here:
+    // http://stackoverflow.com/questions/10867405/generating-v5-uuid-what-is-name-and-namespace
+    // SHA1 Digest:   74738ff5 5367 e958 9aee 98fffdcd1876 94028007
+    // UUID (v5):     74738ff5-5367-5958-9aee-98fffdcd1876
+    //                          ^_low nibble is set to 5 to indicate type 5
+    //                                   ^_first two bits set to 1 and 0, respectively
+    memcpy(uuid, sha_bits, 16);
+    uuid[6] &= 0x0F;
+    uuid[6] |= 0x50;
+    uuid[8] &= 0x3F;
+    uuid[8] |= 0x80;
+  }
+
+  /*_________________---------------------------__________________
     _________________    HSPDBusUnit            __________________
     -----------------___________________________------------------
   */
@@ -201,15 +233,7 @@ extern "C" {
     HSPDBusUnit *unit = (HSPDBusUnit *)my_calloc(sizeof(HSPDBusUnit));
     unit->name = my_strdup(name);
     unit->processes = UTHASH_NEW(HSPDBusProcess, pid, UTHASH_DFLT);
-    // TODO: make this UUID properly by creating one for the namespace
-    // key'd by sp->agentIP and then generating new ones for each
-    // unit name from that (setting the bit as described in rfc 4122)
-    char ipbuf[51];
-    SFLAddress_print(&sp->agentIP, ipbuf, 50);
-    uint32_t addr_hash32 = my_strhash(ipbuf);
-    uint32_t name_hash32 = my_strhash(name);
-    memcpy(unit->uuid + 8, &addr_hash32, 4);
-    memcpy(unit->uuid + 12, &name_hash32, 4);
+    uuidgen_type5(sp, (u_char *)unit->uuid, unit->name);
     return unit;
   }
 

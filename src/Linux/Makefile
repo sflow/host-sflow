@@ -106,7 +106,7 @@ CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
-LIBS_SYSTEMD=$(LIBS_DBUS)
+LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
 
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
