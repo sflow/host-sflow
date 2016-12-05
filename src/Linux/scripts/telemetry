@@ -20,4 +20,9 @@ else
   CMD="${DBUS_SEND}.GetAll";
 fi
 
-$CMD | awk '/string/{var=$2} /int64/{print var,$2}'
+$CMD | gawk '
+      /method/ { next; }
+        /dict/ { dict=1; next; }
+      /string/ { if(dict){ var=$2; dict=0; next; }}
+/int64|string/ { print var,$2; var="" }
+'
