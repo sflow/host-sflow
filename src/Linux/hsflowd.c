@@ -50,6 +50,8 @@ extern "C" {
     // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
     // bring us here where we read the list of collectors.
 
+    sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
+
     for(HSPCollector *coll = sp->sFlowSettings->collectors; coll; coll=coll->nxt) {
 
       switch(coll->ipAddr.type) {
@@ -88,9 +90,6 @@ extern "C" {
 	}
 	else if(result == 0) {
 	  myLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
-	}
-	else {
-	  sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
 	}
       }
     }
