@@ -497,20 +497,9 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
 }
 
   /*_________________---------------------------__________________
-    _________________    addMatch               __________________
+    _________________    registration           __________________
     -----------------___________________________------------------
   */
-#if 0
-  static void addMatch(EVMod *mod, char *type) {
-    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-    char rule[128];
-    sprintf(rule, "eavesdrop=true,type='%s'", type);
-    dbus_bus_add_match(mdata->connection, rule, &mdata->error);
-    if(dbus_error_is_set(&mdata->error)) {
-      myLog(LOG_ERR, "DBUS: addMatch() error adding <%s>", rule);
-    }
-  }
-#endif
 
   static void unregister(DBusConnection *connection, void *user_data) { }
 
@@ -537,11 +526,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
       return;
     }
 
-    //addMatch(mod, "signal");
-    //addMatch(mod, "method_call");
-    //addMatch(mod, "method_return");
-    //addMatch(mod, "error");
-
     if(!dbus_connection_add_filter(mdata->connection, dbusCB, mod, NULL)) {
       log_dbus_error(mod, "dbus_connection_add_filter");
       return;
@@ -557,8 +541,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
       log_dbus_error(mod, "dbus_connection_register_object_path");
       return;
     }
-
-    // TODO: add introspection
 
     // connection OK - so register call-backs
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_DECI), evt_deci);
