@@ -1536,8 +1536,10 @@ extern "C" {
     }
 
     if(UTFileExists(HSP_OS10_SWITCHPORT_CONFIG_PROG)) {
+      // OS10 should be compiled with "make deb FEATURES="OS10 DBUS"
       myLog(LOG_INFO, "Detected OS10");
       sp->os10.os10 = YES;
+      sp->dbus.dbus = YES;
     }
 
     // a sucessful read of the config file is required

@@ -671,6 +671,8 @@ extern "C" {
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
 
+    retainRootRequest(mod, "Needed to call out to OS10 scripts (PYTHONPATH)");
+
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_READ), evt_poll_intf_read);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_poll_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_SPEED), evt_poll_speed_changed);
