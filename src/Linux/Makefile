@@ -35,7 +35,7 @@ endif
 
 #########  compilation flags  #########
 
-HEADERS= util.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h Makefile
+HEADERS= util.h util_dbus.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h Makefile
 
 # compiler
 #CC= g++
@@ -180,8 +180,8 @@ OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
 OBJS_OS10=mod_os10.o
-OBJS_DBUS=mod_dbus.o
-OBJS_SYSTEMD=mod_systemd.o
+OBJS_DBUS=mod_dbus.o util_dbus.o
+OBJS_SYSTEMD=mod_systemd.o util_dbus.o
 
 BUILDTGTS=hsflowd \
           mod_json.so \
@@ -222,6 +222,11 @@ SYSTEMD: mod_systemd.so
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
+
+######## DBUS utils ##########
+
+util_dbus.o: util_dbus.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_DBUS)
 
 #########  modules  #########
 
@@ -401,6 +406,7 @@ clean:
 	$(CC) $(CFLAGS) -c $*.c
 
 util.o: util.c $(HEADERS)
+util_dbus.o: util_dbus.c $(HEADERS)
 evbus.o: evbus.c $(HEADERS)
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
