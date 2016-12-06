@@ -1181,6 +1181,24 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     VNode Role            __________________
+    -----------------___________________________------------------
+    A simple mechanism to decide which module should supply the
+    sFlow VNode structure -- in case more than one is active.
+  */
+
+  void requestVNodeRole(EVMod *mod, EnumVNodePriority vnp) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(vnp > sp->vnodePriority)
+      sp->vnodePriority = vnp;
+  }
+
+  bool hasVNodeRole(EVMod *mod, EnumVNodePriority vnp) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    return (vnp == sp->vnodePriority);
+  }
+
+  /*_________________---------------------------__________________
     _________________         drop_privileges   __________________
     -----------------___________________________------------------
   */

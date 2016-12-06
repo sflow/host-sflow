@@ -1075,15 +1075,8 @@ extern "C" {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
-    if(sp->kvm.kvm
-       || sp->docker.docker) {
-      // TODO: clean this up.  Some kind of priority scheme?
-      // requestVNodeRole(mod, SYSTEMD_VNODE_PRIORITY);
-      // ...
-      // if(hasVNodeRole(mod)) { }
-      // then use in mod_kvm, mod_xen, mod_docker and here.
+    if(!hasVNodeRole(mod, HSP_VNODE_PRIORITY_SYSTEMD))
       return;
-    }
 
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
@@ -1158,6 +1151,8 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 
     if(sp->systemd.dropPriv == NO)
       retainRootRequest(mod, "needed to read /proc/<pid>/io (if cgroup BlockIOAccounting is off).");
+
+    requestVNodeRole(mod, HSP_VNODE_PRIORITY_SYSTEMD);
 
     // get page size for scaling memory pages->bytes
 #if defined(PAGESIZE)

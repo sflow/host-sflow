@@ -690,6 +690,10 @@ extern "C" {
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
+
+    if(!hasVNodeRole(mod, HSP_VNODE_PRIORITY_XEN))
+      return;
+
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
     if(readXenVNodeCounters(mod, &mdata->vnodeElem.counterBlock.host_vrt_node)) {
@@ -710,6 +714,8 @@ extern "C" {
     mod->data = my_calloc(sizeof(HSP_mod_XEN));
     HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    requestVNodeRole(mod, HSP_VNODE_PRIORITY_XEN);
 
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_XEN, vm.uuid, UTHASH_DFLT);
     mdata->pollActions = UTArrayNew(UTARRAY_DFLT);

@@ -483,6 +483,10 @@ extern "C" {
     SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(!hasVNodeRole(mod, HSP_VNODE_PRIORITY_KVM))
+      return;
+
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
     mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
@@ -510,6 +514,8 @@ extern "C" {
     mod->data = my_calloc(sizeof(HSP_mod_KVM));
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    requestVNodeRole(mod, HSP_VNODE_PRIORITY_KVM);
 
     // open the libvirt connection - failure is not an option
     int virErr = virInitialize();

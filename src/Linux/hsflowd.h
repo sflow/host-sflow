@@ -364,6 +364,13 @@ extern "C" {
   };
 #endif
 
+  typedef enum {
+    HSP_VNODE_PRIORITY_SYSTEMD=1,
+    HSP_VNODE_PRIORITY_DOCKER,
+    HSP_VNODE_PRIORITY_KVM,
+    HSP_VNODE_PRIORITY_XEN
+  } EnumVNodePriority;
+
   typedef struct _HSP {
     char *modulesPath;
     EVMod *rootModule;
@@ -537,6 +544,7 @@ extern "C" {
     uint32_t cpu_cores;
     uint64_t mem_total;
     uint64_t mem_free;
+    EnumVNodePriority vnodePriority;
 
     // vm/container dsIndex allocation
     UTHash *vmsByUUID;
@@ -590,6 +598,10 @@ extern "C" {
 
   // capabilities
   void retainRootRequest(EVMod *mod, char *reason);
+
+  // vnode priority
+  void requestVNodeRole(EVMod *mod, EnumVNodePriority vnp);
+  bool hasVNodeRole(EVMod *mod, EnumVNodePriority vnp);
   
   // adaptors
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);

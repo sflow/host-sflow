@@ -838,10 +838,8 @@ extern "C" {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
-    if(sp->kvm.kvm) {
-      // if we make kvm and docker mutually exclusive, this check will be unnecessary
+    if(!hasVNodeRole(mod, HSP_VNODE_PRIORITY_DOCKER))
       return;
-    }
 
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
@@ -1334,6 +1332,8 @@ extern "C" {
     // ask to retain root privileges
     retainRootRequest(mod, "needed to access docker.sock");
     retainRootRequest(mod, "needed by mod_docker to probe for adaptors in other namespaces");
+
+    requestVNodeRole(mod, HSP_VNODE_PRIORITY_DOCKER);
 
     mdata->contentLengthPattern = UTRegexCompile(HSP_CONTENT_LENGTH_REGEX);
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);
