@@ -44,6 +44,7 @@ make clean
 %defattr(-,root,root,-)
 /usr/sbin/hsflowd
 %config(noreplace) /etc/hsflowd.conf
+%config(noreplace) /etc/dbus-1/system.d/hsflowd_dbus.conf
 /etc/init.d/hsflowd
 /lib/systemd/system/hsflowd.service
 %doc README LICENSE INSTALL.Linux

@@ -1,12 +1,13 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 DBUS
+FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 DBUS SYSTEMD
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
 CONFDIR    ?= /etc
 MODDIR     ?= /etc/hsflowd/modules
 SYSTEMDDIR ?= /lib/systemd/system
+DBUSDIR    ?= /etc/dbus-1/system.d
 
 $(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
 
@@ -102,6 +103,9 @@ LIBS_OS10=
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 
+CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
+LIBS_SYSTEMD=$(LIBS_DBUS)
+
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += -DUTHEAP
@@ -135,6 +139,7 @@ endif
 
 HSFLOWD_INITSCRIPT=scripts/hsflowd
 HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service
+HSFLOWD_DBUS_CONF=scripts/org.sflow.hsflowd.conf
 
 ifeq ($(DEBIAN),yes)
   HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
@@ -174,6 +179,7 @@ OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
 OBJS_OS10=mod_os10.o
 OBJS_DBUS=mod_dbus.o
+OBJS_SYSTEMD=mod_systemd.o
 
 BUILDTGTS=hsflowd \
           mod_json.so \
@@ -207,6 +213,8 @@ CUMULUS: mod_cumulus.so
 OS10: mod_os10.so
 
 DBUS: mod_dbus.so
+
+SYSTEMD: mod_systemd.so
 
 #########  hsflowd  #########
 
@@ -336,6 +344,15 @@ mod_dbus.o: mod_dbus.c $(HEADERS)
 mod_dbus.so: $(OBJS_DBUS)
 	$(LD) -o $@ $(OBJS_DBUS) $(LDFLAGS_SHARED) $(LIBS_DBUS)
 
+#----------------------------
+
+
+mod_systemd.o: mod_systemd.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_SYSTEMD)
+
+mod_systemd.so: $(OBJS_SYSTEMD)
+	$(LD) -o $@ $(OBJS_SYSTEMD) $(LDFLAGS_SHARED) $(LIBS_SYSTEMD)
+
 #########  install  #########
 
 install:
@@ -349,6 +366,7 @@ install:
 	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd
 	$(INSTALL) -d $(MOD_D)
 	$(INSTALL) -m 755 *.so $(MOD_D)
+	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUSDIR)
 
 #########  schedule  #########
 
@@ -406,3 +424,4 @@ mod_cumulus.o: mod_cumulus.c $(HEADERS)
 mod_ovs.o: mod_ovs.c $(HEADERS)
 mod_os10.o: mod_os10.c $(HEADERS)
 mod_dbus.o: mod_dbus.c $(HEADERS)
+mod_systemd.o: mod_systemd.c $(HEADERS)

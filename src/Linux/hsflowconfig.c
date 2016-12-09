@@ -63,7 +63,8 @@ extern "C" {
     HSPOBJ_NVML,
     HSPOBJ_OVS,
     HSPOBJ_OS10,
-    HSPOBJ_DBUS
+    HSPOBJ_DBUS,
+    HSPOBJ_SYSTEMD
   } EnumHSPObject;
 
   static const char *HSPObjectNames[] = {
@@ -1050,6 +1051,11 @@ extern "C" {
 	    sp->dbus.dbus = YES;
 	    level[++depth] = HSPOBJ_DBUS;
 	    break;
+	  case HSPTOKEN_SYSTEMD:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->systemd.systemd = YES;
+	    level[++depth] = HSPOBJ_SYSTEMD;
+	    break;
 
 	  case HSPTOKEN_SAMPLING:
 	  case HSPTOKEN_PACKETSAMPLINGRATE:
@@ -1389,6 +1395,23 @@ extern "C" {
 	case HSPOBJ_DBUS:
 	  {
 	    switch(tok->stok) {
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_SYSTEMD:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_REFRESH_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->systemd.refreshVMListSecs, 10, 3600)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_DROP_PRIV:
+	      if((tok = expectONOFF(sp, tok, &sp->systemd.dropPriv)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
