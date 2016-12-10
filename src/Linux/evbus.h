@@ -161,6 +161,7 @@ extern "C" {
 #define EV_BUS_STACKSIZE 2000000
 
   int EVTimeDiff_nS(struct timespec *t1, struct timespec *t2);
+  int EVTimeDiff_mS(struct timespec *t1, struct timespec *t2);
   void EVBusRunThread(EVBus *bus, size_t stacksize);
   void EVBusRun(EVBus *bus);
   void EVBusStop(EVBus *bus);

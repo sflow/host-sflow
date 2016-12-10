@@ -432,6 +432,12 @@ extern "C" {
     return (secs * 1000000000) + nanos;
   }
 
+  int EVTimeDiff_mS(struct timespec *t1, struct timespec *t2) {
+    int secs = t2->tv_sec - t1->tv_sec;
+    int nanos = t2->tv_nsec - t1->tv_nsec;
+    return (secs * 1000) + (nanos / 1000000);
+  }
+
   static void *busRun(void *magic) {
     EVBus *bus = (EVBus *)magic;
     EVMod *mod = bus->root->rootModule;

@@ -31,15 +31,20 @@ extern "C" {
 #define HSP_SYSTEMD_MAX_STATS_LINELEN 512
 #define HSP_SYSTEMD_WAIT_STARTUP 5
 
+#define HSP_DBUS_TIMEOUT_mS 10000
+
 #define HSP_SYSTEMD_SERVICE_REGEX "\\.service$"
 #define HSP_SYSTEMD_SYSTEM_SLICE_REGEX "system\\.slice"
 
+#define HSP_DBUS_MONITOR 0
+  
   typedef void (*HSPDBusHandler)(EVMod *mod, DBusMessage *dbm, void *magic);
   
   typedef struct _HSPDBusRequest {
     int serial;
     HSPDBusHandler handler;
     void *magic;
+    struct timespec send_time;
   } HSPDBusRequest;
 
   typedef struct _HSPUnitCounters {
@@ -76,8 +81,9 @@ extern "C" {
   typedef struct _HSP_mod_SYSTEMD {
     DBusConnection *connection;
     DBusError error;
-    int dbus_soc;
     UTHash *dbusRequests;
+    uint32_t dbus_tx;
+    uint32_t dbus_rx;
     UTHash *units;
     EVBus *pollBus;
     UTHash *vmsByUUID;
@@ -85,18 +91,25 @@ extern "C" {
     UTHash *pollActions;
     SFLCounters_sample_element vnodeElem;
     uint32_t countdownToResync;
-    uint32_t serial_ListUnits;
     regex_t *service_regex;
     regex_t *system_slice_regex;
+#ifdef HSP_DBUS_MONITOR
+    bool subscribed;
+#endif
   } HSP_mod_SYSTEMD;
 
-  static void dbusSynchronize(EVMod *mod);
-  static void removeAndFreeVM_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container);
-
   /*_________________---------------------------__________________
-    _________________    utils to help debug    __________________
+    _________________     logging utils         __________________
     -----------------___________________________------------------
   */
+
+  static void log_dbus_error(EVMod *mod, char *msg) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    if (dbus_error_is_set(&mdata->error))
+      myLog(LOG_ERR, "SYSTEMD Error(%s) = %s", msg, mdata->error.message);
+    else if(msg)
+      myLog(LOG_ERR, "SYSTEMD Error(%s)", msg);
+  }
 
   static const char *messageTypeStr(int mtype)  {
     switch (mtype) {
@@ -122,6 +135,59 @@ extern "C" {
     HSPVMState_SYSTEMD *container;
     UTHASH_WALK(ht, container)
       myLog(LOG_INFO, "%s: %s", prefix, containerStr(container, buf, 1024));
+  }
+
+  /*_________________---------------------------__________________
+    _________________   add and remove VM       __________________
+    -----------------___________________________------------------
+  */
+
+  static void agentCB_getCounters_SYSTEMD_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    EVMod *mod = (EVMod *)magic;
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSPVMState_SYSTEMD *container = (HSPVMState_SYSTEMD *)poller->userData;
+    UTHashAdd(mdata->pollActions, container);
+  }
+
+  static void removeAndFreeVM_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    if(getDebug()) {
+      myLog(LOG_INFO, "removeAndFreeVM: removing service with dsIndex=%u", container->vm.dsIndex);
+    }
+
+    if(UTHashDel(mdata->vmsByID, container) == NULL) {
+      myLog(LOG_ERR, "UTHashDel (vmsByID) failed: service %s", container->id);
+      if(debug(1))
+	containerHTPrint(mdata->vmsByID, "vmsByID");
+    }
+
+    if(UTHashDel(mdata->vmsByUUID, container) == NULL) {
+      myLog(LOG_ERR, "UTHashDel (vmsByUUID) failed: service %s", container->id);
+      if(debug(1))
+	containerHTPrint(mdata->vmsByUUID, "vmsByUUID");
+    }
+
+    if(container->id) my_free(container->id);
+    removeAndFreeVM(mod, &container->vm);
+  }
+
+  static HSPVMState_SYSTEMD *getContainer(EVMod *mod, HSPDBusUnit *unit, int create) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSPVMState_SYSTEMD cont = { .id = unit->name };
+    HSPVMState_SYSTEMD *container = UTHashGet(mdata->vmsByID, &cont);
+    if(container == NULL
+       && create) {
+      container = (HSPVMState_SYSTEMD *)getVM(mod, unit->uuid, YES, sizeof(HSPVMState_SYSTEMD), VMTYPE_SYSTEMD, agentCB_getCounters_SYSTEMD_request);
+      assert(container != NULL);
+      if(container) {
+	container->id = my_strdup(unit->name);
+	// add to collections
+	UTHashAdd(mdata->vmsByID, container);
+	UTHashAdd(mdata->vmsByUUID, container);
+      }
+    }
+    return container;
   }
 
   /*_________________---------------------------__________________
@@ -158,7 +224,7 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    parseDbusElem          __________________
+    _________________    printDbusElem          __________________
     -----------------___________________________------------------
   */
 
@@ -167,27 +233,27 @@ extern "C" {
       UTStrBuf_append(buf, "  ");
   }
 
-#define PARSE_DBUS_VAR(it,type,format,buf) do {	\
+#define PRINT_DBUS_VAR(it,type,format,buf) do {	\
     type val;					\
     dbus_message_iter_get_basic(it, &val);	\
     UTStrBuf_printf(buf, format, val);		\
 } while(0)
   
-  static void parseDBusElem(DBusMessageIter *it, UTStrBuf *buf, bool ind, int depth, char *suffix) {
+  static void printDBusElem(DBusMessageIter *it, UTStrBuf *buf, bool ind, int depth, char *suffix) {
     if(ind) indent(buf, depth);
     int atype = dbus_message_iter_get_arg_type(it);
     switch(atype) {
     case DBUS_TYPE_INVALID: break;
-    case DBUS_TYPE_STRING: PARSE_DBUS_VAR(it, char *, "\"%s\"", buf); break;
-    case DBUS_TYPE_OBJECT_PATH: PARSE_DBUS_VAR(it, char *, "obj=%s", buf); break;
-    case DBUS_TYPE_BYTE: PARSE_DBUS_VAR(it, uint8_t, "0x%02x", buf); break;
-    case DBUS_TYPE_INT16: PARSE_DBUS_VAR(it, int16_t, "%d", buf); break;
-    case DBUS_TYPE_INT32: PARSE_DBUS_VAR(it, int32_t, "%d", buf); break;
-    case DBUS_TYPE_INT64: PARSE_DBUS_VAR(it, int64_t, "%"PRId64, buf); break;
-    case DBUS_TYPE_UINT16: PARSE_DBUS_VAR(it, uint16_t, "%u", buf); break;
-    case DBUS_TYPE_UINT32: PARSE_DBUS_VAR(it, uint32_t, "%u", buf); break;
-    case DBUS_TYPE_UINT64: PARSE_DBUS_VAR(it, uint64_t, "%"PRIu64, buf); break;
-    case DBUS_TYPE_DOUBLE: PARSE_DBUS_VAR(it, double, "%f", buf); break;
+    case DBUS_TYPE_STRING: PRINT_DBUS_VAR(it, char *, "\"%s\"", buf); break;
+    case DBUS_TYPE_OBJECT_PATH: PRINT_DBUS_VAR(it, char *, "obj=%s", buf); break;
+    case DBUS_TYPE_BYTE: PRINT_DBUS_VAR(it, uint8_t, "0x%02x", buf); break;
+    case DBUS_TYPE_INT16: PRINT_DBUS_VAR(it, int16_t, "%d", buf); break;
+    case DBUS_TYPE_INT32: PRINT_DBUS_VAR(it, int32_t, "%d", buf); break;
+    case DBUS_TYPE_INT64: PRINT_DBUS_VAR(it, int64_t, "%"PRId64, buf); break;
+    case DBUS_TYPE_UINT16: PRINT_DBUS_VAR(it, uint16_t, "%u", buf); break;
+    case DBUS_TYPE_UINT32: PRINT_DBUS_VAR(it, uint32_t, "%u", buf); break;
+    case DBUS_TYPE_UINT64: PRINT_DBUS_VAR(it, uint64_t, "%"PRIu64, buf); break;
+    case DBUS_TYPE_DOUBLE: PRINT_DBUS_VAR(it, double, "%f", buf); break;
     case DBUS_TYPE_BOOLEAN: { 
       dbus_bool_t val;
       dbus_message_iter_get_basic(it, &val);
@@ -198,7 +264,7 @@ extern "C" {
       DBusMessageIter sub;
       dbus_message_iter_recurse(it, &sub);
       UTStrBuf_printf(buf, "(");
-      parseDBusElem(&sub, buf, NO, depth+1, ")");
+      printDBusElem(&sub, buf, NO, depth+1, ")");
       break;
     }
     case DBUS_TYPE_ARRAY: {
@@ -211,7 +277,7 @@ extern "C" {
       }
       else {
 	UTStrBuf_printf(buf, "[\n");
-	do parseDBusElem(&sub, buf, YES, depth+1, ",\n");
+	do printDBusElem(&sub, buf, YES, depth+1, ",\n");
 	while (dbus_message_iter_next(&sub));
 	indent(buf, depth);
 	UTStrBuf_printf(buf, "]");
@@ -223,9 +289,9 @@ extern "C" {
       dbus_message_iter_recurse(it, &sub);
       // iterate over key-value pairs (usually only one pair)
       do {
-	parseDBusElem(&sub, buf, NO, depth+1, " => ");
+	printDBusElem(&sub, buf, NO, depth+1, " => ");
 	dbus_message_iter_next(&sub);
-	parseDBusElem(&sub, buf, NO, depth+1, NULL);
+	printDBusElem(&sub, buf, NO, depth+1, NULL);
       }
       while (dbus_message_iter_next(&sub));
       break;
@@ -234,7 +300,7 @@ extern "C" {
       DBusMessageIter sub;
       dbus_message_iter_recurse(it, &sub);
       UTStrBuf_printf(buf, "struct {\n");
-      do parseDBusElem(&sub, buf, YES, depth+1, ",\n");
+      do printDBusElem(&sub, buf, YES, depth+1, ",\n");
       while (dbus_message_iter_next(&sub));
       indent(buf, depth);
       UTStrBuf_printf(buf, "}");
@@ -249,13 +315,11 @@ extern "C" {
 
 
   /*_________________---------------------------__________________
-    _________________    parseDbusMessage       __________________
+    _________________    printDbusMessage       __________________
     -----------------___________________________------------------
   */
 
-  static void parseDBusMessage(EVMod *mod, DBusMessage *msg) {
-    // HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    myLog(LOG_INFO, "SYSTEMD: dbusCB got message");
+  static void printDBusMessage(EVMod *mod, DBusMessage *msg) {
     int mtype = dbus_message_get_type(msg);
     const char *src = dbus_message_get_sender(msg);
     const char *dst = dbus_message_get_destination(msg);
@@ -289,7 +353,7 @@ extern "C" {
     UTStrBuf_printf(buf, ") {");
     DBusMessageIter iterator;
     if(dbus_message_iter_init(msg, &iterator)) {
-      do parseDBusElem(&iterator, buf, YES, 1, "\n");
+      do printDBusElem(&iterator, buf, YES, 1, "\n");
       while (dbus_message_iter_next(&iterator));
     }
     UTStrBuf_append(buf, "}\n");
@@ -495,15 +559,6 @@ extern "C" {
     ________________   getCounters_SYSTEMD     __________________
     ----------------___________________________------------------
   */
-
-
-  static void agentCB_getCounters_SYSTEMD_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
-  {
-    EVMod *mod = (EVMod *)magic;
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    HSPVMState_SYSTEMD *container = (HSPVMState_SYSTEMD *)poller->userData;
-    UTHashAdd(mdata->pollActions, container);
-  }
   
   static void getCounters_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container)
   {
@@ -657,107 +712,6 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________   add and remove VM       __________________
-    -----------------___________________________------------------
-  */
-
-  static void removeAndFreeVM_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    if(getDebug()) {
-      myLog(LOG_INFO, "removeAndFreeVM: removing service with dsIndex=%u", container->vm.dsIndex);
-    }
-
-    if(UTHashDel(mdata->vmsByID, container) == NULL) {
-      myLog(LOG_ERR, "UTHashDel (vmsByID) failed: service %s", container->id);
-      if(debug(1))
-	containerHTPrint(mdata->vmsByID, "vmsByID");
-    }
-
-    if(UTHashDel(mdata->vmsByUUID, container) == NULL) {
-      myLog(LOG_ERR, "UTHashDel (vmsByUUID) failed: service %s", container->id);
-      if(debug(1))
-	containerHTPrint(mdata->vmsByUUID, "vmsByUUID");
-    }
-
-    if(container->id) my_free(container->id);
-    removeAndFreeVM(mod, &container->vm);
-  }
-
-  static HSPVMState_SYSTEMD *getContainer(EVMod *mod, HSPDBusUnit *unit, int create) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    HSPVMState_SYSTEMD cont = { .id = unit->name };
-    HSPVMState_SYSTEMD *container = UTHashGet(mdata->vmsByID, &cont);
-    if(container == NULL
-       && create) {
-      container = (HSPVMState_SYSTEMD *)getVM(mod, unit->uuid, YES, sizeof(HSPVMState_SYSTEMD), VMTYPE_SYSTEMD, agentCB_getCounters_SYSTEMD_request);
-      assert(container != NULL);
-      if(container) {
-	container->id = my_strdup(unit->name);
-	// add to collections
-	UTHashAdd(mdata->vmsByID, container);
-	UTHashAdd(mdata->vmsByUUID, container);
-      }
-    }
-    return container;
-  }
-
-  /*_________________---------------------------__________________
-    _________________    tick,tock              __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(mdata->countdownToResync) {
-      if(--mdata->countdownToResync == 0) {
-    	dbusSynchronize(mod);
-	mdata->countdownToResync = sp->systemd.refreshVMListSecs ?: sp->refreshVMListSecs;
-      }
-    }
-  }
-
-  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    // now we can execute pollActions without holding on to the semaphore
-    HSPVMState_SYSTEMD *container;
-    UTHASH_WALK(mdata->pollActions, container) {
-      getCounters_SYSTEMD(mod, container);
-    }
-    UTHashReset(mdata->pollActions);
-  }
-
-  /*_________________---------------------------__________________
-    _________________   host counter sample     __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-
-    if(sp->kvm.kvm
-       || sp->docker.docker) {
-      // TODO: clean this up.  Some kind of priority scheme?
-      // requestVNodeRole(mod, SYSTEMD_VNODE_PRIORITY);
-      // ...
-      // if(hasVNodeRole(mod)) { }
-      // then use in mod_kvm, mod_xen, mod_docker and here.
-      return;
-    }
-
-    memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
-    mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
-    mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
-    mdata->vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
-    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = UTHashN(mdata->vmsByID);
-    mdata->vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
-    mdata->vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
-    SFLADD_ELEMENT(cs, &mdata->vnodeElem);
-  }
-
-  /*_________________---------------------------__________________
     _________________     dbusMethod            __________________
     -----------------___________________________------------------
   */
@@ -767,6 +721,10 @@ extern "C" {
   static void dbusMethod(EVMod *mod, HSPDBusHandler reqCB, void *magic, char *target, char  *obj, char *interface, char *method, ...) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     DBusMessage *msg = dbus_message_new_method_call(target, obj, interface, method);
+    if(msg == NULL) {
+      log_dbus_error(mod, "dbus_message_new_method_call");
+      return;
+    }
     // append arguments
     DBusMessageIter iter;
     dbus_message_iter_init_append(msg, &iter);
@@ -782,7 +740,7 @@ extern "C" {
     // send the message
     uint32_t serial = 0;
     if(!dbus_connection_send(mdata->connection, msg, &serial)) {
-      myLog(LOG_ERR, "dbus_connection_send() failed!");
+      log_dbus_error(mod, "dbus_connection_send");
     }
     else {
       myDebug(1, "SYSTEMD dbus method %s serial=%u", method, serial);
@@ -791,7 +749,9 @@ extern "C" {
       req->serial = serial;
       req->handler = reqCB;
       req->magic = magic;
+      EVClockMono(&req->send_time);
       UTHashAdd(mdata->dbusRequests, req);
+      mdata->dbus_tx++;
     }
     dbus_message_unref(msg);
   }
@@ -959,6 +919,10 @@ extern "C" {
 	    getDbusProperty(mod, unit, handler_cpuAccounting, "CPUAccounting");
 	    getDbusProperty(mod, unit, handler_memoryAccounting, "MemoryAccounting");
 	    getDbusProperty(mod, unit, handler_blockIOAccounting, "BlockIOAccounting");
+	    // TODO: could try and get "MemoryCurrent" and "CPUUsageNSec" here, but since they
+	    // are usually not limited,  these numbers are usually == (uint64_t)-1.  So
+	    // we have to get the numbers from the cgroup accounting (if enabled) or fall
+	    // back on getting the numbers from each process.
 	  }
 	}
       }
@@ -1081,48 +1045,45 @@ extern "C" {
   static void dbusSynchronize(EVMod *mod) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
 
-    myDebug(1, "SYSTEMD: dbusSynchronize - outstanding requests=%u", UTHashN(mdata->dbusRequests));
-    
-#if 0
-    dbusMethod(mod,
-	       NULL,
-	       NULL,
-	       "org.freedesktop.systemd1",
-	       "/org/freedesktop/systemd1",
-	       "org.freedesktop.systemd1.Manager",
-	       "Subscribe",
-	       HSP_dbusMethod_endargs);
-#endif
-    
-    dbusMethod(mod,
-	       handler_listUnits,
-	       NULL,
-	       "org.freedesktop.systemd1",
-	       "/org/freedesktop/systemd1",
-	       "org.freedesktop.systemd1.Manager",
-	       "ListUnits",
-	       HSP_dbusMethod_endargs);
-
-#if 0
-    dbusMethod(mod,
-    	       NULL,
-    	       NULL,
-    	       "org.freedesktop.systemd1",
-    	       "/org/freedesktop/systemd1/unit/httpd_2eservice",
-    	       "org.freedesktop.DBus.Properties",
-    	       "GetAll",
-    	       DBUS_TYPE_STRING,
-    	       "org.freedesktop.systemd1.Service",
-    	       HSP_dbusMethod_endargs);
+#if HSP_DBUS_MONITOR
+    if(!mdata->subscribed) {
+      mdata->subscribed = YES;
+      dbusMethod(mod,
+		 NULL,
+		 NULL,
+		 "org.freedesktop.systemd1",
+		 "/org/freedesktop/systemd1",
+		 "org.freedesktop.systemd1.Manager",
+		 "Subscribe",
+		 HSP_dbusMethod_endargs);
+    }
 #endif
 
-    // could try and get "MemoryCurrent" and "CPUUsageNSec" here, but since they
-    // are usually not limited,  these numbers are usually == (uint64_t)-1.  So
-    // we have to get the numbers from the cgroup accounting (if enabled) or fall
-    // back on getting the numbers from each process.
-    
-    dbus_connection_flush(mdata->connection);
-
+    if(UTHashN(mdata->dbusRequests)) {
+      myDebug(1, "SYSTEMD: dbusSynchronize - outstanding requests=%u", UTHashN(mdata->dbusRequests));
+      struct timespec now;
+      EVClockMono(&now);
+      HSPDBusRequest *req;
+      UTHASH_WALK(mdata->dbusRequests, req) {
+	int delay_mS = EVTimeDiff_mS(&req->send_time, &now);
+	if(delay_mS > HSP_DBUS_TIMEOUT_mS) {
+	  myLog(LOG_ERR, "SYSTEMD dbus request timeout (serial=%u, delay_mS=%d)", req->serial, delay_mS);
+	  UTHashDel(mdata->dbusRequests, req);
+	  my_free(req);
+	}
+      }
+    }
+    else {
+      // kick off a unit discovery sweep
+      dbusMethod(mod,
+		 handler_listUnits,
+		 NULL,
+		 "org.freedesktop.systemd1",
+		 "/org/freedesktop/systemd1",
+		 "org.freedesktop.systemd1.Manager",
+		 "ListUnits",
+		 HSP_dbusMethod_endargs);
+    }
   }
 
 
@@ -1134,6 +1095,102 @@ extern "C" {
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     mdata->countdownToResync = HSP_SYSTEMD_WAIT_STARTUP;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    tick,tock              __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(mdata->countdownToResync) {
+      if(--mdata->countdownToResync == 0) {
+    	dbusSynchronize(mod);
+	mdata->countdownToResync = sp->systemd.refreshVMListSecs ?: sp->refreshVMListSecs;
+      }
+    }
+  }
+
+  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    // now we can execute pollActions without holding on to the semaphore
+    HSPVMState_SYSTEMD *container;
+    UTHASH_WALK(mdata->pollActions, container) {
+      getCounters_SYSTEMD(mod, container);
+    }
+    UTHashReset(mdata->pollActions);
+  }
+
+  // obtaining a selectable file-descriptor from libdbus is not as easy
+  // as it ought to be, so it turns out that polling with
+  // dbus_connection_read_write_dispatch() is the easiest way to drive
+  // the bus (so that method calls are asychronous and monitoring with filters
+  // can be layered on top if required).
+  // In most cases a single poll is enough to propagate the message through one
+  // way or the other, but when we ask to "ListUnits" it actually takes
+  // about 20 polls before the data finally starts to appear for us in the
+  // dbusCB filter callback.  (I think that means a single poll of
+  // dbux_connection_read_write_dispatch() will sometimes only trigger
+  // a single socket read() operation with a limited size buffer.)
+  // We could spin tightly as long as their is an outstanding request, but
+  // it seems safer to do this polling on deciTick and allow that it might
+  // take a second or two of extra time before a call such as ListUnits delivers
+  // results.  Better to accept extra latency than risk going into a busy loop.
+  // If we see progress in terms of messages send or received, then we
+  // keep spinning, so a flurry of short method calls will complete quickly.
+  
+  static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    bool dbpoll = (UTHashN(mdata->dbusRequests) > 0);
+#if HSP_DBUS_MONITOR
+    dbpoll = YES
+#endif
+    if(dbpoll) {
+      myDebug(2, "SYSTEMD deci - outstanding=%u tx=%u rx=%u", UTHashN(mdata->dbusRequests), mdata->dbus_tx, mdata->dbus_rx);
+      uint32_t curr_tx = mdata->dbus_tx;
+      uint32_t curr_rx = mdata->dbus_rx;
+      for(;;) {
+	// keep iterating here as long as visible progress is made
+	dbus_connection_read_write_dispatch(mdata->connection, 0);
+	if(curr_tx == mdata->dbus_tx &&
+	   curr_rx == mdata->dbus_rx)
+	  break;
+	curr_tx = mdata->dbus_tx;
+	curr_rx = mdata->dbus_rx;
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________   host counter sample     __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(sp->kvm.kvm
+       || sp->docker.docker) {
+      // TODO: clean this up.  Some kind of priority scheme?
+      // requestVNodeRole(mod, SYSTEMD_VNODE_PRIORITY);
+      // ...
+      // if(hasVNodeRole(mod)) { }
+      // then use in mod_kvm, mod_xen, mod_docker and here.
+      return;
+    }
+
+    memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
+    mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
+    mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
+    mdata->vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
+    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = UTHashN(mdata->vmsByID);
+    mdata->vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
+    mdata->vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
+    SFLADD_ELEMENT(cs, &mdata->vnodeElem);
   }
 
   /*_________________---------------------------__________________
@@ -1158,16 +1215,23 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 {
   EVMod *mod = user_data;
   HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-  myLog(LOG_ERR, "SYSTEMD dbusCB()");
+  mdata->dbus_rx++;
 
   if(debug(2))
-    parseDBusMessage(mod, message);
+    printDBusMessage(mod, message);
   
   if(dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_METHOD_RETURN) {
     int serial = dbus_message_get_reply_serial(message);
     HSPDBusRequest search = { .serial = serial };
     HSPDBusRequest *req = UTHashDelKey(mdata->dbusRequests, &search);
     if(req) {
+      if(debug(2)) {
+	struct timespec now;
+	EVClockMono(&now);
+	myLog(LOG_INFO, "serial=%u response_mS=%d",
+	      req->serial,
+	      EVTimeDiff_mS(&req->send_time, &now));
+      }
       if(req->handler)
 	(*req->handler)(mod, message, req->magic);
       my_free(req);
@@ -1177,37 +1241,12 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
   
   return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
-
-  /*_________________---------------------------__________________
-    _________________       readDBus            __________________
-    -----------------___________________________------------------
-  */
-
-  static void readDBUS(EVMod *mod, EVSocket *sock, void *magic)
-  {
-    myLog(LOG_INFO, "SYSTEMD: readDBUS");
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    dbus_connection_read_write_dispatch(mdata->connection, 0);
-  }
-
-  /*_________________---------------------------__________________
-    _________________   log_dbus_error          __________________
-    -----------------___________________________------------------
-  */
-
-  static void log_dbus_error(EVMod *mod, char *msg) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    if (dbus_error_is_set(&mdata->error))
-      myLog(LOG_ERR, "SYSTEMD Error(%s) = %s", msg, mdata->error.message);
-    else
-      myLog(LOG_ERR, "SYSTEMD Error(%s)", msg);
-  }
-
+  
   /*_________________---------------------------__________________
     _________________    addMatch               __________________
     -----------------___________________________------------------
   */
-#if 0
+#if HSP_DBUS_MONITOR
   static void addMatch(EVMod *mod, char *rule) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     dbus_bus_add_match(mdata->connection, rule, &mdata->error);
@@ -1249,15 +1288,13 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       return;
     }
 
-    /* addMatch(mod, "eavesdrop=true,type='signal'"); // TODO: why do we need to eavesdrop signals? Not sure it's necessary */
-    /* addMatch(mod, "eavesdrop=true,type='method_call'"); // TODO: should "eavesdrop" be used here? */
+#if HSP_DBUS_MONITOR    
+    /* TODO: possible eavesdropping if we want to detect service start/stop asynchronously */
+    /* addMatch(mod, "eavesdrop=true,type='signal'"); */
+    /* addMatch(mod, "eavesdrop=true,type='method_call'"); */
     /* addMatch(mod, "eavesdrop=true,type='method_return'"); */
     /* addMatch(mod, "eavesdrop=true,type='error'"); */
-
-    //addMatch(mod, "eavesdrop=true,type='signal'"); // TODO: why do we need to eavesdrop signals? Not sure it's necessary
-    //addMatch(mod, "type='method_call'"); // TODO: should "eavesdrop" be used here?
-    //addMatch(mod, "type='method_return'");
-    //addMatch(mod, "type='error'");
+#endif
 
     // register dispatch callback
     if(!dbus_connection_add_filter(mdata->connection, dbusCB, mod, NULL)) {
@@ -1270,17 +1307,10 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     if(dbus_error_is_set(&mdata->error)) {
       log_dbus_error(mod, "dbus_bus_request_name");
     }
- 
-    if(!dbus_connection_get_unix_fd(mdata->connection, &mdata->dbus_soc)) {
-      log_dbus_error(mod, "dbus_connection_get_unix_fd error");
-      return;
-    }
-
-    // register socket callback to trigger dispatch
-    EVBusAddSocket(mod, mdata->pollBus, mdata->dbus_soc, readDBUS, NULL);
 
     // connection OK - so register call-backs
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);

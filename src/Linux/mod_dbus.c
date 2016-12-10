@@ -26,6 +26,8 @@ extern "C" {
     DBusConnection *connection;
     DBusError error;
     int dbus_soc;
+    uint32_t dbus_tx;
+    uint32_t dbus_rx;
     EVBus *pollBus;
   } HSP_mod_DBUS;
 
@@ -33,6 +35,14 @@ extern "C" {
     _________________    utils to help debug    __________________
     -----------------___________________________------------------
   */
+
+  static void log_dbus_error(EVMod *mod, char *msg) {
+    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
+    if (dbus_error_is_set(&mdata->error))
+      myLog(LOG_ERR, "DBUS Error(%s) = %s", msg, mdata->error.message);
+    else if(msg)
+      myLog(LOG_ERR, "DBUS Error(%s)", msg);
+  }
 
   static const char *messageTypeStr(int mtype)  {
     switch (mtype) {
@@ -186,6 +196,27 @@ extern "C" {
   
 
   /*_________________---------------------------__________________
+    _________________         evt_deci          __________________
+    -----------------___________________________------------------
+  */
+  
+  static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
+    myDebug(2, "DBUS deci - tx=%u rx=%u", mdata->dbus_tx, mdata->dbus_rx);
+    uint32_t curr_tx = mdata->dbus_tx;
+    uint32_t curr_rx = mdata->dbus_rx;
+    for(;;) {
+      // keep iterating here as long as visible progress is made
+      dbus_connection_read_write_dispatch(mdata->connection, 0);
+      if(curr_tx == mdata->dbus_tx &&
+	 curr_rx == mdata->dbus_rx)
+	break;
+      curr_tx = mdata->dbus_tx;
+      curr_rx = mdata->dbus_rx;
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________         evt_final         __________________
     -----------------___________________________------------------
   */
@@ -206,8 +237,10 @@ extern "C" {
 static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message, void *user_data)
 {
   EVMod *mod = user_data;
-  // HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-  if(debug(1))
+  HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
+  mdata->dbus_rx++;
+  
+  if(debug(2))
     parseDBusMessage(mod, message);
   
   switch(dbus_message_get_type(message)) {
@@ -223,8 +256,10 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 			     DBUS_TYPE_STRING, &world,
 			     DBUS_TYPE_INVALID);
     dbus_connection_send(connection, reply, NULL);
-    dbus_connection_flush(connection);
+    mdata->dbus_tx++;
+    dbus_connection_flush(connection);// TODO: do we need this?
     dbus_message_unref(reply);
+    return DBUS_HANDLER_RESULT_HANDLED;
     break;
   }
 
@@ -236,26 +271,14 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       
   }  
   
-  return DBUS_HANDLER_RESULT_HANDLED;
+  return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
-
-  /*_________________---------------------------__________________
-    _________________       readDBus            __________________
-    -----------------___________________________------------------
-  */
-
-  static void readDBUS(EVMod *mod, EVSocket *sock, void *magic)
-  {
-    myLog(LOG_INFO, "DBUS: readDBUS");
-    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-    dbus_connection_read_write_dispatch(mdata->connection, 0);
-  }
 
   /*_________________---------------------------__________________
     _________________    addMatch               __________________
     -----------------___________________________------------------
   */
-
+#if 0
   static void addMatch(EVMod *mod, char *type) {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     char rule[128];
@@ -265,21 +288,14 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       myLog(LOG_ERR, "DBUS: addMatch() error adding <%s>", rule);
     }
   }
-
+#endif
+  
   static void unregister(DBusConnection *connection, void *user_data) { }
   
   static DBusObjectPathVTable agent_table = {
     .unregister_function = unregister,
     .message_function = dbusCB,
   };
-
-  static void log_dbus_error(EVMod *mod, char *msg) {
-    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-    if (dbus_error_is_set(&mdata->error))
-      myLog(LOG_ERR, "DBUS Error(%s) = %s", msg, mdata->error.message);
-    else
-      myLog(LOG_ERR, "DBUS Error(%s)", msg);
-  }
   
   /*_________________---------------------------__________________
     _________________    module init            __________________
@@ -299,23 +315,13 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       return;
     }
 
-    addMatch(mod, "signal");
-    addMatch(mod, "method_call");
-    addMatch(mod, "method_return");
-    addMatch(mod, "error");
+    //addMatch(mod, "signal");
+    //addMatch(mod, "method_call");
+    //addMatch(mod, "method_return");
+    //addMatch(mod, "error");
 
     if(!dbus_connection_add_filter(mdata->connection, dbusCB, mod, NULL)) {
       log_dbus_error(mod, "dbus_connection_add_filter");
-      return;
-    }
-
-    if(!dbus_connection_register_object_path(mdata->connection, "/org/sflow/hsflowd", &agent_table, mod)) {
-      log_dbus_error(mod, "dbus_connection_register_object_path");
-      return;
-    }
- 
-    if(!dbus_connection_get_unix_fd(mdata->connection, &mdata->dbus_soc)) {
-      log_dbus_error(mod, "dbus_connection_get_unix_fd error");
       return;
     }
 
@@ -325,10 +331,15 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       log_dbus_error(mod, "dbus_bus_request_name");
     }
 
-    // get the signals
-    EVBusAddSocket(mod, mdata->pollBus, mdata->dbus_soc, readDBUS, NULL);
+    if(!dbus_connection_register_object_path(mdata->connection, "/org/sflow/hsflowd", &agent_table, mod)) {
+      log_dbus_error(mod, "dbus_connection_register_object_path");
+      return;
+    }
 
+    // TODO: add introspection
+    
     // connection OK - so register call-backs
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);
   }
 
