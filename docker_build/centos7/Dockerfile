@@ -7,7 +7,9 @@ RUN echo "EXTRAS" && yum -y install \
       libvirt-devel \
       libnfnetlink-devel \
       libxml2-devel \
-      rpm-build
+      rpm-build \
+      dbus-devel \
+      openssl-devel
 RUN mkdir /packages && chown 777 /packages
 COPY build_hsflowd /root/build_hsflowd
 ENTRYPOINT ["/root/build_hsflowd"]
