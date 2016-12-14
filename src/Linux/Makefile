@@ -141,7 +141,7 @@ endif
 
 HSFLOWD_INITSCRIPT=scripts/hsflowd
 HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service
-HSFLOWD_DBUS_CONF=scripts/org.sflow.hsflowd.conf
+HSFLOWD_DBUS_CONF=scripts/net.sflow.hsflowd.conf
 
 ifeq ($(DEBIAN),yes)
   HSFLOWD_INITSCRIPT=scripts/hsflowd.deb

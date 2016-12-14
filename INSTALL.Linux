@@ -9,7 +9,7 @@ To compile and install, try this:
 
 Features can be specified individually:
 
-% make FEATURES="ULOG NFLOG PCAP DOCKER KVM OVS TCP"
+% make FEATURES="ULOG NFLOG PCAP DOCKER KVM OVS TCP SYSTEMD DBUS"
 
 Edit /etc/hsflowd.conf for configuration.  The options are
 described here:
@@ -24,6 +24,7 @@ the compilation will work:
  KVM: libvirt-dev(el) libxml2-dev(el)
  NVML: libnvidia-ml nvml.h
  XEN: libxenctrl libxenstore xenctrl.h xenstore.h
+ SYSTEMD: openssl-dev(el)
 
 To start the daemon, run:
 

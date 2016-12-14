@@ -44,7 +44,7 @@ make clean
 %defattr(-,root,root,-)
 /usr/sbin/hsflowd
 %config(noreplace) /etc/hsflowd.conf
-%config(noreplace) /etc/dbus-1/system.d/org.sflow.hsflowd.conf
+%config(noreplace) /etc/dbus-1/system.d/net.sflow.hsflowd.conf
 /etc/init.d/hsflowd
 /lib/systemd/system/hsflowd.service
 %doc README LICENSE INSTALL.Linux
@@ -67,4 +67,3 @@ make clean
 - added post and preun,  and require chkconfig
 * Thu Feb 11 2010 nhm <nhm@chow.sf.inmon.com> 
 - Initial build.
-

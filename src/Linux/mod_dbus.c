@@ -32,6 +32,9 @@ extern "C" {
     EVBus *pollBus;
   } HSP_mod_DBUS;
 
+#define HSP_DBUS_OBJ "/net/sflow/" HSP_DAEMON_NAME
+#define HSP_DBUS_NAME "net.sflow." HSP_DAEMON_NAME
+#define HSP_DBUS_INTF_TELEMETRY HSP_DBUS_NAME ".telemetry"
 
 static const char* introspect_xml =
 "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n"
@@ -42,7 +45,7 @@ static const char* introspect_xml =
 "			<arg name=\"data\" direction=\"out\" type=\"s\"/>\n"
 "		</method>\n"
 "	</interface>\n"
-"	<interface name=\"org.sflow.hsflowd.telemetry\">\n"
+"	<interface name=\"" HSP_DBUS_INTF_TELEMETRY "\">\n"
 "		<method name=\"GetVersion\">\n"
 "		</method>\n"
 "		<method name=\"GetAll\">\n"
@@ -93,7 +96,7 @@ static const char* introspect_xml =
     dbus_message_iter_get_basic(it, &val);	\
     UTStrBuf_printf(buf, format, val);		\
 } while(0)
-  
+
   static void parseDBusElem(DBusMessageIter *it, UTStrBuf *buf, bool ind, int depth, char *suffix) {
     if(ind) indent(buf, depth);
     int atype = dbus_message_iter_get_arg_type(it);
@@ -109,7 +112,7 @@ static const char* introspect_xml =
     case DBUS_TYPE_UINT32: PARSE_DBUS_VAR(it, uint32_t, "%u", buf); break;
     case DBUS_TYPE_UINT64: PARSE_DBUS_VAR(it, uint64_t, "%"PRIu64, buf); break;
     case DBUS_TYPE_DOUBLE: PARSE_DBUS_VAR(it, double, "%f", buf); break;
-    case DBUS_TYPE_BOOLEAN: { 
+    case DBUS_TYPE_BOOLEAN: {
       dbus_bool_t val;
       dbus_message_iter_get_basic(it, &val);
       UTStrBuf_printf(buf, "%s", val ? "true":"false");
@@ -182,8 +185,8 @@ static const char* introspect_xml =
     const char *dst = dbus_message_get_destination(msg);
     UTStrBuf *buf = UTStrBuf_new();
     UTStrBuf_printf(buf, "DBUS %s->%s %s(",
-		    src?:"<no src>", 
-		    dst?:"<no dst>", 
+		    src?:"<no src>",
+		    dst?:"<no dst>",
 		    messageTypeStr(mtype));
     UTStrBuf_printf(buf, "(");
     switch(mtype) {
@@ -217,13 +220,13 @@ static const char* introspect_xml =
     myDebug(1, "DBUS message: %s", buf->buf);
     UTStrBuf_free(buf);
   }
-  
+
 
   /*_________________---------------------------__________________
     _________________         evt_deci          __________________
     -----------------___________________________------------------
   */
-  
+
   static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
     uint32_t curr_tx = mdata->dbus_tx;
@@ -284,7 +287,7 @@ static const char* introspect_xml =
     dbus_message_append_args(reply,
 			     DBUS_TYPE_STRING, &introspect_xml,
 			     DBUS_TYPE_INVALID);
-    send_reply(mod, reply);    
+    send_reply(mod, reply);
     dbus_message_unref(reply);
     return DBUS_HANDLER_RESULT_HANDLED;
   }
@@ -380,10 +383,10 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
   EVMod *mod = user_data;
   HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
   mdata->dbus_rx++;
-  
+
   if(debug(2))
     parseDBusMessage(mod, msg);
-  
+
   switch(dbus_message_get_type(msg)) {
 
   case DBUS_MESSAGE_TYPE_METHOD_CALL: {
@@ -392,7 +395,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
     if(!strcmp("org.freedesktop.DBus.Introspectable", iface)) {
       if(!strcmp("Introspect", method)) return method_introspect(mod, msg);
     }
-    else if(!strcmp("org.sflow.hsflowd.telemetry", iface)) {
+    else if(!strcmp(HSP_DBUS_INTF_TELEMETRY, iface)) {
       if(!strcmp("GetVersion", method)) return method_getVersion(mod, msg);
       if(!strcmp("GetAll", method)) return method_getAll(mod, msg);
       if(!strcmp("Get", method)) return method_get(mod, msg);
@@ -405,9 +408,9 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
   case DBUS_MESSAGE_TYPE_ERROR:
   default:
     break;
-      
-  }  
-  
+
+  }
+
   return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
@@ -426,14 +429,14 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
     }
   }
 #endif
-  
+
   static void unregister(DBusConnection *connection, void *user_data) { }
-  
+
   static DBusObjectPathVTable agent_table = {
     .unregister_function = unregister,
     .message_function = dbusCB,
   };
-  
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -463,18 +466,18 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
     }
 
     // request name
-    dbus_bus_request_name(mdata->connection, "org.sflow.hsflowd", DBUS_NAME_FLAG_REPLACE_EXISTING, &mdata->error);
+    dbus_bus_request_name(mdata->connection, HSP_DBUS_NAME, DBUS_NAME_FLAG_REPLACE_EXISTING, &mdata->error);
     if(dbus_error_is_set(&mdata->error)) {
       log_dbus_error(mod, "dbus_bus_request_name");
     }
 
-    if(!dbus_connection_register_object_path(mdata->connection, "/org/sflow/hsflowd", &agent_table, mod)) {
+    if(!dbus_connection_register_object_path(mdata->connection, HSP_DBUS_OBJ, &agent_table, mod)) {
       log_dbus_error(mod, "dbus_connection_register_object_path");
       return;
     }
 
     // TODO: add introspection
-    
+
     // connection OK - so register call-backs
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);

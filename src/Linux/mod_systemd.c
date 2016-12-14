@@ -39,9 +39,9 @@ extern "C" {
 #define HSP_SYSTEMD_SYSTEM_SLICE_REGEX "system\\.slice"
 
 #define HSP_DBUS_MONITOR 0
-  
+
   typedef void (*HSPDBusHandler)(EVMod *mod, DBusMessage *dbm, void *magic);
-  
+
   typedef struct _HSPDBusRequest {
     int serial;
     HSPDBusHandler handler;
@@ -54,7 +54,7 @@ extern "C" {
     uint64_t wr_bytes;
     uint64_t cpu_total;
   } HSPUnitCounters;
-    
+
   typedef struct _HSPDBusUnit {
     char *name;
     char *obj;
@@ -74,7 +74,7 @@ extern "C" {
     HSPUnitCounters cntr;
     HSPUnitCounters last;
   } HSPDBusProcess;
-  
+
   typedef struct _HSPVMState_SYSTEMD {
     HSPVMState vm; // superclass: must come first
     char *id;
@@ -227,7 +227,7 @@ extern "C" {
     _________________    HSPDBusUnit            __________________
     -----------------___________________________------------------
   */
-  
+
   static HSPDBusUnit *HSPDBusUnitNew(EVMod *mod, char *name) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPDBusUnit *unit = (HSPDBusUnit *)my_calloc(sizeof(HSPDBusUnit));
@@ -263,7 +263,7 @@ extern "C" {
     dbus_message_iter_get_basic(it, &val);	\
     UTStrBuf_printf(buf, format, val);		\
 } while(0)
-  
+
   static void printDBusElem(DBusMessageIter *it, UTStrBuf *buf, bool ind, int depth, char *suffix) {
     if(ind) indent(buf, depth);
     int atype = dbus_message_iter_get_arg_type(it);
@@ -279,7 +279,7 @@ extern "C" {
     case DBUS_TYPE_UINT32: PRINT_DBUS_VAR(it, uint32_t, "%u", buf); break;
     case DBUS_TYPE_UINT64: PRINT_DBUS_VAR(it, uint64_t, "%"PRIu64, buf); break;
     case DBUS_TYPE_DOUBLE: PRINT_DBUS_VAR(it, double, "%f", buf); break;
-    case DBUS_TYPE_BOOLEAN: { 
+    case DBUS_TYPE_BOOLEAN: {
       dbus_bool_t val;
       dbus_message_iter_get_basic(it, &val);
       UTStrBuf_printf(buf, "%s", val ? "true":"false");
@@ -350,8 +350,8 @@ extern "C" {
     const char *dst = dbus_message_get_destination(msg);
     UTStrBuf *buf = UTStrBuf_new();
     UTStrBuf_printf(buf, "SYSTEMD %s->%s %s(",
-		    src?:"<no src>", 
-		    dst?:"<no dst>", 
+		    src?:"<no src>",
+		    dst?:"<no dst>",
 		    messageTypeStr(mtype));
     UTStrBuf_printf(buf, "(");
     switch(mtype) {
@@ -385,16 +385,16 @@ extern "C" {
     myDebug(1, "SYSTEMD message: %s", buf->buf);
     UTStrBuf_free(buf);
   }
-  
+
   /*________________---------------------------__________________
     ________________    deltaProcessCPU        __________________
     ----------------___________________________------------------
   */
-  
+
   static uint64_t readProcessCPU(EVMod *mod, HSPDBusProcess *process) {
     // HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     uint64_t cpu_total = 0;
-    // compare with the reading of /proc/stat in readCpuCounters.c 
+    // compare with the reading of /proc/stat in readCpuCounters.c
     char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
     sprintf(path, "/proc/%u/stat", process->pid);
     FILE *statFile = fopen(path, "r");
@@ -425,12 +425,12 @@ extern "C" {
     process->last.cpu_total = cpu_total;
     return process->cntr.cpu_total;
   }
-  
+
   /*________________---------------------------__________________
     ________________   accumulateProcessCPU    __________________
     ----------------___________________________------------------
   */
-  
+
   static uint64_t accumulateProcessCPU(EVMod *mod, HSPDBusUnit *unit) {
     HSPDBusProcess *process;
     uint64_t unit_total = 0;
@@ -440,12 +440,12 @@ extern "C" {
     unit->cntr.cpu_total = unit_total;
     return unit->cntr.cpu_total;
   }
-  
+
   /*________________---------------------------__________________
     ________________    readProcessRAM         __________________
     ----------------___________________________------------------
   */
-  
+
   static uint64_t readProcessRAM(EVMod *mod, HSPDBusProcess *process) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     uint64_t rss = 0;
@@ -472,12 +472,12 @@ extern "C" {
     }
     return rss * mdata->page_size;
   }
-  
+
   /*________________---------------------------__________________
     ________________   accumulateProcessRAM    __________________
     ----------------___________________________------------------
   */
-  
+
   static uint64_t accumulateProcessRAM(EVMod *mod, HSPDBusUnit *unit) {
     uint64_t rss = 0;
     HSPDBusProcess *process;
@@ -486,12 +486,12 @@ extern "C" {
     }
     return rss;
   }
-  
+
   /*________________---------------------------__________________
     ________________    readProcessIO          __________________
     ----------------___________________________------------------
   */
-  
+
   static bool readProcessIO(EVMod *mod, HSPDBusProcess *process, SFLHost_vrt_dsk_counters *dskio) {
     int found = NO;
     uint64_t rd_bytes = 0;
@@ -529,12 +529,12 @@ extern "C" {
     dskio->wr_bytes += process->cntr.wr_bytes;
     return found;
   }
-  
+
   /*________________---------------------------__________________
     ________________   accumulateProcessIO     __________________
     ----------------___________________________------------------
   */
-  
+
   static bool accumulateProcessIO(EVMod *mod, HSPDBusUnit *unit, SFLHost_vrt_dsk_counters *dskio) {
     bool gotData = NO;
     HSPDBusProcess *process;
@@ -582,12 +582,12 @@ extern "C" {
     }
     return (found > 0);
   }
-  
+
   /*________________---------------------------__________________
     ________________   getCounters_SYSTEMD     __________________
     ----------------___________________________------------------
   */
-  
+
   static void getCounters_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container)
   {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
@@ -600,7 +600,7 @@ extern "C" {
       removeAndFreeVM_SYSTEMD(mod, container);
       return;
     }
-    
+
     SFL_COUNTERS_SAMPLE_TYPE cs = { 0 };
     HSPVMState *vm = (HSPVMState *)&container->vm;
     // host ID
@@ -708,13 +708,13 @@ extern "C" {
 	  dskElem.counterBlock.host_vrt_dsk.wr_bytes += dskValsB[1].nv_val64;
 	}
       }
-      
+
       HSPNameVal dskValsO[] = {
 	{ "Read",0,0 },
 	{ "Write",0,0},
 	{ NULL,0,0},
       };
-      
+
       if(readCgroupCounters(mod, "blkio", unit->cgroup, "blkio.io_serviced_recursive", 2, dskValsO, YES)) {
 	if(dskValsO[0].nv_found) {
 	  dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
@@ -746,7 +746,7 @@ extern "C" {
   */
 
 #define HSP_dbusMethod_endargs DBUS_TYPE_INVALID,NULL
-  
+
   static void dbusMethod(EVMod *mod, HSPDBusHandler reqCB, void *magic, char *target, char  *obj, char *interface, char *method, ...) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     DBusMessage *msg = dbus_message_new_method_call(target, obj, interface, method);
@@ -906,12 +906,12 @@ extern "C" {
 	myDebug(1, "UNIT CGROUP[cgroup=\"%s\"]", val.str);
 	unit->cgroup = my_strdup(val.str);
 	// read the process ids
-	
+
 	// mark and sweep - mark
 	HSPDBusProcess *process;
 	UTHASH_WALK(unit->processes, process)
 	  process->marked = YES;
-	
+
 	char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
 	sprintf(path, "/sys/fs/cgroup/systemd/%s/cgroup.procs", val.str);
 	FILE *pidsFile = fopen(path, "r");
@@ -928,7 +928,7 @@ extern "C" {
 	      process = UTHashGet(unit->processes, &search);
 	      if(process)
 		process->marked = NO;
-	      else {		
+	      else {
 		HSPDBusProcess *process = (HSPDBusProcess *)my_calloc(sizeof(HSPDBusProcess));
 		process->pid = pid64;
 		UTHashAdd(unit->processes, process);
@@ -987,7 +987,7 @@ extern "C" {
       }
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________   handler_listUnits       __________________
     -----------------___________________________------------------
@@ -1136,7 +1136,7 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     if(mdata->countdownToResync) {
       if(--mdata->countdownToResync == 0) {
-    	dbusSynchronize(mod);
+	dbusSynchronize(mod);
 	mdata->countdownToResync = sp->systemd.refreshVMListSecs ?: sp->refreshVMListSecs;
       }
     }
@@ -1169,7 +1169,7 @@ extern "C" {
   // results.  Better to accept extra latency than risk going into a busy loop.
   // If we see progress in terms of messages send or received, then we
   // keep spinning, so a flurry of short method calls will complete quickly.
-  
+
   static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     bool dbpoll = (UTHashN(mdata->dbusRequests) > 0);
@@ -1234,7 +1234,7 @@ extern "C" {
       mdata->connection = NULL;
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________       dbusCB              __________________
     -----------------___________________________------------------
@@ -1248,7 +1248,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 
   if(debug(2))
     printDBusMessage(mod, message);
-  
+
   if(dbus_message_get_type(message) == DBUS_MESSAGE_TYPE_METHOD_RETURN) {
     int serial = dbus_message_get_reply_serial(message);
     HSPDBusRequest search = { .serial = serial };
@@ -1267,10 +1267,10 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       return DBUS_HANDLER_RESULT_HANDLED;
     }
   }
-  
+
   return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
-  
+
   /*_________________---------------------------__________________
     _________________    addMatch               __________________
     -----------------___________________________------------------
@@ -1285,7 +1285,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     }
   }
 #endif
-  
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -1310,7 +1310,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 
     // this mod operates entirely on the pollBus thread
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
-      
+
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_SYSTEMD, vm.uuid, UTHASH_DFLT);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_SYSTEMD, id, UTHASH_SKEY);
     mdata->pollActions = UTHASH_NEW(HSPVMState_SYSTEMD, id, UTHASH_IDTY);
@@ -1326,7 +1326,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
       return;
     }
 
-#if HSP_DBUS_MONITOR    
+#if HSP_DBUS_MONITOR
     /* TODO: possible eavesdropping if we want to detect service start/stop asynchronously */
     /* addMatch(mod, "eavesdrop=true,type='signal'"); */
     /* addMatch(mod, "eavesdrop=true,type='method_call'"); */
@@ -1338,12 +1338,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     if(!dbus_connection_add_filter(mdata->connection, dbusCB, mod, NULL)) {
       log_dbus_error(mod, "dbus_connection_add_filter");
       return;
-    }
-
-    // request name
-    dbus_bus_request_name(mdata->connection, "org.sflow.hsflowd.modsystemd", DBUS_NAME_FLAG_REPLACE_EXISTING, &mdata->error);
-    if(dbus_error_is_set(&mdata->error)) {
-      log_dbus_error(mod, "dbus_bus_request_name");
     }
 
     // connection OK - so register call-backs

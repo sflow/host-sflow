@@ -3,7 +3,7 @@ echo "build_hsflowd on platform:  $1"
 
 git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
-&& make rpm FEATURES="NFLOG PCAP TCP DOCKER KVM OVS"
+&& make rpm FEATURES="NFLOG PCAP TCP DOCKER KVM OVS SYSTEMD DBUS"
 
 for rpm in `ls *.rpm`; do cp "$rpm" "/packages/${rpm/hsflowd/hsflowd-$1}"; done
 echo ""
