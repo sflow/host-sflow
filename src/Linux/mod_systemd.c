@@ -184,6 +184,10 @@ extern "C" {
       container = (HSPVMState_SYSTEMD *)getVM(mod, unit->uuid, YES, sizeof(HSPVMState_SYSTEMD), VMTYPE_SYSTEMD, agentCB_getCounters_SYSTEMD_request);
       assert(container != NULL);
       if(container) {
+	if(container->id) {
+	  my_free(container->id);
+	  container->id = NULL;
+	}
 	container->id = my_strdup(unit->name);
 	// add to collections
 	UTHashAdd(mdata->vmsByID, container);
@@ -904,7 +908,15 @@ extern "C" {
 	 && my_strlen(val.str)
 	 && regexec(mdata->system_slice_regex, val.str, 0, NULL, 0) == 0) {
 	myDebug(1, "UNIT CGROUP[cgroup=\"%s\"]", val.str);
-	unit->cgroup = my_strdup(val.str);
+	if(unit->cgroup
+	   && !my_strequal(unit->cgroup, val.str)) {
+	  // cgroup name changed
+	  my_free(unit->cgroup);
+	  unit->cgroup = NULL;
+	}
+	if(!unit->cgroup)
+	  unit->cgroup = my_strdup(val.str);
+
 	// read the process ids
 
 	// mark and sweep - mark
@@ -970,7 +982,15 @@ extern "C" {
       DBusBasicValue val;
       if(db_get(&it, DBUS_TYPE_OBJECT_PATH, &val)
 	 && val.str) {
-	unit->obj = my_strdup(val.str);
+	if(unit->obj
+	   && !my_strequal(unit->obj, val.str)) {
+	  // obj changed
+	  my_free(unit->obj);
+	  unit->obj = NULL;
+	}
+	if(!unit->obj)
+	  unit->obj = my_strdup(val.str);
+
 	myDebug(1, "UNIT OBJ[obj=\"%s\"]", val.str);
 	dbusMethod(mod,
 		   handler_controlGroup,
