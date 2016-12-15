@@ -38,7 +38,7 @@ extern "C" {
 
 static const char* introspect_xml =
 "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n"
-"\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\";>\n"
+"\"http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd\">\n"
 "<node>\n"
 "	<interface name=\"org.freedesktop.DBus.Introspectable\">\n"
 "		<method name=\"Introspect\">\n"
