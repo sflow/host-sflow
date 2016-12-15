@@ -133,6 +133,7 @@ deb: $(PROG)
 	install -m 755 src/Linux/scripts/hsflowd.deb debian/etc/init.d/hsflowd; \
 	install -m 644 src/Linux/scripts/hsflowd.conf debian/etc; \
 	install -m 644 src/Linux/scripts/hsflowd.service debian/lib/systemd/system; \
+	install -m 644 src/Linux/scripts/net.sflow.hsflowd.conf debian/etc/dbus-1/system.d; \
         cd debian; \
 	find . -type d | xargs chmod 755; \
         md5sum `find usr etc -type f` > DEBIAN/md5sums; \
