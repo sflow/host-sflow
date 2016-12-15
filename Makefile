@@ -120,6 +120,7 @@ deb: $(PROG)
 	mkdir -p debian/etc/init.d; \
 	mkdir -p debian/etc/hsflowd/modules; \
 	mkdir -p debian/lib/systemd/system; \
+	mkdir -p debian/etc/dbus-1/system.d; \
 	install DEBIAN_build/control debian/DEBIAN; \
 	sed -i -e s/_PACKAGE_/$(PROG)/g debian/DEBIAN/control; \
 	sed -i -e s/_VERSION_/$${MYVER}-$${MYREL}/g debian/DEBIAN/control; \
