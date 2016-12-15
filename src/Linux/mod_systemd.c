@@ -1223,19 +1223,6 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________         evt_final         __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    if(mdata->connection) {
-      dbus_connection_close(mdata->connection);
-      mdata->connection = NULL;
-    }
-  }
-
-  /*_________________---------------------------__________________
     _________________       dbusCB              __________________
     -----------------___________________________------------------
   */
@@ -1346,7 +1333,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);
   }
 
 #if defined(__cplusplus)

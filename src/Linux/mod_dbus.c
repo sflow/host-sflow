@@ -243,19 +243,6 @@ static const char* introspect_xml =
   }
 
   /*_________________---------------------------__________________
-    _________________         evt_final         __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
-    if(mdata->connection) {
-      dbus_connection_close(mdata->connection);
-      mdata->connection = NULL;
-    }
-  }
-
-  /*_________________---------------------------__________________
     _________________       send_reply          __________________
     -----------------___________________________------------------
   */
@@ -480,7 +467,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
 
     // connection OK - so register call-backs
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_DECI), evt_deci);
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);
   }
 
 #if defined(__cplusplus)
