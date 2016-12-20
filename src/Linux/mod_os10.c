@@ -271,7 +271,7 @@ extern "C" {
     char outputLine[HSP_MAX_EXEC_LINELEN];
     niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
     if(niostate->sampling_n != niostate->sampling_n_set) {
-      myDebug(1, "setSwitchPortSamplingRate(%s) %u -> %u",
+      myDebug(1, "setSamplingRate(%s) %u -> %u",
 	      adaptor->deviceName,
 	      niostate->sampling_n_set,
 	      niostate->sampling_n);
@@ -294,7 +294,7 @@ extern "C" {
 	  hw_sampling = NO;
 	}
 	else {
-	  myDebug(1, "setSwitchPortSamplingRate(%s) succeeded", adaptor->deviceName);
+	  myDebug(1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
 	  // hardware or kernel sampling was successfully configured
 	  niostate->sampling_n_set = niostate->sampling_n;
 	  sp->hardwareSampling = YES;

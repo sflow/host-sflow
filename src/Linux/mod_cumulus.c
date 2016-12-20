@@ -141,64 +141,61 @@ extern "C" {
     return YES;
   }
 
-  static int setSwitchPortSamplingRates(HSP *sp, HSPSFlowSettings *settings, uint32_t logGroup)
-  {
-    int hw_sampling = YES;
-    UTStringArray *cmdline = strArrayNew();
-    strArrayAdd(cmdline, HSP_CUMULUS_SWITCHPORT_CONFIG_PROG);
-    // usage:  <prog> <interface> <ingress-rate> <egress-rate> <logGroup>
+  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
+    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+    if(niostate->switchPort == NO
+       || niostate->loopback
+       || niostate->bond_master)
+      return NO;
+
+    bool hw_sampling = NO;
+    niostate->sampling_n = sampling_n;
+    if(niostate->sampling_n != niostate->sampling_n_set) {
+      UTStringArray *cmdline = strArrayNew();
+      strArrayAdd(cmdline, HSP_CUMULUS_SWITCHPORT_CONFIG_PROG);
+      // usage:  <prog> <interface> <ingress-rate> <egress-rate> <logGroup>
 #define HSP_MAX_TOK_LEN 16
-    strArrayAdd(cmdline, NULL); // placeholder for port name in slot 1
-    strArrayAdd(cmdline, "0");  // placeholder for ingress sampling
-    strArrayAdd(cmdline, "0");  // placeholder for egress sampling
-    char loggrp[HSP_MAX_TOK_LEN];
-    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", logGroup);
-    strArrayAdd(cmdline, loggrp);
+      strArrayAdd(cmdline, NULL); // placeholder for port name in slot 1
+      strArrayAdd(cmdline, "0");  // placeholder for ingress sampling
+      strArrayAdd(cmdline, "0");  // placeholder for egress sampling
+      char loggrp[HSP_MAX_TOK_LEN];
+      snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", logGroup);
+      strArrayAdd(cmdline, loggrp);
 #define HSP_MAX_EXEC_LINELEN 1024
-    char outputLine[HSP_MAX_EXEC_LINELEN];
-    SFLAdaptor *adaptor;
-    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
-      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-      if(niostate->switchPort
-	 && !niostate->loopback
-	 && !niostate->bond_master) {
-	niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
-	if(niostate->sampling_n != niostate->sampling_n_set) {
-	  myDebug(1, "setSwitchPortSamplingRate(%s) %u -> %u",
-			  adaptor->deviceName,
-			  niostate->sampling_n_set,
-			  niostate->sampling_n);
-	  strArrayInsert(cmdline, 1, adaptor->deviceName);
-	  char srate[HSP_MAX_TOK_LEN];
-	  snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-	  if(settings->samplingDirection & HSP_DIRN_IN) strArrayInsert(cmdline, 2, srate); // ingress
-	  if(settings->samplingDirection & HSP_DIRN_OUT) strArrayInsert(cmdline, 3, srate); // egress
-	  int status;
-	  if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
-	    if(WEXITSTATUS(status) != 0) {
-
-	      myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
-		    HSP_CUMULUS_SWITCHPORT_CONFIG_PROG,
-		    WEXITSTATUS(status));
-
-	      hw_sampling = NO;
-	      break;
-	    }
-	    else {
-	      myDebug(1, "setSwitchPortSamplingRate(%s) succeeded", adaptor->deviceName);
-	      // hardware or kernel sampling was successfully configured
-	      niostate->sampling_n_set = niostate->sampling_n;
-	    }
-	  }
-	  else {
-	    myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
-		  strArrayAt(cmdline, 0),
-		  strArrayAt(cmdline, 1));
-	  }
+      char outputLine[HSP_MAX_EXEC_LINELEN];
+      myDebug(1, "setSamplingRate(%s) %u -> %u",
+	      adaptor->deviceName,
+	      niostate->sampling_n_set,
+	      niostate->sampling_n);
+      strArrayInsert(cmdline, 1, adaptor->deviceName);
+      char srate[HSP_MAX_TOK_LEN];
+      snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
+      if(sampling_dirn & HSP_DIRN_IN)
+	strArrayInsert(cmdline, 2, srate); // ingress
+      if(sampling_dirn & HSP_DIRN_OUT)
+	strArrayInsert(cmdline, 3, srate); // egress
+      int status;
+      if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+	if(WEXITSTATUS(status) != 0) {
+	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
+		HSP_CUMULUS_SWITCHPORT_CONFIG_PROG,
+		WEXITSTATUS(status));
+	}
+	else {
+	  myDebug(1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
+	  // hardware or kernel sampling was successfully configured
+	  niostate->sampling_n_set = niostate->sampling_n;
+	  hw_sampling = YES;
 	}
       }
+      else {
+	myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
+	      strArrayAt(cmdline, 0),
+	      strArrayAt(cmdline, 1));
+      }
+      strArrayFree(cmdline);
     }
-    strArrayFree(cmdline);
+
     return hw_sampling;
   }
 
@@ -231,6 +228,19 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    sampling_channel       __________________
+    -----------------___________________________------------------
+  */
+
+  static uint32_t sampling_channel(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // channel number depends on whether we are using ULOG or NFLOG
+    // (though it defaults to 1 in either case)
+    EVMod *nflogMod = EVGetModule(mod, "mod_nflog");
+    return (nflogMod && nflogMod->libHandle) ? sp->nflog.group : sp->ulog.group;
+  }
+
+  /*_________________---------------------------__________________
     _________________    evt_config_changed     __________________
     -----------------___________________________------------------
   */
@@ -242,13 +252,15 @@ extern "C" {
       return; // no config (yet - may be waiting for DNS-SD)
 
     markSwitchPorts(mod);
+    uint32_t channel = sampling_channel(mod);
+    int sampling_dirn = sp->sFlowSettings->samplingDirection;
 
-    // channel number depends on whether we are using ULOG or NFLOG (though it
-    // defaults to 1 in either case)
-    EVMod *nflogMod = EVGetModule(mod, "mod_nflog");
-    int channel = (nflogMod && nflogMod->libHandle) ? sp->nflog.group : sp->ulog.group;
-
-    sp->hardwareSampling = setSwitchPortSamplingRates(sp, sp->sFlowSettings, channel);
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
+      if(setSamplingRate(mod, adaptor, channel, sampling_n, sampling_dirn))
+	sp->hardwareSampling = YES;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -258,6 +270,27 @@ extern "C" {
 
   static void evt_intfs_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     evt_config_changed(mod, evt, data, dataLen);
+  }
+
+  /*_________________---------------------------__________________
+    _________________        evt_final          __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->sFlowSettings == NULL)
+      return;
+    // turn off any hardware sampling that we enabled
+    uint32_t channel = sampling_channel(mod);
+    int sampling_dirn = sp->sFlowSettings->samplingDirection;
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+      if(niostate->switchPort
+	 && niostate->sampling_n_set != 0)
+	setSamplingRate(mod, adaptor, channel, 0, sampling_dirn);
+    }
   }
 
   /*_________________---------------------------__________________
@@ -281,9 +314,10 @@ extern "C" {
 
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed); 
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);
-  }
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);
+ }
 
 #if defined(__cplusplus)
 } /* extern "C" */
