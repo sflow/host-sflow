@@ -8,19 +8,42 @@ extern "C" {
 
 #include "hsflowd.h"
 #include "arpa/nameser.h"
+#include "arpa/nameser_compat.h"
 #include "resolv.h"
+
+
+#define HSP_DEFAULT_DNSSD_STARTDELAY 30
+#define HSP_DEFAULT_DNSSD_RETRYDELAY 300
+#define HSP_DEFAULT_DNSSD_MINDELAY 10
 
 #define HSP_MIN_DNAME 4  /* what is the shortest FQDN you can have? */
 #define HSP_MIN_TXT 4  /* what is the shortest meaingful TXT record here? */
+
+  // using DNS SRV+TXT records
+#define SFLOW_DNS_SD "_sflow._udp"
+#define HSP_MAX_DNS_LEN 255
+  typedef void (*HSPDnsCB)(EVMod *mod, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *settings);
+
+  typedef struct _HSP_mod_DNSSD {
+    int countdown;
+    uint32_t startDelay;
+    uint32_t retryDelay;
+    uint32_t ttl;
+    EVBus *configBus;
+    EVBus *pollBus;
+    EVEvent *configStartEvent;
+    EVEvent *configEvent;
+    EVEvent *configEndEvent;
+  } HSP_mod_DNSSD;
 
   /*________________---------------------------__________________
     ________________       dnsSD_Request       __________________
     ----------------___________________________------------------
   */
 
-  static
-  int dnsSD_Request(HSP *sp, char *dname, uint16_t rtype, HSPDnsCB callback, HSPSFlowSettings *settings)
+  static int dnsSD_Request(EVMod *mod, char *dname, uint16_t rtype, HSPDnsCB callback, HSPSFlowSettings *settings)
   {
+    // HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     u_char buf[PACKETSZ];
 
     // We could have a config option to set the DNS servers that we will ask. If so
@@ -157,7 +180,7 @@ extern "C" {
 	      char fqdn_port[PACKETSZ];
 	      sprintf(fqdn_port, "%s/%u", fqdn, res_prt);
 	      // use key == NULL to indicate that the value is host:port
-	      (*callback)(sp, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port), settings);
+	      (*callback)(mod, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port), settings);
 	    }
 	  }
 	}
@@ -195,7 +218,7 @@ extern "C" {
 	      myLog(LOG_ERR, "dsnSD TXT record not in var=val format: %s", x);
 	    }
 	    else {
-	      if(callback) (*callback)(sp, rtype, res_ttl, x, klen, (x+klen+1), (pairlen - klen - 1), settings);
+	      if(callback) (*callback)(mod, rtype, res_ttl, x, klen, (x+klen+1), (pairlen - klen - 1), settings);
 	    }
 	    x += pairlen;
 	  }
@@ -216,15 +239,108 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  int dnsSD(HSP *sp, HSPDnsCB callback, HSPSFlowSettings *settings)
+  static int dnsSD(EVMod *mod, HSPDnsCB callback, HSPSFlowSettings *settings)
   {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     char request[HSP_MAX_DNS_LEN];
-    char *domain_override = sp->DNSSD_domain ? sp->DNSSD_domain : "";
+    char *domain_override = sp->DNSSD.domain ?: "";
     snprintf(request, HSP_MAX_DNS_LEN, "%s%s", SFLOW_DNS_SD, domain_override);
-    int num_servers = dnsSD_Request(sp, request, T_SRV, callback, settings);
-    dnsSD_Request(sp, request, T_TXT, callback, settings);
+    int num_servers = dnsSD_Request(mod, request, T_SRV, callback, settings);
+    dnsSD_Request(mod, request, T_TXT, callback, settings);
     // it's ok even if only the SRV request succeeded
     return num_servers; //  -1 on error
+  }
+
+  /*_________________---------------------------__________________
+    _________________      myDnsCB              __________________
+    -----------------___________________________------------------
+  */
+
+  static void myDnsCB(EVMod *mod, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *st)
+  {
+    HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
+    // latch the min ttl
+    if(mdata->ttl == 0 || ttl < mdata->ttl) {
+      mdata->ttl = ttl;
+    }
+
+    char keyBuf[1024];
+    char valBuf[1024];
+    if(keyLen > 1023 || valLen > 1023) {
+      myLog(LOG_ERR, "myDNSCB: string too long");
+      return;
+    }
+    // make a null-terminated copy of key and value
+    // and be careful to avoid memcpy(<target>, 0, 0) because it seems to break
+    // things horribly when the gcc optimizer is on.
+    if(key && keyLen) memcpy(keyBuf, (char *)key, keyLen);
+    keyBuf[keyLen] = '\0';
+    if(val && valLen) memcpy(valBuf, (char *)val, valLen);
+    valBuf[valLen] = '\0';
+
+    myDebug(1, "dnsSD: (rtype=%u,ttl=%u) <%s>=<%s>", rtype, ttl, keyBuf, valBuf);
+
+    if(((keyLen ?: strlen("collector")) + valLen + 2) > EV_MAX_EVT_DATALEN) {
+      myLog(LOG_ERR, "myDNSCB: config line too long");
+      return;
+    }
+
+    char cfgLine[EV_MAX_EVT_DATALEN];
+    snprintf(cfgLine, EV_MAX_EVT_DATALEN, "%s=%s", (keyLen ? keyBuf : "collector"), valBuf);
+
+    // sending configEvent (pollBus) from here (configBus) means it will go via pipe
+    EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+  }
+
+  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(--mdata->countdown <= 0) {
+      // SIGSEGV on Fedora 14 if HSP_RLIMIT_MEMLOCK is non-zero, because calloc returns NULL.
+      // Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
+      // maybe we are supposed to fork the DNSSD thread before dropping privileges?
+
+      // we want the min ttl, so clear it here
+      mdata->ttl = 0;
+      // now make the requests
+      EVEventTx(mod, mdata->configStartEvent, NULL, 0);
+      int num_servers = dnsSD(mod, myDnsCB, sp->sFlowSettings_dnsSD); // will send config line events
+      EVEventTx(mod, mdata->configEndEvent, &num_servers, sizeof(num_servers));
+
+      // whatever happens we might still learn a TTL (e.g. from the TXT record query)
+      mdata->countdown = mdata->ttl ?: mdata->retryDelay;
+      // but make sure it's sane
+      if(mdata->countdown < HSP_DEFAULT_DNSSD_MINDELAY) {
+	myDebug(1, "forcing minimum DNS polling delay");
+	mdata->countdown = HSP_DEFAULT_DNSSD_MINDELAY;
+      }
+      myDebug(1, "DNSSD polling delay set to %u seconds", mdata->countdown);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    module init            __________________
+    -----------------___________________________------------------
+  */
+
+  void mod_dnssd(EVMod *mod) {
+    mod->data = my_calloc(sizeof(HSP_mod_DNSSD));
+    HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
+    mdata->startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
+    mdata->retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
+
+    // make sure we don't all hammer the DNS server immediately on restart
+    mdata->countdown = sfl_random(mdata->startDelay);
+
+    // register call-backs
+    mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
+    mdata->configStartEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_START);
+    mdata->configEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_LINE);
+    mdata->configEndEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_END);
+
+    mdata->configBus = EVGetBus(mod, HSPBUS_CONFIG, YES);
+    EVEventRx(mod, EVGetEvent(mdata->configBus, EVEVENT_TICK), evt_tick);
   }
 
 #if defined(__cplusplus)

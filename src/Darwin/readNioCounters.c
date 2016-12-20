@@ -15,12 +15,21 @@ extern "C" {
 #include <net/route.h>
 
   /*_________________---------------------------__________________
+    _________________    updateNioCounters      __________________
+    -----------------___________________________------------------
+  */
+
+  void updateNioCounters(HSP *sp, SFLAdaptor *filter) {
+    // no-op - we do not read the per-interface counters on Darwin
+  }
+
+  /*_________________---------------------------__________________
     _________________      readNioCounters      __________________
     -----------------___________________________------------------
     adapted from Ganglia libmetrics
   */
   
-  int readNioCounters(SFLHost_nio_counters *nio, char *devFilter) {
+  int readNioCounters(HSP *sp, SFLHost_nio_counters *nio, char *devFilter, SFLAdaptorList *adList) {
     int interface_count = 0;
 
     int mib[]={ CTL_NET, PF_ROUTE, 0, 0, NET_RT_IFLIST, 0 };
@@ -29,6 +38,9 @@ extern "C" {
       myLog(LOG_ERR, "sysctl(<NioCounters>) probe failed : %s", strerror(errno));
       return NO;
     }
+    if(needed == 0)
+      return 0;
+
     char *buf = (char*)my_calloc(needed);
     if (sysctl(mib, 6, buf, &needed, NULL, 0) != 0) {
       myLog(LOG_ERR, "sysctl(<NioCounters>) read failed : %s", strerror(errno));
@@ -54,7 +66,7 @@ extern "C" {
       if(ifm->ifm_flags & IFF_LOOPBACK) continue;
       if(!(ifm->ifm_flags & IFF_UP)) continue;
 
-      // $$$ test the device filter - is the device name known here?
+      // TODO: test the device filter - is the device name known here?
       // may need to get the ifindex with ifm->ifm_index and then look up
       // the name from there - or go the other way and make the filter be
       // a filter on ifindex.
@@ -71,7 +83,7 @@ extern "C" {
       // nio->drops_out += ifm->ifm_data.ifi_oqdrops;
       
     }
-    free(buf);
+    my_free(buf);
     return interface_count;
   }
 

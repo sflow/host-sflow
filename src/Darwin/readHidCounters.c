@@ -78,6 +78,7 @@ extern "C" {
       gotData = YES;
       hid->os_release.str = rbuf;
       hid->os_release.len = strlen(rbuf);
+      // TODO: map this into "marketing" release number.
     }
     return gotData;
   }

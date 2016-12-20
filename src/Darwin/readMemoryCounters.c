@@ -38,6 +38,8 @@ extern "C" {
   */
   
   int readMemoryCounters(SFLHost_mem_counters *mem) {
+    // TODO: could populate these numbers by calling out to vm_stat(1) or iostat(1)
+    // (not sure how to get them in a more direct way)
     int gotData = NO;
     uint64_t val64;
     if(getSys64("hw.memsize", &val64)) {
@@ -53,11 +55,10 @@ extern "C" {
       // $$$ mem->mem_total = val64;
     }
 
-    // swap $$$
-/* 	  if(strcmp(var, "pgpgin") == 0) mem->page_in = (uint32_t)val64; */
-/* 	  else if(strcmp(var, "pgpgout") == 0) mem->page_out = (uint32_t)val64; */
-/* 	  else if(strcmp(var, "pswpin") == 0) mem->swap_in = (uint32_t)val64; */
-/* 	  else if(strcmp(var, "pswpout") == 0) mem->swap_out = (uint32_t)val64; */
+    /* 	  if(strcmp(var, "pgpgin") == 0) mem->page_in = (uint32_t)val64; */
+    /* 	  else if(strcmp(var, "pgpgout") == 0) mem->page_out = (uint32_t)val64; */
+    /* 	  else if(strcmp(var, "pswpin") == 0) mem->swap_in = (uint32_t)val64; */
+    /* 	  else if(strcmp(var, "pswpout") == 0) mem->swap_out = (uint32_t)val64; */
     
     return gotData;
   }

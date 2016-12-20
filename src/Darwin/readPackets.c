@@ -119,14 +119,14 @@ extern "C" {
 	// possibly include LACP struct for bond slave
 	// (used to send for bond-master too,  but that
 	// was a mis-reading of the standard).
-	SFLCounters_sample_element lacp_elem = { 0 };
-	if(/*adaptorNIO->bond_master
-	     ||*/ adaptorNIO->bond_slave) {
-	  updateBondCounters(sp, adaptor);
-	  lacp_elem.tag = SFLCOUNTERS_LACP;
-	  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
-	  SFLADD_ELEMENT(cs, &lacp_elem);
-	}
+	// SFLCounters_sample_element lacp_elem = { 0 };
+	//if(/*adaptorNIO->bond_master
+	//     ||*/ adaptorNIO->bond_slave) {
+	//  updateBondCounters(sp, adaptor);
+	//  lacp_elem.tag = SFLCOUNTERS_LACP;
+	//  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
+	//  SFLADD_ELEMENT(cs, &lacp_elem);
+	//}
 
 	// possibly include SFP struct with optical gauges
 	SFLCounters_sample_element sfp_elem = { 0 };
@@ -512,7 +512,7 @@ extern "C" {
     // a component have been flagged as a switchPorts,
     // however (currently by regex),  then individual
     // polling will not be enabled for them below.
-    readBondState(sp);
+    // readBondState(sp);
 
     int count = 0;
     SFLAdaptor *adaptor;
@@ -527,12 +527,12 @@ extern "C" {
     // batches that will go out together -- mostly
     // used when reading counters means reading all
     // counters and it's expensive to do it.
-    if(sp->syncPollingInterval)
-      syncPolling(sp);
+    //if(sp->syncPollingInterval)
+    //  syncPolling(sp);
 
     // make sure slave ports are on the same
     // polling schedule as their bond master.
-    syncBondPolling(sp);
+    // syncBondPolling(sp);
 
     return count;
   }

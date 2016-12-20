@@ -1,99 +1,128 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-# specify XEN_ROOT path to compile with xen-sources
-# e.g. XEN_ROOT=/root/xen-3.2.0
-ifeq ($(XEN_ROOT),)
-else
-	include $(XEN_ROOT)/tools/Rules.mk
-	CFLAGS+= -DHSF_XEN -I$(XEN_XENSTORE) -I$(XEN_LIBXC)
-	LIBS+= -L$(XEN_XENSTORE) -L$(XEN_LIBXC) -lxenstore -lxenctrl
-endif
+BINDIR     ?= /usr/sbin
+INITDIR    ?= /etc/init.d
+CONFDIR    ?= /etc
 
-# alternatively, if compiling on the Citrix
-# XenServer DDK VM just set XEN_DDK=yes
-ifeq ($(XEN_DDK),yes)
-	CFLAGS+= -DHSF_XEN
-	LIBS+= -lxenstore -lxenctrl
-endif
-
-ifeq ($(BINDIR),)
-	BINDIR=/usr/local/sbin
-endif
-ifeq ($(INITDIR),)
-	INITDIR=/etc/init.d
-endif
-ifeq ($(CONFDIR),)
-	CONFDIR=/etc
-endif
-
-INSTALL=install
-
-# INSTROOT may be passed in, e.g. RPM_BUILD_ROOT
-ifeq ($(INSTROOT),)
-	BIN_D=$(BINDIR)
-	INIT_D=$(INITDIR)
-	CONF_D=$(CONFDIR)
-else
+# INSTROOT may be passed in
+BIN_D=$(BINDIR)
+INIT_D=$(INITDIR)
+CONF_D=$(CONFDIR)
+ifneq ($(INSTROOT),)
 	BIN_D=$(INSTROOT)/$(BINDIR)
 	INIT_D=$(INSTROOT)/$(INITDIR)
 	CONF_D=$(INSTROOT)/$(CONFDIR)
 endif
 
-HEADERS= hsflowd.h hsflowtokens.h Makefile
+#########  compilation flags  #########
 
-SFLOWDIR=../sflow
+HEADERS= util.h evbus.h hsflowd.h hsflowtokens.h cpu_utils.h Makefile
 
-OPT = -O3 -DNDEBUG
-#OPT = -g -ggdb -O2
-#OPT= -g -ggdb
-
+# compiler
 #CC= g++
 CC= gcc -std=gnu99
+#CC= clang
+#LD=ld
+LD=gcc
 
-READ_OBJS=readInterfaces.o \
-          readCpuCounters.o \
-          readMemoryCounters.o \
-          readDiskCounters.o \
-          readHidCounters.o \
-          readNioCounters.o
+# optimization
+OPT_ALL= -O3 -DNDEBUG
+OPT_REG= -g -O2
+OPT_DBG= -g -ggdb
+ifndef OPT
+#  OPT=$(OPT_REG)
+  OPT=$(OPT_DBG)
+endif
 
-HSFLOW_OBJS= hsflowconfig.o \
-             dnsSD.o \
-             hsflowd.o
+# other source directories
+SFLOWDIR=../sflow
+JSONDIR=../json
 
-OBJS=$(HSFLOW_OBJS) $(READ_OBJS)
+# CFLAGS and LIBS - common
+CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR) -dynamic -fPIC
+#LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl -lrt
+LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -ldl -fPIC -dynamic
 
-CFLAGS+= -I. -I$(SFLOWDIR) $(OPT) -Wall -D_GNU_SOURCE
-LIBS+= $(SFLOWDIR)/libsflow.a -lresolv -lpthread
+# CFLAGS and LIBS - modules
+CFLAGS_JSON=
+LIBS_JSON=
 
-all: hsflowd
+CFLAGS_DNSSD=
+LIBS_DNSSD=-lresolv
 
-hsflowd: $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS)
+CFLAGS_PCAP=
+LIBS_PCAP=-lpcap
 
-install: hsflowd
+# common CFLAGS and LIBS	
+CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
+CFLAGS += -DUTHEAP
+CFLAGS += -DHSP_OPTICAL_STATS
+CFLAGS += -DHSP_MOD_DIR=$(MODDIR)
+CFLAGS += -Wall -Wstrict-prototypes -Wunused-value
+CFLAGS += -Wunused-function
+LIBS=
+
+INSTALL=install
+
+#########  object files  #########
+
+OBJS_HSFLOWD= hsflowconfig.o \
+              hsflowd.o \
+	      evbus.o \
+              util.o \
+	      readInterfaces.o \
+              readCpuCounters.o \
+              readMemoryCounters.o \
+              readDiskCounters.o \
+              readHidCounters.o \
+              readNioCounters.o \
+	      readTcpipCounters.o \
+	      readPackets.o
+
+
+OBJS_JSON=mod_json.o
+OBJS_DNSSD=mod_dnssd.o
+OBJS_PCAP=mod_pcap.o
+
+CFLAGS_HSFLOWD += $(CFLAGS_JSON) $(CFLAGS_DNSSD) $(CFLAGS_PCAP)
+OBJS_HSFLOWD += $(OBJS_JSON) $(OBJS_DNSSD) $(OBJS_PCAP)
+LIBS_HSFLOWD += $(LIBS_JSON) $(LIBS_DNSSD) $(LIBS_PCAP)
+
+BUILDTGTS=hsflowd
+
+all: $(BUILDTGTS)
+
+#########  hsflowd  #########
+
+hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD)
+
+#########  install  #########
+
+install:
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
-	if [ ! -e $(INIT_D)/hsflowd ]; then $(INSTALL) -d $(INIT_D); $(INSTALL) -m 700 scripts/hsflowd $(INIT_D); fi
-	if [ ! -e $(CONF_D)/hsflowd.conf ]; then $(INSTALL) -d $(CONF_D); $(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D); fi
+	$(INSTALL) -d $(CONF_D)
+	$(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D)
 
-# the chkconfig command may not be available in your VM, but all it does it to put the
-# necessary links into the /etc/init.d/rc*.d directories to start and stop the daemon
-# at the required runlevels
+#########  schedule  #########
+
 schedule:
-	/sbin/chkconfig --add hsflowd
-	/sbin/chkconfig --list hsflowd
+
+#########  clean   #########
+
+clean: 
+	rm -f hsflowd *.o *.so
+
+#########  dependencies  #########
 
 .c.o: $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c
 
-clean:
-	rm -f $(OBJS) hsflowd
-
-# dependencies
+util.o: util.c $(HEADERS)
+evbus.o: evbus.c $(HEADERS)
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
-dnsSD.o: dnsSD.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
 readInterfaces.o: readInterfaces.c $(HEADERS)
 readCpuCounters.o: readCpuCounters.c $(HEADERS)
@@ -101,4 +130,8 @@ readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)
 readHidCounters.o: readHidCounters.c $(HEADERS)
 readNioCounters.o: readNioCounters.c $(HEADERS)
-
+readPackets.o: readPackets.c $(HEADERS)
+readTcpipCounters.o: readTcpipCounters.c $(HEADERS)
+mod_json.o: mod_json.c $(HEADERS)
+mod_dnssd.o: mod_dnssd.c $(HEADERS)
+mod_pcap.o: mod_pcap.c $(HEADERS)

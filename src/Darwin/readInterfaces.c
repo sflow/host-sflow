@@ -6,167 +6,222 @@
 extern "C" {
 #endif
 
+#include "hsflowd.h"
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <net/if.h>
-
-#include "hsflowd.h"
-
 #include <ifaddrs.h>
 
-extern int debug;
-    
-/*________________---------------------------__________________
-  ________________    freeAdaptors           __________________
-  ----------------___________________________------------------
-*/
 
-void freeAdaptors(HSP *sp)
-{
-  if(sp->adaptorList) {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      free(sp->adaptorList->adaptors[i]);
+  /*________________---------------------------__________________
+    ________________  setAddressPriorities     __________________
+    ----------------___________________________------------------
+    Ideally we would do this as we go along,  but since the vlan
+    info is spliced in separately we have to wait for that and
+    then set the priorities for the whole list.
+  */
+  void setAddressPriorities(HSP *sp)
+  {
+    myDebug(1, "setAddressPriorities");
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      adaptorNIO->ipPriority = agentAddressPriority(sp,
+						    &adaptorNIO->ipAddr,
+						    adaptorNIO->vlan,
+						    adaptorNIO->loopback);
     }
-    free(sp->adaptorList);
-    sp->adaptorList = NULL;
   }
-}
 
-  
 /*________________---------------------------__________________
-  ________________    newAdaptorList         __________________
+  ________________      HSPDevTypeName       __________________
   ----------------___________________________------------------
 */
 
-void newAdaptorList(HSP *sp)
-{
-  freeAdaptors(sp);
-  sp->adaptorList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
-  sp->adaptorList->capacity = 4; // will grow if necessary
-  sp->adaptorList->adaptors = (SFLAdaptor **)my_calloc(sp->adaptorList->capacity * sizeof(SFLAdaptor *));
-  sp->adaptorList->num_adaptors = 0;
-}
+  const char *devTypeName(EnumHSPDevType devType) {
+    switch(devType) {
+    case HSPDEV_OTHER: return "OTHER";
+    case HSPDEV_PHYSICAL: return "PHYSICAL";
+    case HSPDEV_VETH: return "VETH";
+    case HSPDEV_VIF: return "VIF";
+    case HSPDEV_OVS: return "OVS";
+    case HSPDEV_BRIDGE: return "BRIDGE";
+    default: break;
+    }
+    return "<out of range>";
+  }
 
-  
-/*________________---------------------------__________________
-  ________________    trimWhitespace         __________________
-  ----------------___________________________------------------
-*/
+  /*________________---------------------------__________________
+    ________________      readInterfaces       __________________
+    ----------------___________________________------------------
+  */
 
-static char *trimWhitespace(char *str)
-{
-  char *end;
-  
-  // Trim leading space
-  while(isspace(*str)) str++;
-  
-  // Trim trailing space
-  end = str + strlen(str) - 1;
-  while(end > str && isspace(*end)) end--;
-  
-  // Write new null terminator
-  *(end+1) = 0;
-  
-  return str;
-}
+  int readInterfaces(HSP *sp, bool full_discovery,  uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed)
+  {
+    uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
 
-/*________________---------------------------__________________
-  ________________      readInterfaces       __________________
-  ----------------___________________________------------------
-*/
+    UTHash *newLocalIP = UTHASH_NEW(SFLAddress, address.ip_v4, UTHASH_DFLT);
+    UTHash *newLocalIP6 = UTHASH_NEW(SFLAddress, address.ip_v6, UTHASH_DFLT);
 
-int readInterfaces(HSP *sp)
-{
-  newAdaptorList(sp);
+    { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
 
-  // Walk the interfaces and collect the non-loopback interfaces so that we
-  // have a list of MAC addresses for each interface (usually only 1).
-  //
-  // May need to come back and run a variation of this where we supply
-  // a domain and collect the virtual interfaces for that domain in a
-  // similar way.  It looks like we do that by just parsing the numbers
-  // out of the interface name.
+    // Walk the interfaces and collect the non-loopback interfaces so that we
+    // have a list of MAC addresses for each interface (usually only 1).
 
-  struct ifaddrs *ifap;
-  getifaddrs(&ifap);
-  for(struct ifaddrs *ifp = ifap; ifp; ifp = ifp->ifa_next) {
-    char *devName = ifp->ifa_name;
+    struct ifaddrs *ifap;
+    getifaddrs(&ifap);
+    uint32_t ifIndex=0;
+    for(struct ifaddrs *ifp = ifap; ifp; ifp = ifp->ifa_next) {
+      char *devName = ifp->ifa_name;
 
-    if(devName) {
+      if(devName == NULL) continue;
       devName = trimWhitespace(devName);
+      int devNameLen = my_strlen(devName);
+      if(devNameLen == 0 || devNameLen >= IFNAMSIZ) continue;
+
       // Get the flags for this interface
       int up = (ifp->ifa_flags & IFF_UP) ? YES : NO;
       int loopback = (ifp->ifa_flags & IFF_LOOPBACK) ? YES : NO;
       int address_family = ifp->ifa_addr->sa_family;
-      if(debug > 1) {
-	myLog(LOG_INFO, "reading interface %s (up=%d, loopback=%d, family=%d)",
-	      devName,
-	      up,
-	      loopback,
-	      address_family);
+      int promisc = (ifp->ifa_flags & IFF_PROMISC) ? YES : NO;
+      //int bond_master = (ifp->ifa_flags & IFF_MASTER) ? YES : NO;
+      //int bond_slave = (ifp->ifa_flags & IFF_SLAVE) ? YES : NO;
+
+      // read MAC
+      u_char macBytes[6];
+      memcpy(macBytes, &ifp->ifa_addr->sa_data, 6);
+      if(macBytes[0] == 0
+	 && macBytes[1] == 0
+	 && macBytes[2] == 0
+	 && macBytes[3] == 0
+	 && macBytes[4] == 0
+	 && macBytes[5] == 0)
+	continue;
+      int gotMac = YES;
+
+      // Try and get the ifIndex for this interface
+      // TODO: could take a digest of the MAC if we want it to be more predictable?
+      ++ifIndex;
+
+      // for now just assume that each interface has only one MAC.  It's not clear how we can
+      // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
+      // find or create a new "adaptor" entry
+      SFLAdaptor *adaptor = nioAdaptorNew(devName, (gotMac ? macBytes : NULL), ifIndex);
+    
+      bool addAdaptorToHT = YES;
+      SFLAdaptor *existing = adaptorByName(sp, devName);
+      if(existing
+	 && adaptorEqual(adaptor, existing)) {
+	// no change - use existing object
+	adaptorFree(adaptor);
+	adaptor = existing;
+	addAdaptorToHT = NO;
       }
-      //int hasBroadcast = (ifp->ifa_flags & IFF_BROADCAST);
-      //int pointToPoint = (ifp->ifa_flags & IFF_POINTOPOINT);
-      if(up && !loopback && address_family == AF_LINK) {
-	// for now just assume that each interface has only one MAC.  It's not clear how we can
-	// learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
-	// create a new "adaptor" entry
-	SFLAdaptor *adaptor = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor) + (1 * sizeof(SFLMacAddress)));
-	memcpy(adaptor->macs[0].mac, &ifp->ifa_addr->sa_data, 6);
-	adaptor->num_macs = 1;
-	adaptor->deviceName = strdup(devName);
-	
-	// Try and get the ifIndex for this interface
-	// if(ioctl(fd,SIOCGIFINDEX, &ifr) != 0) {
-	// only complain about this if we are debugging
-	//if(debug) {
-	//myLog(LOG_ERR, "device %s Get SIOCGIFINDEX failed : %s",
-	//devName,
-	//strerror(errno));
-	//}
-	//}
-	//else {
-	//adaptor->ifIndex = ifr.ifr_ifindex;
-	//}
-	       
-	// Try to get the IP address for this interface
-/* 	if(ioctl(fd,SIOCGIFADDR, &ifr) != 0) { */
-/* 	  // only complain about this if we are debugging */
-/* 	  if(debug) { */
-/* 	    myLog(LOG_ERR, "device %s Get SIOCGIFADDR failed : %s", */
-/* 		  devName, */
-/* 		  strerror(errno)); */
-/* 	  } */
-/* 	} */
-/* 	else { */
-/* 	  if (ifr.ifr_addr.sa_family == AF_INET) { */
-/* 	    struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr; */
-/* 	    // IP addr is now s->sin_addr */
-/* 	    adaptor->ipAddr.addr = s->sin_addr.s_addr; */
-/* 	  } */
-/* 	  //else if (ifr.ifr_addr.sa_family == AF_INET6) { */
-/* 	  // not sure this ever happens - on a linux system IPv6 addresses */
-/* 	  // are picked up from /proc/net/if_inet6 */
-/* 	  // struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifr.ifr_addr; */
-/* 	  // IP6 addr is now s->sin6_addr; */
-/* 	  //} */
-/* 	} */
-	
-	// add it to the list
-	sp->adaptorList->adaptors[sp->adaptorList->num_adaptors] = adaptor;
-	if(++sp->adaptorList->num_adaptors == sp->adaptorList->capacity)  {
-	  // grow
-	  sp->adaptorList->capacity *= 2;
-	  sp->adaptorList->adaptors = (SFLAdaptor **)my_realloc(sp->adaptorList->adaptors,
-								sp->adaptorList->capacity * sizeof(SFLAdaptor *));
+    
+      // clear the mark so we don't free it below
+      adaptor->marked = NO;
+
+      // this flag might belong in the adaptorNIO struct
+      adaptor->promiscuous = promisc;
+
+      // remember some useful flags in the userData structure
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      if(adaptorNIO->up != up) {
+	if(up) {
+	  ad_cameup++;
+	}
+	else ad_wentdown++;
+	myDebug(1, "adaptor %s %s",
+		adaptor->deviceName,
+		up ? "came up" : "went down");
+      }
+      adaptorNIO->up = up;
+      adaptorNIO->loopback = loopback;
+      //adaptorNIO->bond_master = bond_master;
+      //adaptorNIO->bond_slave = bond_slave;
+
+      // Try to get the IP address for this interface
+      if(address_family == AF_INET) {
+	struct sockaddr_in *s = (struct sockaddr_in *)ifp->ifa_addr;
+	// IP addr is now s->sin_addr
+	adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
+	adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+	// add to localIP hash too
+	if(UTHashGet(newLocalIP, &adaptorNIO->ipAddr) == NULL) {
+	  SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
+	  *addrCopy = adaptorNIO->ipAddr;
+	  UTHashAdd(newLocalIP, addrCopy);
 	}
       }
+      //else if (address_family == AF_INET6) {
+      //struct sockaddr_in6 *s = (struct sockaddr_in6 *)&ifp->ifa_addr;
+      // IP6 addr is now s->sin6_addr;
+      //myDebug(1, "got IPv6 address");
+      // TODO: read it in
+      //      }
+
+      char buf[51];
+      myDebug(1, "interface %s IP address: %s", devName, SFLAddress_print(&adaptorNIO->ipAddr, buf, 50));
+
+      if(full_discovery) {
+	// allow modules to supply additional info on this adaptor
+	// (and influence ethtool data-gathering).  We broadcast this
+	// but it only really makes sense to receive it on the POLL_BUS
+	EVEventTxAll(sp->rootModule, HSPEVENT_INTF_READ, &adaptor, sizeof(adaptor));
+	// use ethtool to get info about direction/speed and more
+	// if(read_ethtool_info(sp, &ifr, fd, adaptor) == YES) ad_changed++;
+      }
+
+      if(addAdaptorToHT) {
+	ad_added++;
+	adaptorAddOrReplace(sp->adaptorsByName, adaptor);
+	// add to "all namespaces" collections too
+	if(gotMac) adaptorAddOrReplace(sp->adaptorsByMac, adaptor);
+	if(ifIndex) adaptorAddOrReplace(sp->adaptorsByIndex, adaptor);
+      }
+
     }
-  }
-  freeifaddrs(ifap);
-  return sp->adaptorList->num_adaptors;
-}
+    freeifaddrs(ifap);
   
+    // now remove and free any that are still marked
+    ad_removed = deleteMarkedAdaptors(sp, sp->adaptorsByName, YES);
+
+    // check in case any of the survivors are specific
+    // to a particular VLAN
+    // TODO: readVLANs(sp);
+
+    // now that we have the evidence gathered together, we can
+    // set the L3 address priorities (used for auto-selecting
+    // the sFlow-agent-address if requrired to by the config.
+    setAddressPriorities(sp);
+
+    if(p_added) *p_added = ad_added;
+    if(p_removed) *p_removed = ad_removed;
+    if(p_cameup) *p_cameup = ad_cameup;
+    if(p_wentdown) *p_wentdown = ad_wentdown;
+    if(p_changed) *p_changed = ad_changed;
+
+    // swap in new localIP lookup tables
+    UTHash *oldLocalIP = sp->localIP;
+    UTHash *oldLocalIP6 = sp->localIP6;
+    sp->localIP = newLocalIP;
+    sp->localIP6 = newLocalIP6;
+    if(oldLocalIP) {
+      SFLAddress *ad;
+      UTHASH_WALK(oldLocalIP, ad)
+	my_free(ad);
+      UTHashFree(oldLocalIP);
+    }
+    if(oldLocalIP6) {
+      SFLAddress *ad;
+      UTHASH_WALK(oldLocalIP6, ad)
+	my_free(ad);
+      UTHashFree(oldLocalIP6);
+    }
+  
+    return sp->adaptorsByName->entries;
+  }
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

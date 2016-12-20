@@ -15,6 +15,7 @@ extern "C" {
    be read off */
 #define ASSUMED_DISK_SECTOR_BYTES 512
 
+#if 0
   /*_________________---------------------------__________________
     _________________         tdestroy          __________________
     -----------------___________________________------------------
@@ -23,14 +24,14 @@ extern "C" {
   
   typedef int (* comparison_fn_t)(const void *, const void *);
   
-  static void tdestroy_action(void *node, VISIT order, int level) {
+  static void tdestroy_action(const void *node, VISIT order, int level) {
     switch(order) {
     case preorder:
     case postorder:
       break;
     case endorder:
     case leaf:
-      free(node);
+      free((void *)node);
     }
   }
   
@@ -49,14 +50,16 @@ extern "C" {
 	    || (!strncmp(type, "nfs", 3)) || (!strcmp(type, "autofs"))
 	    || (!strcmp(type,"gfs")) || (!strcmp(type,"none")) );
   }
-  
+#endif
+
   /*_________________---------------------------__________________
     _________________     readDiskCounters      __________________
     -----------------___________________________------------------
   */
   
-  int readDiskCounters(SFLHost_dsk_counters *dsk) {
+  int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk) {
     int gotData = NO;
+#if 0 // TODO: where to get this data on MacOS?
     FILE *procFile;
     procFile= fopen("/proc/diskstats", "r");
     if(procFile) {
@@ -155,6 +158,7 @@ extern "C" {
       fclose(procFile);
     }
     
+#endif
     return gotData;
   }
 

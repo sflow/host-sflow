@@ -2,68 +2,27 @@
  * http://sflow.net/license.html
  */
 
-
 #if defined(__cplusplus)
 extern "C" {
 #endif
 
-#define HSFLOWD_MAIN
-
 #include "hsflowd.h"
+#include "cpu_utils.h"
+#include "cJSON.h"
 
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
-  int debug = 0;
+  FILE *f_crash = NULL;
 
-  /*_________________---------------------------__________________
-    _________________        logging            __________________
-    -----------------___________________________------------------
-  */
-
-  void myLog(int syslogType, char *fmt, ...)
-  {
-    va_list args;
-    va_start(args, fmt);
-    if(debug) {
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
-    }
-    else vsyslog(syslogType, fmt, args);
-  }
-
-  /*_________________---------------------------__________________
-    _________________       my_calloc             __________________
-    -----------------___________________________------------------
-  */
-  
-  void *my_calloc(size_t bytes)
-  {
-    void *mem = calloc(1, bytes);
-    if(mem == NULL) {
-      myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
-      // if(debug) malloc_stats();
-      exit(EXIT_FAILURE);
-    }
-    return mem;
-  }
-  
-  void *my_realloc(void *ptr, size_t bytes)
-  {
-    void *mem = realloc(ptr, bytes);
-    if(mem == NULL) {
-      myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
-      //if(debug) malloc_stats();
-      exit(EXIT_FAILURE);
-    }
-    return mem;
-  }
+  static void installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
+  static bool updatePollingInterval(HSP *sp);
 
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
     -----------------___________________________------------------
   */
-  
+
   static void *agentCB_alloc(void *magic, SFLAgent *agent, size_t bytes)
   {
     return my_calloc(bytes);
@@ -71,7 +30,7 @@ extern "C" {
 
   static int agentCB_free(void *magic, SFLAgent *agent, void *obj)
   {
-    free(obj);
+    my_free(obj);
     return 0;
   }
 
@@ -80,14 +39,20 @@ extern "C" {
     myLog(LOG_ERR, "sflow agent error: %s", msg);
   }
 
-  
   static void agentCB_sendPkt(void *magic, SFLAgent *agent, SFLReceiver *receiver, u_char *pkt, uint32_t pktLen)
   {
     HSP *sp = (HSP *)magic;
     size_t socklen = 0;
     int fd = 0;
 
-    for(HSPCollector *coll = sp->sFlow->sFlowSettings->collectors; coll; coll=coll->nxt) {
+    // note that we are relying on any new settings being installed atomically from the DNS-SD
+    // thread (it's just a pointer move,  so it should be atomic).  Otherwise we would want to
+    // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
+    // bring us here where we read the list of collectors.
+
+    sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
+
+    for(HSPCollector *coll = sp->sFlowSettings->collectors; coll; coll=coll->nxt) {
 
       switch(coll->ipAddr.type) {
       case SFLADDRESSTYPE_UNDEFINED:
@@ -123,118 +88,163 @@ extern "C" {
 	if(result == -1 && errno != EINTR) {
 	  myLog(LOG_ERR, "socket sendto error: %s", strerror(errno));
 	}
-	if(result == 0) {
+	else if(result == 0) {
 	  myLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
 	}
       }
     }
   }
 
-#ifdef HSF_XEN
-  static void openXenHandles(HSP *sp)
-  {
-    // need to do this while we still have root privileges
-    if(sp->xc_handle == 0) {
-      sp->xc_handle = xc_interface_open();
-      if(sp->xc_handle <= 0) {
-        myLog(LOG_ERR, "xc_interface_open() failed : %s", strerror(errno));
-      }
-      else {
-        sp->xs_handle = xs_daemon_open_readonly();
-        if(sp->xs_handle == NULL) {
-          myLog(LOG_ERR, "xs_daemon_open_readonly() failed : %s", strerror(errno));
-        }
-        // get the page size [ref xenstat.c]
-#if defined(PAGESIZE)
-        sp->page_size = PAGESIZE;
-#elif defined(PAGE_SIZE)
-        sp->page_size = PAGE_SIZE;
-#else
-        sp->page_size = sysconf(_SC_PAGE_SIZE);
-        if(pgsiz < 0) {
-          myLog(LOG_ERR, "Failed to retrieve page size : %s", strerror(errno));
-          abort();
-        }
-#endif
-      }
+  /*_________________---------------------------__________________
+    _________________   adaptor utils           __________________
+    -----------------___________________________------------------
+  */
+
+  SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex) {
+    SFLAdaptor *adaptor = adaptorNew(dev, macBytes, sizeof(HSPAdaptorNIO), ifIndex);
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    // set defaults
+    nio->vlan = HSP_VLAN_ALL;
+    nio->ethtool_GDRVINFO = YES;
+    nio->ethtool_GLINKSETTINGS = YES;
+    nio->ethtool_GSET = YES;
+    nio->ethtool_GSTATS = YES;
+    nio->procNetDev = YES;
+    return adaptor;
+  }
+
+  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad) {
+    SFLAdaptor *replaced = UTHashAdd(ht, ad);
+    if(replaced) {
+      char buf1[256], buf2[256];
+      myDebug(1, "adaptorAddOrReplace: replacing adaptor [%s] with [%s]",
+	      adaptorStr(replaced, buf1, 256),
+	      adaptorStr(ad, buf2, 256));
+      // TODO: should we delete the replaced one?
+      // adaptorFree(replaced);
     }
   }
 
-  // if sp->xs_handle is not NULL then we know that sp->xc_handle is good too
-  // because of the way we opened the handles in the first place.
-  static int xenHandlesOK(HSP *sp) { return (sp->xs_handle != NULL); }
+  SFLAdaptor *adaptorByName(HSP *sp, char *dev) {
+    SFLAdaptor ad = { .deviceName = trimWhitespace(dev) };
+    return UTHashGet(sp->adaptorsByName, &ad);
+  }
 
-  static void closeXenHandles(HSP *sp)
-  {
-    if(sp->xc_handle && sp->xc_handle != -1) {
-      xc_interface_close(sp->xc_handle);
-      sp->xc_handle = 0;
-    }
-    if(sp->xs_handle) {
-      xs_daemon_close(sp->xs_handle);
-      sp->xs_handle = NULL;
+  SFLAdaptor *adaptorByMac(HSP *sp, SFLMacAddress *mac) {
+    SFLAdaptor ad = { .macs[0] = (*mac) };
+    return UTHashGet(sp->adaptorsByMac, &ad);
+  }
+
+  SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex) {
+    SFLAdaptor ad = { .ifIndex = ifIndex };
+    return UTHashGet(sp->adaptorsByIndex, &ad);
+  }
+
+  SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex) {
+    SFLAdaptor ad = { .peer_ifIndex = ifIndex };
+    return UTHashGet(sp->adaptorsByPeerIndex, &ad);
+  }
+
+  static void deleteAdaptorFromHT(UTHash *ht, SFLAdaptor *ad, char *htname) {
+    char buf[256];
+    if(UTHashDel(ht, ad) != ad) {
+      myDebug(1, "WARNING: adaptor not deleted from %s : %s", htname, adaptorStr(ad, buf, 256));
+      if(debug(1))
+	 adaptorHTPrint(ht, htname);
     }
   }
 
-  static int readVNodeCounters(HSP *sp, SFLHost_vrt_node_counters *vnode)
-  {
-    if(xenHandlesOK(sp)) {
-      xc_physinfo_t physinfo = { 0 };
-      if(xc_physinfo(sp->xc_handle, &physinfo) < 0) {
-	myLog(LOG_ERR, "xc_physinfo() failed : %s", strerror(errno));
-      }
-      else {
-      	vnode->mhz = (physinfo.cpu_khz / 1000);
-	vnode->cpus = physinfo.nr_cpus;
-	vnode->memory = ((uint64_t)physinfo.total_pages * sp->page_size);
-	vnode->memory_free = ((uint64_t)physinfo.free_pages * sp->page_size);
-	vnode->num_domains = sp->num_domains;
-	return YES;
-      }
-    }
-    return NO;
+  void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag) {
+    deleteAdaptorFromHT(sp->adaptorsByName, ad, "byName");
+    deleteAdaptorFromHT(sp->adaptorsByIndex, ad, "byIndex");
+    deleteAdaptorFromHT(sp->adaptorsByMac, ad, "byMac");
+    if(ad->peer_ifIndex)
+      deleteAdaptorFromHT(sp->adaptorsByPeerIndex, ad, "byPeerIndex");
+    if(freeFlag)
+      adaptorFree(ad);
   }
 
-  static SFLAdaptorList *xenstat_adaptors(HSP *sp, uint32_t dom_id, SFLAdaptorList *myAdaptors)
+  int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag) {
+    int found = 0;
+    SFLAdaptor *ad;
+    UTHASH_WALK(adaptorHT, ad) if(ad->marked) {
+      deleteAdaptor(sp, ad, freeFlag);
+      found++;
+    }
+    return found;
+  }
+
+  int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList) {
+    int found = 0;
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(adList, ad) if(ad->marked) {
+      deleteAdaptor(sp, ad, NO);
+      found++;
+    }
+    return found;
+  }
+
+  char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen) {
+    u_char macstr[13];
+    macstr[0] = '\0';
+    if(ad->num_macs) printHex(ad->macs[0].mac, 6, macstr, 13, NO);
+    snprintf(buf, bufLen, "ifindex: %u peer: %u nmacs: %u mac0: %s name: %s",
+	  ad->ifIndex,
+	  ad->peer_ifIndex,
+	  ad->num_macs,
+	  macstr,
+	  ad->deviceName);
+    return buf;
+  }
+
+  void adaptorHTPrint(UTHash *ht, char *prefix) {
+    char buf[256];
+    SFLAdaptor *ad;
+    UTHASH_WALK(ht, ad)
+      myLog(LOG_INFO, "%s: %s", prefix, adaptorStr(ad, buf, 256));
+  }
+
+  static SFLAdaptorList *host_adaptors(HSP *sp, SFLAdaptorList *myAdaptors, int capacity)
   {
-    for(uint32_t i = 0; i < sp->adaptorList->num_adaptors; i++) {
-      SFLAdaptor *adaptor = sp->adaptorList->adaptors[i];
-      uint32_t vif_domid;
-      uint32_t vif_netid;
-      int isVirtual = (sscanf(adaptor->deviceName, "vif%"SCNu32".%"SCNu32, &vif_domid, &vif_netid) == 2);
-      if((isVirtual && dom_id == vif_domid) ||
-	 (!isVirtual && dom_id == 0)) {
-	// include this one (if we have room)
-	if(myAdaptors->num_adaptors < HSP_MAX_VIFS) {
+    // build the list of adaptors that are up and have non-empty MACs,
+    // and are not veth connectors to peers inside containers,
+    // and have not been claimed as switchPorts or VM or Container ports,
+    // but stop if we hit the capacity
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      if(adaptor->peer_ifIndex == 0) {
+	HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+	if(niostate->up
+	   && (niostate->switchPort == NO)
+	   && (niostate->vm_or_container == NO)
+	   && adaptor->num_macs
+	   && !isZeroMAC(&adaptor->macs[0])) {
+	  if(myAdaptors->num_adaptors >= capacity) break;
 	  myAdaptors->adaptors[myAdaptors->num_adaptors++] = adaptor;
-	  if(isVirtual) {
-	    // for virtual interfaces we need to query for the MAC address
-	    char macQuery[256];
-	    snprintf(macQuery, sizeof(macQuery), "/local/domain/%u/device/vif/%u/mac", vif_domid, vif_netid);
-	    char *macStr = xs_read(sp->xs_handle, XBT_NULL, macQuery, NULL);
-	    if(macStr == NULL) {
-	      myLog(LOG_ERR, "mac address query failed : %s : %s", macQuery, strerror(errno));
-	    }
-	    else{
-	      // got it - but make sure there is a place to write it
-	      if(adaptor->num_macs > 0) {
-		// OK, just overwrite the 'dummy' one that was there
-		if(hexToBinary((u_char *)macStr, adaptor->macs[0].mac, 6) != 6) {
-		  myLog(LOG_ERR, "mac address format error in xenstore query <%s> : %s", macQuery, macStr);
-		}
-	      }
-	      free(macStr);
-	    }
-	  }
 	}
       }
     }
     return myAdaptors;
   }
 
-#endif
+  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed)
+  {
+    bool changed = (speed != adaptor->ifSpeed);
+    adaptor->ifSpeed = speed;
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    nio->changed_speed = changed;
+    if(changed
+       && sp->rootModule) {
+      EVEventTxAll(sp->rootModule, HSPEVENT_INTF_SPEED, &adaptor, sizeof(adaptor));
+    }
+  }
 
-  void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  /*_________________---------------------------__________________
+    _________________   agentCB_getCounters     __________________
+    -----------------___________________________------------------
+  */
+
+  static void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     assert(poller->magic);
     HSP *sp = (HSP *)poller->magic;
@@ -242,13 +252,11 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char hnamebuf[SFL_MAX_HOSTNAME_CHARS+1];
-    char osrelbuf[SFL_MAX_OSRELEASE_CHARS+1];
     if(readHidCounters(sp,
 		       &hidElem.counterBlock.host_hid,
-		       hnamebuf,
+		       sp->hostname,
 		       SFL_MAX_HOSTNAME_CHARS,
-		       osrelbuf,
+		       sp->os_release,
 		       SFL_MAX_OSRELEASE_CHARS)) {
       SFLADD_ELEMENT(cs, &hidElem);
     }
@@ -256,7 +264,7 @@ extern "C" {
     // host Net I/O
     SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_NIO;
-    if(readNioCounters(&nioElem.counterBlock.host_nio, NULL)) {
+    if(readNioCounters(sp, &nioElem.counterBlock.host_nio, NULL, NULL)) {
       SFLADD_ELEMENT(cs, &nioElem);
     }
 
@@ -264,6 +272,9 @@ extern "C" {
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_CPU;
     if(readCpuCounters(&cpuElem.counterBlock.host_cpu)) {
+      // remember speed and nprocs for other purposes
+      sp->cpu_cores = cpuElem.counterBlock.host_cpu.cpu_num;
+      sp->cpu_mhz = cpuElem.counterBlock.host_cpu.cpu_speed;
       SFLADD_ELEMENT(cs, &cpuElem);
     }
 
@@ -271,436 +282,426 @@ extern "C" {
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_MEM;
     if(readMemoryCounters(&memElem.counterBlock.host_mem)) {
+      // remember mem_total and mem_free for other purposes
+      sp->mem_total = memElem.counterBlock.host_mem.mem_total;
+      sp->mem_free = memElem.counterBlock.host_mem.mem_free;
       SFLADD_ELEMENT(cs, &memElem);
     }
 
     // host I/O counters
     SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_DSK;
-    if(readDiskCounters(&dskElem.counterBlock.host_dsk)) {
+    if(readDiskCounters(sp, &dskElem.counterBlock.host_dsk)) {
       SFLADD_ELEMENT(cs, &dskElem);
     }
 
-    // include the adaptor list
+    // don't send L4 stats from switches.  Save the space for other things.
+    // TODO: review this.  Possibly generalize with a request-to-omit flag.
+    // host TCP/IP counters
+    SFLCounters_sample_element ipElem = { 0 }, icmpElem = { 0 }, tcpElem = { 0 }, udpElem = { 0 };
+    if(!sp->cumulus.cumulus
+       && !sp->os10.os10) {
+      ipElem.tag = SFLCOUNTERS_HOST_IP;
+      icmpElem.tag = SFLCOUNTERS_HOST_ICMP;
+      tcpElem.tag = SFLCOUNTERS_HOST_TCP;
+      udpElem.tag = SFLCOUNTERS_HOST_UDP;
+      if(readTcpipCounters(sp,
+			   &ipElem.counterBlock.host_ip,
+			   &icmpElem.counterBlock.host_icmp,
+			   &tcpElem.counterBlock.host_tcp,
+			   &udpElem.counterBlock.host_udp)) {
+	SFLADD_ELEMENT(cs, &ipElem);
+	SFLADD_ELEMENT(cs, &icmpElem);
+	SFLADD_ELEMENT(cs, &tcpElem);
+	SFLADD_ELEMENT(cs, &udpElem);
+      }
+    }
+
     SFLCounters_sample_element adaptorsElem = { 0 };
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-    adaptorsElem.counterBlock.adaptors = sp->adaptorList;
+    // collect list of host adaptors that are up, and have non-zero MACs, and
+    // have not been claimed by xen, kvm or docker.
+    SFLAdaptorList myAdaptors;
+    SFLAdaptor *adaptors[HSP_MAX_PHYSICAL_ADAPTORS];
+    myAdaptors.adaptors = adaptors;
+    myAdaptors.capacity = HSP_MAX_PHYSICAL_ADAPTORS;
+    myAdaptors.num_adaptors = 0;
+    adaptorsElem.counterBlock.adaptors = host_adaptors(sp, &myAdaptors, HSP_MAX_PHYSICAL_ADAPTORS);
     SFLADD_ELEMENT(cs, &adaptorsElem);
 
-#ifdef HSF_XEN
-    // replace the adaptorList with a filtered version of the same
-      SFLAdaptorList myAdaptors;
-      SFLAdaptor *adaptors[HSP_MAX_VIFS];
-      myAdaptors.adaptors = adaptors;
-      myAdaptors.capacity = HSP_MAX_VIFS;
-      myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, 0, &myAdaptors);
+    // send the cs out to be annotated by other modules such as docker, xen, vrt and NVML
+    EVEvent *evt_host_cs = EVGetEvent(sp->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE);
+    EVEventTx(sp->rootModule, evt_host_cs, &cs, sizeof(cs));
 
-    // hypervisor node stats
-    SFLCounters_sample_element vnodeElem = { 0 };
-    vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
-    if(readVNodeCounters(sp, &vnodeElem.counterBlock.host_vrt_node)) {
-      SFLADD_ELEMENT(cs, &vnodeElem);
-    }
-#endif
-
-    sfl_poller_writeCountersSample(poller, cs);
-  }
-
-#ifdef HSF_XEN
-
-#define HSP_MAX_PATHLEN 256
-#define XEN_SYSFS_VBD_PATH "/sys/devices/xen-backend"
-
-  static int64_t xen_vbd_counter(char *vbd_type, uint32_t dom_id, uint32_t vbd_dev, char *counter)
-  {
-    int64_t ctr64 = 0;
-    char path[HSP_MAX_PATHLEN];
-    snprintf(path, HSP_MAX_PATHLEN, XEN_SYSFS_VBD_PATH "/%s-%u-%u/statistics/%s",
-	     vbd_type,
-	     dom_id,
-	     vbd_dev,
-	     counter);
-    FILE *file = fopen(path, "r");
-    if(file) {
-      fscanf(file, "%"SCNi64, &ctr64);
-      fclose(file);
-    }
-    return ctr64;
-  }
-  
-  static int xenstat_dsk(HSP *sp, uint32_t dom_id, SFLHost_vrt_dsk_counters *dsk)
-  {
-    // [ref xenstat_linux.c]
-#define SYSFS_VBD_PATH "/sys/devices/xen-backend/"
-    DIR *sysfsvbd = opendir(SYSFS_VBD_PATH);
-    if(sysfsvbd == NULL) {
-      myLog(LOG_ERR, "opendir %s failed : %s", SYSFS_VBD_PATH, strerror(errno));
-      return NO;
-    }
-
-    char scratch[sizeof(struct dirent) + _POSIX_PATH_MAX];
-    struct dirent *dp = NULL;
-    for(;;) {
-      readdir_r(sysfsvbd, (struct dirent *)scratch, &dp);
-      if(dp == NULL) break;
-      uint32_t vbd_dom_id;
-      uint32_t vbd_dev;
-      char vbd_type[256];
-      if(sscanf(dp->d_name, "%3s-%u-%u", vbd_type, &vbd_dom_id, &vbd_dev) == 3) {
-	if(vbd_dom_id == dom_id) {
-	  //dsk->capacity $$$
-	  //dsk->allocation $$$
-	  //dsk->available $$$
-	  if(debug > 1) myLog(LOG_INFO, "reading VBD %s for dom_id %u", dp->d_name, dom_id); 
-	  dsk->rd_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_req");
-	  dsk->rd_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "rd_sect") * HSP_SECTOR_BYTES);
-	  dsk->wr_req += xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_req");
-	  dsk->wr_bytes += (xen_vbd_counter(vbd_type, dom_id, vbd_dev, "wr_sect") * HSP_SECTOR_BYTES);
-	}
-      }
-    }
-    closedir(sysfsvbd);
-    return YES;
-  }
-  
-#endif
-
-  void agentCB_getCountersVM(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
-  {
-#ifdef HSF_XEN
-    assert(poller->magic);
-    HSP *sp = (HSP *)poller->magic;
-    HSPVMState *state = (HSPVMState *)poller->userData;
-
-    if(state && xenHandlesOK(sp)) {
-      
-      uint32_t dom_id = SFL_DS_INDEX(poller->dsi);
-      xc_domaininfo_t domaininfo;
-      int32_t n = xc_domain_getinfolist(sp->xc_handle, state->vm_index, 1, &domaininfo);
-      if(n < 0 || domaininfo.domain != dom_id) {
-	// Assume something changed under our feet.
-	// Request a reload of the VM information and bail.
-	// We'll try again next time.
-	myLog(LOG_INFO, "request for vm_index %u (dom_id=%u) returned %d (with dom_id=%u)",
-	      state->vm_index,
-	      dom_id,
-	      n,
-	      domaininfo.domain);
-	sp->refreshVMList = YES;
-	return;
-      }
-      
-      // host ID
-      SFLCounters_sample_element hidElem = { 0 };
-      memset(&hidElem, 0, sizeof(hidElem));
-      hidElem.tag = SFLCOUNTERS_HOST_HID;
-      char query[255];
-      char hname[255];
-      snprintf(query, sizeof(query), "/local/domain/%u/name", dom_id);
-      char *xshname = (char *)xs_read(sp->xs_handle, XBT_NULL, query, NULL);
-      if(xshname) {
-	// copy the name out here so we can free it straight away
-	strncpy(hname, xshname, 255);
-	free(xshname);
-	hidElem.counterBlock.host_hid.hostname.str = hname;
-	hidElem.counterBlock.host_hid.hostname.len = strlen(hname);
-	memcpy(hidElem.counterBlock.host_hid.uuid, &domaininfo.handle, 16);
-	hidElem.counterBlock.host_hid.machine_type = SFLMT_unknown;
-	hidElem.counterBlock.host_hid.os_name = SFLOS_unknown;
-	//hidElem.counterBlock.host_hid.os_release.str = NULL;
-	//hidElem.counterBlock.host_hid.os_release.len = 0;
-	SFLADD_ELEMENT(cs, &hidElem);
-      }
-      
-      // host parent
-      SFLCounters_sample_element parElem = { 0 };
-      parElem.tag = SFLCOUNTERS_HOST_PAR;
-      parElem.counterBlock.host_par.dsClass = SFL_DSCLASS_PHYSICAL_ENTITY;
-      parElem.counterBlock.host_par.dsIndex = 1;
-      SFLADD_ELEMENT(cs, &parElem);
-
-      // VM Net I/O
-      SFLCounters_sample_element nioElem = { 0 };
-      nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
-      char devFilter[20];
-      snprintf(devFilter, 20, "vif%u.", dom_id);
-      uint32_t network_count = readNioCounters((SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, devFilter);
-      if(state->network_count != network_count) {
-	// request a refresh if the number of VIFs changed. Not a perfect test
-	// (e.g. if one was removed and another was added at the same time then
-	// we would miss it). I guess we should keep the whole list of network ids,
-	// or just force a refresh every few minutes?
-	myLog(LOG_INFO, "vif count changed from %u to %u (dom_id=%u). Setting refreshAdaptorList=YES",
-	      state->network_count,
-	      network_count,
-	      dom_id);
-	state->network_count = network_count;
-	sp->refreshAdaptorList = YES;
-      }
-      SFLADD_ELEMENT(cs, &nioElem);
-
-      // VM cpu counters [ref xenstat.c]
-      SFLCounters_sample_element cpuElem = { 0 };
-      cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-      u_int64_t vcpu_ns = 0;
-      for(uint32_t c = 0; c <= domaininfo.max_vcpu_id; c++) {
-	xc_vcpuinfo_t info;
-	if(xc_vcpu_getinfo(sp->xc_handle, dom_id, c, &info) != 0) {
-	  // error or domain is in transition.  Just bail.
-	  myLog(LOG_INFO, "vcpu list in transition (dom_id=%u)", dom_id);
-	  return;
-	}
-	else {
-	  if(info.online) {
-	    vcpu_ns += info.cpu_time;
-	  }
-	}
-      }
-      uint32_t st = domaininfo.flags;
-      // first 8 bits (b7-b0) are a mask of flags (see tools/libxc/xen/domctl.h)
-      // next 8 bits (b15-b8) indentify the CPU to which the domain is bound
-      // next 8 bits (b23-b16) indentify the the user-supplied shutdown code
-      cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_NOSTATE;
-      if(st & XEN_DOMINF_shutdown) {
-	cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_SHUTDOWN;
-	if(((st >> XEN_DOMINF_shutdownshift) & XEN_DOMINF_shutdownmask) == SHUTDOWN_crash) {
-	  cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_CRASHED;
-	}
-      }
-      else if(st & XEN_DOMINF_paused) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_PAUSED;
-      else if(st & XEN_DOMINF_blocked) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_BLOCKED;
-      else if(st & XEN_DOMINF_running) cpuElem.counterBlock.host_vrt_cpu.state = SFL_VIR_DOMAIN_RUNNING;
-      // SFL_VIR_DOMAIN_SHUTOFF ?
-      // other domaininfo flags include:
-      // XEN_DOMINF_dying      : not sure when this is set -- perhaps always :)
-      // XEN_DOMINF_hvm_guest  : as opposed to a PV guest
-      // XEN_DOMINF_debugged   :
-
-      cpuElem.counterBlock.host_vrt_cpu.cpuTime = vcpu_ns;
-      cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = domaininfo.max_vcpu_id + 1;
-      SFLADD_ELEMENT(cs, &cpuElem);
-
-      // VM memory counters [ref xenstat.c]
-      SFLCounters_sample_element memElem = { 0 };
-      memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-      memElem.counterBlock.host_vrt_mem.memory = domaininfo.tot_pages * sp->page_size;
-      memElem.counterBlock.host_vrt_mem.maxMemory = (domaininfo.max_pages == UINT_MAX) ? -1 : (domaininfo.max_pages * sp->page_size);
-      SFLADD_ELEMENT(cs, &memElem);
-
-      // VM disk I/O counters
-      SFLCounters_sample_element dskElem = { 0 };
-      dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-      if(xenstat_dsk(sp, dom_id, &dskElem.counterBlock.host_vrt_dsk)) {
-	SFLADD_ELEMENT(cs, &dskElem);
-      }
-
-      // include my slice of the adaptor list - and update
-      // the MAC with the correct one at the same time
-      SFLCounters_sample_element adaptorsElem = { 0 };
-      adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
-      SFLAdaptorList myAdaptors;
-      SFLAdaptor *adaptors[HSP_MAX_VIFS];
-      myAdaptors.adaptors = adaptors;
-      myAdaptors.capacity = HSP_MAX_VIFS;
-      myAdaptors.num_adaptors = 0;
-      adaptorsElem.counterBlock.adaptors = xenstat_adaptors(sp, dom_id, &myAdaptors);
-      SFLADD_ELEMENT(cs, &adaptorsElem);
-
-      
+    SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(poller, cs);
+      sp->counterSampleQueued = YES;
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
     }
+  }
 
-#endif /* HSF_XEN */
+  static void agentCB_getCounters_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)poller->magic;
+    UTArrayAdd(sp->pollActions, poller);
+    UTArrayAdd(sp->pollActions, agentCB_getCounters);
+    // Note readPackets.c uses this mechanism too (for switch port
+    // pollers), but other mods use their own array.
   }
 
   /*_________________---------------------------__________________
-    _________________    configVMs              __________________
+    _________________    persistent dsIndex     __________________
     -----------------___________________________------------------
   */
-  
-  static void configVMs(HSP *sp) {
-    if(debug) myLog(LOG_INFO, "configVMs");
-    HSPSFlow *sf = sp->sFlow;
-    if(sf && sf->agent) {
-      // mark and sweep
-      // 1. mark all the current virtual pollers
-      for(SFLPoller *pl = sf->agent->pollers; pl; pl = pl->nxt) {
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
-	  HSPVMState *state = (HSPVMState *)pl->userData;
-	  state->marked = YES;
-	}
-      }
 
-      // 2. create new VM pollers, or clear the mark on existing ones
-#ifdef HSF_XEN
+  static uint32_t assignVM_dsIndex(HSP *sp, HSPVMState *state) {
 
-      if(xenHandlesOK(sp)) {
-#define DOMAIN_CHUNK_SIZE 256
-	xc_domaininfo_t domaininfo[DOMAIN_CHUNK_SIZE];
-	int32_t num_domains=0, new_domains=0;
-	do {
-	  new_domains = xc_domain_getinfolist(sp->xc_handle,
-					      num_domains,
-					      DOMAIN_CHUNK_SIZE,
-					      domaininfo);
-	  if(new_domains < 0) {
-	    myLog(LOG_ERR, "xc_domain_getinfolist() failed : %s", strerror(errno));
-	  }
-	  else {
-	    for(uint32_t i = 0; i < new_domains; i++) {
-	      uint32_t domId = domaininfo[i].domain;
-	      // dom0 is the hypervisor. We want the others.
-	      if(domId != 0) {
-		SFLDataSource_instance dsi;
-		// ds_class = <virtualEntity>, ds_index = <domId>, ds_instance = 0
-		SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, domId, 0);
-		SFLPoller *vpoller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCountersVM);
-		if(vpoller->userData) {
-		  // it was already there, just clear the mark.
-		  HSPVMState *state = (HSPVMState *)vpoller->userData;
-		  state->marked = NO;
-		}
-		else {
-		  // new one - tell it what to do.
-		  myLog(LOG_INFO, "configVMs: new domain=%u", domId);
-		  uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-		  sfl_poller_set_sFlowCpInterval(vpoller, pollingInterval);
-		  sfl_poller_set_sFlowCpReceiver(vpoller, HSP_SFLOW_RECEIVER_INDEX);
-		  // hang my HSPVMState object on the datasource userData hook
-		  HSPVMState *state = (HSPVMState *)my_calloc(sizeof(HSPVMState));
-		  state->network_count = 0;
-		  state->marked = NO;
-		  vpoller->userData = state;
-		  sp->refreshAdaptorList = YES;
-		}
-		// remember the index so we can access this individually later
-		HSPVMState *state = (HSPVMState *)vpoller->userData;
-		state->vm_index = num_domains + i;
-	      }
-	    }
-	  }
-	  num_domains += new_domains;
-	} while(new_domains > 0);
-	// remember the number of domains we found
-	sp->num_domains = num_domains;
+    // make sure we are never called from a different thread
+    assert(EVCurrentBus() == sp->pollBus);
+
+    uint32_t first = HSP_DEFAULT_LOGICAL_DSINDEX_START;
+    uint32_t last = HSP_DEFAULT_APP_DSINDEX_START - 1;
+    uint32_t range = last - first + 1;
+
+    if(UTHashN(sp->vmsByDsIndex) >= range) {
+      // table is full
+      state->dsIndex = 0;
+      return NO;
+    }
+
+    uint32_t hash = hashUUID(state->uuid);
+    uint32_t preferred = first + (hash % range);
+    state->dsIndex = preferred;
+    for(;;) {
+      HSPVMState *probe = UTHashGet(sp->vmsByDsIndex, state);
+      if(probe == NULL) {
+	// claim this one
+	UTHashAdd(sp->vmsByDsIndex, state);
+	break;
       }
-#endif
-      
-      // 3. remove any that don't exist any more
-      for(SFLPoller *pl = sf->agent->pollers; pl; ) {
-	SFLPoller *nextPl = pl->nxt;
-	if(SFL_DS_CLASS(pl->dsi) == SFL_DSCLASS_LOGICAL_ENTITY) {
-	  HSPVMState *state = (HSPVMState *)pl->userData;
-	  if(state->marked) {
-	    myLog(LOG_INFO, "configVMs: removing domain=%u", SFL_DS_INDEX(pl->dsi));
-	    free(pl->userData);
-	    pl->userData = NULL;
-	    sfl_agent_removePoller(sf->agent, &pl->dsi);
-	    sp->refreshAdaptorList = YES;
-	  }
-	}
-	pl = nextPl;
+      if(probe == state) {
+	// why did we assign again?
+	break;
+      }
+      // collision - keep searching
+      state->dsIndex++;
+      if(state->dsIndex > last)
+	state->dsIndex = first;
+      if(state->dsIndex == preferred) {
+	// full wrap - shouldn't happen if the table
+	// is not full, but detect it anyway just in
+	// case we change something later.
+	state->dsIndex = 0;
+	return NO;
       }
     }
+    return YES;
   }
 
+  /*_________________---------------------------__________________
+    _________________   VM/Container state      __________________
+    -----------------___________________________------------------
+  */
+  HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // make sure we are never called from a different thread
+    assert(EVCurrentBus() == sp->pollBus);
+    assert(objSize >= sizeof(HSPVMState));
+    HSPVMState search;
+    memcpy(search.uuid, uuid, 16);
+    HSPVMState *state = UTHashGet(sp->vmsByUUID, &search);
+    if(state == NULL
+       && create) {
+      state = (HSPVMState *)my_calloc(objSize);
+      memcpy(state->uuid, uuid, 16);
+      UTHashAdd(sp->vmsByUUID, state);
+      if(assignVM_dsIndex(sp,state) == NO) {
+	my_free(state);
+	state = NULL;
+      }
+      else {
+	state->created = YES;
+	state->vmType = vmType;
+	state->volumes = strArrayNew();
+	state->disks = strArrayNew();
+	state->interfaces = adaptorListNew();
+	sp->refreshAdaptorList = YES;
+	SFLDataSource_instance dsi;
+	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
+	SFL_DS_SET(dsi, SFL_DSCLASS_LOGICAL_ENTITY, state->dsIndex, 0);
+	SEMLOCK_DO(sp->sync_agent) {
+	  state->poller = sfl_agent_addPoller(sp->agent, &dsi, mod, getCountersFn);
+	  state->poller->userData = state;
+	  sfl_poller_set_sFlowCpInterval(state->poller, sp->actualPollingInterval);
+	  sfl_poller_set_sFlowCpReceiver(state->poller, HSP_SFLOW_RECEIVER_INDEX);
+	}
+      }
+    }
+    return state;
+  }
+
+  void removeAndFreeVM(EVMod *mod, HSPVMState *state) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // make sure we are never called from a different thread
+    assert(EVCurrentBus() == sp->pollBus);
+    UTHashDel(sp->vmsByDsIndex, state);
+    UTHashDel(sp->vmsByUUID, state);
+    if(state->disks) strArrayFree(state->disks);
+    if(state->volumes) strArrayFree(state->volumes);
+    if(state->interfaces) {
+      adaptorListMarkAll(state->interfaces);
+      // delete any hash-table references to these adaptors
+      deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
+      // then free them along with the adaptorList itself
+      adaptorListFree(state->interfaces);
+    }
+    if(state->poller) {
+      state->poller->userData = NULL;
+      SEMLOCK_DO(sp->sync_agent) {
+	sfl_agent_removePoller(sp->agent, &state->poller->dsi);
+      }
+    }
+    my_free(state);
+    sp->refreshAdaptorList = YES;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    syncOutputFile         __________________
+    -----------------___________________________------------------
+  */
+
+  static void syncOutputFile(HSP *sp) {
+    myDebug(1, "syncOutputFile");
+    rewind(sp->f_out);
+    fprintf(sp->f_out, "# WARNING: Do not edit this file. It is generated automatically by hsflowd.\n");
+
+    // revision appears both at the beginning and at the end
+    fprintf(sp->f_out, "rev_start=%u\n", sp->revisionNo);
+    if(sp->sFlowSettings_str) fputs(sp->sFlowSettings_str, sp->f_out);
+    // repeat the revision number. The reader knows that if the revison number
+    // has not changed under his feet then he has a consistent config.
+    fprintf(sp->f_out, "rev_end=%u\n", sp->revisionNo);
+    fflush(sp->f_out);
+    // chop off anything that may be lingering from before
+    UTTruncateOpenFile(sp->f_out);
+  }
 
   /*_________________---------------------------__________________
     _________________       tick                __________________
     -----------------___________________________------------------
   */
-  
-  static void tick(HSP *sp, time_t clk) {
 
-    // possibly refresh the list of VMs
-    if(sp->refreshVMList || (clk % 60) == 0) {
-      sp->refreshVMList = NO;
-      configVMs(sp);
+  static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    time_t clk = evt->bus->now.tv_sec;
+
+    // reset the pollActions
+    UTArrayReset(sp->pollActions);
+
+    // send a tick to the sFlow agent. This will be passed on
+    // to the samplers, pollers and receiver.  If the poller is
+    // ready to poll counters it will pull it's callback, but
+    // we are using that just to populate the poll actions list.
+    // That way we can relinquish the sync semaphore quickly.
+    // It is up to the poller's getCounters Fn to grab it again
+    // if and when it is required.  Same goes for the
+    // sync_receiver lock,  which is needed when the final
+    // counter sample is submitted for XDR serialization.
+    SEMLOCK_DO(sp->sync_agent) {
+      // only run the poller_tick()s here,  not the full agent_tick()
+      // we'll call receiver_flush at the end of this tick/tock cycle,
+      // and skip the sampler_tick() altogether.
+      // sfl_agent_tick(sp->agent, clk);
+      for(SFLPoller *pl = sp->agent->pollers; pl; pl = pl->nxt)
+	sfl_poller_tick(pl, clk);
+    }
+    // We can only get away with this scheme because the poller
+    // objects are only ever removed and free by this thread.
+    // So we don't need to worry about them being freed under
+    // our feet below.
+
+    // now we can execute them without holding on to the semaphore
+    for(uint32_t ii = 0; ii < UTArrayN(sp->pollActions); ii += 2) {
+      SFLPoller *poller = (SFLPoller *)UTArrayAt(sp->pollActions, ii);
+      getCountersFn_t cb = (getCountersFn_t)UTArrayAt(sp->pollActions, ii+1);
+      SFL_COUNTERS_SAMPLE_TYPE cs;
+      memset(&cs, 0, sizeof(cs));
+      (cb)((void *)sp, poller, &cs);
     }
 
-    // see if a refresh of the interface list was requested
-    if(sp->refreshAdaptorList) {
+    // possibly poll the nio counters to avoid 32-bit rollover
+    if(sp->nio_polling_secs &&
+       clk >= sp->next_nio_poll) {
+      updateNioCounters(sp, NULL);
+      sp->next_nio_poll = clk + sp->nio_polling_secs;
+    }
+
+    // refresh the interface list periodically or on request
+    if(sp->refreshAdaptorList
+       || clk > sp->next_refreshAdaptorList) {
       sp->refreshAdaptorList = NO;
-      readInterfaces(sp);
+      sp->next_refreshAdaptorList = clk + sp->refreshAdaptorListSecs;
+      uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
+      if(readInterfaces(sp, YES, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
+	myLog(LOG_ERR, "failed to re-read interfaces\n");
+      }
+      else {
+	myDebug(1, "interfaces added: %u removed: %u cameup: %u wentdown: %u changed: %u",
+		ad_added, ad_removed, ad_cameup, ad_wentdown, ad_changed);
+      }
+
+      int agentAddressChanged=NO;
+      if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
+	  myLog(LOG_ERR, "failed to re-select agent address\n");
+      }
+      myDebug(1, "agentAddressChanged=%s", agentAddressChanged ? "YES" : "NO");
+      if(agentAddressChanged) {
+	// this incs the revision No so it causes the
+	// output file to be rewritten below too.
+	installSFlowSettings(sp, sp->sFlowSettings);
+      }
+
+      if(ad_added || ad_cameup || ad_wentdown || ad_changed) {
+	// test for switch ports
+	configSwitchPorts(sp); // in readPackets.c
+	// announce (e.g. to adjust sampling rates if ifSpeeds changed)
+	EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
+      }
     }
+
+    // rewrite the output if the config has changed
+    if(sp->outputRevisionNo != sp->revisionNo) {
+      syncOutputFile(sp);
+      sp->outputRevisionNo = sp->revisionNo;
+    }
+
+  }
+
+  /*_________________---------------------------__________________
+    _________________    flushCounters          __________________
+    -----------------___________________________------------------
+    Use this to ensure that any sFlow datagram with a counter-sample
+    is flushed immediately.  While not required by the sFlow standard
+    this does help to ensure that counters arrive at the collector
+    promptly, rather than waiting for up to a second.  This reduces
+    the time-dither effect and makes successive counter deltas more
+    stable.  It is particularly helpful when the polling interval is
+    short.
+  */
+  
+  void flushCounters(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->counterSampleQueued) {
+      SEMLOCK_DO(sp->sync_agent) {
+	if(sp->counterSampleQueued) {
+	  sfl_receiver_flush(sp->agent->receivers);
+	  sp->counterSampleQueued = NO;
+	}
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________       tock                __________________
+    -----------------___________________________------------------
+  */
+  
+  static void evt_poll_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // we registered for this event after the other modules were loaded,  so
+    // unless they delay their registration for some reason we can assume
+    // that this is the last tock() action.  (Could add another event to the
+    // cycle in evbus.c if we really need to be sure).  Delaying the flush to
+    // here makes it more likely that counters will be flushed out promptly
+    // when they are freshly read.
+    SEMLOCK_DO(sp->sync_agent) {
+      // note - this used to happen inside sfl_agent_tick(), but we
+      // disaggregated that call so the pollers get their ticks first
+      // and the receiver flush happens at the end.
+      sfl_receiver_flush(sp->agent->receivers);
+      sp->counterSampleQueued = NO;
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________     tock - all buses      __________________
+    -----------------___________________________------------------
+    this fn called on tock by all buses (all threads) so be careful!
+  */
+
+  static void evt_all_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+#ifdef UTHEAP
+    // check for heap cleanup
+    UTHeapGC();
+#endif
+    // TODO: this would be a good place to test the memory footprint and
+    // bail out if it looks like we are leaking memory(?)
   }
 
   /*_________________---------------------------__________________
     _________________         initAgent         __________________
     -----------------___________________________------------------
   */
-  
-  static int initAgent(HSP *sp)
+
+  static void initAgent(HSP *sp)
   {
-    if(debug) myLog(LOG_INFO,"creating sfl agent");
+    myDebug(1,"creating sfl agent");
 
-    HSPSFlow *sf = sp->sFlow;
-    
-    if(sf->sFlowSettings == NULL) {
-      myLog(LOG_ERR, "No sFlow config defined");
-      return NO;
-    }
-    
-    if(sf->sFlowSettings->collectors == NULL) {
-      myLog(LOG_ERR, "No collectors defined");
-      return NO;
-    }
-
-    assert(sf->agentIP.type);
-    
     // open the sockets if not open already - one for v4 and another for v6
     if(sp->socket4 <= 0) {
-      if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+      if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	myLog(LOG_ERR, "IPv4 send socket open failed : %s", strerror(errno));
+      }
+      else {
+        // increase tx buffer size
+        uint32_t sndbuf = HSP_SFLOW_SND_BUF;
+        if(setsockopt(sp->socket4, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
+          myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v4): %s", HSP_SFLOW_SND_BUF, strerror(errno));
+        }
+      }
     }
     if(sp->socket6 <= 0) {
-      if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1)
+      if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	myLog(LOG_ERR, "IPv6 send socket open failed : %s", strerror(errno));
+      }
+      else {
+        // increase tx buffer size
+        uint32_t sndbuf = HSP_SFLOW_SND_BUF;
+        if(setsockopt(sp->socket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
+          myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v6): %s", HSP_SFLOW_SND_BUF, strerror(errno));
+        }
+      }
     }
 
-    time_t now = time(NULL);
-    sf->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
-    sfl_agent_init(sf->agent,
-		   &sf->agentIP,
-		   sf->subAgentId,
-		   now,
-		   now,
-		   sp,
-		   agentCB_alloc,
-		   agentCB_free,
-		   agentCB_error,
-		   agentCB_sendPkt);
-    // just one receiver - we are serious about making this lightweight for now
-    HSPCollector *collector = sf->sFlowSettings->collectors;
-    SFLReceiver *receiver = sfl_agent_addReceiver(sf->agent);
-    
-    // claim the receiver slot
-    sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
-    
-    // set the timeout to infinity
-    sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
+    SEMLOCK_DO(sp->sync_agent) {
+      struct timespec ts;
+      EVClockMono(&ts);
+      time_t mono_now = ts.tv_sec;
+      sp->agent = (SFLAgent *)my_calloc(sizeof(SFLAgent));
+      sfl_agent_init(sp->agent,
+		     &sp->agentIP,
+		     sp->subAgentId,
+		     mono_now,
+		     mono_now,
+		     sp,
+		     agentCB_alloc,
+		     agentCB_free,
+		     agentCB_error,
+		     agentCB_sendPkt);
+      // just one receiver - we are serious about making this lightweight for now
+      SFLReceiver *receiver = sfl_agent_addReceiver(sp->agent);
 
-    // receiver address/port - set it for the first collector,  but
-    // actually we'll send the same feed to all collectors.  This step
-    // may not be necessary at all when we are using the sendPkt callback.
-    sfl_receiver_set_sFlowRcvrAddress(receiver, &collector->ipAddr);
-    sfl_receiver_set_sFlowRcvrPort(receiver, collector->udpPort);
-    
-    uint32_t pollingInterval = sf->sFlowSettings ? sf->sFlowSettings->pollingInterval : SFL_DEFAULT_POLLING_INTERVAL;
-    
-    // add a <physicalEntity> poller to represent the whole physical host
-    SFLDataSource_instance dsi;
-  // ds_class = <physicalEntity>, ds_index = 1, ds_instance = 0
-    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, 1, 0);
-    sf->poller = sfl_agent_addPoller(sf->agent, &dsi, sp, agentCB_getCounters);
-    sfl_poller_set_sFlowCpInterval(sf->poller, pollingInterval);
-    sfl_poller_set_sFlowCpReceiver(sf->poller, HSP_SFLOW_RECEIVER_INDEX);
-    
-    // add <virtualEntity> pollers for each virtual machine
-    configVMs(sp);
+      // max datagram size might have been tweaked in the config file
+      if(sp->sFlowSettings_file->datagramBytes) {
+	sfl_receiver_set_sFlowRcvrMaximumDatagramSize(receiver, sp->sFlowSettings_file->datagramBytes);
+      }
 
-    return YES;
+      // claim the receiver slot
+      sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
+
+      // set the timeout to infinity
+      sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
+    }
   }
 
   /*_________________---------------------------__________________
@@ -711,9 +712,15 @@ extern "C" {
   static void setDefaults(HSP *sp)
   {
     sp->configFile = HSP_DEFAULT_CONFIGFILE;
+    sp->outputFile = HSP_DEFAULT_OUTPUTFILE;
     sp->pidFile = HSP_DEFAULT_PIDFILE;
-    sp->DNSSD_startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
-    sp->DNSSD_retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
+    sp->crashFile = NULL;
+    sp->daemonize = YES;
+    sp->dropPriv = YES;
+    sp->refreshAdaptorListSecs = HSP_REFRESH_ADAPTORS;
+    sp->refreshVMListSecs = HSP_REFRESH_VMS;
+    sp->forgetVMSecs = HSP_FORGET_VMS;
+    sp->modulesPath = NULL; // STRINGIFY_DEF(HSP_MOD_DIR);
   }
 
   /*_________________---------------------------__________________
@@ -723,13 +730,15 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-d] [-v] [-p PIDFile] [-f CONFIGFile] [-u UUID] \n", command);
+    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-f CONFIGFile]\n", command);
     fprintf(stderr,"\n\
-             -d:  debug mode - do not fork as a daemon, and log to stderr (repeat for more details)\n\
+             -d:  do not daemonize, and log to stdout/stderr (repeat for more debug details)\n\
              -v:  print version number and exit\n\
+             -P:  do not drop privileges (run as root)\n\
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
         -u UUID:  specify UUID as unique ID for this host\n\
-  -f CONFIGFile:  specify config file (default is "HSP_DEFAULT_CONFIGFILE")\n\n");
+  -f CONFIGFile:  specify config file (default is " HSP_DEFAULT_CONFIGFILE ")\n\n\
+   -c CRASHFile:  specify file to write crash info to (default is stderr)\n");
   fprintf(stderr, "=============== More Information ============================================\n");
   fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
   fprintf(stderr, "| sFlowTrend (FREE)     - http://www.inmon.com/products/sFlowTrend.php      |\n");
@@ -746,12 +755,23 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dvp:f:u:?h")) != -1) {
+    while ((in = getopt(argc, argv, "dDvPp:f:o:u:?hc:")) != -1) {
       switch(in) {
-      case 'd': debug++; break;
-      case 'v': printf("%s version %s\n", argv[0], HSP_VERSION); exit(EXIT_SUCCESS); break;
+      case 'v':
+	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
+	exit(EXIT_SUCCESS);
+	break;
+      case 'd':
+	// first 'd' just turns off daemonize, second increments debug
+	if(!sp->daemonize)
+	  setDebug(getDebug() + 1);
+	sp->daemonize=NO;
+	break;
+      case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
       case 'f': sp->configFile = optarg; break;
+      case 'o': sp->outputFile = optarg; break;
+      case 'c': sp->crashFile = optarg; break;
       case 'u':
 	if(parseUUID(optarg, sp->uuid) == NO) {
 	  fprintf(stderr, "bad UUID format: %s\n", optarg);
@@ -766,13 +786,36 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________     setState              __________________
+    _________________    log_backtrace          __________________
     -----------------___________________________------------------
   */
 
-  static void setState(HSP *sp, EnumHSPState state) {
-    if(debug) myLog(LOG_INFO, "state -> %s", HSPStateNames[state]);
-    sp->state = state;
+  static void log_backtrace(int sig, siginfo_t *info) {
+#ifdef HAVE_BACKTRACE
+
+    fprintf(stderr, "log_backtrace\n");
+
+#define HSP_NUM_BACKTRACE_PTRS 50
+    static void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
+
+    // ask for the backtrace pointers
+    size_t siz = backtrace(backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
+
+    if(f_crash == NULL)
+      f_crash = stderr;
+
+    // do this first in case everything else is compromised
+    backtrace_symbols_fd(backtracePtrs, siz, fileno(f_crash));
+    fflush(f_crash);
+
+    // Do something useful with siginfo_t
+    if (sig == SIGSEGV)
+      fprintf(f_crash, "SIGSEGV, faulty address is %p\n", info->si_addr);
+
+    // thread info
+    EVBus *bus = EVCurrentBus();
+    fprintf(f_crash, "current bus: %s\n", (bus ? bus->name : "<none>"));
+#endif
   }
 
   /*_________________---------------------------__________________
@@ -780,219 +823,456 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void signal_handler(int sig) {
+  static void signal_handler(int sig, siginfo_t *info, void *secret) {
     HSP *sp = &HSPSamplingProbe;
+
     switch(sig) {
     case SIGTERM:
       myLog(LOG_INFO,"Received SIGTERM");
-      setState(sp, HSPSTATE_END);
+      // graceful
+      EVStop(sp->rootModule);
       break;
     case SIGINT:
       myLog(LOG_INFO,"Received SIGINT");
-      setState(sp, HSPSTATE_END);
+      // abrupt
+      exit(sig);
+      break;
+    case SIGUSR1:
+      myLog(LOG_INFO,"Received SIGUSR1");
+      // backtrace only - then keep going
+      log_backtrace(sig, info);
+      break;
+    case SIGUSR2:
+      myLog(LOG_INFO,"Received SIGUSR2");
+      // memory only - then keep going
+      malloc_stats();
       break;
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
+      // first make sure we can't go in a loop
+      signal(SIGSEGV, SIG_DFL);
+      signal(SIGFPE, SIG_DFL);
+      signal(SIGILL, SIG_DFL);
+      signal(SIGBUS, SIG_DFL);
+      signal(SIGXFSZ, SIG_DFL);
+      // backtrace and bail
+      log_backtrace(sig, info);
+      exit(sig);
       break;
     }
   }
 
   /*_________________---------------------------__________________
-    _________________     my_usleep             __________________
+    _________________   sFlowSettingsString     __________________
     -----------------___________________________------------------
   */
+
+  char *sFlowSettingsString(HSP *sp, HSPSFlowSettings *settings)
+  {
+    UTStrBuf *buf = UTStrBuf_new();
+
+    if(settings) {
+      UTStrBuf_printf(buf, "hostname=%s\n", sp->hostname);
+      UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
+      UTStrBuf_printf(buf, "header=%u\n", settings->headerBytes);
+      UTStrBuf_printf(buf, "datagram=%u\n", settings->datagramBytes);
+      UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
+      // make sure the application specific ones always come after the general ones - to simplify the override logic there
+      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
+	if(appSettings->got_sampling_n) {
+	  UTStrBuf_printf(buf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
+	}
+	if(appSettings->got_polling_secs) {
+	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
+	}
+      }
+      char ipbuf[51];
+      UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&sp->agentIP, ipbuf, 50));
+      if(sp->agentDevice) {
+	UTStrBuf_printf(buf, "agent=%s\n", sp->agentDevice);
+      }
+      UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+
+      // jsonPort always comes from local config file, but include it here so that
+      // others know where to send their JSON application/rtmetric/rtflow messages
+      if(sp->json.port) {
+	UTStrBuf_printf(buf, "jsonPort=%u\n", sp->json.port);
+      }
+
+      // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
+      // another step here to make sure they are sorted.  Otherwise we think the config has changed
+      // every time(!)
+      UTStringArray *iplist = strArrayNew();
+      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
+	// make sure we ignore any where the foward lookup failed
+	// this might mean we write a .auto file with no collectors in it,
+	// so let's hope the slave agents all do the right thing with that(!)
+	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
+	  char collectorStr[128];
+	  // <ip> <port> [<priority>]
+	  sprintf(collectorStr, "collector=%s %u\n", SFLAddress_print(&collector->ipAddr, ipbuf, 50), collector->udpPort);
+	  strArrayAdd(iplist, collectorStr);
+	}
+      }
+      strArraySort(iplist);
+      char *arrayStr = strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/);
+      UTStrBuf_printf(buf, "%s", arrayStr);
+      my_free(arrayStr);
+      strArrayFree(iplist);
+    }
+    return UTStrBuf_unwrap(buf);
+  }
+
+  /*_________________---------------------------__________________
+    _________________   pre_config_first        __________________
+    -----------------___________________________------------------
+  */
+
+  static void pre_config_first(HSP *sp) {
+    // make sure we are ready for someone to call getSampler/getPoller
+    updatePollingInterval(sp);
+    
+    // before we do anything else,  read the interfaces again - this time with a full discovery
+    // so that modules can weigh in if required,  and, for example, sampling-rates can be set
+    // correctly.
+    readInterfaces(sp, YES, NULL, NULL, NULL, NULL, NULL);
+    
+    // print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
+    if(debug(1))
+      malloc_stats();
+    
+    // add a <physicalEntity> poller to represent the whole physical host
+    SFLDataSource_instance dsi;
+    // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
+    SFL_DS_SET(dsi, SFL_DSCLASS_PHYSICAL_ENTITY, HSP_DEFAULT_PHYSICAL_DSINDEX, 0);
+    sp->poller = sfl_agent_addPoller(sp->agent, &dsi, sp, agentCB_getCounters_request);
+    sfl_poller_set_sFlowCpInterval(sp->poller, sp->actualPollingInterval);
+    sfl_poller_set_sFlowCpReceiver(sp->poller, HSP_SFLOW_RECEIVER_INDEX);
+  }
+
+  /*_________________---------------------------__________________
+    _________________   installSFlowSettings    __________________
+    -----------------___________________________------------------
+
+    Always increment the revision number whenever we change the sFlowSettings pointer
+  */
+
+  static void installSFlowSettings(HSP *sp, HSPSFlowSettings *settings)
+  {
+    char *settingsStr = sFlowSettingsString(sp, settings);
+    if(my_strequal(sp->sFlowSettings_str, settingsStr)) {
+      // no change - don't increment the revision number
+      // (which will mean that the file is not rewritten either)
+      if(settingsStr) my_free(settingsStr);
+    }
+    else {
+      // new config
+      bool firstConfig = YES;
+      if(sp->sFlowSettings_str) {
+	firstConfig = NO;
+	my_free(sp->sFlowSettings_str);
+      }
+      sp->sFlowSettings_str = settingsStr;
+      sp->revisionNo++;
+      // atomic pointer-switch.  No need for lock.  At least
+      // not on the  platforms we expect to run on.
+      sp->sFlowSettings = settings;
+
+      // announce the change
+      if(firstConfig) {
+	// make sure certain things are in place before we proceed. This
+	// could be done with an event such as CONFIG_PRE, but then
+	// we would have to handshake before raising CONFIG_FIRST
+	pre_config_first(sp);
+	// now offer it to the modules
+	EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
+      }
+      EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_CHANGED, NULL, 0);
+      // delay the config-done event until every thread has processed the
+      // config change.  This is especially important the first time because
+      // we are about to drop priviledges.  If we plow on and do that here
+      // we will drop them before another module on another bus gets to, for
+      // example, open a pcap socket.  Use the handshake mechanism to get
+      // every bus to reply.  Then we know we can proceed.
+      sp->config_shake_countdown = EVBusCount(sp->rootModule);
+      EVEventTxAll(sp->rootModule, EVEVENT_HANDSHAKE, HSPEVENT_CONFIG_SHAKE, strlen(HSPEVENT_CONFIG_SHAKE));
+      // EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
+    }
+  }
+
+  /*_________________------------------------__________________
+    _________________   evt_config_shake     __________________
+    -----------------________________________------------------
+  */
   
-  void my_usleep(uint32_t microseconds) {
-    struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = microseconds;
-    int max_fd = 0;
-    int nfds = select(max_fd + 1,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      (fd_set *)NULL,
-		      &timeout);
-    // may return prematurely if a signal was caught, in which case nfds will be
-    // -1 and errno will be set to EINTR.  If we get any other error, abort.
-    if(nfds < 0 && errno != EINTR) {
-      myLog(LOG_ERR, "select() returned %d : %s", nfds, strerror(errno));
-      exit(EXIT_FAILURE);
+  static void evt_config_shake(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    myDebug(1, "evt_config_shake: reply from %s", (char *)data);
+    if(--sp->config_shake_countdown == 0) {
+      myDebug(1, "evt_config_shake: sync complete");
+      EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
     }
   }
 
   /*_________________---------------------------__________________
-    _________________        runDNSSD           __________________
+    _________________  new config line-by-line  __________________
+    -----------------___________________________------------------
+    These events passed in from DNS-SD module to submit new SRV and TXT record config.
+    The config could probably fit in one PIPE_BUF msg but it's safer to pass it in one
+    name-value pair at a time to make sure we never hit that limit.  The sequence is
+    HSPEVENT_CONFIG_START
+    HSPEVENT_CONFIG_LINE (repeat)
+    HSPEVENT_CONFIG_END
+  */
+
+  static void evt_config_start(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->sFlowSettings_dnsSD_prev)
+      freeSFlowSettings(sp->sFlowSettings_dnsSD_prev);
+    sp->sFlowSettings_dnsSD_prev = sp->sFlowSettings_dnsSD;
+    sp->sFlowSettings_dnsSD = newSFlowSettings();
+  }
+
+  static void evt_config_line(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSPSFlowSettings *st = sp->sFlowSettings_dnsSD;
+    if(st == NULL) {
+      myLog(LOG_ERR, "dnssd: no current settings object");
+      return;
+    }
+    char *varval = (char *)data;
+    char keyBuf[EV_MAX_EVT_DATALEN];
+    char valBuf[EV_MAX_EVT_DATALEN];
+    if(parseNextTok(&varval, "=", YES, '"', YES, keyBuf, EV_MAX_EVT_DATALEN)
+       && parseNextTok(&varval, "=", YES, '"', YES, valBuf, EV_MAX_EVT_DATALEN)) {
+
+      if(my_strequal(keyBuf, "collector")) { // TODO: string constant for this from tokens
+	int valLen = my_strlen(valBuf);
+	if(valLen > 3) {
+	  uint32_t delim = strcspn(valBuf, "/");
+	  if(delim > 0 && delim < valLen) {
+	    valBuf[delim] = '\0';
+	    HSPCollector *coll = newCollector(st);
+	    if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
+	      myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but forward lookup failed");
+	      // turn off the collector by clearing the address type
+	      coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	    }
+	    coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
+	    if(coll->udpPort < 1 || coll->udpPort > 65535) {
+	      myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but bad port: %d", coll->udpPort);
+	      // turn off the collector by clearing the address type
+	      coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	    }
+	  }
+	}
+      }
+      else {
+	// key=val (TXT record line)
+	if(strcmp(keyBuf, "sampling") == 0) {
+	  st->samplingRate = strtol(valBuf, NULL, 0);
+	}
+	else if(my_strnequal(keyBuf, "sampling.", 9)) {
+	  setApplicationSampling(st, keyBuf+9, strtol(valBuf, NULL, 0));
+	}
+	else if(strcmp(keyBuf, "txtvers") == 0) {
+	}
+	else if(strcmp(keyBuf, "polling") == 0) {
+	  st->pollingInterval = strtol(valBuf, NULL, 0);
+	}
+	else if(my_strnequal(keyBuf, "polling.", 8)) {
+	  setApplicationPolling(st, keyBuf+8, strtol(valBuf, NULL, 0));
+	}
+#if HSP_DNSSD_AGENTCIDR
+	else if(strcmp(keyBuf, "agent.cidr") == 0) {
+	  HSPCIDR cidr = { 0 };
+	  if(SFLAddress_parseCIDR(valBuf,
+				  &cidr.ipAddr,
+				  &cidr.mask,
+				  &cidr.maskBits)) {
+	    addAgentCIDR(st, &cidr);
+	  }
+	  else {
+	    myLog(LOG_ERR, "CIDR parse error in dnsSD record <%s>=<%s>", keyBuf, valBuf);
+	  }
+	}
+#endif /* HSP_DNSSD_AGENTCIDR */
+	else {
+	  myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
+	}
+      }
+    }
+  }
+
+  static void evt_config_end(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    // initiate server-discovery
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    assert(dataLen = sizeof(int));
+    int num_servers = *(int *)data;
+
+    // three cases here:
+    // A) if(num_servers == -1) (i.e. query failed) then keep the current config
+    // B) if(num_servers == 0) then stop monitoring
+    // C) if(num_servers > 0) then install the new config
+
+    myDebug(1, "num_servers == %d", num_servers);
+
+    if(num_servers < 0) {
+      // A: query failed: keep the current config.
+    }
+    else if(num_servers == 0) {
+      // B: turn off monitoring.   TODO: test this!
+      installSFlowSettings(sp, NULL);
+    }
+    else {
+      // C: make this new one the running config.
+      installSFlowSettings(sp, sp->sFlowSettings_dnsSD);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________  updatePollingInterval    __________________
     -----------------___________________________------------------
   */
 
-  static void myDnsCB(HSP *sp, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen)
-  {
-    HSPSFlowSettings *st = sp->sFlow->sFlowSettings_dnsSD;
+  static bool updatePollingInterval(HSP *sp) {
+    if(sp->sFlowSettings == NULL)
+      return NO;
 
-    // latch the min ttl
-    if(sp->DNSSD_ttl == 0 || ttl < sp->DNSSD_ttl) {
-      sp->DNSSD_ttl = ttl;
-    }
+    // pick up the configured polling interval
+    uint32_t pollingInterval = sp->sFlowSettings ?
+      sp->sFlowSettings->pollingInterval :
+      SFL_DEFAULT_POLLING_INTERVAL;
 
-    char keyBuf[1024];
-    char valBuf[1024];
-    if(keyLen > 1023 || valLen > 1023) {
-      myLog(LOG_ERR, "myDNSCB: string too long");
-      return;
-    }
-    // null terminate
-    memcpy(keyBuf, (char *)key, keyLen);
-    keyBuf[keyLen] = '\0';
-    memcpy(valBuf, (char *)val, valLen);
-    valBuf[valLen] = '\0';
-
-    if(debug) {
-      myLog(LOG_INFO, "dnsSD: (rtype=%u,ttl=%u) <%s>=<%s>", rtype, ttl, keyBuf, valBuf);
+    // apply constraints
+    if(pollingInterval < sp->minPollingInterval) {
+      pollingInterval = sp->minPollingInterval;
+      myDebug(1, "override polling interval to min: %u", pollingInterval);
     }
 
-    if(key == NULL && val && valLen > 3) {
-      uint32_t delim = strcspn(valBuf, "/");
-      if(delim > 0 && delim < valLen) {
-	valBuf[delim] = '\0';
-	HSPCollector *coll = newCollector(st);
-	if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
-	  myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but forward lookup failed");
-	  // turn off the collector by clearing the address type
-	  coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
-	}
-	coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
-	if(coll->udpPort < 1 || coll->udpPort > 65535) {
-	  myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but bad port: %d", coll->udpPort);
-	  // turn off the collector by clearing the address type
-	  coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
-	}
-      }
-    }
-    else if(strcmp(keyBuf, "sampling") == 0) {
-    }
-    else if(strcmp(keyBuf, "txtvers") == 0) {
-    }
-    else if(strcmp(keyBuf, "polling") == 0) {
-      st->pollingInterval = strtol(valBuf, NULL, 0);
-      if(st->pollingInterval < 1 || st->pollingInterval > 300) {
-	// $$$ what if this fails?
-      }
-    }
-    else {
-      myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
+    bool changed = (pollingInterval != sp->actualPollingInterval);
+    // store for all to use and return the changed flag
+    sp->actualPollingInterval = pollingInterval;
+    return changed;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     evt_config_first      __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // assert(sp->sFlowSettings);
+    myDebug(1, "evt_config_first: first valid configuration");
+
+    if(sp->sFlowSettings == NULL
+       || sp->sFlowSettings->collectors == NULL) {
+      myLog(LOG_ERR, "evt_config_first: no collectors defined");
+      if(!sp->DNSSD.DNSSD)
+	abort();
     }
   }
 
-  static void *runDNSSD(void *magic) {
-    HSP *sp = (HSP *)magic;
-    sp->DNSSD_countdown = sfl_random(sp->DNSSD_startDelay);
-    time_t clk = time(NULL);
-    while(1) {
-      my_usleep(1000000);
-      time_t test_clk = time(NULL);
-      if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
-	// avoid a flurry of ticks if the clock jumps
-	myLog(LOG_INFO, "time jump detected (DNSSD) %ld->%ld", clk, test_clk);
-	clk = test_clk - 1;
-      }
-      time_t ticks = test_clk - clk;
-      clk = test_clk;
-      if(sp->DNSSD_countdown > ticks) {
-	sp->DNSSD_countdown -= ticks;
-      }
-      else {
-	// initiate server-discovery
-	HSPSFlow *sf = sp->sFlow;
-	sf->sFlowSettings_dnsSD = newSFlowSettings();
-	// pick up default polling interval from config file
-	sf->sFlowSettings_dnsSD->pollingInterval = sf->sFlowSettings_file->pollingInterval;
-	// we want the min ttl, so clear it here
-	sp->DNSSD_ttl = 0;
-	// now make the requests
-	int num_servers = dnsSD(sp, myDnsCB);
-	SEMLOCK_DO(sp->config_mut) {
-	  // three cases here:
-	  // A) if(num_servers == -1) (i.e. query failed) then keep the current config
-	  // B) if(num_servers == 0) then stop monitoring
-	  // C) if(num_servers > 0) then install the new config
-	  if(debug) myLog(LOG_INFO, "num_servers == %d", num_servers);
-	  if(num_servers >= 0) {
-	    // remove the current config
-	    if(sf->sFlowSettings && sf->sFlowSettings != sf->sFlowSettings_file) freeSFlowSettings(sf->sFlowSettings);
-	    sf->sFlowSettings = NULL;
-	  }
-	  if(num_servers <= 0) {
-	    // clean up, and go into 'retry' mode
-	    freeSFlowSettings(sf->sFlowSettings_dnsSD);
-	    sf->sFlowSettings_dnsSD = NULL;
-	    // we might still learn a TTL (e.g. from the TXT record query)
-	    sp->DNSSD_countdown = sp->DNSSD_ttl == 0 ? sp->DNSSD_retryDelay : sp->DNSSD_ttl;
-	  }
-	  else {
-	    // make this the running config
-	    sf->sFlowSettings = sf->sFlowSettings_dnsSD;
-	    sp->DNSSD_countdown = sp->DNSSD_ttl;
-	  }
-	  if(sp->DNSSD_countdown < HSP_DEFAULT_DNSSD_MINDELAY) {
-	    if(debug) myLog(LOG_INFO, "forcing minimum DNS polling delay");
-	    sp->DNSSD_countdown = HSP_DEFAULT_DNSSD_MINDELAY;
-	  }
-	  if(debug) myLog(LOG_INFO, "DNSSD polling delay set to %u seconds", sp->DNSSD_countdown);
-	}
-      }    
-    }  
-    return NULL;
+  /*_________________---------------------------__________________
+    _________________     evt_config_changed    __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    myDebug(1, "main: evt_config_changed()");
   }
-      
+
   /*_________________---------------------------__________________
     _________________         drop_privileges   __________________
     -----------------___________________________------------------
   */
 
-  static void drop_privileges(int requestMemLockBytes) {
-    if(getuid() == 0) {
+  void retainRootRequest(EVMod *mod, char *reason) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(!sp->retainRootReasons)
+      sp->retainRootReasons = strArrayNew();
+    strArrayAdd(sp->retainRootReasons, reason);
+  }
 
-      if(requestMemLockBytes) {
-	// Request to lock this process in memory so that we don't get
-	// swapped out. It's probably less than 100KB,  and this way
-	// we don't consume extra resources swapping in and out
-	// every 20 seconds.  The default limit is just 32K on most
-	// systems,  so for this to be useful we have to increase it
-	// somewhat first.
-	struct rlimit rlim = {0};
-#ifdef RLIMIT_MEMLOCK
-	rlim.rlim_cur = rlim.rlim_max = requestMemLockBytes;
-	if(setrlimit(RLIMIT_MEMLOCK, &rlim) != 0) {
-	  myLog(LOG_ERR, "setrlimit(RLIMIT_MEMLOCK, %d) failed : %s", requestMemLockBytes, strerror(errno));
+  static bool retainRoot(HSP *sp) {
+    if(sp->retainRootReasons
+       && strArrayN(sp->retainRootReasons)) {
+      if(debug(1)) {
+	for(int ss = 0; ss < strArrayN(sp->retainRootReasons); ss++) {
+	  char *reason = strArrayAt(sp->retainRootReasons, ss);
+	  myLog(LOG_INFO, "retaining root privileges because: %s", reason);
 	}
-#endif
-	// Because we are dropping privileges we can get away with
-	// using the MLC_FUTURE option to mlockall without fear.  We
-	// won't be allowed to lock more than the limit we just set
-	// above.
-	if(mlockall(MCL_FUTURE) == -1) {
-	  myLog(LOG_ERR, "mlockall(MCL_FUTURE) failed : %s", strerror(errno));
-	}
-
-	// We can also use this as an upper limit on the data segment so that we fail
-	// if there is a memory leak,  rather than grow forever and cause problems.
-#ifdef RLIMIT_DATA
-	rlim.rlim_cur = rlim.rlim_max = requestMemLockBytes;
-	if(setrlimit(RLIMIT_DATA, &rlim) != 0) {
-	  myLog(LOG_ERR, "setrlimit(RLIMIT_DATA, %d) failed : %s", requestMemLockBytes, strerror(errno));
-	}
-#endif
-
-	// consider overriding other limits to make sure we fail quickly if anything is wrong
-	// RLIMIT_STACK
-	// RLIMIT_CORE
-	// RLIMIT_RSS
-	// RLIMIT_NOFILE
-	// RLIMIT_AS
-	// RLIMIT_LOCKS
       }
+      return YES;
+    }
+    return NO;
+  }
       
+
+  static int getMyLimit(int resource, char *resourceName) {
+    struct rlimit rlim = {0};
+    if(getrlimit(resource, &rlim) != 0) {
+      myLog(LOG_ERR, "getrlimit(%s) failed : %s", resourceName, strerror(errno));
+    }
+    else {
+      myLog(LOG_INFO, "getrlimit(%s) = %u (max=%u)", resourceName, rlim.rlim_cur, rlim.rlim_max);
+    }
+    return rlim.rlim_cur;
+  }
+
+  static int setMyLimit(int resource, char *resourceName, int request) {
+    struct rlimit rlim = {0};
+    rlim.rlim_cur = rlim.rlim_max = request;
+    if(setrlimit(resource, &rlim) != 0) {
+      myLog(LOG_ERR, "setrlimit(%s)=%d failed : %s", resourceName, request, strerror(errno));
+      return NO;
+    }
+    myDebug(1, "setrlimit(%s)=%u", resourceName, request);
+    return YES;
+  }
+
+#define GETMYLIMIT(L) getMyLimit((L), STRINGIFY(L))
+#define SETMYLIMIT(L,V) setMyLimit((L), STRINGIFY(L), (V))
+
+  static void drop_privileges(HSP *sp, int requestMemLockBytes) {
+    myDebug(1, "drop_priviliges: getuid=%d", getuid());
+
+    if(getuid() != 0) return;
+
+    if(requestMemLockBytes) {
+      // Request to lock this process in memory so that we don't get
+      // swapped out. It's probably less than 100KB,  and this way
+      // we don't consume extra resources swapping in and out
+      // every 20 seconds.  The default limit is just 32K on most
+      // systems,  so for this to be useful we have to increase it
+      // somewhat first.
+#ifdef RLIMIT_MEMLOCK
+      SETMYLIMIT(RLIMIT_MEMLOCK, requestMemLockBytes);
+#endif
+      // Because we are dropping privileges we can get away with
+      // using the MLC_FUTURE option to mlockall without fear.  We
+      // won't be allowed to lock more than the limit we just set
+      // above.
+      if(mlockall(MCL_FUTURE) == -1) {
+	myLog(LOG_ERR, "mlockall(MCL_FUTURE) failed : %s", strerror(errno));
+      }
+
+      // We can also use this as an upper limit on the data segment so that we fail
+      // if there is a memory leak,  rather than grow forever and cause problems.
+#ifdef RLIMIT_DATA
+      SETMYLIMIT(RLIMIT_DATA, requestMemLockBytes);
+#endif
+
+    }
+
+    if(retainRoot(sp)) {
+      myDebug(1, "not relinquishing root privileges");
+    }
+    else {
       // set the real and effective group-id to 'nobody'
+      // (Might have to make this configurable so we can become a user
+      // that has been set up with the right permissions, e.g. for Docker)
       struct passwd *nobody = getpwnam("nobody");
       if(nobody == NULL) {
 	myLog(LOG_ERR, "drop_privileges: user 'nobody' not found");
@@ -1002,19 +1282,73 @@ extern "C" {
 	myLog(LOG_ERR, "drop_privileges: setgid(%d) failed : %s", nobody->pw_gid, strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      /*       if(initgroups("nobody", nobody->pw_gid) != 0) { */
-      /* 	myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno)); */
-      /* 	exit(EXIT_FAILURE); */
-      /*       } */
-      /*       endpwent(); */
-      /*       endgrent(); */
+
+      // It doesn't seem like this part is necessary(?)
+      // if(initgroups("nobody", nobody->pw_gid) != 0) {
+      //  myLog(LOG_ERR, "drop_privileges: initgroups failed : %s", strerror(errno));
+      //  exit(EXIT_FAILURE);
+      // }
+      // endpwent();
+      // endgrent();
+
+      // now change user
       if(setuid(nobody->pw_uid) != 0) {
 	myLog(LOG_ERR, "drop_privileges: setuid(%d) failed : %s", nobody->pw_uid, strerror(errno));
 	exit(EXIT_FAILURE);
       }
     }
+
+    if(getDebug()) {
+      GETMYLIMIT(RLIMIT_MEMLOCK);
+      GETMYLIMIT(RLIMIT_NPROC);
+      GETMYLIMIT(RLIMIT_STACK);
+      GETMYLIMIT(RLIMIT_CORE);
+      GETMYLIMIT(RLIMIT_CPU);
+      GETMYLIMIT(RLIMIT_DATA);
+      GETMYLIMIT(RLIMIT_FSIZE);
+      GETMYLIMIT(RLIMIT_RSS);
+      GETMYLIMIT(RLIMIT_NOFILE);
+      GETMYLIMIT(RLIMIT_AS);
+      //GETMYLIMIT(RLIMIT_LOCKS);
+    }
   }
-      
+
+  /*_________________------------------------__________________
+    _________________   evt_config_done      __________________
+    -----------------________________________------------------
+  */
+
+  static void evt_config_done(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(sp->dropPriv) {
+      // don't need to be root any more - we held on to root privileges
+      // to make sure we could write the pid file,  and open the output
+      // file, and open the Xen handles, and delay the opening of the
+      // ULOG socket until we knew the group-number, and on Debian and
+      // Fedora 14 we needed to fork the DNSSD thread before dropping root
+      // priviliges (something to do with mlockall()). Anway, from now on
+      // we just don't want the responsibility...
+      drop_privileges(sp, HSP_RLIMIT_MEMLOCK);
+    }
+
+    // did the polling interval change?
+    if(updatePollingInterval(sp)) {
+      SEMLOCK_DO(sp->sync_agent) {
+	for(SFLPoller *pl = sp->agent->pollers; pl; pl = pl->nxt) {
+	  sfl_poller_set_sFlowCpInterval(pl, sp->actualPollingInterval);
+	}
+      }
+    }
+
+    // now that interfaces have been fully discovered (in evt_config_first)
+    // and sflow agent is initialized, check to see if we should be exporting
+    // individual counter data for switch port interfaces.  This may also
+    // adjust the polling schedule to respect constraints.  (This is also called
+    // if the interfaces change)
+    configSwitchPorts(sp); // in readPackets.c
+  }
+
   /*_________________---------------------------__________________
     _________________         main              __________________
     -----------------___________________________------------------
@@ -1024,35 +1358,50 @@ extern "C" {
   {
     HSP *sp = &HSPSamplingProbe;
 
+#ifdef UTHEAP
+    UTHeapInit();
+#endif
+
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
     setlogmask(LOG_UPTO(LOG_DEBUG));
 
     // register signal handler
-    signal(SIGTERM,signal_handler);
-    signal(SIGINT,signal_handler); 
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGXFSZ, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
+    // TODO: SIGPIPE? SIGCHLD?
 
     // init
     setDefaults(sp);
 
     // read the command line
     processCommandLine(sp, argc, argv);
-      
+
     // don't run if we think another one is already running
-    struct stat statBuf;
-    if(stat(sp->pidFile, &statBuf) == 0) {
+    if(UTFileExists(sp->pidFile)) {
       myLog(LOG_ERR,"Another %s is already running. If this is an error, remove %s", argv[0], sp->pidFile);
       exit(EXIT_FAILURE);
     }
 
-    if(debug == 0) {
+    if(sp->daemonize) {
       // fork to daemonize
       pid_t pid = fork();
       if(pid < 0) {
 	myLog(LOG_ERR,"Cannot fork child");
 	exit(EXIT_FAILURE);
       }
-      
+
       if(pid > 0) {
 	// in parent - write pid file and exit
 	FILE *f;
@@ -1065,12 +1414,14 @@ extern "C" {
 	  myLog(LOG_ERR,"Could not close pid file %s : %s", sp->pidFile, strerror(errno));
 	  exit(EXIT_FAILURE);
 	}
-	
+
 	exit(EXIT_SUCCESS);
       }
       else {
 	// in child
-	umask(0);
+
+	// make sure the output file we write cannot then be written by some other non-root user
+	umask(S_IWGRP | S_IWOTH);
 
 	// new session - with me as process group leader
 	pid_t sid = setsid();
@@ -1078,166 +1429,257 @@ extern "C" {
 	  myLog(LOG_ERR,"setsid failed");
 	  exit(EXIT_FAILURE);
 	}
-	
-	// close all file descriptors 
+
+	// close all file descriptors
 	int i;
 	for(i=getdtablesize(); i >= 0; --i) close(i);
 	// create stdin/out/err
-	i = open("/dev/null",O_RDWR); // stdin
-	dup(i);                       // stdout
-	dup(i);                       // stderr
+	// stdin
+	if((i = open("/dev/null",O_RDWR)) == -1) {
+	  myLog(LOG_ERR,"open /dev/null failed: %s", strerror(errno));
+	  exit(EXIT_FAILURE);
+	}
+	// stdout
+	if(dup(i) == -1) {
+	  myLog(LOG_ERR,"dup() failed: %s", strerror(errno));
+	  exit(EXIT_FAILURE);
+	}
+	// stderr
+	if(dup(i) == -1) {
+	  myLog(LOG_ERR,"dup() failed: %s", strerror(errno));
+	  exit(EXIT_FAILURE);
+	}
       }
     }
-    
-#ifdef HSF_XEN
-    // open Xen handles while we still have root privileges
-    openXenHandles(sp);
-#endif
 
-    // don't need to be root any more - we held on to root privileges
-    // to make sure we could write the pid file (and possibly open the
-    // Xen handles,  but from now on we don't want the responsibility...
-    drop_privileges(HSP_RLIMIT_MEMLOCK);
+    // open the output file while we still have root priviliges.
+    // use mode "w+" because we intend to write it and rewrite it.
+    if((sp->f_out = fopen(sp->outputFile, "w+")) == NULL) {
+      myLog(LOG_ERR, "cannot open output file %s : %s", sp->outputFile, strerror(errno));
+      exit(EXIT_FAILURE);
+    }
+
+    // open a file we can use to write a crash dump (if necessary)
+    if(sp->crashFile) {
+      // the file pointer needs to be a global so it is accessible
+      // to the signal handler
+      if((f_crash = fopen(sp->crashFile, "w")) == NULL) {
+	myLog(LOG_ERR, "cannot open output file %s : %s", sp->crashFile, strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+    }
+
+    // force load of cJson lib here - even though it's currently
+    // only used by dynamic-loaded modules.  (Could have let the modules
+    // link to it themselves,  but it is not compiled with -fPIC and
+    // I don't know how portable that option is.)
+    cJSON_Hooks hooks;
+    hooks.malloc_fn = my_calloc;
+    hooks.free_fn = my_free;
+    cJSON_InitHooks(&hooks);
 
     myLog(LOG_INFO, "started");
-    
-    // initialize the clock so we can detect second boundaries
-    time_t clk = time(NULL);
 
-    // semaphore to protect config shared with DNSSD thread
-    sp->config_mut = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
-    pthread_mutex_init(sp->config_mut, NULL);
-    
-    setState(sp, HSPSTATE_READCONFIG);
+    // semaphore to protect structure of sFlow agent (sampler and poller lists
+    // and XDR datagram encoding)
+    sp->sync_agent = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
+    pthread_mutex_init(sp->sync_agent, NULL);
 
-    while(sp->state != HSPSTATE_END) {
-      
-      switch(sp->state) {
-	
-      case HSPSTATE_READCONFIG:
-	{
-	  if(readInterfaces(sp)
-	     && HSPReadConfigFile(sp)) {
-	    
-	    { // we must have an agentIP, so we can use
-	      // it to seed the random number generator
-	      SFLAddress *agentIP = &sp->sFlow->agentIP;
-	      uint32_t seed;
-	      if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
-	      else memcpy(agentIP->address.ip_v6.addr + 12, &seed, 4);
-	      sfl_random_init(seed);
-	    }
-	    
-	    if(sp->DNSSD) {
-	      // launch dnsSD thread.  It will now be responsible for
-	      // the sFlowSettings,  and the current thread will loop
-	      // in the HSPSTATE_WAITCONFIG state until that pointer
-	      // has been set (sp->sFlow.sFlowSettings)
-	      sp->DNSSD_thread = my_calloc(sizeof(pthread_t));
-	      if(pthread_create(sp->DNSSD_thread, NULL, runDNSSD, sp) != 0) {
-		myLog(LOG_ERR, "pthread_create() failed\n");
-		exit(EXIT_FAILURE);
-	      }
-	    }
-	    else {
-	      // just use the config from the file
-	      sp->sFlow->sFlowSettings = sp->sFlow->sFlowSettings_file;
-	    }
-	    setState(sp, HSPSTATE_WAITCONFIG);
-	  }
-	  else{
-	    exitStatus = EXIT_FAILURE;
-	    setState(sp, HSPSTATE_END);
-	  }
-	  
-	}
-	break;
-	
-      case HSPSTATE_WAITCONFIG:
-	SEMLOCK_DO(sp->config_mut) {
-	  if(sp->sFlow->sFlowSettings) {
-	    // we have a config - proceed
-	    if(initAgent(sp)) {
-	      if(debug) {
-		if(debug) myLog(LOG_INFO, "initAgent suceeded");
-		// print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
-		// malloc_stats();
-	      }
-	      setState(sp, HSPSTATE_RUN);
-	    }
-	    else {
-	      exitStatus = EXIT_FAILURE;
-	      setState(sp, HSPSTATE_END);
-	    }
-	  }
-	}
-	break;
-	
-      case HSPSTATE_RUN:
-	{
-	  // check for second boundaries and generate ticks for the sFlow library
-	  time_t test_clk = time(NULL);
-	  if((test_clk < clk) || (test_clk - clk) > HSP_MAX_TICKS) {
-	    // avoid a busy-loop of ticks
-	    myLog(LOG_INFO, "time jump detected");
-	    clk = test_clk - 1;
-	  }
-	  while(clk < test_clk) {
+    // poll actions array
+    sp->pollActions = UTArrayNew(UTARRAY_DFLT);
 
-	    // this would be a good place to test the memory footprint and
-	    // bail out if it looks like we are leaking memory(?)
+    // allocate device tables - these ones need sync
+    sp->adaptorsByName = UTHASH_NEW(SFLAdaptor, deviceName, UTHASH_SYNC | UTHASH_SKEY);
+    sp->adaptorsByIndex = UTHASH_NEW(SFLAdaptor, ifIndex, UTHASH_SYNC);
+    sp->adaptorsByPeerIndex = UTHASH_NEW(SFLAdaptor, peer_ifIndex, UTHASH_SYNC);
+    sp->adaptorsByMac = UTHASH_NEW(SFLAdaptor, macs[0], UTHASH_SYNC);
 
-	    SEMLOCK_DO(sp->config_mut) {
-	      // was the config turned off?
-	      if(sp->sFlow->sFlowSettings) {
-		// did the polling interval change?  We have the semaphore
-		// here so we can just run along and tell everyone.
-		uint32_t piv = sp->sFlow->sFlowSettings->pollingInterval;
-		if(piv != sp->previousPollingInterval) {
-		  
-		  if(debug) myLog(LOG_INFO, "polling interval changed from %u to %u",
-				  sp->previousPollingInterval, piv);
-		  
-		  for(SFLPoller *pl = sp->sFlow->agent->pollers; pl; pl = pl->nxt) {
-		    sfl_poller_set_sFlowCpInterval(pl, piv);
-		  }
-		  sp->previousPollingInterval = piv;
-		}
-		
-		// send a tick to the sFlow agent
-		sfl_agent_tick(sp->sFlow->agent, clk);
-		// and a tick for myself too
-		tick(sp, clk);
-	      }
-	    } // semaphore
-	    
-	    clk++;
-	  }
-	}
-      case HSPSTATE_END:
-	break;
-      }
-      
-      // set the timeout so that if all is quiet we will
-      // still loop around and check for ticks/signals
-      // several times per second
-      my_usleep(200000);
+    // these ones do not need sync - always accessed from same thread
+    sp->vmsByUUID = UTHASH_NEW(HSPVMState, uuid, UTHASH_DFLT);
+    sp->vmsByDsIndex = UTHASH_NEW(HSPVMState, dsIndex, UTHASH_DFLT);
+
+    // IPv4 addresses can represent themselves directly
+    sp->localIP =  UTHASH_NEW(SFLAddress, address.ip_v4, UTHASH_DFLT);
+    sp->localIP6 = UTHASH_NEW(SFLAddress, address.ip_v6, UTHASH_DFLT);
+
+    // read the host-id info up front, so we can include it in hsflowd.auto
+    // (we'll read it again each time we send the counters)
+    SFLCounters_sample_element hidElem = { 0 };
+    hidElem.tag = SFLCOUNTERS_HOST_HID;
+    readHidCounters(sp,
+		    &hidElem.counterBlock.host_hid,
+		    sp->hostname,
+		    SFL_MAX_HOSTNAME_CHARS,
+		    sp->os_release,
+		    SFL_MAX_OSRELEASE_CHARS);
+
+    // some modules can be triggered to load even if they are not
+    // explicitly in the config file - but do this before we read
+    // the config so that overrides are possible.
+    if(UTFileExists(HSP_CUMULUS_SWITCHPORT_CONFIG_PROG)) {
+      myLog(LOG_INFO, "Detected Cumulus Linux");
+      sp->cumulus.cumulus = YES;
+      uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
+	| HSP_SAMPLEOPT_IF_POLLER
+	| HSP_SAMPLEOPT_ASIC
+	| HSP_SAMPLEOPT_DIRN_HOOK
+	| HSP_SAMPLEOPT_CUMULUS;
+      // Cumulus Linux 2.5 or earlier uses ULOG group 1
+      // So it should be compiled with:
+      // make deb FEATURES="CUMULUS ULOG"
+      sp->ulog.ulog = YES;
+      sp->ulog.group = 1;
+      sp->ulog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_ULOG;
+      // Cumulus Linux 3.0 or later uses NFLOG group 1
+      // So it should be compiled with:
+      // make deb FEATURES="CUMULUS NFLOG"
+      sp->nflog.nflog = YES;
+      sp->nflog.group = 1;
+      sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
     }
 
-    // get here if a signal kicks the state to HSPSTATE_END
-    // and we break out of the loop above.
-    // If that doesn't happen the most likely explanation
-    // is a bug that caused the semaphore to be acquired
-    // and not released,  but that would only happen if the
-    // DNSSD thread died or hung up inside the critical block.
+    if(UTFileExists(HSP_OS10_SWITCHPORT_CONFIG_PROG)) {
+      myLog(LOG_INFO, "Detected OS10");
+      sp->os10.os10 = YES;
+    }
+
+    // a sucessful read of the config file is required
+    if(HSPReadConfigFile(sp) == NO) {
+      myLog(LOG_ERR, "failed to read config file\n");
+      exit(EXIT_FAILURE);
+    }
+
+    // must be able to read interfaces. Minimal discovery this time.
+    // Just enough to decide on an agent address.  No ethtool probing.
+    if(readInterfaces(sp, NO, NULL, NULL, NULL, NULL, NULL) == 0) {
+      myLog(LOG_ERR, "failed to read interfaces\n");
+      exit(EXIT_FAILURE);
+    }
+
+    // must be able to choose an agent address
+    if(selectAgentAddress(sp, NULL) == NO) {
+      myLog(LOG_ERR, "failed to select agent address\n");
+      exit(EXIT_FAILURE);
+    }
+
+    // we must have an agentIP now, so we can use
+    // it to seed the random number generator
+    SFLAddress *agentIP = &sp->agentIP;
+    uint32_t seed = 0;
+    if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
+    else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
+    sfl_random_init(seed);
+
+    // initialize the faster polling of NIO counters
+    // to avoid undetected 32-bit wraps
+    sp->nio_polling_secs = HSP_NIO_POLLING_SECS_32BIT;
+
+    // set up the sFlow agent (with no pollers or samplers yet)
+    initAgent(sp);
+
+    // initialize event bus
+    sp->rootModule = EVInit(sp);
+
+    // convenience ptr to the poll-bus
+    sp->pollBus = EVGetBus(sp->rootModule, HSPBUS_POLL, YES);
+
+    // register for events that we are going to handle here in the main pollBus thread.  The
+    // events that form the config sequence are requested here before the modules are loaded
+    // so that these functions are called first for each event. For example, a module callback
+    // for HSPEVENT_CONFIG_FIRST will be called after evt_config_first() here,  but before
+    // evt_config_done().
+
+    // Events to feed lines of configuration in one line at a time
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_START), evt_config_start);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_LINE), evt_config_line);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_END), evt_config_end);
+
+    // An event that is called once,  after the config is settled and
+    // interfaces have been fully discovered, but before privileges are dropped
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
+
+    // An event that is called for every config change.
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
+
+    // A handshake event for sync across threads - to make sure CONFIG_FIRST and CONFIG_CHANGED
+    // have been processed to completion by all threads (all buses) before CONFIG_DONE is sent.
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_SHAKE), evt_config_shake);
+    // CONFIG_DONE is where privileges are dropped (the first time).
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, HSPEVENT_CONFIG_DONE), evt_config_done);
+
+    // load modules (except DNSSD - loaded below).
+    // The module init functions can assume that the
+    // config is loaded,  but they can't assume anything
+    // else.  Not even an agent-address. So all they should
+    // really do at this stage is interpret config and
+    // register for bus events.
+    if(sp->json.json)
+      EVLoadModule(sp->rootModule, "mod_json", sp->modulesPath);
+    if(sp->kvm.kvm)
+      EVLoadModule(sp->rootModule, "mod_kvm", sp->modulesPath);
+    if(sp->xen.xen)
+      EVLoadModule(sp->rootModule, "mod_xen", sp->modulesPath);
+    if(sp->docker.docker)
+      EVLoadModule(sp->rootModule, "mod_docker", sp->modulesPath);
+    if(sp->pcap.pcap)
+      EVLoadModule(sp->rootModule, "mod_pcap", sp->modulesPath);
+    if(sp->tcp.tcp)
+      EVLoadModule(sp->rootModule, "mod_tcp", sp->modulesPath);
+    if(sp->ulog.ulog)
+      EVLoadModule(sp->rootModule, "mod_ulog", sp->modulesPath);
+    if(sp->nflog.nflog)
+      EVLoadModule(sp->rootModule, "mod_nflog", sp->modulesPath);
+    if(sp->nvml.nvml)
+      EVLoadModule(sp->rootModule, "mod_nvml", sp->modulesPath);
+    if(sp->ovs.ovs)
+      EVLoadModule(sp->rootModule, "mod_ovs", sp->modulesPath);
+    if(sp->cumulus.cumulus)
+      EVLoadModule(sp->rootModule, "mod_cumulus", sp->modulesPath);
+    if(sp->os10.os10)
+      EVLoadModule(sp->rootModule, "mod_os10", sp->modulesPath);
+    if(sp->dbus.dbus)
+      EVLoadModule(sp->rootModule, "mod_dbus", sp->modulesPath);
+    if(sp->systemd.systemd)
+      EVLoadModule(sp->rootModule, "mod_systemd", sp->modulesPath);
+
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
+    EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TOCK), evt_poll_tock);
+
+    if(sp->DNSSD.DNSSD) {
+      EVLoadModule(sp->rootModule, "mod_dnssd", sp->modulesPath);
+      // DNS-SD will run in HSPBUS_CONFIG thread.  It will be responsible for
+      // the sFlowSettings,  and the program will stay in a holding
+      // pattern until the first valid config comes in.
+
+      // Mechanism: configBus will send ticks to mod_dnssd module,
+      // which will use them to make periodic DNS requests for SRV and TXT
+      // records.  Those records will be passed back line-by-line using events on
+      // the pollBus (which means they will come in via the pollBus pipe for
+      // synchronization).  The main thread handles these HSPEVENT_CONFIG_*
+      // events and assembles the new config.  When it is complete it sends
+      // HSPEVENT_CONFIG_CHANGED to both the pollBus and the packetBus.
+      // That calls evt_config_changed() below, which updates polling and
+      // sampling settings.
+    }
+    else {
+      // just push in the config from the file. This will trigger a
+      // HSPEVENT_CONFIG_CHANGED right away.
+      installSFlowSettings(sp, sp->sFlowSettings_file);
+    }
+
+    // have every thread call in every second
+    EVEventRxAll(sp->rootModule, EVEVENT_TOCK, evt_all_tock);
+
+    // start all buses, with pollBus in this thread
+    EVRun(sp->pollBus);
+
+    // get here if a signal kicks EVStop() and we break out of the loop above.
+    // The modules can get final/end events if they need to clean up.
+
     closelog();
     myLog(LOG_INFO,"stopped");
-    
-#ifdef HSF_XEN
-    closeXenHandles(sp);
-#endif
 
-    if(debug == 0) {
+    if(getDebug() == 0) {
       // shouldn't need to be root again to remove the pidFile
       // (i.e. we should still have execute permission on /var/run)
       remove(sp->pidFile);
@@ -1246,8 +1688,6 @@ extern "C" {
     exit(exitStatus);
   } /* main() */
 
-
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif
-
