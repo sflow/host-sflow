@@ -235,7 +235,7 @@ extern "C" {
     return YES;
   }
 
-  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor) {
+  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
 
     if(adaptor->ifSpeed == 0) {
@@ -243,9 +243,6 @@ extern "C" {
       // with speed == 0 we can stabilize the startup.
       // Now sampling will only be configured as ports
       // are discovered or come up (or change speed).
-      // TODO: if a port has gone down do we need to
-      // clear the sampling rate back to 0, since it
-      // may come up again with a different speed?
       return NO;
     }
 
@@ -254,10 +251,8 @@ extern "C" {
        || niostate->bond_master) {
       return NO;
     }
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSPSFlowSettings *settings = sp->sFlowSettings;
 
-    int hw_sampling = YES;
+    bool hw_sampling = NO;
     UTStringArray *cmdline = strArrayNew();
     strArrayAdd(cmdline, HSP_OS10_SWITCHPORT_CONFIG_PROG);
     // usage:  <prog> [enable|disable] <interface> <direction>  <rate>
@@ -269,7 +264,7 @@ extern "C" {
     strArrayAdd(cmdline, NULL); // extra NULL
 #define HSP_MAX_EXEC_LINELEN 1024
     char outputLine[HSP_MAX_EXEC_LINELEN];
-    niostate->sampling_n = lookupPacketSamplingRate(adaptor, settings);
+    niostate->sampling_n = sampling_n;
     if(niostate->sampling_n != niostate->sampling_n_set) {
       myDebug(1, "setSamplingRate(%s) %u -> %u",
 	      adaptor->deviceName,
@@ -288,16 +283,15 @@ extern "C" {
       int status;
       if(myExec(niostate, strArray(cmdline), srateOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	if(WEXITSTATUS(status) != 0) {
-	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
+	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d",
 		HSP_OS10_SWITCHPORT_CONFIG_PROG,
 		WEXITSTATUS(status));
-	  hw_sampling = NO;
 	}
 	else {
 	  myDebug(1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
 	  // hardware or kernel sampling was successfully configured
 	  niostate->sampling_n_set = niostate->sampling_n;
-	  sp->hardwareSampling = YES;
+	  hw_sampling = YES;
 	}
       }
       else {
@@ -571,8 +565,9 @@ extern "C" {
     // The sampling-rate settings may have changed.
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByName, adaptor) {
-	setSamplingRate(mod, adaptor);
-      }
+      uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
+      setSamplingRate(mod, adaptor, sampling_n);
+    }
   }
 
   /*_________________---------------------------__________________
@@ -618,7 +613,8 @@ extern "C" {
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
-    setSamplingRate(mod, adaptor);
+    uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
+    setSamplingRate(mod, adaptor, sampling_n);
   }
 
   /*_________________---------------------------__________________
@@ -648,6 +644,22 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________        evt_final          __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->sFlowSettings == NULL)
+      return;
+    // turn off any hardware-sampling that we enabled
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      setSamplingRate(mod, adaptor, 0);
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
   */
@@ -666,6 +678,8 @@ extern "C" {
 
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_poll_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_pkt_config_changed);
+
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);
 
     // we know there are no 32-bit counters
     sp->nio_polling_secs = 0;
