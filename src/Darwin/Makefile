@@ -1,19 +1,10 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-BINDIR     ?= /usr/sbin
-INITDIR    ?= /etc/init.d
-CONFDIR    ?= /etc
-
-# INSTROOT may be passed in
-BIN_D=$(BINDIR)
-INIT_D=$(INITDIR)
-CONF_D=$(CONFDIR)
-ifneq ($(INSTROOT),)
-	BIN_D=$(INSTROOT)/$(BINDIR)
-	INIT_D=$(INSTROOT)/$(INITDIR)
-	CONF_D=$(INSTROOT)/$(CONFDIR)
-endif
+APP_D     ?= /Applications/hsflowd.app/Contents/
+CTL_D     ?= /Library/LaunchDaemons
+CONF_D    ?= /etc
+BIN_D = $(APP_D)/MacOS
 
 #########  compilation flags  #########
 
@@ -101,10 +92,13 @@ hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
 #########  install  #########
 
 install:
+	$(INSTALL) -d $(APP_D)
+	$(INSTALL) -m 644 scripts/net.sflow.hsflowd.plist $(APP_D)
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	$(INSTALL) -d $(CONF_D)
 	$(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D)
+	ln -s $(APP_D)/net.sflow.hsflowd.plist $(CTL_D)
 
 #########  schedule  #########
 

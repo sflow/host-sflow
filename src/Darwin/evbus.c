@@ -10,6 +10,11 @@ extern "C" {
 #include "evbus.h"
 #include "signal.h"
 
+// for EVClockMono()
+#include <mach/mach.h>
+#include <mach/clock.h>
+#include <mach/mach_time.h>
+
   // only one running bus in each thread - keep track with thread-local var
   // so we can always know what the current "home" bus is and detect
   // inter-bus (inter-thread) messages automatically in EVEventTx
@@ -354,15 +359,14 @@ extern "C" {
   }
 
   void EVClockMono(struct timespec *ts) {
-    clockid_t monoClock = CLOCK_MONOTONIC;
-#ifdef CLOCK_MONOTONIC_COARSE
-    // more efficient if supported,  since we only need mS accuracy
-    monoClock = CLOCK_MONOTONIC_COARSE;
-#endif
-    if(clock_gettime(monoClock, ts) == -1) {
-      myLog(LOG_ERR, "clock_gettime() failed: %s", strerror(errno));
-      exit(EXIT_FAILURE);
-    }
+    // clock_gettime(CLOCK_MONOTONIC, ts); is not avaiable on older OSX versions
+    static clock_serv_t mono_clock_serv = 0;
+    if(mono_clock_serv == 0)
+      host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &mono_clock_serv);
+    mach_timespec_t mts;
+    clock_get_time(mono_clock_serv, &mts);
+    ts->tv_sec = mts.tv_sec;
+    ts->tv_nsec = mts.tv_nsec;
   }
 
   static void busRead(EVBus *bus) {
