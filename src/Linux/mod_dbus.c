@@ -35,6 +35,7 @@ extern "C" {
 #define HSP_DBUS_OBJ "/net/sflow/" HSP_DAEMON_NAME
 #define HSP_DBUS_NAME "net.sflow." HSP_DAEMON_NAME
 #define HSP_DBUS_INTF_TELEMETRY HSP_DBUS_NAME ".telemetry"
+#define HSP_DBUS_INTF_SWITCHPORT HSP_DBUS_NAME ".switchport"
 
 static const char* introspect_xml =
 "<!DOCTYPE node PUBLIC \"-//freedesktop//DTD D-BUS Object Introspection 1.0//EN\"\n"
@@ -48,6 +49,13 @@ static const char* introspect_xml =
 "	<interface name=\"" HSP_DBUS_INTF_TELEMETRY "\">\n"
 "		<method name=\"GetVersion\">\n"
 "		</method>\n"
+"		<method name=\"GetAll\">\n"
+"		</method>\n"
+"		<method name=\"Get\">\n"
+"                     <arg name=\"field\" type=\"s\" direction=\"in\"/>\n"
+"		</method>\n"
+"	</interface>\n"
+"	<interface name=\"" HSP_DBUS_INTF_SWITCHPORT "\">\n"
 "		<method name=\"GetAll\">\n"
 "		</method>\n"
 "		<method name=\"Get\">\n"
@@ -263,11 +271,11 @@ static const char* introspect_xml =
   }
 
   /*_________________---------------------------__________________
-    _________________     method_introspect     __________________
+    _________________        m_Introspect       __________________
     -----------------___________________________------------------
   */
 
-  static DBusHandlerResult method_introspect(EVMod *mod, DBusMessage *msg) {
+  static DBusHandlerResult m_Introspect(EVMod *mod, DBusMessage *msg) {
     DBusMessage *reply = dbus_message_new_method_return(msg);
     if (!reply)
       return DBUS_HANDLER_RESULT_NEED_MEMORY;
@@ -280,10 +288,10 @@ static const char* introspect_xml =
   }
 
   /*_________________---------------------------__________________
-    _________________     method_getVersion     __________________
+    _________________  m_telemetry_GetVersion   __________________
     -----------------___________________________------------------
   */
-  static DBusHandlerResult method_getVersion(EVMod *mod, DBusMessage *msg) {
+  static DBusHandlerResult m_telemetry_GetVersion(EVMod *mod, DBusMessage *msg) {
     DBusMessage *reply = dbus_message_new_method_return(msg);
     if (!reply)
       return DBUS_HANDLER_RESULT_NEED_MEMORY;
@@ -296,41 +304,40 @@ static const char* introspect_xml =
   }
 
   /*_________________---------------------------__________________
-    _________________     method_getAll         __________________
+    _________________     m_telemetry_GetAll    __________________
     -----------------___________________________------------------
     with reference to:
     http://git.kernel.org/cgit/network/connman/connman.git/tree/gdbus/object.c
   */
-  static DBusHandlerResult method_getAll(EVMod *mod, DBusMessage *msg) {
+  static DBusHandlerResult m_telemetry_GetAll(EVMod *mod, DBusMessage *msg) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     DBusMessage *reply = dbus_message_new_method_return(msg);
     if (!reply)
       return DBUS_HANDLER_RESULT_NEED_MEMORY;
     DBusMessageIter it1, it2, it3;
     dbus_message_iter_init_append(reply, &it1);
-    if(!dbus_message_iter_open_container(&it1, DBUS_TYPE_ARRAY, "{sx}", &it2))
+    if(!dbus_message_iter_open_container(&it1, DBUS_TYPE_ARRAY, "{st}", &it2))
       return DBUS_HANDLER_RESULT_NEED_MEMORY;
 
     for(int ii = 0; ii < HSP_TELEMETRY_NUM_COUNTERS; ii++) {
       if(!dbus_message_iter_open_container(&it2, DBUS_TYPE_DICT_ENTRY, NULL, &it3))
 	return DBUS_HANDLER_RESULT_NEED_MEMORY;
       dbus_message_iter_append_basic(&it3, DBUS_TYPE_STRING, &HSPTelemetryNames[ii]);
-      dbus_message_iter_append_basic(&it3, DBUS_TYPE_INT64, &sp->telemetry[ii]);
+      dbus_message_iter_append_basic(&it3, DBUS_TYPE_UINT64, &sp->telemetry[ii]);
       dbus_message_iter_close_container(&it2, &it3);
     }
 
     dbus_message_iter_close_container(&it1, &it2);
-
     send_reply(mod, reply);
     dbus_message_unref(reply);
     return DBUS_HANDLER_RESULT_HANDLED;
   }
 
   /*_________________---------------------------__________________
-    _________________     method_get            __________________
+    _________________     m_telemetry_Get       __________________
     -----------------___________________________------------------
   */
-  static DBusHandlerResult method_get(EVMod *mod, DBusMessage *msg) {
+  static DBusHandlerResult m_telemetry_Get(EVMod *mod, DBusMessage *msg) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     DBusMessageIter it;
     if(!dbus_message_iter_init(msg, &it))
@@ -360,6 +367,90 @@ static const char* introspect_xml =
     return DBUS_HANDLER_RESULT_HANDLED;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________     addSwitchPort         __________________
+    -----------------___________________________------------------
+  */
+  static void addSwitchPort(EVMod *mod, SFLAdaptor *adaptor, DBusMessageIter *it)
+  {
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    uint64_t speed_bps = adaptor->ifSpeed;
+    uint32_t sampling_n = nio->sampling_n;
+    uint32_t polling_secs = nio->poller ? nio->poller->sFlowCpInterval : 0;
+    dbus_message_iter_append_basic(it, DBUS_TYPE_STRING, &adaptor->deviceName);
+    dbus_message_iter_append_basic(it, DBUS_TYPE_UINT64, &speed_bps);
+    dbus_message_iter_append_basic(it, DBUS_TYPE_UINT32, &sampling_n);
+    dbus_message_iter_append_basic(it, DBUS_TYPE_UINT32, &polling_secs);
+  }
+
+  /*_________________---------------------------__________________
+    _________________     m_switchport_Get      __________________
+    -----------------___________________________------------------
+  */
+
+  static DBusHandlerResult m_switchport_Get(EVMod *mod, DBusMessage *msg) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    DBusMessageIter it;
+    if(!dbus_message_iter_init(msg, &it))
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+    int atype = dbus_message_iter_get_arg_type(&it);
+    if(atype != DBUS_TYPE_STRING) {
+      send_reply_err(mod, msg, "expected string arg");
+      return DBUS_HANDLER_RESULT_HANDLED;
+    }
+    char *dev=NULL;
+    dbus_message_iter_get_basic(&it, &dev);
+    SFLAdaptor *adaptor = dev ? adaptorByName(sp, dev) : NULL;
+    if(!adaptor || !ADAPTOR_NIO(adaptor)->switchPort) {
+      send_reply_err(mod, msg, "not a switch port");
+      return DBUS_HANDLER_RESULT_HANDLED;
+    }
+    DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (!reply)
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+    DBusMessageIter it1, it2;
+    dbus_message_iter_init_append(reply, &it1);
+    if(!dbus_message_iter_open_container(&it1, DBUS_TYPE_STRUCT, NULL, &it2))
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+    addSwitchPort(mod, adaptor, &it2);
+    dbus_message_iter_close_container(&it1, &it2);
+    send_reply(mod, reply);
+    dbus_message_unref(reply);
+    return DBUS_HANDLER_RESULT_HANDLED;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     m_switchport_GetAll   __________________
+    -----------------___________________________------------------
+  */
+  static DBusHandlerResult m_switchport_GetAll(EVMod *mod, DBusMessage *msg) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (!reply)
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+    DBusMessageIter it1, it2, it3;
+    dbus_message_iter_init_append(reply, &it1);
+    if(!dbus_message_iter_open_container(&it1, DBUS_TYPE_ARRAY, "(stuu)", &it2))
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      if(nio->switchPort) {
+	if(!dbus_message_iter_open_container(&it2, DBUS_TYPE_STRUCT, NULL, &it3))
+	  return DBUS_HANDLER_RESULT_NEED_MEMORY;
+	addSwitchPort(mod, adaptor, &it3);
+	dbus_message_iter_close_container(&it2, &it3);
+      }
+    }
+
+    dbus_message_iter_close_container(&it1, &it2);
+    send_reply(mod, reply);
+    dbus_message_unref(reply);
+    return DBUS_HANDLER_RESULT_HANDLED;
+  }
+
   /*_________________---------------------------__________________
     _________________       dbusCB              __________________
     -----------------___________________________------------------
@@ -380,12 +471,16 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
     const char *method = dbus_message_get_member(msg);
     const char *iface = dbus_message_get_interface(msg);
     if(!strcmp("org.freedesktop.DBus.Introspectable", iface)) {
-      if(!strcmp("Introspect", method)) return method_introspect(mod, msg);
+      if(!strcmp("Introspect", method)) return m_Introspect(mod, msg);
     }
     else if(!strcmp(HSP_DBUS_INTF_TELEMETRY, iface)) {
-      if(!strcmp("GetVersion", method)) return method_getVersion(mod, msg);
-      if(!strcmp("GetAll", method)) return method_getAll(mod, msg);
-      if(!strcmp("Get", method)) return method_get(mod, msg);
+      if(!strcmp("GetVersion", method)) return m_telemetry_GetVersion(mod, msg);
+      if(!strcmp("GetAll", method)) return m_telemetry_GetAll(mod, msg);
+      if(!strcmp("Get", method)) return m_telemetry_Get(mod, msg);
+    }
+    else if(!strcmp(HSP_DBUS_INTF_SWITCHPORT, iface)) {
+      if(!strcmp("GetAll", method)) return m_switchport_GetAll(mod, msg);
+      if(!strcmp("Get", method)) return m_switchport_Get(mod, msg);
     }
     break;
   }

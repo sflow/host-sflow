@@ -475,7 +475,10 @@ extern "C" {
     // might be too expensive in the case where ulogSamplingRate==1.
     sampler->samplePool += actualSamplingRate;
     
-    // accumulate any dropped-samples we detected against whichever sampler
+    // accumulate total drops
+    sp->telemetry[HSP_TELEMETRY_DROPPED_SAMPLES] += drops;
+
+    // also accumulate dropped-samples we detected against whichever sampler
     // sends the next sample. This is not perfect,  but is likely to accrue
     // drops against the point whose sampling-rate needs to be adjusted.
     samplerNIO->netlink_drops += drops;

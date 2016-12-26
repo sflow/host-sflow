@@ -349,6 +349,7 @@ extern "C" {
     HSP_TELEMETRY_RTMETRIC_SAMPLES,
     HSP_TELEMETRY_RTFLOW_SAMPLES,
     HSP_TELEMETRY_DATAGRAMS,
+    HSP_TELEMETRY_DROPPED_SAMPLES,
     HSP_TELEMETRY_NUM_COUNTERS
   } EnumHSPTelemetry;
 
@@ -359,6 +360,7 @@ extern "C" {
     "rtmetric_samples",
     "rtflow_samples",
     "datagrams",
+    "dropped_samples"
   };
 #endif
 
