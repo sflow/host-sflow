@@ -280,6 +280,13 @@ extern "C" {
 	my_free(cmd_str);
       }
 
+      if(sampling_n == 0) {
+	// use "<script> disable <port>" instead of "<script> enable <port> ingress 0"
+	// although both should have the same effect.
+	strArrayInsert(cmdline, 1, "disable");
+	strArrayInsert(cmdline, 3, NULL);
+      }
+
       int status;
       if(myExec(niostate, strArray(cmdline), srateOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	if(WEXITSTATUS(status) != 0) {
