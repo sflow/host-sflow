@@ -76,7 +76,7 @@ endif
 ifeq ($(JSON),yes)
 	JSONDIR=../json
 	CFLAGS += -DHSF_JSON -I$(JSONDIR)
-	LIBS += $(JSONDIR)/libjson.a -lm
+	LIBS += $(JSONDIR)/libcjson.a -lm
 endif
 
 #### BUILD ####

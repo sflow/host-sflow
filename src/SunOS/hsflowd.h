@@ -341,7 +341,7 @@ extern "C" {
   void setApplicationPolling(HSPSFlowSettings *settings, char *app, uint32_t secs);
   void clearApplicationSettings(HSPSFlowSettings *settings);
   void lookupApplicationSettings(HSPSFlowSettings *settings, char *app, uint32_t *p_sampling, uint32_t *p_polling);
-  EnumIPSelectionPriority agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
+  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
   int selectAgentAddress(HSP *sp);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
