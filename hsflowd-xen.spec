@@ -1,13 +1,13 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 2.0.1
+Version: 2.0.8
 Release: 1
 License: http://sflow.net/license.html
 Group: Applications/Internet
 URL: http://sflow.net
 Source0: %{name}-%{version}-%{release}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
-Requires(post): chkconfig
+%define debug_package %{nil}
 
 %description
 This program implements the host sFlow(R) standard - sending
@@ -17,10 +17,10 @@ the network. If Open VSwitch is present, will also control
 the Open VSwitch sFlow configuration.
 
 %prep
-%setup
+%setup -n %{name}-%{version}-%{release}
 
 %build
-make FEATURES="XEN OVS"
+make FEATURES="XEN OVS DBUS"
 
 %install
 rm -rf %{buildroot}
@@ -34,12 +34,13 @@ make clean
 %defattr(-,root,root,-)
 /usr/sbin/hsflowd
 %config(noreplace) /etc/hsflowd.conf
+%config(noreplace) /etc/dbus-1/system.d/net.sflow.hsflowd.conf
 /etc/init.d/hsflowd
-/etc/hsflowd/modules/
+/lib/systemd/system/hsflowd.service 
 %doc README LICENSE INSTALL.Linux
+/etc/hsflowd/modules/
 
 %post
-/sbin/chkconfig --add hsflowd
 # need this logic just for Xenserver package. It preserves config
 # across Xenserver upgrades by copying the config to another directory
 # so that we get a chance to merge the old and new configs.
@@ -54,11 +55,12 @@ fi
 
 %preun
 if [ $1 = 0 ]; then
-  /sbin/service hsflowd stop > /dev/null 2>&1
-  /sbin/chkconfig --del hsflowd;
+  /sbin/service hsflowd stop > /dev/null 2>&1;
 fi
 
 %changelog
+* Thu Jan 19 2017 nhm <neil.mckee@inmon.com>
+- update for XenServer 7.0 and systemd
 * Tue Jul 26 2016 nhm <neil.mckee@inmon.com>
 - fork custom spec file for xen
 * Wed Jul 20 2016 nhm <neil.mckee@inmon.com>

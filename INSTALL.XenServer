@@ -15,9 +15,9 @@ xenserver-ddk/xenserver-hsflowd.iso.
 To install, copy it to the XenServer dom0 and run these commands:
 
 mkdir /tmp/iso 
-mount -o loop xenserver-hsflowd-X_XX.iso /tmp/iso 
+mount -o loop xenserver-hsflowd.iso /tmp/iso 
 cd /tmp/iso 
-./install.sh 
+./install 
 cd 
 umount /tmp/iso
 
@@ -34,6 +34,14 @@ turn on standard sFlow monitoring of all the traffic through
 patterns (including MAC, VLAN, ARP, FCoE, IPv4, IPv6, TCP, UDP
 and ICMP) as well as providing a feed of standard interface-counter
 data for every virtual port on the switch.
+
+Now start the daemon.  On XenServer 7.0 or later, run:
+systemctl daemon-reload
+systemctl start hsflowd
+
+Otherwise, run:
+chkconfig --add hsflowd
+service hsflowd start
 
 Output will go to /var/log/messages.
 
