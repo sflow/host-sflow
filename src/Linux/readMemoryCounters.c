@@ -25,6 +25,7 @@ extern "C" {
 
     procFile= fopen("/proc/meminfo", "r");
     if(procFile) {
+      uint64_t sreclaimable = 0;
       while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
 	if(sscanf(line, "%s %"SCNu64"", var, &val64) == 2) {
 	  gotData = YES;
@@ -34,8 +35,10 @@ extern "C" {
 	  else if(strcmp(var, "Cached:") == 0) mem->mem_cached = val64 * 1024;
 	  else if(strcmp(var, "SwapTotal:") == 0) mem->swap_total = val64 * 1024;
 	  else if(strcmp(var, "SwapFree:") == 0) mem->swap_free = val64 * 1024;
+	  else if(strcmp(var, "SReclaimable:") == 0) sreclaimable = val64 * 1024;
 	}
       }
+      mem->mem_cached += sreclaimable;
       fclose(procFile);
     }
 
