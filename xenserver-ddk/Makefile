@@ -14,7 +14,7 @@ RPM_VERSION := $(shell sed -ne 's/^Version: *//p' $(SPEC))
 RPM_RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC)) 
 
 # no changes below here
-RPMDIR := $(shell rpm --eval %{_rpmdir})
+RPMDIR := /tmp/HSFLOWD_RPM_TOP
 RPMSOURCES := $(shell rpm --eval %{_sourcedir})
 ARCH := $(shell uname -p)
 XENSERVER_VERSION := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$3)
@@ -29,7 +29,7 @@ RPMS := $(PACKAGE_NAME)-$(RPM_VERSION)-$(RPM_RELEASE)
 RPM_FILES := $(patsubst %, $(RPMDIR)/$(ARCH)/%.$(ARCH).rpm, $(RPMS))
 
 
-build-iso: build-rpms
+build-iso: 
 	python setup.py "--output=$(dir $(ISO))" --iso "--vendor-code=$(VENDOR_CODE)" "--vendor-name=$(VENDOR_NAME)" "--label=$(LABEL)" "--text=$(TEXT)" "--version=$(PACK_VERSION)" "--build=$(PACK_BUILD)" $(RPM_FILES)
 
 build-tarball: build-rpms
