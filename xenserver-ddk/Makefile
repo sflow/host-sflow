@@ -35,7 +35,7 @@ build-iso: build-rpms
 build-tarball: build-rpms
 	python setup.py "--output=$(dir $(ISO))" --tar "--vendor-code=$(VENDOR_CODE)" "--vendor-name=$(VENDOR_NAME)" "--label=$(LABEL)" "--text=$(TEXT)" "--version=$(PACK_VERSION)" "--build=$(PACK_BUILD)" $(RPM_FILES)
 
-build-rpms: build-srctarballs
+build-rpms:
 	rpmbuild -bb --define "version $(RPM_VERSION)" --define "release $(RPM_RELEASE)" $(SPEC)
 
 build-srctarballs:

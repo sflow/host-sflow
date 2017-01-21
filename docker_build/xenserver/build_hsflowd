@@ -21,8 +21,7 @@ yum -y install xen-libs-devel xen-dom0-libs-devel supp-pack-build
 echo "building hsflowd"
 git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
-&& sed --in-place -e 's/PACK_BUILD = $(XENSERVER_BUILD)/PACK_BUILD = docker_ddk/g' xenserver-ddk/Makefile \
-&& make xenserver FEATURES="XEN OVS SYSTEMD DBUS"
+&& make xenserver
 
 echo "copying result"
 cp xenserver-ddk/hsflowd-xenserver.iso /packages
