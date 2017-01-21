@@ -1,0 +1,31 @@
+#!/bin/bash
+echo "build_hsflowd on platform:  $1"
+cat /etc/redhat-release
+df -h
+echo "mounting binpkg iso"
+mkdir /binpkg
+mount -o loop XenServer-7.0.0-binpkg.iso /binpkg
+
+echo "adding binpkg yum repo"
+cat >/etc/yum.repos.d/xen.repo <<E_O_F
+[binpkg]
+name=CitrixXenServer7
+enabled=1
+baseurl=file:///binpkg
+gpgcheck=0
+E_O_F
+
+echo "installing binpkg packages"
+yum -y install xen-libs-devel xen-dom0-libs-devel supp-pack-build
+
+echo "building hsflowd"
+git clone https://github.com/sflow/host-sflow \
+&& cd host-sflow \
+&& sed --in-place -e 's/PACK_BUILD = $(XENSERVER_BUILD)/PACK_BUILD = docker_ddk/g' xenserver-ddk/Makefile \
+&& make xenserver FEATURES="XEN OVS SYSTEMD DBUS"
+
+echo "copying result"
+cp xenserver-ddk/hsflowd-xenserver.iso /packages
+echo "files in /packages:"
+ls -l /packages
+
