@@ -14,7 +14,7 @@ RPM_VERSION := $(shell sed -ne 's/^Version: *//p' $(SPEC))
 RPM_RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC)) 
 
 # no changes below here
-RPMDIR := /tmp/HSFLOWD_RPM_TOP
+RPMDIR := /tmp/HSFLOWD_RPM_TOP/RPMS/
 RPMSOURCES := $(shell rpm --eval %{_sourcedir})
 ARCH := $(shell uname -p)
 XENSERVER_VERSION := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$3)
