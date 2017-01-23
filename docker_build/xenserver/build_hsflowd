@@ -16,15 +16,25 @@ gpgcheck=0
 E_O_F
 
 echo "installing binpkg packages"
-yum -y install xen-libs-devel xen-dom0-libs-devel supp-pack-build
+yum -y install xen-libs-devel xen-dom0-libs-devel supp-pack-build genisoimage
 
 echo "building hsflowd"
-git clone https://github.com/sflow/host-sflow \
-&& cd host-sflow \
-&& make xenserver
+git clone https://github.com/sflow/host-sflow
+cd host-sflow \
+&& make xenrpm
+
+echo "building iso package"
+cat /etc/os-release
+. /etc/os-release
+HSFLOWD_VER=`./getVersion`
+HSFLOWD_REL=`./getRelease`
+cd xenserver-ddk
+python setup.py --output=. --iso --vendor-code=hostsflow --vendor-name="Host sFlow" --label="hsflowd-xenserver-$VERSION_ID" --text="Host sFlow agent" --version=$VERSION_ID --build=1 "../hsflowd-$HSFLOWD_VER-$HSFLOWD_REL.x86_64.rpm"
+pwd
+ls -l
 
 echo "copying result"
-cp xenserver-ddk/hsflowd-xenserver.iso /packages
+cp hsflowd-xenserver-$VERSION_ID.iso /packages
 echo "files in /packages:"
 ls -l /packages
 

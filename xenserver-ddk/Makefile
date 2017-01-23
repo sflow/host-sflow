@@ -1,5 +1,5 @@
 # the following values must be changed
-SPEC := ../hsflowd-xen.spec 
+SPEC := ../hsflowd-xen.spec
 VENDOR_CODE := hostsflow
 VENDOR_NAME := Host sFlow
 LABEL = hsflowd-xenserver
@@ -11,36 +11,40 @@ PACK_BUILD = $(XENSERVER_BUILD)
 
 # versioning of RPM
 RPM_VERSION := $(shell sed -ne 's/^Version: *//p' $(SPEC))
-RPM_RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC)) 
+RPM_RELEASE := $(shell sed -ne 's/^Release: *//p' $(SPEC))
 
 # no changes below here
-RPMDIR := /tmp/HSFLOWD_RPM_TOP/RPMS/
-RPMSOURCES := $(shell rpm --eval %{_sourcedir})
-ARCH := $(shell uname -p)
-XENSERVER_VERSION := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$3)
-XENSERVER_BUILD := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$4)
+RPMROOT := /tmp/HSFLOWD_RPM_TOP
+ARCH := $(shell uname -i)
+XENSERVER_VERSION := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$4)
+XENSERVER_BUILD := $(shell set -- `tr '-' ' ' </etc/redhat-release` && echo $$5)
 PACKAGE_NAME := $(shell sed -ne 's/^Name: *//p' $(SPEC))
-ISO := $(PACKAGE_NAME).iso
-ISO_MD5 := $(ISO).md5
-TAR := $(PACKAGE_NAME).tar.gz
-METADATA_MD5 := $(PACKAGE_NAME).metadata.md5
+PACKAGE := package
+ISO := $(shell pwd)/$(PACKAGE_NAME).iso
+METADATA_MD5 := $(DRIVER_NAME).metadata.md5
 
 RPMS := $(PACKAGE_NAME)-$(RPM_VERSION)-$(RPM_RELEASE)
-RPM_FILES := $(patsubst %, $(RPMDIR)/$(ARCH)/%.$(ARCH).rpm, $(RPMS))
+RPM_FILES := $(patsubst %, $(RPMROOT)/RPMS/$(ARCH)/%.$(ARCH).rpm, $(RPMS))
 
 
-build-iso: 
-	python setup.py "--output=$(dir $(ISO))" --iso "--vendor-code=$(VENDOR_CODE)" "--vendor-name=$(VENDOR_NAME)" "--label=$(LABEL)" "--text=$(TEXT)" "--version=$(PACK_VERSION)" "--build=$(PACK_BUILD)" $(RPM_FILES)
+build-iso: build-rpms
+	mkdir -p $(PACKAGE)
+	cp -fp $(RPM_FILES) $(PACKAGE)
+	cd $(PACKAGE) && build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) $(patsubst %, %.$(ARCH).rpm, $(RPMS))
 
 build-tarball: build-rpms
-	python setup.py "--output=$(dir $(ISO))" --tar "--vendor-code=$(VENDOR_CODE)" "--vendor-name=$(VENDOR_NAME)" "--label=$(LABEL)" "--text=$(TEXT)" "--version=$(PACK_VERSION)" "--build=$(PACK_BUILD)" $(RPM_FILES)
+	mkdir -p $(PACKAGE)
+	cp -fp $(RPM_FILES) $(PACKAGE)
+	cd $(PACKAGE) && build-supplemental-pack.sh --output=$(dir $(ISO)) --vendor-code=$(VENDOR_CODE) "--vendor-name=$(VENDOR_NAME)" --label=$(LABEL) "--text=$(TEXT)" --version=$(PACK_VERSION) --build=$(PACK_BUILD) --no-iso --tarball $(patsubst %, %.$(ARCH).rpm, $(RPMS))
 
 build-rpms:
-	rpmbuild -bb --define "version $(RPM_VERSION)" --define "release $(RPM_RELEASE)" $(SPEC)
+	rpmbuild -bb --define "_topdir $(RPMROOT)" --define "version $(RPM_VERSION)" --define "release $(RPM_RELEASE)" $(SPEC)
 
 build-srctarballs:
-	mkdir -p $(RPMSOURCES)
-	tar zcvf $(RPMSOURCES)/$(PACKAGE_NAME)-$(RPM_VERSION).tar.gz $(PACKAGE_NAME)-$(RPM_VERSION)
+	tar zcvf $(RPMROOT)/SOURCES/$(PACKAGE_NAME)-$(RPM_VERSION).tar.gz $(PACKAGE_NAME)-$(RPM_VERSION)
 
 clean:
-	rm -f $(ISO) $(ISO_MD5) $(TAR) $(METADATA_MD5)
+	rm -rf $(PACKAGE)
+
+distclean: clean
+	rm -f $(ISO) $(ISO).md5 $(METADATA_MD5)
