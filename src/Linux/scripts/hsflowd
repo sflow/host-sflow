@@ -188,7 +188,13 @@ case "$1" in
       status)
 	echo -n "hsflowd status: "
 	pid=`inm_pid hsflowd`
-	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
+	if [ -n "$pid" ] ; then
+            echo "running (pid = $pid)"
+            exit 0
+        else
+            echo "stopped"
+            exit 3
+        fi
 	;;
 
      restart)
