@@ -161,7 +161,14 @@ inm_kill() {
 case "$1" in
        start)
 	echo -n "hsflowd start: "
-	inm_daemon hsflowd && echo "OK" || echo "FAILED"
+	inm_daemon hsflowd
+        ret=$?
+        if [ "$ret" -eq 0 ] ; then
+            echo "OK"
+        else
+            echo "FAILED"
+            exit "$ret"
+        fi
 	;;
 
         stop)
