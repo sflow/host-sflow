@@ -4,9 +4,25 @@ http://sflow.net/license.html
 Citrix XenServer
 ================
 
-To compile for XenServer, install these sources into the
-equivalent XenServer DDK VM.  For XenServer 7.0 you will
-also need to follow these steps on the DDK:
+For XenServer we build a .iso image.  If you need
+to build it from sources,  then there are two
+ways.  The easier one is to use Docker:
+
+./docker_build_on xenserver
+
+This might be slow the first time,  but once it has
+constructed and cached the container image then it
+will build much faster thereafter.  If that works,
+ or you were able to download a pre-built .iso file,
+you can jump straight to the step where you
+transfer the .iso package to the hypervisor below
+(see INSTALLING .ISO PACKAGE below)
+
+Otherwise, you should follow the Citrix instructions
+to download and install the DDK as a new VM on your
+hypervisor, and then compile the .iso package there.
+For XenServer 7.0 you will need to follow these
+three extra steps to prepare the DDK:
 
 (1) enable yum repo /etc/yum.repos.d/CentOS-Base
  * - substitute "7" for $releasever everwhere
@@ -35,6 +51,9 @@ DDK> make xenserver
 The Xenserver .iso will now be accessible as
 xenserver-ddk/hsflowd-xenserver.iso.
 
+
+INSTALLING .ISO PACKAGE
+=======================
 To install, copy it to the XenServer dom0 and run these commands:
 
 mkdir /tmp/iso 
@@ -44,6 +63,16 @@ cd /tmp/iso
 cd 
 umount /tmp/iso
 
+
+EDITING /etc/hsflowd.conf
+=========================
+(1) VM Monitoring
+To monitor VMs as well as the hypervisor itself,  make sure
+/etc/hsflowd.conf has this line:
+
+  xen {}
+
+(2) Open vSwitch
 If Open VSwitch is running (it is the default virtual switch
 in XenServer 6.0 and later), then make sure /etc/hsflowd.conf
 has the line:
@@ -58,8 +87,19 @@ patterns (including MAC, VLAN, ARP, FCoE, IPv4, IPv6, TCP, UDP
 and ICMP) as well as providing a feed of standard interface-counter
 data for every virtual port on the switch.
 
+(3) DBUS agent
+If you include a line:
+
+  dbus{}
+
+then hsflowd will install a simple DBUS agent that can report
+basic stats (see telemetry scripts in src/Linux/scripts).
+
+STARTING HSFLOWD
+================
 Now start the daemon.  On XenServer 7.0 or later, run:
 systemctl daemon-reload
+systemctl enable hsflowd
 systemctl start hsflowd
 
 Otherwise, run:
