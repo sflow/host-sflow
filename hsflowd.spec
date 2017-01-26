@@ -13,7 +13,7 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}
 # that are not captured here, but they do not have to be enabled (dynamic loaded) for
 # the program to run.
 AutoReqProv: no
-Requires: ld-linux-x86-64.so.2()(64bit),libc.so.6(GLIBC_2.3.4)(64bit),libdl.so.2()(64bit),libm.so.6()(64bit),libpthread.so.0()(64bit),libresolv.so.2()(64bit)
+Requires: glibc >= 2.3.4
 
 # for rpm backwards compatibility
 %define _binary_payload w9.gzdio
