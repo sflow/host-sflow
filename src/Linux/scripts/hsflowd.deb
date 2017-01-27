@@ -50,6 +50,11 @@ is_uuid() {
 inm_uuid() {
     local MYUUID;
 
+    if [ -n "$UUID" ] && is_uuid "$UUID" ; then
+        echo "$UUID"
+        return 0
+    fi
+
     if [ -x /usr/sbin/dmidecode ]; then
         # from the BIOS
         MYUUID=`/usr/sbin/dmidecode 2>/dev/null | awk -- '/UUID/{print $2}'`

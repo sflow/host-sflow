@@ -22,6 +22,10 @@
 HSFLOWD=/usr/sbin/hsflowd
 PIDFILE=/var/run/hsflowd.pid
 
+NAME=hsflowd
+# Read configuration variable file if it is present
+[ -r /etc/sysconfig/$NAME ] && . /etc/sysconfig/$NAME
+
 # A function to test the form of a UUID string
 is_uuid() {
     local UUID_REGEX;
@@ -33,6 +37,11 @@ is_uuid() {
 # A function to try and find a UUID for this host
 inm_uuid() {
     local MYUUID;
+
+    if [ -n "$UUID" ] && is_uuid "$UUID" ; then
+        echo "$UUID"
+        return 0
+    fi
 
     if [ -x /usr/sbin/dmidecode ]; then
 	# from the BIOS

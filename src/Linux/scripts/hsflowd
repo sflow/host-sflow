@@ -19,6 +19,10 @@
 
 EXECPREFIX=/usr/sbin
 
+NAME=hsflowd
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
 inm_running() {
     if [ $# = 0 ] ; then
 	echo "Usage: $0 {pid}"
@@ -57,6 +61,11 @@ is_uuid() {
 # A function to try and find a UUID for this host
 inm_uuid() {
     local MYUUID;
+
+    if [ -n "$UUID" ] && is_uuid "$UUID" ; then
+        echo "$UUID"
+        return 0
+    fi
 
     if [ -x /usr/sbin/dmidecode ]; then
 	# from the BIOS
@@ -161,7 +170,14 @@ inm_kill() {
 case "$1" in
        start)
 	echo -n "hsflowd start: "
-	inm_daemon hsflowd && echo "OK" || echo "FAILED"
+	inm_daemon hsflowd
+        ret=$?
+        if [ "$ret" -eq 0 ] ; then
+            echo "OK"
+        else
+            echo "FAILED"
+            exit "$ret"
+        fi
 	;;
 
         stop)
@@ -172,7 +188,13 @@ case "$1" in
       status)
 	echo -n "hsflowd status: "
 	pid=`inm_pid hsflowd`
-	[ -n "$pid" ] && echo "running (pid = $pid)" || echo "stopped"
+	if [ -n "$pid" ] ; then
+            echo "running (pid = $pid)"
+            exit 0
+        else
+            echo "stopped"
+            exit 3
+        fi
 	;;
 
      restart)
