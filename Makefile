@@ -38,18 +38,26 @@ schedule:
         MYREL=`./getRelease`; \
         cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL schedule
 
-dist:
+dist: clean
 	MYVER=`./getVersion`; \
         MYREL=`./getRelease`; \
-	MYTARBALL=$(PROG)-$$MYVER-$$MYREL.tar.gz; \
-	git archive HEAD --prefix=$(PROG)-$$MYVER-$$MYREL/ | gzip >$$MYTARBALL;
+	MYTARDIR=$(PROG)-$$MYVER-$$MYREL; \
+	MYTARBALL=$$MYTARDIR.tar.gz; \
+	MYTMP=.tmpdist; \
+	rm -rf $$MYTMP; \
+	MYTMPDIR=$$MYTMP/$$MYTARDIR; \
+	mkdir -p $$MYTMPDIR; \
+	rsync -a --exclude=".*" --exclude="*~" --exclude="*.o" --exclude="*.so" --exclude="*.a" --exclude="$(PROG)[-_][0-9]*" . $$MYTMPDIR; \
+	cd $$MYTMP; \
+	tar czf ../$$MYTARBALL $$MYTARDIR; \
+	cd ..; \
+	rm -rf $$MYTMP
 
-rpm:
+rpm: dist
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
 	MYREL=`./getRelease`; \
 	MYTARBALL=$(PROG)-$$MYVER-$$MYREL.tar.gz; \
-	git archive HEAD --prefix=$(PROG)-$$MYVER-$$MYREL/ | gzip >$$MYTARBALL; \
 	mkdir -p $(MY_RPM_TOP)/BUILD; \
 	mkdir -p $(MY_RPM_TOP)/SRPMS; \
 	mkdir -p $(MY_RPM_TOP)/RPMS; \
