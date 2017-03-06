@@ -24,6 +24,7 @@ extern "C" {
 #include <pthread.h>
 #include <dlfcn.h>
 #include <limits.h> // for PIPE_BUF
+#include <signal.h> // for sigemptyset()
 
 #include "util.h"
 
