@@ -680,7 +680,7 @@ extern "C" {
     and stop when a different type is found or the iterator is done.
   */
 
-  static bool db_get(DBusMessageIter *it, int expected_type, DBusBasicValue *val) {
+  static bool db_get(DBusMessageIter *it, int expected_type, MyDbusBasicValue *val) {
     int atype = dbus_message_iter_get_arg_type(it);
     if(atype == DBUS_TYPE_VARIANT) {
       DBusMessageIter sub;
@@ -698,7 +698,7 @@ extern "C" {
     return dbus_message_iter_next(it);
   }
 
-  static bool db_get_next(DBusMessageIter *it, int expected_type, DBusBasicValue *val) {
+  static bool db_get_next(DBusMessageIter *it, int expected_type, MyDbusBasicValue *val) {
     return db_next(it) && db_get(it, expected_type, val);
   }
 
@@ -713,7 +713,7 @@ extern "C" {
     HSPDBusUnit *unit = (HSPDBusUnit *)magic;
     DBusMessageIter it;
     if(dbus_message_iter_init(dbm, &it)) {
-      DBusBasicValue val;
+      MyDbusBasicValue val;
       if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
 	myDebug(1, "UNIT CPUAccounting %u", val.bool_val);
 	unit->cpuAccounting = val.bool_val;
@@ -725,7 +725,7 @@ extern "C" {
     HSPDBusUnit *unit = (HSPDBusUnit *)magic;
     DBusMessageIter it;
     if(dbus_message_iter_init(dbm, &it)) {
-      DBusBasicValue val;
+      MyDbusBasicValue val;
       if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
 	myDebug(1, "UNIT memoryAccounting %u", val.bool_val);
 	unit->memoryAccounting = val.bool_val;
@@ -737,7 +737,7 @@ extern "C" {
     HSPDBusUnit *unit = (HSPDBusUnit *)magic;
     DBusMessageIter it;
     if(dbus_message_iter_init(dbm, &it)) {
-      DBusBasicValue val;
+      MyDbusBasicValue val;
       if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
 	myDebug(1, "UNIT BlockIOAccounting %u", val.bool_val);
 	unit->blockIOAccounting = val.bool_val;
@@ -755,7 +755,7 @@ extern "C" {
     HSPDBusUnit *unit = (HSPDBusUnit *)magic;
     DBusMessageIter it;
     if(dbus_message_iter_init(dbm, &it)) {
-      DBusBasicValue val;
+      MyDbusBasicValue val;
       if(db_get(&it, DBUS_TYPE_STRING, &val)
 	 && val.str
 	 && my_strlen(val.str)
@@ -832,7 +832,7 @@ extern "C" {
     HSPDBusUnit *unit = (HSPDBusUnit *)magic;
     DBusMessageIter it;
     if(dbus_message_iter_init(dbm, &it)) {
-      DBusBasicValue val;
+      MyDbusBasicValue val;
       if(db_get(&it, DBUS_TYPE_OBJECT_PATH, &val)
 	 && val.str) {
 	if(unit->obj
@@ -895,7 +895,7 @@ extern "C" {
 	DB_WALK(&it_unit, DBUS_TYPE_STRUCT, NULL) {
 	  DBusMessageIter it_field;
 	  dbus_message_iter_recurse(&it_unit, &it_field);
-	  DBusBasicValue nm, ds, ls, as;
+	  MyDbusBasicValue nm, ds, ls, as;
 	  if(db_get(&it_field,  DBUS_TYPE_STRING, &nm)
 	     && db_get_next(&it_field, DBUS_TYPE_STRING, &ds)
 	     && db_get_next(&it_field, DBUS_TYPE_STRING, &ls)
