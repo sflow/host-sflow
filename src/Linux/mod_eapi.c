@@ -67,12 +67,51 @@ Expecting something like:
     cJSON *enabled = cJSON_GetObjectItem(sflow, "enabled");
     cJSON *sources_v4 = cJSON_GetObjectItem(sflow, "ipv4Sources");
     cJSON *sources_v6 = cJSON_GetObjectItem(sflow, "ipv6Sources");
+    int n_sources_v4 = cJSON_GetArraySize(sources_v4);
+    int n_sources_v6 = cJSON_GetArraySize(sources_v6);
+    SFLAddress agent = { 0 };
+    bool gotAgent = NO;
+    if(n_sources_v4) {
+      cJSON *source = cJSON_GetArrayItem(sources_v4, 0);
+      cJSON *ip = cJSON_GetObjectItem(source, "ipv4Address");
+      gotAgent = parseNumericAddress(ip->valuestring, NULL, &agent, AF_INET);
+    }
+    if(n_sources_v6 &&  !gotAgent) {
+      cJSON *source = cJSON_GetArrayItem(sources_v6, 0);
+      cJSON *ip = cJSON_GetObjectItem(source, "ipv6Address");
+      gotAgent = parseNumericAddress(ip->valuestring, NULL, &agent, AF_INET6);
+    }
     cJSON *dests_v4 = cJSON_GetObjectItem(sflow, "ipv4Destinations");
     cJSON *dests_v6 = cJSON_GetObjectItem(sflow, "ipv6Destinations");
+    int n_dests_v4 = cJSON_GetArraySize(dests_v4);
+    int n_dests_v6 = cJSON_GetArraySize(dests_v6);
     cJSON *sampling = cJSON_GetObjectItem(sflow, "samplingEnabled");
     cJSON *polling = cJSON_GetObjectItem(sflow, "polling");
     cJSON *sampling_n = cJSON_GetObjectItem(sflow, "sampleRate");
-    cJSON *polling_interval = cJSON_GetObjectItem(sflow, "pollingInterval");
+    cJSON *polling_i = cJSON_GetObjectItem(sflow, "pollingInterval");
+    cJSON *datagrams_sent = cJSON_GetObjectItem(sflow, "datagrams");
+    char ipbuf[51];
+    myDebug(1, "agent: %s enabled: %s sampling: %s sampling_n: %s polling: %s polling_interval: %s datagrams: %s",
+	    SFLAddress_print(&agent, ipbuf, 50),
+	    cJSON_Print(enabled),
+	    cJSON_Print(sampling),
+	    cJSON_Print(sampling_n),
+	    cJSON_Print(polling),
+	    cJSON_Print(polling_i),
+	    cJSON_Print(datagrams_sent));
+    int dd;
+    for(dd = 0; dd < n_dests_v4; dd++) {
+      cJSON *dest = cJSON_GetArrayItem(dests_v4, dd);
+      cJSON *dest_addr = cJSON_GetObjectItem(dest, "ipv4Address");
+      cJSON *dest_port = cJSON_GetObjectItem(dest, "port");
+      myDebug(1, "sflow destination %s:%d", dest_addr->valuestring, dest_port->valueint);
+    }
+    for(dd = 0; dd < n_dests_v6; dd++) {
+      cJSON *dest = cJSON_GetArrayItem(dests_v6, dd);
+      cJSON *dest_addr = cJSON_GetObjectItem(dest, "ipv6Address");
+      cJSON *dest_port = cJSON_GetObjectItem(dest, "port");
+      myDebug(1, "sflow destination [%s]:%d", dest_addr->valuestring, dest_port->valueint);
+    }
   }
 
   /*_________________---------------------------__________________
