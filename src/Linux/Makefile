@@ -1,7 +1,7 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
-FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 DBUS SYSTEMD
+FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 DBUS SYSTEMD EAPI
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
 CONFDIR    ?= /etc
@@ -108,6 +108,9 @@ LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
 LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
 
+CFLAGS_EAPI=
+LIBS_EAPI=
+
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += -DUTHEAP
@@ -182,6 +185,7 @@ OBJS_CUMULUS=mod_cumulus.o
 OBJS_OS10=mod_os10.o
 OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o
+OBJS_EAPI=mod_eapi.o
 
 BUILDTGTS=hsflowd \
           mod_json.so \
@@ -218,6 +222,8 @@ DBUS: mod_dbus.so
 
 SYSTEMD: mod_systemd.so
 
+EAPI: mod_eapi.so
+
 #########  hsflowd  #########
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
@@ -242,7 +248,7 @@ mod_json.o: mod_json.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_JSON)
 
 mod_json.so: $(OBJS_JSON)
-	$(LD) -o $@ $(OBJS_JSON) $(LDFLAGS_SHARED)
+	$(LD) -o $@ $(OBJS_JSON) $(LDFLAGS_SHARED) $(LIBS_JSON)
 
 #----------------------------
 
@@ -360,6 +366,15 @@ mod_systemd.o: mod_systemd.c $(HEADERS)
 mod_systemd.so: $(OBJS_SYSTEMD)
 	$(LD) -o $@ $(OBJS_SYSTEMD) $(LDFLAGS_SHARED) $(LIBS_SYSTEMD)
 
+#----------------------------
+
+mod_eapi.o: mod_eapi.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_EAPI)
+
+mod_eapi.so: $(OBJS_EAPI)
+	$(LD) -o $@ $(OBJS_EAPI) $(LDFLAGS_SHARED) $(LIBS_EAPI)
+
+
 #########  install  #########
 
 install:
@@ -434,3 +449,4 @@ mod_ovs.o: mod_ovs.c $(HEADERS)
 mod_os10.o: mod_os10.c $(HEADERS)
 mod_dbus.o: mod_dbus.c $(HEADERS)
 mod_systemd.o: mod_systemd.c $(HEADERS)
+mod_eapi.o: mod_eapi.c $(HEADERS)
