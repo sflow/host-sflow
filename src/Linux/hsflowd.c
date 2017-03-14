@@ -1658,6 +1658,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_dbus", sp->modulesPath);
     if(sp->systemd.systemd)
       EVLoadModule(sp->rootModule, "mod_systemd", sp->modulesPath);
+    if(sp->eapi.eapi)
+      EVLoadModule(sp->rootModule, "mod_eapi", sp->modulesPath);
 
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TOCK), evt_poll_tock);

@@ -481,6 +481,9 @@ extern "C" {
       uint32_t refreshVMListSecs;
       bool dropPriv;
     } systemd;
+    struct {
+      bool eapi;
+    } eapi;
 
     // hardware sampling flag
     bool hardwareSampling;

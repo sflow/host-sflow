@@ -64,7 +64,8 @@ extern "C" {
     HSPOBJ_OVS,
     HSPOBJ_OS10,
     HSPOBJ_DBUS,
-    HSPOBJ_SYSTEMD
+    HSPOBJ_SYSTEMD,
+    HSPOBJ_EAPI
   } EnumHSPObject;
 
   static const char *HSPObjectNames[] = {
@@ -83,7 +84,8 @@ extern "C" {
     "cumulus",
     "nvml",
     "ovs",
-    "os10"
+    "os10",
+    "eapi"
   };
 
   /*_________________---------------------------__________________
@@ -1056,6 +1058,11 @@ extern "C" {
 	    sp->systemd.systemd = YES;
 	    level[++depth] = HSPOBJ_SYSTEMD;
 	    break;
+	  case HSPTOKEN_EAPI:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->eapi.eapi = YES;
+	    level[++depth] = HSPOBJ_EAPI;
+	    break;
 
 	  case HSPTOKEN_SAMPLING:
 	  case HSPTOKEN_PACKETSAMPLINGRATE:
@@ -1412,6 +1419,17 @@ extern "C" {
 	    case HSPTOKEN_DROP_PRIV:
 	      if((tok = expectONOFF(sp, tok, &sp->systemd.dropPriv)) == NULL) return NO;
 	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_EAPI:
+	  {
+	    switch(tok->stok) {
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
