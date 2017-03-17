@@ -115,13 +115,13 @@ extern "C" {
 
   void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad) {
     SFLAdaptor *replaced = UTHashAdd(ht, ad);
-    if(replaced) {
+    if(replaced && replaced != ad) {
       char buf1[256], buf2[256];
       myDebug(1, "adaptorAddOrReplace: replacing adaptor [%s] with [%s]",
 	      adaptorStr(replaced, buf1, 256),
 	      adaptorStr(ad, buf2, 256));
       // TODO: should we delete the replaced one?
-      // adaptorFree(replaced);
+      // if(replaced != ad) adaptorFree(replaced);
     }
   }
 
@@ -143,6 +143,16 @@ extern "C" {
   SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex) {
     SFLAdaptor ad = { .peer_ifIndex = ifIndex };
     return UTHashGet(sp->adaptorsByPeerIndex, &ad);
+  }
+
+  SFLAdaptor *adaptorByIP(HSP *sp, SFLAddress *ip) {
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      if(SFLAddress_equal(ip, &adaptorNIO->ipAddr))
+	return adaptor;
+    }
+    return NULL;
   }
 
   static void deleteAdaptorFromHT(UTHash *ht, SFLAdaptor *ad, char *htname) {
@@ -553,9 +563,13 @@ extern "C" {
       int agentAddressChanged=NO;
       if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
 	  myLog(LOG_ERR, "failed to re-select agent address\n");
+	  // TODO: what should we do in this case?
       }
       myDebug(1, "agentAddressChanged=%s", agentAddressChanged ? "YES" : "NO");
       if(agentAddressChanged) {
+	SEMLOCK_DO(sp->sync_agent) {
+	  sfl_agent_set_address(sp->agent, &sp->agentIP);
+	}
 	// this incs the revision No so it causes the
 	// output file to be rewritten below too.
 	installSFlowSettings(sp, sp->sFlowSettings);
@@ -860,67 +874,6 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________   sFlowSettingsString     __________________
-    -----------------___________________________------------------
-  */
-
-  char *sFlowSettingsString(HSP *sp, HSPSFlowSettings *settings)
-  {
-    UTStrBuf *buf = UTStrBuf_new();
-
-    if(settings) {
-      UTStrBuf_printf(buf, "hostname=%s\n", sp->hostname);
-      UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
-      UTStrBuf_printf(buf, "header=%u\n", settings->headerBytes);
-      UTStrBuf_printf(buf, "datagram=%u\n", settings->datagramBytes);
-      UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
-      // make sure the application specific ones always come after the general ones - to simplify the override logic there
-      for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
-	if(appSettings->got_sampling_n) {
-	  UTStrBuf_printf(buf, "sampling.%s=%u\n", appSettings->application, appSettings->sampling_n);
-	}
-	if(appSettings->got_polling_secs) {
-	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
-	}
-      }
-      char ipbuf[51];
-      UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&sp->agentIP, ipbuf, 50));
-      if(sp->agentDevice) {
-	UTStrBuf_printf(buf, "agent=%s\n", sp->agentDevice);
-      }
-      UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
-
-      // jsonPort always comes from local config file, but include it here so that
-      // others know where to send their JSON application/rtmetric/rtflow messages
-      if(sp->json.port) {
-	UTStrBuf_printf(buf, "jsonPort=%u\n", sp->json.port);
-      }
-
-      // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
-      // another step here to make sure they are sorted.  Otherwise we think the config has changed
-      // every time(!)
-      UTStringArray *iplist = strArrayNew();
-      for(HSPCollector *collector = settings->collectors; collector; collector = collector->nxt) {
-	// make sure we ignore any where the foward lookup failed
-	// this might mean we write a .auto file with no collectors in it,
-	// so let's hope the slave agents all do the right thing with that(!)
-	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
-	  char collectorStr[128];
-	  // <ip> <port> [<priority>]
-	  sprintf(collectorStr, "collector=%s %u\n", SFLAddress_print(&collector->ipAddr, ipbuf, 50), collector->udpPort);
-	  strArrayAdd(iplist, collectorStr);
-	}
-      }
-      strArraySort(iplist);
-      char *arrayStr = strArrayStr(iplist, NULL/*start*/, NULL/*quote*/, NULL/*delim*/, NULL/*end*/);
-      UTStrBuf_printf(buf, "%s", arrayStr);
-      my_free(arrayStr);
-      strArrayFree(iplist);
-    }
-    return UTStrBuf_unwrap(buf);
-  }
-
-  /*_________________---------------------------__________________
     _________________   pre_config_first        __________________
     -----------------___________________________------------------
   */
@@ -975,6 +928,14 @@ extern "C" {
       // not on the  platforms we expect to run on.
       sp->sFlowSettings = settings;
 
+      // agent address might have been overridden (e.g. by mod_eapi)
+      if(settings->agentIP.type) {
+	sp->agentIP = settings->agentIP;
+	SEMLOCK_DO(sp->sync_agent) {
+	  sfl_agent_set_address(sp->agent, &sp->agentIP);
+	}
+      }
+
       // announce the change
       if(firstConfig) {
 	// make sure certain things are in place before we proceed. This
@@ -1024,81 +985,20 @@ extern "C" {
 
   static void evt_config_start(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(sp->sFlowSettings_dnsSD_prev)
-      freeSFlowSettings(sp->sFlowSettings_dnsSD_prev);
-    sp->sFlowSettings_dnsSD_prev = sp->sFlowSettings_dnsSD;
-    sp->sFlowSettings_dnsSD = newSFlowSettings();
+    if(sp->sFlowSettings_dyn_prev)
+      freeSFlowSettings(sp->sFlowSettings_dyn_prev);
+    sp->sFlowSettings_dyn_prev = sp->sFlowSettings_dyn;
+    sp->sFlowSettings_dyn = newSFlowSettings();
   }
 
   static void evt_config_line(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSPSFlowSettings *st = sp->sFlowSettings_dnsSD;
+    HSPSFlowSettings *st = sp->sFlowSettings_dyn;
     if(st == NULL) {
-      myLog(LOG_ERR, "dnssd: no current settings object");
+      myLog(LOG_ERR, "dynamic config: no current settings object");
       return;
     }
-    char *varval = (char *)data;
-    char keyBuf[EV_MAX_EVT_DATALEN];
-    char valBuf[EV_MAX_EVT_DATALEN];
-    if(parseNextTok(&varval, "=", YES, '"', YES, keyBuf, EV_MAX_EVT_DATALEN)
-       && parseNextTok(&varval, "=", YES, '"', YES, valBuf, EV_MAX_EVT_DATALEN)) {
-
-      if(my_strequal(keyBuf, "collector")) { // TODO: string constant for this from tokens
-	int valLen = my_strlen(valBuf);
-	if(valLen > 3) {
-	  uint32_t delim = strcspn(valBuf, "/");
-	  if(delim > 0 && delim < valLen) {
-	    valBuf[delim] = '\0';
-	    HSPCollector *coll = newCollector(st);
-	    if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
-	      myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but forward lookup failed");
-	      // turn off the collector by clearing the address type
-	      coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
-	    }
-	    coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
-	    if(coll->udpPort < 1 || coll->udpPort > 65535) {
-	      myLog(LOG_ERR, "myDNSCB: SRV record returned hostname, but bad port: %d", coll->udpPort);
-	      // turn off the collector by clearing the address type
-	      coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
-	    }
-	  }
-	}
-      }
-      else {
-	// key=val (TXT record line)
-	if(strcmp(keyBuf, "sampling") == 0) {
-	  st->samplingRate = strtol(valBuf, NULL, 0);
-	}
-	else if(my_strnequal(keyBuf, "sampling.", 9)) {
-	  setApplicationSampling(st, keyBuf+9, strtol(valBuf, NULL, 0));
-	}
-	else if(strcmp(keyBuf, "txtvers") == 0) {
-	}
-	else if(strcmp(keyBuf, "polling") == 0) {
-	  st->pollingInterval = strtol(valBuf, NULL, 0);
-	}
-	else if(my_strnequal(keyBuf, "polling.", 8)) {
-	  setApplicationPolling(st, keyBuf+8, strtol(valBuf, NULL, 0));
-	}
-#if HSP_DNSSD_AGENTCIDR
-	else if(strcmp(keyBuf, "agent.cidr") == 0) {
-	  HSPCIDR cidr = { 0 };
-	  if(SFLAddress_parseCIDR(valBuf,
-				  &cidr.ipAddr,
-				  &cidr.mask,
-				  &cidr.maskBits)) {
-	    addAgentCIDR(st, &cidr);
-	  }
-	  else {
-	    myLog(LOG_ERR, "CIDR parse error in dnsSD record <%s>=<%s>", keyBuf, valBuf);
-	  }
-	}
-#endif /* HSP_DNSSD_AGENTCIDR */
-	else {
-	  myLog(LOG_INFO, "unexpected dnsSD record <%s>=<%s>", keyBuf, valBuf);
-	}
-      }
-    }
+    dynamic_config_line(st, data);
   }
 
   static void evt_config_end(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
@@ -1123,7 +1023,7 @@ extern "C" {
     }
     else {
       // C: make this new one the running config.
-      installSFlowSettings(sp, sp->sFlowSettings_dnsSD);
+      installSFlowSettings(sp, sp->sFlowSettings_dyn);
     }
   }
 

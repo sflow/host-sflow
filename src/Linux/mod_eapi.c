@@ -47,9 +47,31 @@ extern "C" {
     EVEvent *configEndEvent;
     int currentRequests;
     regex_t *contentLengthPattern;
-    bool flush:1;
   } HSP_mod_Eapi;
 
+
+  /*_________________---------------------------__________________
+    _________________    config_line            __________________
+    -----------------___________________________------------------
+  */
+  static int send_config_line(EVMod *mod, char *fmt, ...) {
+    HSP_mod_Eapi *mdata = (HSP_mod_Eapi *)mod->data;
+    int ans = 0;
+    va_list args;
+    va_start(args, fmt);
+    // vsnprintf will tell you what space it *would* need
+    int needed = vsnprintf(NULL, 0, fmt, args);
+    if(needed > 0) {
+      char *buf = my_calloc(needed+1);
+      va_start(args, fmt);
+      ans = vsnprintf(buf, needed+1, fmt, args);
+      myDebug(1, "send_config_line <%s>", buf);
+      // will copy from config bus to poll bus via pipe
+      EVEventTx(mod, mdata->configEvent, buf, my_strlen(buf));
+      my_free(buf);
+    }
+    return ans;
+  }
 
   /*_________________---------------------------__________________
     _________________     eapi_show_sflow       __________________
@@ -91,27 +113,44 @@ Expecting something like:
     cJSON *polling_i = cJSON_GetObjectItem(sflow, "pollingInterval");
     cJSON *datagrams_sent = cJSON_GetObjectItem(sflow, "datagrams");
     char ipbuf[51];
+    char *agentIP = SFLAddress_print(&agent, ipbuf, 50);
+
+    // TODO: what if sFlow not configured or no agent or no sampling/polling?
+    // Do we send num_servers==-1 to indicate that?
+    
     myDebug(1, "agent: %s enabled: %s sampling: %s sampling_n: %s polling: %s polling_interval: %s datagrams: %s",
-	    SFLAddress_print(&agent, ipbuf, 50),
+	    agentIP,
 	    cJSON_Print(enabled),
 	    cJSON_Print(sampling),
 	    cJSON_Print(sampling_n),
 	    cJSON_Print(polling),
 	    cJSON_Print(polling_i),
 	    cJSON_Print(datagrams_sent));
+    
+    EVEventTx(mod, mdata->configStartEvent, NULL, 0);
+    send_config_line(mod, "agentIP=%s", agentIP);
+    // don't set sampling because it is not needed and it would be misleading
+    // anyway - would need to set sampling.<speed> for all speeds before it would
+    // be correct.
+    // send_config_line(mod, "sampling=%s", cJSON_Print(sampling_n));
+    send_config_line(mod, "polling=%s", cJSON_Print(polling_i));
+    int num_servers = 0;
     int dd;
     for(dd = 0; dd < n_dests_v4; dd++) {
       cJSON *dest = cJSON_GetArrayItem(dests_v4, dd);
       cJSON *dest_addr = cJSON_GetObjectItem(dest, "ipv4Address");
       cJSON *dest_port = cJSON_GetObjectItem(dest, "port");
-      myDebug(1, "sflow destination %s:%d", dest_addr->valuestring, dest_port->valueint);
+      send_config_line(mod, "collector=%s/%d", dest_addr->valuestring, dest_port->valueint);
+      num_servers++;
     }
     for(dd = 0; dd < n_dests_v6; dd++) {
       cJSON *dest = cJSON_GetArrayItem(dests_v6, dd);
       cJSON *dest_addr = cJSON_GetObjectItem(dest, "ipv6Address");
       cJSON *dest_port = cJSON_GetObjectItem(dest, "port");
-      myDebug(1, "sflow destination [%s]:%d", dest_addr->valuestring, dest_port->valueint);
+      send_config_line(mod, "collector=%s/%d", dest_addr->valuestring, dest_port->valueint);
+      num_servers++;
     }
+    EVEventTx(mod, mdata->configEndEvent, &num_servers, sizeof(num_servers));
   }
 
   /*_________________---------------------------__________________
@@ -210,6 +249,29 @@ Expecting something like:
       break;
     }
   }
+
+  /*________________---------------------------__________________
+    ________________      eapiRequest New/Free __________________
+    ----------------___________________________------------------
+  */
+
+  static HSPEapiRequest *eapiRequestNew(EVMod *mod, HSPEapiCB jsonCB) {
+    HSPEapiRequest *req = (HSPEapiRequest *)my_calloc(sizeof(HSPEapiRequest));
+    req->request = UTStrBuf_new();
+    req->jsonCB = jsonCB;
+    return req;
+  }
+
+  static void  eapiRequestFree(EVMod *mod, HSPEapiRequest *req) {
+    UTStrBuf_free(req->request);
+    if(req->response) UTStrBuf_free(req->response);
+    my_free(req);
+  }
+
+  /*________________---------------------------__________________
+    ________________    readEapiCB             __________________
+    ----------------___________________________------------------
+  */
   
   static void readEapiCB(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic) {
     HSP_mod_Eapi *mdata = (HSP_mod_Eapi *)mod->data;
@@ -218,39 +280,20 @@ Expecting something like:
     case EVSOCKETREAD_AGAIN:
       break;
     case EVSOCKETREAD_STR:
-      if(!mdata->flush) {
-	processEapiResponse(mod, sock, req);
-	UTStrBuf_reset(sock->ioline);
-      }
+      processEapiResponse(mod, sock, req);
+      UTStrBuf_reset(sock->ioline);
       break;
     case EVSOCKETREAD_EOF:
-      if(!mdata->flush) {
-	if(req->response)
-	  processEapiJSON(mod, req, req->response);
-      }
+      if(req->response)
+	processEapiJSON(mod, req, req->response);
       // fall through
     case EVSOCKETREAD_BADF:
     case EVSOCKETREAD_ERR:
       // clean up
       assert(mdata->currentRequests > 0);
       --mdata->currentRequests;
-      // TODO: free the request?
-      // eapiRequestFree(mod, req);
+      eapiRequestFree(mod, req);
       req = NULL;
-      
-      if(mdata->flush &&
-	 mdata->currentRequests == 0) {
-	// no outstanding requests - flush is done
-	mdata->flush = NO;
-      }
-      
-      // see if we have another request queued
-      //if(!mdata->flush
-      // && !UTQ_EMPTY(mdata->requestQ)) {
-      //HSPEapiRequest *nextReq;
-      //UTQ_REMOVE_HEAD(mdata->requestQ, nextReq);
-      //eapiRequest(mod, nextReq);
-      //}
     }
   }
 
@@ -279,24 +322,6 @@ Expecting something like:
 	      cmd, cc, len, strerror(errno));
       }
     }
-  }
-
-  /*________________---------------------------__________________
-    ________________      eapiRequest New/Free __________________
-    ----------------___________________________------------------
-  */
-
-  static HSPEapiRequest *eapiRequestNew(EVMod *mod, HSPEapiCB jsonCB) {
-    HSPEapiRequest *req = (HSPEapiRequest *)my_calloc(sizeof(HSPEapiRequest));
-    req->request = UTStrBuf_new();
-    req->jsonCB = jsonCB;
-    return req;
-  }
-
-  static void  eapiRequestFree(EVMod *mod, HSPEapiRequest *req) {
-    UTStrBuf_free(req->request);
-    if(req->response) UTStrBuf_free(req->response);
-    my_free(req);
   }
 
   /*________________---------------------------__________________
@@ -332,7 +357,6 @@ Expecting something like:
     HSP_mod_Eapi *mdata = (HSP_mod_Eapi *)mod->data;
     if(--mdata->countdown <= 0) {
       mdata->countdown = mdata->retryDelay;
-      EVEventTx(mod, mdata->configStartEvent, NULL, 0);
       eapi(mod); // will send config line events
 
 

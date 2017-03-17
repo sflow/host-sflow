@@ -128,6 +128,20 @@ void sfl_agent_set_now(SFLAgent *agent, time_t now, time_t now_nS)
 }
 
 /*_________________---------------------------__________________
+  _________________  sfl_agent_set_address    __________________
+  -----------------___________________________------------------
+*/
+
+void sfl_agent_set_address(SFLAgent *agent, SFLAddress *ip)
+{
+  SFLReceiver *rcv;
+
+  for( rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt)
+    sfl_receiver_flush(rcv);
+  agent->myIP = (*ip);
+}
+
+/*_________________---------------------------__________________
   _________________   sfl_agent_uptime_mS     __________________
   -----------------___________________________------------------
 */

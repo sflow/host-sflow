@@ -309,6 +309,9 @@ void sfl_agent_tick(SFLAgent *agent, time_t now);
 /* call this to set more accurate "now" - e.g. to influence datagram timestamp */
 void sfl_agent_set_now(SFLAgent *agent, time_t now_S, time_t now_nS);
 
+/* call this to change the designated sflow-agent-address */  
+void sfl_agent_set_address(SFLAgent *agent, SFLAddress *ip);
+
 /* convert stored "now" to mS since bootTime */
 uint32_t sfl_agent_uptime_mS(SFLAgent *agent);
 

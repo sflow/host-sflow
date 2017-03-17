@@ -180,6 +180,8 @@ extern "C" {
 #define HSP_MAX_HEADER_BYTES 256
     HSPApplicationSettings *applicationSettings;
     HSPCIDR *agentCIDRs;
+    SFLAddress agentIP;
+    char *agentDevice;
   } HSPSFlowSettings;
 
   // userData structure to store state for VM data-sources
@@ -386,8 +388,8 @@ extern "C" {
 
     // config settings
     HSPSFlowSettings *sFlowSettings_file;
-    HSPSFlowSettings *sFlowSettings_dnsSD;
-    HSPSFlowSettings *sFlowSettings_dnsSD_prev;
+    HSPSFlowSettings *sFlowSettings_dyn;
+    HSPSFlowSettings *sFlowSettings_dyn_prev;
     HSPSFlowSettings *sFlowSettings;
     char *sFlowSettings_str;
 
@@ -401,8 +403,6 @@ extern "C" {
     uint32_t subAgentId;
     char *agentDevice;
     SFLAddress agentIP;
-    bool explicitAgentDevice;
-    bool explicitAgentIP;
 
     // config-file-only settings by module
     struct {
@@ -567,6 +567,7 @@ extern "C" {
   // expose some config parser fns
   int HSPReadConfigFile(HSP *sp);
   HSPSFlowSettings *newSFlowSettings(void);
+  char *sFlowSettingsString(HSP *sp, HSPSFlowSettings *settings);
   HSPCollector *newCollector(HSPSFlowSettings *sFlowSettings);
   void clearCollectors(HSPSFlowSettings *settings);
   void freeSFlowSettings(HSPSFlowSettings *sFlowSettings);
@@ -576,9 +577,10 @@ extern "C" {
   int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling);
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings);
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
-  int selectAgentAddress(HSP *sp, int *p_changed);
-  void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr);
+  bool selectAgentAddress(HSP *sp, int *p_changed);
+  void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr, bool atEnd);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
+  void dynamic_config_line(HSPSFlowSettings *st, char *line);
 
   // read functions
   int readInterfaces(HSP *sp, bool full_discovery, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
@@ -614,6 +616,7 @@ extern "C" {
   SFLAdaptor *adaptorByMac(HSP *sp, SFLMacAddress *mac);
   SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex);
   SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex);
+  SFLAdaptor *adaptorByIP(HSP *sp, SFLAddress *ip);
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
   int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
