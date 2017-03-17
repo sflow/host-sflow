@@ -674,6 +674,13 @@ extern "C" {
 		up ? "came up" : "went down");
       }
       adaptorNIO->up = up;
+
+      // make sure we notice changes
+      if(adaptorNIO->loopback != loopback
+	 || adaptorNIO->bond_master != bond_master
+	 || adaptorNIO->bond_slave != bond_slave)
+	ad_changed++;
+      
       adaptorNIO->loopback = loopback;
       adaptorNIO->bond_master = bond_master;
       adaptorNIO->bond_slave = bond_slave;
@@ -718,9 +725,10 @@ extern "C" {
       }
 
       if(addAdaptorToHT) {
+	// it is a new adaptor name or the mac/ifindex changed
 	ad_added++;
 	adaptorAddOrReplace(sp->adaptorsByName, adaptor);
-	// add to "all namespaces" collections too
+	// add to "all namespaces" collections too.
 	if(gotMac) adaptorAddOrReplace(sp->adaptorsByMac, adaptor);
 	if(ifIndex) adaptorAddOrReplace(sp->adaptorsByIndex, adaptor);
       }
