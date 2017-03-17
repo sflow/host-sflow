@@ -20,7 +20,7 @@ extern "C" {
   // using DNS SRV+TXT records
 #define SFLOW_DNS_SD "_sflow._udp"
 #define HSP_MAX_DNS_LEN 255
-  typedef void (*HSPDnsCB)(EVMod *mod, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *settings);
+  typedef void (*HSPDnsCB)(EVMod *mod, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen);
 
   typedef struct _HSP_mod_DNSSD {
     int countdown;
@@ -39,7 +39,7 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  static int dnsSD_Request(EVMod *mod, char *dname, uint16_t rtype, HSPDnsCB callback, HSPSFlowSettings *settings)
+  static int dnsSD_Request(EVMod *mod, char *dname, uint16_t rtype, HSPDnsCB callback)
   {
     // HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     u_char buf[PACKETSZ];
@@ -178,7 +178,7 @@ extern "C" {
 	      char fqdn_port[PACKETSZ];
 	      sprintf(fqdn_port, "%s/%u", fqdn, res_prt);
 	      // use key == NULL to indicate that the value is host:port
-	      (*callback)(mod, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port), settings);
+	      (*callback)(mod, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port));
 	    }
 	  }
 	}
@@ -216,7 +216,7 @@ extern "C" {
 	      myLog(LOG_ERR, "dsnSD TXT record not in var=val format: %s", x);
 	    }
 	    else {
-	      if(callback) (*callback)(mod, rtype, res_ttl, x, klen, (x+klen+1), (pairlen - klen - 1), settings);
+	      if(callback) (*callback)(mod, rtype, res_ttl, x, klen, (x+klen+1), (pairlen - klen - 1));
 	    }
 	    x += pairlen;
 	  }
@@ -237,15 +237,15 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  static int dnsSD(EVMod *mod, HSPDnsCB callback, HSPSFlowSettings *settings)
+  static int dnsSD(EVMod *mod, HSPDnsCB callback)
   {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     char request[HSP_MAX_DNS_LEN];
     char *domain_override = sp->DNSSD.domain ?: "";
     snprintf(request, HSP_MAX_DNS_LEN, "%s%s", SFLOW_DNS_SD, domain_override);
-    int num_servers = dnsSD_Request(mod, request, T_SRV, callback, settings);
-    dnsSD_Request(mod, request, T_TXT, callback, settings);
+    int num_servers = dnsSD_Request(mod, request, T_SRV, callback);
+    dnsSD_Request(mod, request, T_TXT, callback);
     // it's ok even if only the SRV request succeeded
     return num_servers; //  -1 on error
   }
@@ -255,7 +255,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void myDnsCB(EVMod *mod, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen, HSPSFlowSettings *st)
+  static void myDnsCB(EVMod *mod, uint16_t rtype, uint32_t ttl, u_char *key, int keyLen, u_char *val, int valLen)
   {
     HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     // latch the min ttl
@@ -293,7 +293,6 @@ extern "C" {
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     if(--mdata->countdown <= 0) {
       // SIGSEGV on Fedora 14 if HSP_RLIMIT_MEMLOCK is non-zero, because calloc returns NULL.
       // Maybe we need to repeat some of the setrlimit() calls here in the forked thread? Or
@@ -303,7 +302,7 @@ extern "C" {
       mdata->ttl = 0;
       // now make the requests
       EVEventTx(mod, mdata->configStartEvent, NULL, 0);
-      int num_servers = dnsSD(mod, myDnsCB, sp->sFlowSettings_dnsSD); // will send config line events
+      int num_servers = dnsSD(mod, myDnsCB); // will send config line events
       EVEventTx(mod, mdata->configEndEvent, &num_servers, sizeof(num_servers));
 
       // whatever happens we might still learn a TTL (e.g. from the TXT record query)
@@ -327,7 +326,7 @@ extern "C" {
     HSP_mod_DNSSD *mdata = (HSP_mod_DNSSD *)mod->data;
     mdata->startDelay = HSP_DEFAULT_DNSSD_STARTDELAY;
     mdata->retryDelay = HSP_DEFAULT_DNSSD_RETRYDELAY;
-
+    
     // make sure we don't all hammer the DNS server immediately on restart
     mdata->countdown = sfl_random(mdata->startDelay);
 
