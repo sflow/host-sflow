@@ -64,8 +64,8 @@ extern "C" {
     UTArray *sockets_run;
     UTArray *sockets_del;
     int select_mS;
-#define EVBUS_SELECT_MS_TICK 991
-#define EVBUS_SELECT_MS_DECI 91
+#define EVBUS_SELECT_MS_TICK 599
+#define EVBUS_SELECT_MS_DECI 59
     struct timespec now;
     struct timespec now_tick;
     struct timespec now_deci;
