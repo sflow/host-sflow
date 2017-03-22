@@ -6,6 +6,17 @@
 extern "C" {
 #endif
 
+  /*
+    Prerequisite:  turn on eAPI:
+    
+    management api http-commands
+    protocol unix-socket
+    no shutdown
+
+    as described here:
+    https://eos.arista.com/eapi-and-unix-domain-socket/
+  */
+
 #include "hsflowd.h"
 #include "cJSON.h"
 
@@ -370,21 +381,6 @@ Expecting something like:
     if(--mdata->countdown <= 0) {
       mdata->countdown = mdata->retryDelay;
       eapi(mod); // will send config line events
-
-
-      // TODO: change sp->sFlowSettings_dnsSD to something like sp->sFlowSettings_dynamic
-      // and make both mod_dnssd and mod_eapi share them (and make those modules mutally
-      // exclusive too!).  Right now mod_dnssd is always built and linked in.  Maybe it
-      // should be optional (requires changes to Makefile).  I think it might have been
-      // done this way to ensure backwards compatibility,  since dns-sd was always an
-      // inherent option in hsflowd v1.  Still,  compiling without dns-sd would remove
-      // the dependency on DNS resolving and could shrink the executable size.
-      // EVEventTx(mod, mdata->configStartEvent, NULL, 0);
-      // int num_servers = eapi(mod, sp->sFlowSettings_dnsSD); // will send config line events
-      // EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
-      // EVEventTx(mod, mdata->configEndEvent, &num_servers, sizeof(num_servers));
-
-      
     }
   }
 

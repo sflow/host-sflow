@@ -1480,20 +1480,25 @@ extern "C" {
 
     // a sucessful read of the config file is required
     if(HSPReadConfigFile(sp) == NO) {
-      myLog(LOG_ERR, "failed to read config file\n");
+      myLog(LOG_ERR, "failed to read config file");
+      exit(EXIT_FAILURE);
+    }
+
+    if(sp->eapi.eapi && sp->DNSSD.DNSSD) {
+      myLog(LOG_ERR, "cannot run eapi and dns-sd modules together");
       exit(EXIT_FAILURE);
     }
 
     // must be able to read interfaces. Minimal discovery this time.
     // Just enough to decide on an agent address.  No ethtool probing.
     if(readInterfaces(sp, NO, NULL, NULL, NULL, NULL, NULL) == 0) {
-      myLog(LOG_ERR, "failed to read interfaces\n");
+      myLog(LOG_ERR, "failed to read interfaces");
       exit(EXIT_FAILURE);
     }
 
     // must be able to choose an agent address
     if(selectAgentAddress(sp, NULL) == NO) {
-      myLog(LOG_ERR, "failed to select agent address\n");
+      myLog(LOG_ERR, "failed to select agent address");
       exit(EXIT_FAILURE);
     }
 
