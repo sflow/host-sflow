@@ -245,6 +245,7 @@ extern "C" {
   char *SFLAddress_print(SFLAddress *addr, char *buf, size_t len);
   int SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2);
   int SFLAddress_isLoopback(SFLAddress *addr);
+  int SFLAddress_isZero(SFLAddress *addr);
   int SFLAddress_isSelfAssigned(SFLAddress *addr);
   int SFLAddress_isLinkLocal(SFLAddress *addr);
   int SFLAddress_isUniqueLocal(SFLAddress *addr);

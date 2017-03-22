@@ -1287,6 +1287,8 @@ extern "C" {
 			     len);
   }
 
+  // TODO: replace "int" with "bool" where appropriate
+
   int SFLAddress_equal(SFLAddress *addr1, SFLAddress *addr2) {
     if(addr1 == addr2) return YES;
     if(addr1 ==NULL ||addr2 == NULL) return NO;
@@ -1312,6 +1314,19 @@ extern "C" {
       // for IPv4, it's 127.0.0.0/8
       char *a = (char *)&(addr->address.ip_v4.addr);
       return a[0] == 127;
+    }
+  }
+
+  int SFLAddress_isZero(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      uint32_t *x = (uint32_t *)addr->address.ip_v6.addr;
+      return (x[0] == 0 &&
+	      x[1] == 0 &&
+	      x[2] == 0 &&
+	      x[3] == 0);
+    }
+    else {
+      return (addr->address.ip_v4.addr == 0);
     }
   }
 
