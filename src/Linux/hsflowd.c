@@ -50,6 +50,9 @@ extern "C" {
     // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
     // bring us here where we read the list of collectors.
 
+    if(sp->sFlowSettings == NULL)
+      return;
+
     sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
 
     for(HSPCollector *coll = sp->sFlowSettings->collectors; coll; coll=coll->nxt) {
@@ -910,6 +913,7 @@ extern "C" {
   static void installSFlowSettings(HSP *sp, HSPSFlowSettings *settings)
   {
     char *settingsStr = sFlowSettingsString(sp, settings);
+    myDebug(3, "installSFlowSettings: <%s>", settingsStr);
     if(my_strequal(sp->sFlowSettings_str, settingsStr)) {
       // no change - don't increment the revision number
       // (which will mean that the file is not rewritten either)
@@ -917,6 +921,7 @@ extern "C" {
     }
     else {
       // new config
+      myDebug(3, "installSFlowSettings: detected new config");
       bool firstConfig = YES;
       if(sp->sFlowSettings_str) {
 	firstConfig = NO;
@@ -928,14 +933,6 @@ extern "C" {
       // not on the  platforms we expect to run on.
       sp->sFlowSettings = settings;
 
-      // agent address might have been overridden (e.g. by mod_eapi)
-      if(settings->agentIP.type) {
-	sp->agentIP = settings->agentIP;
-	SEMLOCK_DO(sp->sync_agent) {
-	  sfl_agent_set_address(sp->agent, &sp->agentIP);
-	}
-      }
-
       // announce the change
       if(firstConfig) {
 	// make sure certain things are in place before we proceed. This
@@ -945,6 +942,7 @@ extern "C" {
 	// now offer it to the modules
 	EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
       }
+      myDebug(3, "installSFlowSettings: announcing config change");
       EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_CHANGED, NULL, 0);
       // delay the config-done event until every thread has processed the
       // config change.  This is especially important the first time because
@@ -975,7 +973,8 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________  new config line-by-line  __________________
     -----------------___________________________------------------
-    These events passed in from DNS-SD module to submit new SRV and TXT record config.
+    These events passed in from DNS-SD module to submit new SRV and TXT record config,
+    or from EAPI module for tracking EOS sFlow config.
     The config could probably fit in one PIPE_BUF msg but it's safer to pass it in one
     name-value pair at a time to make sure we never hit that limit.  The sequence is
     HSPEVENT_CONFIG_START
@@ -1078,6 +1077,25 @@ extern "C" {
 
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     myDebug(1, "main: evt_config_changed()");
+
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->sFlowSettings
+       && sp->sFlowSettings != sp->sFlowSettings_file) {
+      // check for changes that we need to react to here:
+
+      // agent address might have been overridden (e.g. by mod_eapi)
+      if(sp->sFlowSettings->agentIP.type
+	 && !SFLAddress_equal(&sp->sFlowSettings->agentIP, &sp->agentIP)) {
+	myDebug(1, "evt_config_changed:  change sFlow agent address");
+	sp->agentIP = sp->sFlowSettings->agentIP;
+	if(sp->agent) {
+	  SEMLOCK_DO(sp->sync_agent) {
+	    sfl_agent_set_address(sp->agent, &sp->agentIP);
+	  }
+	}
+      }
+
+    }
   }
 
   /*_________________---------------------------__________________

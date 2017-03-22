@@ -1665,6 +1665,8 @@ extern "C" {
     if(parseNextTok(&varval, "=", YES, '"', YES, keyBuf, EV_MAX_EVT_DATALEN)
        && parseNextTok(&varval, "=", YES, '"', YES, valBuf, EV_MAX_EVT_DATALEN)) {
 
+      myDebug(3, "dynamic_config_line key=%s val=%s", keyBuf, valBuf);
+
       if(tokenMatch(keyBuf, HSPTOKEN_COLLECTOR)) {
 	int valLen = my_strlen(valBuf);
 	if(valLen > 3) {
@@ -1694,7 +1696,7 @@ extern "C" {
 	else if(!strncasecmp(keyBuf, "sampling.", 9)) {
 	  setApplicationSampling(st, keyBuf+9, strtol(valBuf, NULL, 0));
 	}
-	else if(!strcasecmp(keyBuf, "txtvers") == 0) {
+	else if(!strcasecmp(keyBuf, "txtvers")) {
 	}
 	else if(tokenMatch(keyBuf, HSPTOKEN_POLLING)) {
 	  st->pollingInterval = strtol(valBuf, NULL, 0);
