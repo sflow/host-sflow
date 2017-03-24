@@ -594,6 +594,20 @@ extern "C" {
     }
   }
 
+
+  /*_________________---------------------------__________________
+    _________________    evt_final              __________________
+    -----------------___________________________------------------
+    Graceful shutdown - turn OVS sFlow off
+  */
+
+  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
+    myDebug(1, "graceful shutdown: turning off OVS sFlow");
+    mdata->config.num_collectors = 0;
+    syncOVS(mod);
+  }
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -616,6 +630,7 @@ extern "C" {
     EVBus *pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_FINAL), evt_final);
   }
 
 #if defined(__cplusplus)
