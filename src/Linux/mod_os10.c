@@ -60,6 +60,9 @@ extern "C" {
     // the counters
     SFLHost_nio_counters ctrs;
     HSP_ethtool_counters et_ctrs;
+
+    // ports listed individually in config
+    UTHash *switchPorts;
   } HSP_mod_OS10;
 
   /*_________________---------------------------__________________
@@ -524,19 +527,30 @@ extern "C" {
 
   static bool markSwitchPort(EVMod *mod, SFLAdaptor *adaptor)  {
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSP_mod_OS10 *mdata = (HSP_mod_OS10 *)mod->data;
 
-    if(sp->os10.swp_regex_str == NULL) {
-      // pattern not specified in config, so compile the default
-      sp->os10.swp_regex_str = HSP_DEFAULT_SWITCHPORT_REGEX;
-      sp->os10.swp_regex = UTRegexCompile(HSP_DEFAULT_SWITCHPORT_REGEX);
-      assert(sp->os10.swp_regex);
-    }
-
-    // use pattern to mark the switch ports
     bool switchPort = NO;
-    if(regexec(sp->os10.swp_regex, adaptor->deviceName, 0, NULL, 0) == 0) {
-      switchPort = YES;
+
+    // list supplied in config takes precendence over regex pattern.
+    // This requires an exact (case-sensitive) match on the name.
+    if(mdata->switchPorts) {
+      HSPPort search = { .dev = adaptor->deviceName };
+      if(UTHashGet(mdata->switchPorts, &search))
+	switchPort = YES;
     }
+    else {
+      // fall back on regex
+      if(sp->os10.swp_regex_str == NULL) {
+	// pattern not specified in config, so compile the default
+	sp->os10.swp_regex_str = HSP_DEFAULT_SWITCHPORT_REGEX;
+	sp->os10.swp_regex = UTRegexCompile(HSP_DEFAULT_SWITCHPORT_REGEX);
+	assert(sp->os10.swp_regex);
+      }
+      // use pattern to mark the switch ports
+      if(regexec(sp->os10.swp_regex, adaptor->deviceName, 0, NULL, 0) == 0)
+	switchPort = YES;
+    }
+
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
     niostate->switchPort = switchPort;
     niostate->os10Port = switchPort;
@@ -701,7 +715,16 @@ extern "C" {
     if(sp->syncPollingInterval < HSP_OS10_MIN_POLLING_INTERVAL) {
       sp->syncPollingInterval = HSP_OS10_MIN_POLLING_INTERVAL;
     }
+
+    // ports may have been listed explicity in config file.  If so,
+    // define a hash lookup for them.
+    if(sp->os10.ports) {
+      mdata->switchPorts = UTHASH_NEW(HSPPort, dev, UTHASH_SKEY);
+      for(HSPPort *prt = sp->os10.ports; prt; prt = prt->nxt)
+	UTHashAdd(mdata->switchPorts, prt);
+    }
   }
+  
 
 #if defined(__cplusplus)
 } /* extern "C" */

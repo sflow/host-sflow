@@ -522,6 +522,8 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________   sFlowSettingsString     __________________
     -----------------___________________________------------------
+   Only print the config fields that can be overridden dynamically
+   (e.g. via DNS-SD)
   */
 
   char *sFlowSettingsString(HSP *sp, HSPSFlowSettings *settings)
