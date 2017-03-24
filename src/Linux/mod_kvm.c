@@ -543,11 +543,6 @@ extern "C" {
       myLog(LOG_ERR, "virInitialize() failed: %d\n", virErr);
       exit(EXIT_FAILURE);
     }
-    mdata->virConn = virConnectOpenReadOnly(NULL);
-    if(mdata->virConn == NULL) {
-      myLog(LOG_ERR, "virConnectOpenReadOnly() failed\n");
-      exit(EXIT_FAILURE);
-    }
 
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_KVM, vm.uuid, UTHASH_DFLT);
     mdata->pollActions = UTArrayNew(UTARRAY_DFLT);
