@@ -143,6 +143,11 @@ extern "C" {
     bool speed_set;
   } HSPPcap;
 
+  typedef struct _HSPPort {
+    struct _HSPPort *nxt;
+    char *dev;
+  } HSPPort;
+
   typedef struct _HSPCIDR {
     struct _HSPCIDR *nxt;
     SFLAddress ipAddr;
@@ -444,9 +449,11 @@ extern "C" {
     } ovs;
     struct {
       bool os10;
-      uint32_t port;
+      uint32_t port; // UDP port for hw samples
       char *swp_regex_str;
       regex_t *swp_regex;
+      HSPPort *ports; // alternative way to list switch ports
+      uint32_t numPorts;
     } os10;
     struct {
       bool nvml;

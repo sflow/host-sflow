@@ -65,7 +65,8 @@ extern "C" {
     HSPOBJ_OS10,
     HSPOBJ_DBUS,
     HSPOBJ_SYSTEMD,
-    HSPOBJ_EAPI
+    HSPOBJ_EAPI,
+    HSPOBJ_PORT
   } EnumHSPObject;
 
   static const char *HSPObjectNames[] = {
@@ -85,7 +86,8 @@ extern "C" {
     "nvml",
     "ovs",
     "os10",
-    "eapi"
+    "eapi",
+    "port"
   };
 
   static void copyApplicationSettings(HSPSFlowSettings *from, HSPSFlowSettings *to);
@@ -463,6 +465,13 @@ extern "C" {
     ADD_TO_LIST(sp->pcap.pcaps, col);
     sp->pcap.numPcaps++;
     return col;
+  }
+
+  static HSPPort *newOS10Port(HSP *sp) {
+    HSPPort *prt = (HSPPort *)my_calloc(sizeof(HSPPort));
+    ADD_TO_LIST(sp->os10.ports, prt);
+    sp->os10.numPorts++;
+    return prt;
   }
 
   /*_________________---------------------------__________________
@@ -1236,7 +1245,6 @@ extern "C" {
 	    sp->eapi.eapi = YES;
 	    level[++depth] = HSPOBJ_EAPI;
 	    break;
-
 	  case HSPTOKEN_SAMPLING:
 	  case HSPTOKEN_PACKETSAMPLINGRATE:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlowSettings_file->samplingRate, 0, 65535)) == NULL) return NO;
@@ -1550,6 +1558,26 @@ extern "C" {
 	    case HSPTOKEN_SWITCHPORT:
 	      if((tok = expectRegex(sp, tok, &sp->os10.swp_regex)) == NULL) return NO;
 	      sp->os10.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    case HSPTOKEN_PORT:
+	      if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	      newOS10Port(sp);
+	      level[++depth] = HSPOBJ_PORT;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_PORT:
+	  {
+	    HSPPort *prt = sp->os10.ports;
+	    switch(tok->stok) {
+	    case HSPTOKEN_DEV:
+	      if((tok = expectDevice(sp, tok, &prt->dev)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
