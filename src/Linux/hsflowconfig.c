@@ -1041,32 +1041,42 @@ extern "C" {
       // We already used this ranking to prioritize L3 addresses per adaptor (in the case where
       // there are more than one) so now we are applying the same ranking globally to pick
       // the best candidate to represent the whole agent:
-      EnumIPSelectionPriority ipPriority = IPSP_NONE;
-
+      
       SFLAdaptor *adaptor;
       UTHASH_WALK(sp->adaptorsByName, adaptor) {
 	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-	// take the highest priority one,  but if we have more than one with the same
-	// priority then choose the one with the lowest (non-zero) ifIndex number:
-	if(adaptorNIO->ipPriority > ipPriority
-	   || (adaptorNIO->ipPriority == ipPriority
-	       && adaptor->ifIndex
-	       && selectedAdaptor
-	       && (selectedAdaptor->ifIndex == 0
-		   || adaptor->ifIndex < selectedAdaptor->ifIndex))) {
-	  selectedAdaptor = adaptor;
-	  ipPriority = adaptorNIO->ipPriority;
+	// must have an IP
+	if(!SFLAddress_isZero(&adaptorNIO->ipAddr)) {
+	  if(selectedAdaptor == NULL) {
+	    selectedAdaptor = adaptor;
+	  }
+	  else {
+	    uint32_t ifi = selectedAdaptor->ifIndex;
+	    uint32_t pri = ADAPTOR_NIO(selectedAdaptor)->ipPriority;
+	    // take the highest priority one,  but if we have more than one with the same
+	    // priority then choose the one with the lowest (non-zero) ifIndex number:
+	    if((adaptorNIO->ipPriority > pri)
+	       || (adaptorNIO->ipPriority == pri
+		   && adaptor->ifIndex
+		   && (ifi == 0 || adaptor->ifIndex < ifi))) {
+	      selectedAdaptor = adaptor;
+	    }
+	  }
 	}
       }
-      if(selectedAdaptor) {
-	// crown the winner
-	ip = &(ADAPTOR_NIO(selectedAdaptor)->ipAddr);
-      }
     }
-
-    // keep the device name too
-    if(sp->agentDevice) my_free(sp->agentDevice);
-    sp->agentDevice = my_strdup(selectedAdaptor->deviceName);
+    
+    if(sp->agentDevice) {
+      my_free(sp->agentDevice);
+      sp->agentDevice = NULL;
+    }
+    
+    if(selectedAdaptor) {
+      // crown the winner
+      ip = &(ADAPTOR_NIO(selectedAdaptor)->ipAddr);
+      // keep the device name too
+      sp->agentDevice = my_strdup(selectedAdaptor->deviceName);
+    }
 
     // see if this represents a change
     bool changed = (SFLAddress_equal(ip, &sp->agentIP) == NO);
@@ -1075,7 +1085,7 @@ extern "C" {
     char ipbuf1[51];
     char ipbuf2[51];
     myDebug(1, "selectAgentAddress selected agentIP with highest priority: device=%s, address=%s, previous=%s, changed=%s",
-	    sp->agentDevice,
+	    sp->agentDevice ?: "<none>",
 	    SFLAddress_print(ip, ipbuf1, 50),
 	    SFLAddress_print(&sp->agentIP, ipbuf2, 50),
 	    changed ? "YES" : "NO");
@@ -1675,6 +1685,11 @@ extern "C" {
       sp->nflog.samplingRate = (uint32_t)(1.0 / sp->nflog.probability);
     }
 
+    if(depth != 0) {
+      // this cannot be a fatal error because we tolerated it before
+      myLog(LOG_ERR, "parse error in %s: expect closing '}'", sp->configFile);
+    }
+    
     return parseOK;
   }
 
