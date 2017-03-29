@@ -48,11 +48,6 @@ extern "C" {
 #include "sflow_api.h"
 #include "evbus.h"
 
-  // define these here because we use them to trigger a module load
-  // even when the module is not referenced in the config.
-#define HSP_CUMULUS_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
-#define HSP_OS10_SWITCHPORT_CONFIG_PROG "/opt/dell/os10/bin/cps_config_sflow"
-
   typedef struct _HSPNameVal {
     char *nv_name;
     int nv_found;

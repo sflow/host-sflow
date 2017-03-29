@@ -18,11 +18,8 @@ extern "C" {
 
 #define HSP_OS10_MIN_POLLING_INTERVAL 10
 
-// HSP_OS10_SWITCHPORT_CONFIG_PROG is defined in hsflowd.h
-// because it is used to auto-detect when we are on os10.
-
+#define HSP_OS10_SWITCHPORT_CONFIG_PROG "/opt/dell/os10/bin/cps_config_sflow"
 #define HSP_OS10_SWITCHPORT_SPEED_PROG "/opt/dell/os10/bin/os10-ethtool"
-
 #define HSP_OS10_SWITCHPORT_STATS_PROG_0 "/opt/dell/os10/bin/os10-show-stats"
 #define HSP_OS10_SWITCHPORT_STATS_PROG_1 "if_stat"
 

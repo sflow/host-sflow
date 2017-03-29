@@ -1449,35 +1449,48 @@ extern "C" {
     // some modules can be triggered to load even if they are not
     // explicitly in the config file - but do this before we read
     // the config so that overrides are possible.
-    if(UTFileExists(HSP_CUMULUS_SWITCHPORT_CONFIG_PROG)) {
-      myLog(LOG_INFO, "Detected Cumulus Linux");
-      sp->cumulus.cumulus = YES;
-      uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
-	| HSP_SAMPLEOPT_IF_POLLER
-	| HSP_SAMPLEOPT_ASIC
-	| HSP_SAMPLEOPT_DIRN_HOOK
-	| HSP_SAMPLEOPT_CUMULUS;
-      // Cumulus Linux 2.5 or earlier uses ULOG group 1
-      // So it should be compiled with:
-      // make deb FEATURES="CUMULUS ULOG"
-      sp->ulog.ulog = YES;
-      sp->ulog.group = 1;
-      sp->ulog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_ULOG;
-      // Cumulus Linux 3.0 or later uses NFLOG group 1
-      // So it should be compiled with:
-      // make deb FEATURES="CUMULUS NFLOG"
-      sp->nflog.nflog = YES;
-      sp->nflog.group = 1;
-      sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
-    }
+#ifdef HSP_LOAD_CUMULUS
+    myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG and SYSTEMD modules");
+    sp->cumulus.cumulus = YES;
+    sp->systemd.systemd = YES;
+    uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
+      | HSP_SAMPLEOPT_IF_POLLER
+      | HSP_SAMPLEOPT_ASIC
+      | HSP_SAMPLEOPT_DIRN_HOOK
+      | HSP_SAMPLEOPT_CUMULUS;
+    // Cumulus Linux 2.5 or earlier uses ULOG group 1
+    // So it should be compiled with:
+    // make deb FEATURES="CUMULUS ULOG"
+    sp->ulog.ulog = YES;
+    sp->ulog.group = 1;
+    sp->ulog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_ULOG;
+    // Cumulus Linux 3.0 or later uses NFLOG group 1
+    // So it should be compiled with:
+    // make deb FEATURES="CUMULUS NFLOG"
+    sp->nflog.nflog = YES;
+    sp->nflog.group = 1;
+    sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
+#endif /* HSP_LOAD_CUMULUS */
 
-    if(UTFileExists(HSP_OS10_SWITCHPORT_CONFIG_PROG)) {
-      // OS10 should be compiled with "make deb FEATURES="OS10 DBUS"
-      myLog(LOG_INFO, "Detected OS10");
-      sp->os10.os10 = YES;
-      sp->dbus.dbus = YES;
-    }
+#ifdef HSP_LOAD_OS10
+    // OS10 should be compiled with "make deb FEATURES="OS10 DBUS"
+    myLog(LOG_INFO, "autoload OS10 and DBUS modules");
+    sp->os10.os10 = YES;
+    sp->dbus.dbus = YES;
+#endif /* HSP_LOAD_OS10 */
 
+#ifdef HSP_LOAD_XEN
+    myLog(LOG_INFO, "autoload XEN and OVS modules");
+    sp->xen.xen = YES;
+    sp->ovs.ovs = YES;
+#endif /* HSP_LOAD_XEN */
+
+#ifdef HSP_LOAD_EAPI
+    myLog(LOG_INFO, "autoload EAPI and SYSTEMD modules");
+    sp->eapi.eapi = YES;
+    sp->systemd.systemd = YES;
+#endif /* HSP_LOAD_EAPI */
+     
     // a sucessful read of the config file is required
     if(HSPReadConfigFile(sp) == NO) {
       myLog(LOG_ERR, "failed to read config file");

@@ -10,6 +10,7 @@ extern "C" {
 
 #include "regex.h" // for switchport detection
 #define HSP_DEFAULT_SWITCHPORT_REGEX "^swp[0-9s]+$"
+#define HSP_CUMULUS_SWITCHPORT_CONFIG_PROG  "/usr/lib/cumulus/portsamp"
 
   typedef struct _HSP_mod_CUMULUS {
     EVBus *pollBus;

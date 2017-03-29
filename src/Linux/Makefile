@@ -2,6 +2,12 @@
 # http://sflow.net/license.html
 
 FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 DBUS SYSTEMD EAPI
+FEATURES_CUMULUS= CUMULUS NFLOG SYSTEMD
+FEATURES_EAPI= EAPI SYSTEMD
+FEATURES_OS10= OS10 DBUS
+FEATURES_XEN= XEN OVS
+FEATURES_HOST= NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD
+
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
 CONFDIR    ?= /etc
@@ -13,8 +19,24 @@ $(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
 
 XTGTS= $(FEATURES)
 ifeq ("$(strip $(FEATURES))","ALL")
-  XTGTS= $(FEATURES_ALL)
+  XTGTS += $(FEATURES_ALL)
 endif
+ifeq ("$(strip $(FEATURES))","CUMULUS")
+  XTGTS += $(FEATURES_CUMULUS)
+endif
+ifeq ("$(strip $(FEATURES))","EAPI")
+  XTGTS += $(FEATURES_EAPI)
+endif
+ifeq ("$(strip $(FEATURES))","OS10")
+  XTGTS += $(FEATURES_OS10)
+endif
+ifeq ("$(strip $(FEATURES))","XEN")
+  XTGTS += $(FEATURES_XEN)
+endif
+ifeq ("$(strip $(FEATURES))","HOST")
+  XTGTS += $(FEATURES_HOST)
+endif
+
 $(info $$XTGTS is [$(XTGTS)])
 
 # INSTROOT may be passed in
@@ -69,10 +91,10 @@ LIBS_JSON=
 CFLAGS_DNSSD=
 LIBS_DNSSD=-lresolv
 
-CFLAGS_XEN=
+CFLAGS_XEN= -DHSP_LOAD_XEN
 LIBS_XEN= -lxenstore -lxenctrl
 
-CFLAGS_KVM= -DHSP_KVM -I/usr/include/libvirt -I/usr/include/libxml2
+CFLAGS_KVM= -I/usr/include/libvirt -I/usr/include/libxml2
 LIBS_KVM= -lvirt -lxml2
 
 CFLAGS_DOCKER=
@@ -93,13 +115,13 @@ LIBS_TCP=
 CFLAGS_NVML= -I/usr/include/nvidia/gdk
 LIBS_NVML= -lnvidia-ml
 
-CFLAGS_CUMULUS=
+CFLAGS_CUMULUS= -DHSP_LOAD_CUMULUS
 LIBS_CUMULUS=
 
 CFLAGS_OVS=
 LIBS_OVS=
 
-CFLAGS_OS10=
+CFLAGS_OS10= -DHSP_LOAD_OS10
 LIBS_OS10=
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
@@ -108,7 +130,7 @@ LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
 LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
 
-CFLAGS_EAPI=
+CFLAGS_EAPI= -DHSP_LOAD_EAPI
 LIBS_EAPI=
 
 # common CFLAGS and LIBS	
@@ -195,6 +217,9 @@ BUILDTGTS=hsflowd \
 all: $(BUILDTGTS)
 
 #########  feature dependencies #########
+
+ALL:
+HOST:
 
 XEN: mod_xen.so OVS
 
