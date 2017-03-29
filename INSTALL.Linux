@@ -3,7 +3,7 @@ http://sflow.net/license.html
 
 To compile and install, try this:
 
-% make FEATURES="ALL"
+% make FEATURES="HOST"
 % sudo make install
 % sudo make schedule
 
@@ -35,7 +35,7 @@ and check the syslog for errors.
 
 To run in the debugger, first recompile like this:
 % make clean
-% make FEATURES="ALL" OPT=-g
+% make FEATURES="HOST" OPT=-g
 % sudo make install
 
 and then run with the "-dd" command line option to
@@ -55,8 +55,7 @@ To build a Debian package, try:
 
 % make deb FEATURES="..."
 
-And to use Docker to compile natively on other platforms (if required)
-you can try:
+And to use Docker to compile for other platforms, try:
 
 % sudo ./docker_build_on <platform>
 

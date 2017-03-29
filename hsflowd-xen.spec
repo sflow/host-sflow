@@ -20,7 +20,7 @@ the Open VSwitch sFlow configuration.
 %setup -n %{name}-%{version}-%{release}
 
 %build
-make FEATURES="XEN OVS DBUS"
+make FEATURES="XEN"
 
 %install
 rm -rf %{buildroot}

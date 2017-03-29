@@ -4,7 +4,7 @@ http://sflow.net/license.html
 Compile/install
 ===============
 
-root> make FEATURES="DOCKER PCAP"
+root> make FEATURES="DOCKER PCAP OVS"
 root> make install
 
 Edit /etc/hsflowd.conf for configuration, then:
@@ -40,8 +40,8 @@ Packaging
 =========
 To build an rpm, try:
 
-% make rpm FEATURES="DOCKER PCAP"
+% make rpm FEATURES="DOCKER PCAP OVS"
 
 To build a Debian package, try:
 
-% make deb FEATURES="DOCKER PCAP"
+% make deb FEATURES="DOCKER PCAP OVS"

@@ -6,7 +6,11 @@ Red Hat KVM Hypervisor
 
 To compile for a Red Hat KVM hypervisor:
 
-% make rpm FEATURES="KVM"
+% make rpm FEATURES="KVM PCAP OVS"
+
+Dependencies include:
+ KVM:  libvirt-dev(el) libxml2-dev(el)
+ PCAP: libpcap-dev(el)
 
 The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
 (where <ARCH> is i386 or x86_64 or ...)
@@ -14,8 +18,23 @@ The rpm will be written to /usr/src/redhat/RPMS/<ARCH>/
 Copy this rpm to the hypervisor, and install it,
 then start the daemon with:
 
-root> /etc/init.d/hsflowd start
+% sudo service hsflowd start
 
 You can use virsh(1) and virt-manager(1) to see the data
 that hsflowd can see via libvirt.
 
+Traffic Monitoring
+==================
+If the linux-bridge is being used for networking then you
+can add a line like this to /etc/hsflowd.conf:
+
+pcap { dev = virbr0 }
+
+so that the traffic to and from the VMs is monitored
+with sFlow.  Alternatively, if Open VSwitch is running,
+adding:
+
+ovs { }
+
+will propagate your collector and sampling-rate information
+to the switch via ovs-vsctl(1).
