@@ -482,6 +482,8 @@ extern "C" {
       bool systemd;
       uint32_t refreshVMListSecs;
       bool dropPriv;
+      char *cgroup_procs;
+      char *cgroup_acct;
     } systemd;
     struct {
       bool eapi;

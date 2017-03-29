@@ -41,6 +41,9 @@ extern "C" {
 
 #define HSP_DBUS_MONITOR 0
 
+#define HSP_SYSTEMD_CGROUP_PROCS "/sys/fs/cgroup/systemd/%s/cgroup.procs"
+#define HSP_SYSTEMD_CGROUP_ACCT "/sys/fs/cgroup/%s%s/%s"
+  
   typedef void (*HSPDBusHandler)(EVMod *mod, DBusMessage *dbm, void *magic);
 
   typedef struct _HSPDBusRequest {
@@ -100,6 +103,8 @@ extern "C" {
     bool subscribed;
 #endif
     uint32_t page_size;
+    char *cgroup_procs;
+    char *cgroup_acct;
   } HSP_mod_SYSTEMD;
 
   /*_________________---------------------------__________________
@@ -407,9 +412,10 @@ extern "C" {
   */
 
   static bool readCgroupCounters(EVMod *mod, char *acct, char *cgroup, char *fname, int nvals, HSPNameVal *nameVals, bool multi) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     int found = 0;
     char statsFileName[HSP_SYSTEMD_MAX_FNAME_LEN+1];
-    snprintf(statsFileName, HSP_SYSTEMD_MAX_FNAME_LEN, "/sys/fs/cgroup/%s%s/%s", acct, cgroup, fname);
+    snprintf(statsFileName, HSP_SYSTEMD_MAX_FNAME_LEN, mdata->cgroup_acct, acct, cgroup, fname);
     FILE *statsFile = fopen(statsFileName, "r");
     if(statsFile == NULL) {
       myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
@@ -778,7 +784,7 @@ extern "C" {
 	  process->marked = YES;
 
 	char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
-	sprintf(path, "/sys/fs/cgroup/systemd/%s/cgroup.procs", val.str);
+	sprintf(path, mdata->cgroup_procs, val.str);
 	FILE *pidsFile = fopen(path, "r");
 	if(pidsFile == NULL) {
 	  myDebug(2, "cannot open %s : %s", path, strerror(errno));
@@ -1154,6 +1160,10 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_SYSTEMD);
 
+    // path formats for cgroup info - can be overridden in config
+    mdata->cgroup_procs = sp->systemd.cgroup_procs ?: HSP_SYSTEMD_CGROUP_PROCS;
+    mdata->cgroup_acct = sp->systemd.cgroup_acct ?: HSP_SYSTEMD_CGROUP_ACCT;
+    
     // get page size for scaling memory pages->bytes
 #if defined(PAGESIZE)
     mdata->page_size = PAGESIZE;

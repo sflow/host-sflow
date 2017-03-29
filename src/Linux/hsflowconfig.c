@@ -415,6 +415,20 @@ extern "C" {
     return NULL;
   }
 
+  // expectFormat
+
+  static HSPToken *expectFormat(HSP *sp, HSPToken *tok, char **p_format)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && t->str) {
+      *p_format = my_strdup(t->str);
+      return t;
+    }
+    parseError(sp, tok, "expected format", "");
+    return NULL;
+  }
+
   // expectRegex
 
   static HSPToken *expectRegex(HSP *sp, HSPToken *tok, regex_t **pattern)
@@ -1629,6 +1643,12 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_DROP_PRIV:
 	      if((tok = expectONOFF(sp, tok, &sp->systemd.dropPriv)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_CGROUP_PROCS:
+	      if((tok = expectFormat(sp, tok, &sp->systemd.cgroup_procs)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_CGROUP_ACCT:
+	      if((tok = expectFormat(sp, tok, &sp->systemd.cgroup_acct)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
