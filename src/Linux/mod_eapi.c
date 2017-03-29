@@ -221,6 +221,7 @@ Expecting something like:
        && line[0] == '{') {
       myDebug(2, "EAPI got content when expecting length");
       req->state = HSPEAPIREQ_CONTENT;
+      req->contentLength = UTSTRBUF_LEN(sock->ioline);
     }
 
     switch(req->state) {
