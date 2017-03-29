@@ -1664,8 +1664,10 @@ extern "C" {
       parseOK = NO;
     }
     else {
-      if(sp->sFlowSettings_file->numCollectors == 0 && sp->DNSSD.DNSSD == NO) {
-	myLog(LOG_ERR, "parse error in %s : DNS-SD is off and no collectors are defined", sp->configFile);
+      if(sp->sFlowSettings_file->numCollectors == 0
+	 && sp->DNSSD.DNSSD == NO
+	 && sp->eapi.eapi == NO) {
+	myLog(LOG_ERR, "parse error in %s : no collectors are defined", sp->configFile);
 	parseOK = NO;
       }
 

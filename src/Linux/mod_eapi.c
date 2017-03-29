@@ -214,7 +214,15 @@ Expecting something like:
   static void processEapiResponse(EVMod *mod, EVSocket *sock, HSPEapiRequest *req) {
     HSP_mod_Eapi *mdata = (HSP_mod_Eapi *)mod->data;
     char *line = UTSTRBUF_STR(sock->ioline);
-    myDebug(2, "readEapiAPI got answer: <%s> state=%d", line, req->state);
+    myDebug(2, "EAPI got answer: <%s> state=%d", line, req->state);
+
+    // handle missing length
+    if(req->state == HSPEAPIREQ_LENGTH
+       && line[0] == '{') {
+      myDebug(2, "EAPI got content when expecting length");
+      req->state = HSPEAPIREQ_CONTENT;
+    }
+
     switch(req->state) {
       
     case HSPEAPIREQ_HEADERS:
