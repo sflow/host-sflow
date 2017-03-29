@@ -3,7 +3,7 @@ echo "build_hsflowd on platform:  $1"
 
 git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
-&& make deb FEATURES="NFLOG PCAP TCP DOCKER KVM OVS SYSTEMD DBUS"
+&& make deb FEATURES="HOST"
 
 for deb in `ls *.deb`; do cp "$deb" "/packages/${deb/hsflowd/hsflowd-$1}"; done
 echo ""
