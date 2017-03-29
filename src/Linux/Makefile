@@ -18,20 +18,25 @@ DBUSDIR    ?= /etc/dbus-1/system.d
 $(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
 
 XTGTS= $(FEATURES)
+CFLAGS_LOAD=
 ifeq ("$(strip $(FEATURES))","ALL")
   XTGTS += $(FEATURES_ALL)
 endif
 ifeq ("$(strip $(FEATURES))","CUMULUS")
   XTGTS += $(FEATURES_CUMULUS)
+  CFLAGS_LOAD += -DHSP_LOAD_CUMULUS
 endif
 ifeq ("$(strip $(FEATURES))","EOS")
   XTGTS += $(FEATURES_EOS)
+  CFLAGS_LOAD += -DHSP_LOAD_EOS
 endif
 ifeq ("$(strip $(FEATURES))","OS10")
   XTGTS += $(FEATURES_OS10)
+  CFLAGS_LOAD += -DHSP_LOAD_OS10
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
+  CFLAGS_LOAD += -DHSP_LOAD_XEN
 endif
 ifeq ("$(strip $(FEATURES))","HOST")
   XTGTS += $(FEATURES_HOST)
@@ -91,7 +96,7 @@ LIBS_JSON=
 CFLAGS_DNSSD=
 LIBS_DNSSD=-lresolv
 
-CFLAGS_XEN= -DHSP_LOAD_XEN
+CFLAGS_XEN=
 LIBS_XEN= -lxenstore -lxenctrl
 
 CFLAGS_KVM= -I/usr/include/libvirt -I/usr/include/libxml2
@@ -115,13 +120,13 @@ LIBS_TCP=
 CFLAGS_NVML= -I/usr/include/nvidia/gdk
 LIBS_NVML= -lnvidia-ml
 
-CFLAGS_CUMULUS= -DHSP_LOAD_CUMULUS
+CFLAGS_CUMULUS=
 LIBS_CUMULUS=
 
 CFLAGS_OVS=
 LIBS_OVS=
 
-CFLAGS_OS10= -DHSP_LOAD_OS10
+CFLAGS_OS10=
 LIBS_OS10=
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
@@ -130,11 +135,11 @@ LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
 LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
 
-CFLAGS_EAPI= -DHSP_LOAD_EAPI
+CFLAGS_EAPI=
 LIBS_EAPI=
 
 # common CFLAGS and LIBS	
-CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
+CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += -DUTHEAP
 CFLAGS += -DHSP_OPTICAL_STATS
 CFLAGS += -DHSP_MOD_DIR=$(MODDIR)

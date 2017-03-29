@@ -1485,11 +1485,11 @@ extern "C" {
     sp->ovs.ovs = YES;
 #endif /* HSP_LOAD_XEN */
 
-#ifdef HSP_LOAD_EAPI
+#ifdef HSP_LOAD_EOS
     myLog(LOG_INFO, "autoload EAPI and SYSTEMD modules");
     sp->eapi.eapi = YES;
     sp->systemd.systemd = YES;
-#endif /* HSP_LOAD_EAPI */
+#endif /* HSP_LOAD_EOS */
      
     // a sucessful read of the config file is required
     if(HSPReadConfigFile(sp) == NO) {
