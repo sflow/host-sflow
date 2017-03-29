@@ -1486,9 +1486,8 @@ extern "C" {
 #endif /* HSP_LOAD_XEN */
 
 #ifdef HSP_LOAD_EOS
-    myLog(LOG_INFO, "autoload EAPI and SYSTEMD modules");
+    myLog(LOG_INFO, "autoload EAPI module");
     sp->eapi.eapi = YES;
-    sp->systemd.systemd = YES;
 #endif /* HSP_LOAD_EOS */
      
     // a sucessful read of the config file is required
