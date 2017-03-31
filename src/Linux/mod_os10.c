@@ -6,9 +6,10 @@
 extern "C" {
 #endif
 
+#include <systemd/sd-daemon.h>
 #include "hsflowd.h"
-
 #include "regex.h"
+
 #define HSP_DEFAULT_SWITCHPORT_REGEX "^e[0-9]+-[0-9]+-[0-9]+$"
 #define HSP_DEFAULT_OS10_PORT 20001
 
@@ -555,6 +556,19 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    evt_poll_config_first  __________________
+    -----------------___________________________------------------
+  */
+  
+  static void evt_poll_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    // only get here if we have a valid config,  so we can announce
+    // that we are ready to go. The man page says to ignore the
+    // return value,  but we'll log in anyway when debugging...
+    int ans = sd_notify(0, "READY=1");
+    myDebug(1, "os10.evt_poll_config_first(): sd_notify() returned %d", ans);
+  }
+
+  /*_________________---------------------------__________________
     _________________    evt_config_changed     __________________
     -----------------___________________________------------------
   */
@@ -696,6 +710,7 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_SPEED), evt_poll_speed_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_UPDATE_NIO), evt_poll_update_nio);
 
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_poll_config_first);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_poll_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_pkt_config_changed);
 

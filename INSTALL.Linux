@@ -26,6 +26,7 @@ the compilation will work:
  XEN: libxenctrl libxenstore xenctrl.h xenstore.h
  SYSTEMD: dbus-dev(el) openssl-dev(el)
  DBUS: dbus-dev(el)
+ OS10: libsystemd-daemon-dev
 
 To start the daemon, run:
 
