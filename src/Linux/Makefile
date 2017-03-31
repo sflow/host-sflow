@@ -127,7 +127,7 @@ CFLAGS_OVS=
 LIBS_OVS=
 
 CFLAGS_OS10=
-LIBS_OS10=
+LIBS_OS10= -lsystemd-daemon
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
