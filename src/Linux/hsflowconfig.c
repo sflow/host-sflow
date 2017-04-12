@@ -1178,6 +1178,9 @@ extern "C" {
 	  case HSPTOKEN_REFRESH_ADAPTORS:
 	    if((tok = expectInteger32(sp, tok, &sp->refreshAdaptorListSecs, 60, 3600)) == NULL) return NO;
 	    break;
+	  case HSPTOKEN_CHECK_ADAPTORS:
+	    if((tok = expectInteger32(sp, tok, &sp->checkAdaptorListSecs, 1, 3600)) == NULL) return NO;
+	    break;
 	  case HSPTOKEN_REFRESH_VMS:
 	    if((tok = expectInteger32(sp, tok, &sp->refreshVMListSecs, 60, 3600)) == NULL) return NO;
 	    break;

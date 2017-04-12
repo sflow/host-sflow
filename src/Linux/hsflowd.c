@@ -549,9 +549,17 @@ extern "C" {
       sp->next_nio_poll = clk + sp->nio_polling_secs;
     }
 
+    // check for interface changes (relatively frequently)
+    // and request a full refresh if we find anything
+    if(clk >= sp->next_checkAdaptorList) {
+      sp->next_checkAdaptorList = clk + sp->checkAdaptorListSecs;
+      if(detectInterfaceChange(sp))
+	sp->refreshAdaptorList = YES;
+    }
+
     // refresh the interface list periodically or on request
     if(sp->refreshAdaptorList
-       || clk > sp->next_refreshAdaptorList) {
+       || clk >= sp->next_refreshAdaptorList) {
       sp->refreshAdaptorList = NO;
       sp->next_refreshAdaptorList = clk + sp->refreshAdaptorListSecs;
       uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
@@ -735,6 +743,7 @@ extern "C" {
     sp->daemonize = YES;
     sp->dropPriv = YES;
     sp->refreshAdaptorListSecs = HSP_REFRESH_ADAPTORS;
+    sp->checkAdaptorListSecs = HSP_CHECK_ADAPTORS;
     sp->refreshVMListSecs = HSP_REFRESH_VMS;
     sp->forgetVMSecs = HSP_FORGET_VMS;
     sp->modulesPath = STRINGIFY_DEF(HSP_MOD_DIR);

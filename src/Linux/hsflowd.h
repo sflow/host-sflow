@@ -83,6 +83,7 @@ extern "C" {
 #define HSP_REFRESH_VMS 60
 #define HSP_FORGET_VMS 180
 #define HSP_REFRESH_ADAPTORS 180
+#define HSP_CHECK_ADAPTORS 10
 
 // set to 1 to allow agent.cidr setting in DNSSD TXT record.
 // This is currently considered out-of-scope for the DNSSD config,
@@ -535,6 +536,9 @@ extern "C" {
     uint32_t refreshAdaptorListSecs; // poll interval
     time_t next_refreshAdaptorList; // deadline
 
+    uint32_t checkAdaptorListSecs; // poll interval
+    time_t next_checkAdaptorList; // deadline
+
     bool refreshVMList; // request flag
     uint32_t refreshVMListSecs; // poll interval (default)
     uint32_t forgetVMSecs; // age-out idle VM or container (default)
@@ -587,6 +591,7 @@ extern "C" {
   void dynamic_config_line(HSPSFlowSettings *st, char *line);
 
   // read functions
+  bool detectInterfaceChange(HSP *sp);
   int readInterfaces(HSP *sp, bool full_discovery, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
   const char *devTypeName(EnumHSPDevType devType);
   int readCpuCounters(SFLHost_cpu_counters *cpu);

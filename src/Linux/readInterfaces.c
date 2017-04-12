@@ -544,6 +544,60 @@ extern "C" {
     return changed;
   }
 
+
+/*________________---------------------------__________________
+  ________________   detectInterfaceChange   __________________
+  ----------------___________________________------------------
+  Check for any change to the set of interface.  This can be used
+  to trigger a more extensive re-read of the interface state.
+  Currently it won't detect changes such as a new interface
+  being added,  and it won't detect changes in MAC/IP/VLAN.  We
+  could add checks for all those things but the risk is that we
+  end up doing too much work.  By keeping this light we can call
+  it more frequently,  however listening for interface changes via
+  netlink will probably work better for this.
+*/
+
+  bool detectInterfaceChange(HSP *sp)
+  {
+    int fd = socket (PF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+      fprintf (stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
+      return 0;
+    }
+    SFLAdaptor *changed = NULL;
+    SFLAdaptor *ad;
+    UTHASH_WALK(sp->adaptorsByName, ad) {
+      myDebug(3, "detectInterfaceChange: testing %s", ad->deviceName);
+      struct ifreq ifr;
+      memset(&ifr, 0, sizeof(ifr));
+      strncpy(ifr.ifr_name, ad->deviceName, sizeof(ifr.ifr_name));
+      if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
+	myDebug(1, "device %s Get SIOCGIFFLAGS failed : %s",
+		ad->deviceName,
+		strerror(errno));
+	changed = ad;
+	break;
+      }
+      int up = (ifr.ifr_flags & IFF_UP) ? YES : NO;
+      int loopback = (ifr.ifr_flags & IFF_LOOPBACK) ? YES : NO;
+      int bond_master = (ifr.ifr_flags & IFF_MASTER) ? YES : NO;
+      int bond_slave = (ifr.ifr_flags & IFF_SLAVE) ? YES : NO;
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(ad);
+      if(nio->up != up
+	 || nio->loopback != loopback
+	 || nio->bond_master != bond_master
+	 || nio->bond_slave != bond_slave) {
+	changed = ad;
+	break;
+      }
+    }
+    close (fd);
+    if(changed)
+      myDebug(1, "detectInterfaceChange: found change in %s", changed->deviceName);
+    return (changed != NULL);
+  }
+
 /*________________---------------------------__________________
   ________________      readInterfaces       __________________
   ----------------___________________________------------------
@@ -680,7 +734,7 @@ extern "C" {
 	 || adaptorNIO->bond_master != bond_master
 	 || adaptorNIO->bond_slave != bond_slave)
 	ad_changed++;
-      
+
       adaptorNIO->loopback = loopback;
       adaptorNIO->bond_master = bond_master;
       adaptorNIO->bond_slave = bond_slave;
@@ -780,7 +834,7 @@ extern "C" {
       my_free(ad);
     UTHashFree(oldLocalIP6);
   }
-  
+
   return sp->adaptorsByName->entries;
 }
 
