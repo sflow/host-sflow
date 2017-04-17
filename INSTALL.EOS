@@ -2,10 +2,10 @@
 ! In this example we are installing hsflowd version 2.0.9-1 and sending sFlow to 10.0.0.160:
 
 enable
- copy https://github.com/sflow/host-sflow/releases/download/v2.0.9-1/hsflowd-eos-2.0.9-1.x86_64.rpm extension:
+ copy https://github.com/sflow/host-sflow/releases/download/v2.0.9-1/hsflowd-eos-2.0.9-1.i686.rpm extension:
 
  ! install and start rpm
- extension hsflowd-eos-2.0.9-1.x86_64.rpm 
+ extension hsflowd-eos-2.0.9-1.i686.rpm 
  bash sudo systemctl start hsflowd.service
 
  ! install on reboot too
