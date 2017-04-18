@@ -53,6 +53,7 @@ extern "C" {
       uint32_t operStatus;
       uint32_t adminStatus;
       bool duplex;
+      ETCTRFlags et_found;
     } poll;
 
     // the counters
@@ -372,10 +373,9 @@ extern "C" {
 	  memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
 	  memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
 	  nio->up = mdata->poll.enabled;
+	  nio->et_found = mdata->poll.et_found;
 	  mdata->et_ctrs.adminStatus = mdata->poll.adminStatus;
-	  nio->et_found |= HSP_ETCTR_ADMIN;
 	  mdata->et_ctrs.operStatus = mdata->poll.operStatus;
-	  nio->et_found |= HSP_ETCTR_OPER;
 	  adaptor->ifDirection = mdata->poll.duplex ? 1 : 2;
 	  // setting the speed may trigger a sampling-rate change
 	  setAdaptorSpeed(sp, adaptor, mdata->poll.speed);
@@ -437,8 +437,14 @@ extern "C" {
       else if(my_strequal(var, "if-index")) mdata->poll.ifIndex = val64;
       else if(my_strequal(var, "mtu")) 	mdata->poll.mtu = val64;
       else if(my_strequal(var, "enabled")) mdata->poll.enabled = (bool)val64;
-      else if(my_strequal(var, "admin-status")) mdata->poll.adminStatus = val64;
-      else if(my_strequal(var, "oper-status")) 	mdata->poll.operStatus = val64;
+      else if(my_strequal(var, "admin-status")) {
+	mdata->poll.adminStatus = val64;
+	mdata->poll.et_found |= HSP_ETCTR_ADMIN;
+      }
+      else if(my_strequal(var, "oper-status")) {
+	mdata->poll.operStatus = val64;
+	mdata->poll.et_found |= HSP_ETCTR_OPER;
+      }
       else if(my_strequal(var, "name")) mdata->poll.adaptor = adaptorByName(sp, val);
     }
     else {
