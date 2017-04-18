@@ -6,8 +6,8 @@ enable
 
  ! install and start rpm
  extension hsflowd-eos-2.0.9-1.i686.rpm 
- bash sudo systemctl start hsflowd.service
-
+ bash sudo service hsflowd start
+ 
  ! install on reboot too
  copy installed-extensions boot-extensions
 
@@ -21,7 +21,7 @@ enable
   ! trigger start on reboot
   event-handler hsflowd
     trigger on-boot
-    action bash sudo systemctl start hsflowd
+    action bash sudo service hsflowd start
     delay 60
     asynchronous
     exit
