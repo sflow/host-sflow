@@ -123,8 +123,10 @@ extern "C" {
       myDebug(1, "adaptorAddOrReplace: replacing adaptor [%s] with [%s]",
 	      adaptorStr(replaced, buf1, 256),
 	      adaptorStr(ad, buf2, 256));
-      // TODO: should we delete the replaced one?
-      // if(replaced != ad) adaptorFree(replaced);
+      // This can happen quite commonly when two interfaces share the
+      // same MAC addresses and the adaptorsByMAC hash table detects
+      // the clash,  so don't free the one that was replaced.  It's
+      // probably still referenced in adaptorsByIndex and adaptorsByName.
     }
   }
 
@@ -1105,6 +1107,20 @@ extern "C" {
       }
 
     }
+  }
+
+  /*_________________---------------------------__________________
+    _________________   synthesizeBondCounters  __________________
+    -----------------___________________________------------------
+  */
+  
+  void setSynthesizeBondCounters(EVMod *mod, bool val) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    myDebug(1, "setSynthesizeBondCounters =  %s", val ? "YES" : "NO");
+    sp->synthesizeBondCounters = val;
+    // assune this happens at startup,  otherwise we should probably
+    // reset sequence numbers on all bond pollers here to signal a
+    // discontinuity.
   }
 
   /*_________________---------------------------__________________

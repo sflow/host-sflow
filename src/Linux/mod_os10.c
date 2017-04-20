@@ -711,6 +711,9 @@ extern "C" {
 
     retainRootRequest(mod, "Needed to call out to OS10 scripts (PYTHONPATH)");
 
+    // ask that bond counters be accumuated from their components
+    setSythesizeBondCounters(mod, YES);
+    
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_READ), evt_poll_intf_read);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_poll_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_SPEED), evt_poll_speed_changed);

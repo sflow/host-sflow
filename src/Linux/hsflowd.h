@@ -531,6 +531,9 @@ extern "C" {
 #define HSP_NIO_POLLING_SECS_32BIT 3
     time_t next_nio_poll;
 
+    // setting to allow bond counters to be sythesized from their components
+    bool synthesizeBondCounters;
+
     // refresh cycles
     bool refreshAdaptorList; // request flag
     uint32_t refreshAdaptorListSecs; // poll interval
@@ -603,13 +606,16 @@ extern "C" {
   void readBondState(HSP *sp);
   void syncPolling(HSP *sp);
   void syncBondPolling(HSP *sp);
-  int accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs);
+  bool accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs);
   void updateNioCounters(HSP *sp, SFLAdaptor *adaptor);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int configSwitchPorts(HSP *sp);
   int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp);
   void flushCounters(EVMod *mod);
 
+  // sum bond counters from their components
+  void setSynthesizeBondCounters(EVMod *mod, bool val);
+  
   // capabilities
   void retainRootRequest(EVMod *mod, char *reason);
 
