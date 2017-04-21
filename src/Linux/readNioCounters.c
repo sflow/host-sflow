@@ -131,12 +131,21 @@ extern "C" {
 	      // counters if the slave is going to (because it was
 	      // marked as a switchPort):
 	      if(slave_nio->switchPort) {
-		bond_nio->switchPort = YES;
+		if(!bond_nio->switchPort) {
+		  myDebug(1, "updateBondCounters: marking bond %s as switchPort",
+			  bond->deviceName);
+		  bond_nio->switchPort = YES;
+		}
 	      }
-	      // and vice-versa
-	      if(bond_nio->switchPort) {
-		slave_nio->switchPort = YES;
-	      }
+	      // but we no longer allow the inverse to happen.  If a slave is not
+	      // already marked as a switchPort then do not start treating it as one.
+	      // This is not necessarily an error.  A regular server may enable traffic
+	      // monitoring on a bond interface without intending to get separate
+	      // counters for the components too.  Log is as a warning when debugging.
+	      if(bond_nio->switchPort && !slave_nio->switchPort)
+		myDebug(1, "updateBondCounters: warning: bond %s slave %s not marked as switchPort",
+			bond->deviceName,
+			currentSlave->deviceName);
 	    }
 	  }
 
@@ -240,6 +249,35 @@ extern "C" {
       if(ADAPTOR_NIO(adaptor)->bond_master)
 	updateBondCounters(sp, adaptor);
     }
+  }
+
+
+  /*_________________---------------------------__________________
+    _________________   synthesizeBondMetaData  __________________
+    -----------------___________________________------------------
+  */
+
+  static void synthesizeBondMetaData(HSP *sp, SFLAdaptor *bond) {
+    uint64_t ifSpeed = 0;
+    bool up = NO;
+    uint32_t ifDirection = 0;
+    SFLAdaptor *search_ad;
+    UTHASH_WALK(sp->adaptorsByIndex, search_ad) {
+      if(search_ad != bond) {
+	HSPAdaptorNIO *search_nio = ADAPTOR_NIO(search_ad);
+	if(search_nio && search_nio->lacp.attachedAggID == bond->ifIndex) {
+	  // sum ifSpeed
+	  ifSpeed += search_ad->ifSpeed;
+	  // bond is up if any slave is up
+	  if(search_nio->up) up = YES;
+	  // capture ifDirection -- assume the same on all components
+	  if(search_ad->ifDirection) ifDirection = search_ad->ifDirection;
+	}
+      }
+    }
+    ADAPTOR_NIO(bond)->up = up;
+    bond->ifSpeed = ifSpeed;
+    bond->ifDirection = ifDirection;
   }
 
   /*_________________---------------------------__________________
@@ -642,7 +680,10 @@ extern "C" {
     if(nio->bond_master
        && sp->synthesizeBondCounters) {
       // If we are synthezizing bond counters from their components, then we
-      // ignore anything that we are offered for bond counters here.
+      // ignore anything that we are offered for bond counters here,  but we
+      // still have to iterate here to make sure that other properties such as
+      // ifSpeed are rolled up correctly.
+      synthesizeBondMetaData(sp, adaptor);
       return NO;
     }
     
