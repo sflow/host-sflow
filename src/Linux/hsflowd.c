@@ -89,10 +89,10 @@ extern "C" {
 			    (struct sockaddr *)&coll->sendSocketAddr,
 			    socklen);
 	if(result == -1 && errno != EINTR) {
-	  myLog(LOG_ERR, "socket sendto error: %s", strerror(errno));
+	  EVLog(60, LOG_ERR, "socket sendto error: %s", strerror(errno));
 	}
 	else if(result == 0) {
-	  myLog(LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
+	  EVLog(60, LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
 	}
       }
     }

@@ -128,15 +128,21 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  void myLog(int syslogType, char *fmt, ...)
+  void myLogv(int syslogType, char *fmt, va_list args)
   {
-    va_list args;
-    va_start(args, fmt);
     if(debugLevel) {
       vfprintf(stderr, fmt, args);
       fprintf(stderr, "\n");
     }
-    else vsyslog(syslogType, fmt, args);
+    else
+      vsyslog(syslogType, fmt, args);
+  }
+
+  void myLog(int syslogType, char *fmt, ...)
+  {
+    va_list args;
+    va_start(args, fmt);
+    myLogv(syslogType, fmt, args);
   }
 
   void setDebug(int level) {

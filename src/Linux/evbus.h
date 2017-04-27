@@ -54,6 +54,12 @@ extern "C" {
 
   struct _EVSocket; // fwd decl
 
+  typedef struct _EVLogMsg {
+    char *msg;
+    uint32_t logTime;
+    uint32_t count;
+  } EVLogMsg;
+
   typedef struct _EVBus {
     EVRoot *root;
     char *name;
@@ -71,6 +77,7 @@ extern "C" {
     struct timespec now_deci;
     pthread_t *thread;
     int childCount;
+    UTHash *msgs;
     bool socketsChanged:1;
     bool running:1;
     bool stop:1;
@@ -169,6 +176,7 @@ extern "C" {
   EVBus *EVCurrentBus(void);
   void EVRun(EVBus *mainBus);
   void EVStop(EVMod *mod);
+  void EVLog(uint32_t rl_secs, int syslogType, char *fmt, ...);
 
 #if defined(__cplusplus)
 } /* extern "C" */

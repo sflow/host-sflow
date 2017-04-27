@@ -58,6 +58,7 @@ extern "C" {
 	bus->root = mod->root;
 	bus->name = my_strdup(name);
 	UTHashAdd(mod->root->buses, bus);
+	bus->msgs = UTHASH_NEW(EVLogMsg, msg, UTHASH_SKEY);
 	bus->events = UTHASH_NEW(EVEvent, name, UTHASH_SKEY);
 	bus->eventList = UTArrayNew(UTARRAY_DFLT);
 	bus->sockets = UTArrayNew(UTARRAY_PACK);
@@ -667,6 +668,29 @@ extern "C" {
     // sent final/end events as they stop.
     UTHASH_WALK(mod->root->buses, bus) {
       EVBusStop(bus);
+    }
+  }
+
+  void EVLog(uint32_t rl_secs, int syslogType, char *fmt, ...) {
+    EVBus *bus = EVCurrentBus();
+    EVLogMsg search = { .msg = fmt };
+    EVLogMsg *msg = UTHashGet(bus->msgs, &search);
+    if(msg == NULL) {
+      msg = (EVLogMsg *)my_calloc(sizeof(EVLogMsg));
+      msg->msg = my_strdup(fmt);
+      UTHashAdd(bus->msgs, msg);
+    }
+    if((bus->now.tv_sec - msg->logTime) > rl_secs) {
+      va_list args;
+      va_start(args, fmt);
+      myLogv(syslogType, fmt, args);
+      msg->logTime = bus->now.tv_sec;
+      if(msg->count > 1)
+	myLog(syslogType, "(msg repeated %u times in %u secs)", msg->count, rl_secs);
+      msg->count = 1;
+    }
+    else {
+      msg->count++;
     }
   }
 

@@ -338,7 +338,6 @@ extern "C" {
 #define HSPEVENT_INTFS_CHANGED "intfs_changed"   // some interface(s) changed
 #define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
 
-
   typedef struct _HSPPendingSample {
     SFL_FLOW_SAMPLE_TYPE *fs;
     SFLSampler *sampler;

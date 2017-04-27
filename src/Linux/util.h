@@ -67,6 +67,7 @@ extern "C" {
   int printSpeed(const uint64_t speed, char *buf, int bufLen);
 
   // logger
+  void myLogv(int syslogType, char *fmt, va_list args);
   void myLog(int syslogType, char *fmt, ...);
   void setDebug(int level);
   int getDebug(void);
