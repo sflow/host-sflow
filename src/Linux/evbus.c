@@ -680,7 +680,7 @@ extern "C" {
       msg->msg = my_strdup(fmt);
       UTHashAdd(bus->msgs, msg);
     }
-    if((bus->now.tv_sec - msg->logTime) > rl_secs) {
+    if((bus->now.tv_sec - msg->logTime) >= rl_secs) {
       va_list args;
       va_start(args, fmt);
       myLogv(syslogType, fmt, args);
