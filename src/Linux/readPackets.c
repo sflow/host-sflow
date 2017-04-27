@@ -71,6 +71,15 @@ extern "C" {
 	  ifStatus = 0;
 	  if((adaptorNIO->et_last.adminStatus & 1)) ifStatus |= SFLSTATUS_ADMIN_UP;
 	  if((adaptorNIO->et_last.operStatus & 1)) ifStatus |= SFLSTATUS_OPER_UP;
+	  if(debug(1)) {
+	    if(adaptorNIO->bond_master) {
+	      myDebug(1, "bond %s (ifSpeed=%"PRIu64" dirn=%u) ifStatus set to %u",
+		      adaptor->deviceName,
+		      adaptor->ifSpeed,
+		      adaptor->ifDirection,
+		      ifStatus);
+	    }
+	  }
 	}
 
 	// generic interface counters

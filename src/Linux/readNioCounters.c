@@ -278,6 +278,11 @@ extern "C" {
     ADAPTOR_NIO(bond)->up = up;
     bond->ifSpeed = ifSpeed;
     bond->ifDirection = ifDirection;
+    myDebug(1, "synthesizeBondMetaData: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+	    bond->deviceName,
+	    bond->ifSpeed,
+	    bond->ifDirection,
+	    up ? "UP" : "DOWN");
   }
 
   /*_________________---------------------------__________________
