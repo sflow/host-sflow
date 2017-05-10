@@ -262,10 +262,25 @@ extern "C" {
     bool up = NO;
     uint32_t ifDirection = 0;
     SFLAdaptor *search_ad;
+
+    myDebug(1, "synthesizeBondMetaData: BEFORE: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+	    bond->deviceName,
+	    bond->ifSpeed,
+	    bond->ifDirection,
+	    up ? "UP" : "DOWN");
+
     UTHASH_WALK(sp->adaptorsByIndex, search_ad) {
       if(search_ad != bond) {
 	HSPAdaptorNIO *search_nio = ADAPTOR_NIO(search_ad);
 	if(search_nio && search_nio->lacp.attachedAggID == bond->ifIndex) {
+
+	  myDebug(1, "synthesizeBondMetaData: bond %s component %s (ifSpeed=%"PRIu64" dirn=%u up=%s)",
+		  bond->deviceName,
+		  search_ad->deviceName,
+		  search_ad->ifSpeed,
+		  search_ad->ifDirection,
+		  search_nio->up ? "UP":"DOWN");
+
 	  // sum ifSpeed
 	  ifSpeed += search_ad->ifSpeed;
 	  // bond is up if any slave is up
@@ -275,10 +290,12 @@ extern "C" {
 	}
       }
     }
+
     ADAPTOR_NIO(bond)->up = up;
     bond->ifSpeed = ifSpeed;
     bond->ifDirection = ifDirection;
-    myDebug(1, "synthesizeBondMetaData: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+
+    myDebug(1, "synthesizeBondMetaData: AFTER: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
 	    bond->deviceName,
 	    bond->ifSpeed,
 	    bond->ifDirection,
