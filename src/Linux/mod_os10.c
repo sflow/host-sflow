@@ -382,10 +382,10 @@ extern "C" {
 	  // check that we already have the right MAC and ifIndex
 	  checkByMac(mod, adaptor, &mdata->poll.mac);
 	  checkByIndex(mod, adaptor, mdata->poll.ifIndex);
-	  // clear poll structure for next interface phase
-	  memset(&mdata->poll, 0, sizeof(mdata->poll));
 	}
       }
+      // clear poll structure for next interface phase
+      memset(&mdata->poll, 0, sizeof(mdata->poll));
     }
   }
 
