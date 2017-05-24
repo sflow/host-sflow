@@ -509,6 +509,8 @@ extern "C" {
     char os_release[SFL_MAX_OSRELEASE_CHARS+1];
     uint32_t machine_type;
     char uuid[16];
+    char system_uuid[16];
+    char machine_id[16];
 
     // interfaces and MACs
     UTHash *adaptorsByName; // global namespace only

@@ -442,6 +442,10 @@ extern "C" {
     return hash_fnv1a(str, my_strlen(str));
   }
 
+  uint32_t my_binhash(const char *bytes, const uint32_t len) {
+    return hash_fnv1a(bytes, len);
+  }
+
   /*_________________---------------------------__________________
     _________________     setStr                __________________
     -----------------___________________________------------------
@@ -994,6 +998,12 @@ extern "C" {
     return hash_fnv1a(uuid, 16);
   }
 
+  bool isZeroUUID(char *uuid) {
+    for(int ii = 0; ii < 16; ii++)
+      if(uuid[ii]) return NO;
+    return YES;
+  }
+
   /*_________________---------------------------__________________
     _________________     printSpeed            __________________
     -----------------___________________________------------------
@@ -1091,7 +1101,7 @@ extern "C" {
       // exec program
       char *env[] = { NULL };
       if(execve(cmd[0], cmd, env) == -1) {
-	myLog(LOG_ERR, "execve() failed : errno=%d (%s)", errno, strerror(errno));
+	myLog(LOG_ERR, "execve(%s,...) failed : errno=%d (%s)", cmd[0], errno, strerror(errno));
 	exit(EXIT_FAILURE);
       }
     }

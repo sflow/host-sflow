@@ -758,7 +758,7 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-f CONFIGFile]\n", command);
+    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile]\n", command);
     fprintf(stderr,"\n\
              -d:  do not daemonize, and log to stdout/stderr (repeat for more debug details)\n\
              -v:  print version number and exit\n\
@@ -783,7 +783,7 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dDvPp:f:o:u:?hc:")) != -1) {
+    while ((in = getopt(argc, argv, "dDvPp:f:o:u:m:?hc:")) != -1) {
       switch(in) {
       case 'v':
 	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
@@ -803,6 +803,12 @@ extern "C" {
       case 'u':
 	if(parseUUID(optarg, sp->uuid) == NO) {
 	  fprintf(stderr, "bad UUID format: %s\n", optarg);
+	  instructions(*argv);
+	}
+	break;
+      case 'm':
+	if(parseUUID(optarg, sp->machine_id) == NO) {
+	  fprintf(stderr, "bad UUID (machine-id) format: %s\n", optarg);
 	  instructions(*argv);
 	}
 	break;
@@ -1308,6 +1314,80 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     readSystemUUID        __________________
+    -----------------___________________________------------------
+  */
+
+#define HSP_DMIDECODE_CMD "/usr/sbin/dmidecode"
+#define HSP_DMIDECODE_LINELEN 1024
+
+  static int readSystemUUIDLine(void *magic, char *line) {
+    HSP *sp = (HSP *)magic;
+    char *p = line;
+    char *sep = " \t=:";
+    char buf[HSP_DMIDECODE_LINELEN];
+    char *tag = parseNextTok(&p, sep, NO, 0, YES, buf, HSP_DMIDECODE_LINELEN);
+    if(my_strequal(tag, "UUID")) {
+      char *uuid = parseNextTok(&p, sep, NO, 0, YES, buf, HSP_DMIDECODE_LINELEN);
+      if(parseUUID(uuid, sp->system_uuid)) {
+	myDebug(1, "readSystemUUID: <%s>", uuid);
+	return NO; // got it - stop reading
+      }
+    }
+    return YES; // keep reading
+  }
+
+  static int readSystemUUID(HSP *sp) {
+    UTStringArray *cmd = strArrayNew();
+    strArrayAdd(cmd, HSP_DMIDECODE_CMD);
+    strArrayAdd(cmd,  NULL);
+    char lineBuf[HSP_DMIDECODE_LINELEN];
+    int status=-1;
+    myExec(sp, strArray(cmd), readSystemUUIDLine, lineBuf, HSP_DMIDECODE_LINELEN, &status);
+    strArrayFree(cmd);
+    return status;
+  }
+
+
+  /*_________________---------------------------__________________
+    _________________    chooseUUID             __________________
+    -----------------___________________________------------------
+  */
+  static void chooseUUID(HSP *sp) {
+    // select a UUID to use: preference is for:
+    // (1) UUID specified on command line by -u <uuid>
+    // (2) UUID found via readSystemUUID()
+    // (3) UUID derived from machine id
+    if(!isZeroUUID(sp->uuid)) {
+      myDebug(1, "Using UUID passed on command line");
+      return;
+    }
+
+    if(!isZeroUUID(sp->system_uuid)) {
+      memcpy(sp->uuid, sp->system_uuid, 16);
+      myDebug(1, "Using UUID read from BIOS (dmidecode)");
+      return;
+    }
+
+    // Ideally we would generate a type-5 UUID (rfc 4122)
+    // with the machine_id as the namespace UUID,  like this:
+    // uuidgen_type5(sp->machine_id, "hsflowd");
+    // but don't want to add dependency on libcrypto
+    // here just to cover an unlikely fallback position,
+    // so just make a type-5 UUID using the hash
+    // function we already have...
+    uint32_t mid_hash1 = my_binhash(sp->machine_id, 8);
+    uint32_t mid_hash2 = my_binhash(sp->machine_id+8, 8);
+    uint32_t *quads = (uint32_t *)sp->uuid;
+    quads[0] = quads[2] = mid_hash1;
+    quads[1] = quads[3] = mid_hash2;
+    sp->uuid[6] &= 0x0F;
+    sp->uuid[6] |= 0x50;
+    sp->uuid[8] &= 0x3F;
+    sp->uuid[8] |= 0x80;
+  }
+  
+  /*_________________---------------------------__________________
     _________________         main              __________________
     -----------------___________________________------------------
   */
@@ -1345,6 +1425,14 @@ extern "C" {
 
     // read the command line
     processCommandLine(sp, argc, argv);
+
+    // try to get the UUID from the BIOS because it is usually the most persistent,
+    // and because hypervisors seem to set it up with the UUID that they know the VM by.
+    // Used to do this as part of the startup script,  but moved it here so it would
+    // work even when invoking hsflowd manually (without specifying -u <uuid>).  This
+    // also helps to simplify the systemd unit file and avoids the need to add some
+    // other script to the package.
+    readSystemUUID(sp);
 
     // don't run if we think another one is already running
     if(UTFileExists(sp->pidFile)) {
@@ -1546,6 +1634,9 @@ extern "C" {
     if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
     else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
     sfl_random_init(seed);
+
+    // Resolve which UUID we are going to use to represent this host
+    chooseUUID(sp);
 
     // initialize the faster polling of NIO counters
     // to avoid undetected 32-bit wraps
