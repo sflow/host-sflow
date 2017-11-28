@@ -63,6 +63,7 @@ extern "C" {
     HSPOBJ_NVML,
     HSPOBJ_OVS,
     HSPOBJ_OS10,
+    HSPOBJ_OPX,
     HSPOBJ_DBUS,
     HSPOBJ_SYSTEMD,
     HSPOBJ_EAPI,
@@ -86,6 +87,7 @@ extern "C" {
     "nvml",
     "ovs",
     "os10",
+    "opx",
     "eapi",
     "port"
   };
@@ -485,6 +487,13 @@ extern "C" {
     HSPPort *prt = (HSPPort *)my_calloc(sizeof(HSPPort));
     ADD_TO_LIST(sp->os10.ports, prt);
     sp->os10.numPorts++;
+    return prt;
+  }
+
+  static HSPPort *newOPXPort(HSP *sp) {
+    HSPPort *prt = (HSPPort *)my_calloc(sizeof(HSPPort));
+    ADD_TO_LIST(sp->opx.ports, prt);
+    sp->opx.numPorts++;
     return prt;
   }
 
@@ -1259,6 +1268,11 @@ extern "C" {
 	    sp->os10.os10 = YES;
 	    level[++depth] = HSPOBJ_OS10;
 	    break;
+	  case HSPTOKEN_OPX:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->opx.opx = YES;
+	    level[++depth] = HSPOBJ_OPX;
+	    break;
 	  case HSPTOKEN_DBUS:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->dbus.dbus = YES;
@@ -1601,9 +1615,42 @@ extern "C" {
 	  }
 	  break;
 
+	case HSPOBJ_OPX:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_UDPPORT:
+	      if((tok = expectInteger32(sp, tok, &sp->opx.port,0,65535)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SWITCHPORT:
+	      if((tok = expectRegex(sp, tok, &sp->opx.swp_regex)) == NULL) return NO;
+	      sp->opx.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    case HSPTOKEN_PORT:
+	      if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	      newOPXPort(sp);
+	      level[++depth] = HSPOBJ_PORT;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
 	case HSPOBJ_PORT:
 	  {
-	    HSPPort *prt = sp->os10.ports;
+	    HSPPort *prt = NULL;
+	    if(depth) {
+	      if (level[depth-1] == HSPOBJ_OPX)
+		prt = sp->opx.ports;
+	      if (level[depth-1] == HSPOBJ_OS10)
+		prt = sp->os10.ports;
+	    }
+	    if(prt == NULL) {
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	    }
 	    switch(tok->stok) {
 	    case HSPTOKEN_DEV:
 	      if((tok = expectDevice(sp, tok, &prt->dev)) == NULL) return NO;

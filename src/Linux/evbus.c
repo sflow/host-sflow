@@ -607,9 +607,8 @@ extern "C" {
       while(close(outPipe[1]) == -1 && errno == EINTR);
       while(close(errPipe[1]) == -1 && errno == EINTR);
       // and exec
-      char *env[] = { NULL };
-      if(execve(cmd[0], cmd, env) == -1) {
-	myLog(LOG_ERR, "execve() failed : errno=%d (%s)", errno, strerror(errno));
+      if(execv(cmd[0], cmd) == -1) {
+	myLog(LOG_ERR, "execv() failed : errno=%d (%s)", errno, strerror(errno));
 	exit(EXIT_FAILURE);
       }
     }

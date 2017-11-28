@@ -315,7 +315,8 @@ extern "C" {
     // host TCP/IP counters
     SFLCounters_sample_element ipElem = { 0 }, icmpElem = { 0 }, tcpElem = { 0 }, udpElem = { 0 };
     if(!sp->cumulus.cumulus
-       && !sp->os10.os10) {
+       && !sp->os10.os10
+       && !sp->opx.opx) {
       ipElem.tag = SFLCOUNTERS_HOST_IP;
       icmpElem.tag = SFLCOUNTERS_HOST_ICMP;
       tcpElem.tag = SFLCOUNTERS_HOST_TCP;
@@ -1592,6 +1593,13 @@ extern "C" {
     sp->dbus.dbus = YES;
 #endif /* HSP_LOAD_OS10 */
 
+#ifdef HSP_LOAD_OPX
+    // OPX should be compiled with "make deb FEATURES="OPX DBUS"
+    myLog(LOG_INFO, "autoload OPX and DBUS modules");
+    sp->opx.opx = YES;
+    sp->dbus.dbus = YES;
+#endif /* HSP_LOAD_OPX */
+
 #ifdef HSP_LOAD_XEN
     myLog(LOG_INFO, "autoload XEN and OVS modules");
     sp->xen.xen = YES;
@@ -1705,6 +1713,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_cumulus", sp->modulesPath);
     if(sp->os10.os10)
       EVLoadModule(sp->rootModule, "mod_os10", sp->modulesPath);
+    if(sp->opx.opx)
+      EVLoadModule(sp->rootModule, "mod_opx", sp->modulesPath);
     if(sp->dbus.dbus)
       EVLoadModule(sp->rootModule, "mod_dbus", sp->modulesPath);
     if(sp->systemd.systemd)

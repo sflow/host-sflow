@@ -1094,14 +1094,10 @@ extern "C" {
       while(close(pfd[1]) == -1 && errno == EINTR); // clean up
       // By merging stdout and stderr we make it easier to read the data back
       // but it does mean the caller has to be able to tell the difference between
-      // the expected lines of stdout and an error message.
-      // (One option is to collect all the output and then check
-      // the exit status before processing it,  but if this gets awkward it may
-      // be better to come back and do this more carefully.)
-      // exec program
-      char *env[] = { NULL };
-      if(execve(cmd[0], cmd, env) == -1) {
-	myLog(LOG_ERR, "execve(%s,...) failed : errno=%d (%s)", cmd[0], errno, strerror(errno));
+      // the expected lines of stdout and an error message. See EVBusExec() for a
+      // more thorough treatment.
+      if(execv(cmd[0], cmd) == -1) {
+	myLog(LOG_ERR, "execv(%s,...) failed : errno=%d (%s)", cmd[0], errno, strerror(errno));
 	exit(EXIT_FAILURE);
       }
     }

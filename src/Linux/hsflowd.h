@@ -255,6 +255,7 @@ extern "C" {
     bool bond_slave:1;
     bool switchPort:1;
     bool os10Port:1;
+    bool opxPort:1;
     bool vm_or_container:1;
     bool modinfo_tested:1;
     bool ethtool_GDRVINFO:1;
@@ -450,6 +451,14 @@ extern "C" {
       HSPPort *ports; // alternative way to list switch ports
       uint32_t numPorts;
     } os10;
+    struct {
+      bool opx;
+      uint32_t port; // UDP port for hw samples
+      char *swp_regex_str;
+      regex_t *swp_regex;
+      HSPPort *ports; // alternative way to list switch ports
+      uint32_t numPorts;
+    } opx;
     struct {
       bool nvml;
     } nvml;
@@ -655,6 +664,7 @@ extern "C" {
 #define HSP_SAMPLEOPT_EGRESS      0x0800
 #define HSP_SAMPLEOPT_DIRN_HOOK   0x1000
 #define HSP_SAMPLEOPT_ASIC        0x2000
+#define HSP_SAMPLEOPT_OPX         0x4000
 
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len);

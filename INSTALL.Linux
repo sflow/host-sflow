@@ -15,9 +15,8 @@ Edit /etc/hsflowd.conf for configuration.  The options are
 described here:
 http://sflow.net/host-sflow-linux-config.php
 
-Module dependencies var from platform to platform, but
-the following packages usually have to be installed before
-the compilation will work:
+Module dependencies vary by platform, but the following packages
+will typically be required for compilation:
 
  NFLOG:  libnfnetlink-dev(el)
  PCAP:  libpcap-dev(el)
@@ -27,6 +26,7 @@ the compilation will work:
  SYSTEMD: dbus-dev(el) openssl-dev(el)
  DBUS: dbus-dev(el)
  OS10: libsystemd-daemon-dev
+ OPX: libsystemd-daemon-dev
 
 To start the daemon, run:
 
