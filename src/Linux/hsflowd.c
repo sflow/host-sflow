@@ -42,8 +42,6 @@ extern "C" {
   static void agentCB_sendPkt(void *magic, SFLAgent *agent, SFLReceiver *receiver, u_char *pkt, uint32_t pktLen)
   {
     HSP *sp = (HSP *)magic;
-    size_t socklen = 0;
-    int fd = 0;
 
     // note that we are relying on any new settings being installed atomically from the DNS-SD
     // thread (it's just a pointer move,  so it should be atomic).  Otherwise we would want to
@@ -56,38 +54,13 @@ extern "C" {
     sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
 
     for(HSPCollector *coll = sp->sFlowSettings->collectors; coll; coll=coll->nxt) {
-
-      switch(coll->ipAddr.type) {
-      case SFLADDRESSTYPE_UNDEFINED:
-	// skip over it if the forward lookup failed
-	break;
-      case SFLADDRESSTYPE_IP_V4:
-	{
-	  struct sockaddr_in *sa = (struct sockaddr_in *)&(coll->sendSocketAddr);
-	  socklen = sizeof(struct sockaddr_in);
-	  sa->sin_family = AF_INET;
-	  sa->sin_port = htons(coll->udpPort);
-	  fd = sp->socket4;
-	}
-	break;
-      case SFLADDRESSTYPE_IP_V6:
-	{
-	  struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&(coll->sendSocketAddr);
-	  socklen = sizeof(struct sockaddr_in6);
-	  sa6->sin6_family = AF_INET6;
-	  sa6->sin6_port = htons(coll->udpPort);
-	  fd = sp->socket6;
-	}
-	break;
-      }
-
-      if(socklen && fd > 0) {
-	int result = sendto(fd,
+      if(coll->socklen && coll->socket > 0) {
+	int result = sendto(coll->socket,
 			    pkt,
 			    pktLen,
 			    0,
 			    (struct sockaddr *)&coll->sendSocketAddr,
-			    socklen);
+			    coll->socklen);
 	if(result == -1 && errno != EINTR) {
 	  EVLog(60, LOG_ERR, "socket sendto error: %s", strerror(errno));
 	}
@@ -675,31 +648,10 @@ extern "C" {
   {
     myDebug(1,"creating sfl agent");
 
-    // open the sockets if not open already - one for v4 and another for v6
-    if(sp->socket4 <= 0) {
-      if((sp->socket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-	myLog(LOG_ERR, "IPv4 send socket open failed : %s", strerror(errno));
-      }
-      else {
-        // increase tx buffer size
-        uint32_t sndbuf = HSP_SFLOW_SND_BUF;
-        if(setsockopt(sp->socket4, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
-          myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v4): %s", HSP_SFLOW_SND_BUF, strerror(errno));
-        }
-      }
-    }
-    if(sp->socket6 <= 0) {
-      if((sp->socket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-	myLog(LOG_ERR, "IPv6 send socket open failed : %s", strerror(errno));
-      }
-      else {
-        // increase tx buffer size
-        uint32_t sndbuf = HSP_SFLOW_SND_BUF;
-        if(setsockopt(sp->socket6, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
-          myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v6): %s", HSP_SFLOW_SND_BUF, strerror(errno));
-        }
-      }
-    }
+    // Used to open collector sockets here, but now that each
+    // collector object has his own socket we delay that until
+    // the point where the settings are about to go into effect
+    // (installSFlowSettings()).
 
     SEMLOCK_DO(sp->sync_agent) {
       struct timespec ts;
@@ -921,6 +873,135 @@ extern "C" {
     sfl_poller_set_sFlowCpReceiver(sp->poller, HSP_SFLOW_RECEIVER_INDEX);
   }
 
+
+  /*_________________---------------------------__________________
+    _________________   openCollectorSockets    __________________
+    -----------------___________________________------------------
+  */
+
+#include <linux/version.h>
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0) || (__GLIBC__ <= 2 && __GLIBC_MINOR__ < 14))
+#ifndef CLONE_NEWNET
+#define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
+#endif
+
+#define MY_SETNS(fd, nstype) syscall(__NR_setns, fd, nstype)
+#else
+#define MY_SETNS(fd, nstype) setns(fd, nstype)
+#endif
+
+#define HSP_MAX_NETNS_PATH 256
+
+  static void *openCollectorSocket(void *magic) {
+    HSPCollector *coll = (HSPCollector *)magic;
+
+    if(coll->namespace) {
+      // switch namespace now
+      // (1) open /var/run/netns/<namespace>
+      char topath[HSP_MAX_NETNS_PATH];
+      snprintf(topath, HSP_MAX_NETNS_PATH, "/var/run/netns/%s", coll->namespace);
+      int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
+      if(nsfd < 0) {
+	myLog(LOG_ERR, "cannot open %s : %s", topath, strerror(errno));
+	exit(EXIT_FAILURE); // consider making this non-fatal
+      }
+      // (2) call setns
+      if(MY_SETNS(nsfd, CLONE_NEWNET) < 0) {
+	myLog(LOG_ERR, "seting network namespace failed: %s", strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      // (3) call unshare
+      if(unshare(CLONE_NEWNS) < 0) {
+	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
+	exit(EXIT_FAILURE);
+      }
+      // still here? celebrate...
+      myDebug(1, "thread sucessfully switched network namespace to %s", coll->namespace);
+
+      // tested this using the following steps:
+      // create two namespaces:
+      //  % ip netns add red
+      //  % ip netns add blue
+      // connect them with a veth pair:
+      //  % ip link add vethred type veth peer name vethblue
+      //  % ip link set vethred netns red
+      //  % ip link set vethblue netns blue
+      // and give each end an IP:
+      //  % ip netns exec red ifconfig vethred 172.16.100.1/24 up
+      //  % ip netns exec blue ifconfig vethblue 172.16.100.2/24 up
+      // test connectivity:
+      //  % ip netns exec blue ping 172.16.100.1
+      //  % ip netns exec red  ping 172.16.100.2
+      // now tell hsflowd to send to the blue IP via the red namespace:
+      //   collector { ip=172.16.100.2 udpport=7777 namespace=red }
+      // and listen for output on the blue side:
+      //  % ip netns exec blue sflowtool -p 7777
+    }
+
+    switch(coll->ipAddr.type) {
+    case SFLADDRESSTYPE_UNDEFINED:
+      // skip over it if the forward lookup failed
+      break;
+    case SFLADDRESSTYPE_IP_V4:
+      {
+	coll->socklen = sizeof(struct sockaddr_in);
+	struct sockaddr_in *sa = (struct sockaddr_in *)&(coll->sendSocketAddr);
+	sa->sin_family = AF_INET;
+	sa->sin_port = htons(coll->udpPort);
+	if((coll->socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+	  myLog(LOG_ERR, "IPv4 send socket open failed : %s", strerror(errno));
+	}
+      }
+      break;
+    case SFLADDRESSTYPE_IP_V6:
+      {
+	coll->socklen = sizeof(struct sockaddr_in6);
+	struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&(coll->sendSocketAddr);
+	sa6->sin6_family = AF_INET6;
+	sa6->sin6_port = htons(coll->udpPort);
+	if((coll->socket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+	  myLog(LOG_ERR, "IPv6 send socket open failed : %s", strerror(errno));
+	}
+      }
+      break;
+    }
+    if(coll->socket > 0) {
+      // increase tx buffer size
+      uint32_t sndbuf = HSP_SFLOW_SND_BUF;
+      if(setsockopt(coll->socket, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf)) < 0) {
+	myLog(LOG_ERR, "setsockopt(SO_SNDBUF=%d) failed(v4): %s", HSP_SFLOW_SND_BUF, strerror(errno));
+      }
+    }
+    return NULL;
+  }
+
+  static void openCollectorSockets(HSPSFlowSettings *settings) {
+    // open the collector sockets if not open already
+    for(HSPCollector *coll = settings->collectors; coll; coll=coll->nxt) {
+      if(coll->socket <= 0) {
+	if(coll->namespace) {
+	  // fork a new thread that can switch to the namespace before opening the socket
+	  pthread_attr_t attr;
+	  pthread_attr_init(&attr);
+	  pthread_attr_setstacksize(&attr, EV_BUS_STACKSIZE);
+	  pthread_t *thread = my_calloc(sizeof(pthread_t));
+	  int err = pthread_create(thread, &attr, openCollectorSocket, coll);
+	  if(err) {
+	    myLog(LOG_ERR, "openCollectorSockets(): pthread_create() failed: %s\n", strerror(err));
+	    abort();
+	  }
+	  else {
+	    pthread_join(*thread, NULL);
+	  }
+	}
+	else {
+	  // open in default namespace
+	  openCollectorSocket(coll);
+	}
+      }
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
     -----------------___________________________------------------
@@ -947,6 +1028,11 @@ extern "C" {
       }
       sp->sFlowSettings_str = settingsStr;
       sp->revisionNo++;
+      if(settings) {
+	// open collector sockets before this goes live
+	// (old collector sockets will be closed as they are freed)
+	openCollectorSockets(settings);
+      }
       // atomic pointer-switch.  No need for lock.  At least
       // not on the  platforms we expect to run on.
       sp->sFlowSettings = settings;
@@ -1021,7 +1107,7 @@ extern "C" {
   static void evt_config_end(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     // initiate server-discovery
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    assert(dataLen = sizeof(int));
+    assert(dataLen == sizeof(int));
     int num_servers = *(int *)data;
 
     // three cases here:

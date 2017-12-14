@@ -444,6 +444,19 @@ extern "C" {
     parseError(sp, tok, "expected regex pattern", "");
     return NULL;
   }
+  // expectDevice
+
+  static HSPToken *expectNamespace(HSP *sp, HSPToken *tok, char **p_namespace)
+  {
+    HSPToken *t = tok;
+    t = t->nxt;
+    if(t && t->str) {
+      *p_namespace = my_strdup(t->str);
+      return t;
+    }
+    parseError(sp, tok, "expected namespace", "");
+    return NULL;
+  }
 
   /*_________________---------------------------__________________
     _________________     new object fns        __________________
@@ -455,6 +468,7 @@ extern "C" {
     ADD_TO_LIST(sFlowSettings->collectors, col);
     sFlowSettings->numCollectors++;
     col->udpPort = SFL_DEFAULT_COLLECTOR_PORT;
+    col->namespace = NULL;
     return col;
   }
 
@@ -462,7 +476,11 @@ extern "C" {
   {
     for(HSPCollector *coll = settings->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
+      if(coll->socket > 0)
+	close(coll->socket);
       my_free(coll);
+      if(coll->namespace)
+	my_free(coll->namespace);
       coll = nextColl;
     }
     settings->collectors = NULL;
@@ -1395,6 +1413,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_UDPPORT:
 	      if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_NAMESPACE:
+	      if((tok = expectNamespace(sp, tok, &col->namespace)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

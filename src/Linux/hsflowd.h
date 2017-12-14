@@ -126,6 +126,9 @@ extern "C" {
     SFLAddress ipAddr;
     uint32_t udpPort;
     struct sockaddr_in6 sendSocketAddr;
+    size_t socklen;
+    int socket;
+    char *namespace;
   } HSPCollector;
 
   typedef struct _HSPPcap {
@@ -558,10 +561,6 @@ extern "C" {
 
     // 64-bit diskIO accumulators
     HSPDiskIO diskIO;
-
-    // UDP send sockets
-    int socket4;
-    int socket6;
 
     // physical host / hypervisor vnode characteristics
     uint32_t cpu_mhz;
