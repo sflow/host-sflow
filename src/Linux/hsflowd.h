@@ -314,6 +314,8 @@ extern "C" {
     // allow mod_xen to write regex-extracted fields here
     int xen_domid;
     int xen_netid;
+    // allow mod_opx to write CPS entry ids here
+    int opx_id;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {

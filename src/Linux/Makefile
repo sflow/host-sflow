@@ -134,8 +134,8 @@ LIBS_OVS=
 CFLAGS_OS10=
 LIBS_OS10= -lsystemd
 
-CFLAGS_OPX=
-LIBS_OPX= -lsystemd
+CFLAGS_OPX= -I/usr/include/opx
+LIBS_OPX= -lsystemd -lopx_cps_api_common -lopx_cps_class_map
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)

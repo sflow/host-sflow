@@ -10,6 +10,15 @@ extern "C" {
 #include "hsflowd.h"
 #include "regex.h"
 
+#include "dell-base-sflow.h"
+#include "cps_api_object.h"
+#include "cps_class_map.h"
+#include "cps_api_object_key.h"
+#include "iana-if-type.h"
+#include "dell-base-if.h"
+#include "dell-interface.h"
+#include "ietf-interfaces.h"
+
 #define HSP_DEFAULT_SWITCHPORT_REGEX "^e[0-9]+-[0-9]+-[0-9]+$"
 #define HSP_DEFAULT_OPX_PORT 20001
 
@@ -19,10 +28,7 @@ extern "C" {
 
 #define HSP_OPX_MIN_POLLING_INTERVAL 10
 
-#define HSP_OPX_SWITCHPORT_CONFIG_PROG "/usr/bin/cps_config_sflow"
-#define HSP_OPX_SWITCHPORT_SPEED_PROG "/usr/bin/opx-ethtool"
-#define HSP_OPX_SWITCHPORT_STATS_PROG_0 "/usr/bin/opx-show-stats"
-#define HSP_OPX_SWITCHPORT_STATS_PROG_1 "if_stat"
+#define HSP_MAX_EXEC_LINELEN 1024
 
   typedef struct _HSP_mod_OPX {
     // active on two threads (buses)
@@ -33,36 +39,10 @@ extern "C" {
     // sample processing
     uint32_t opx_seqno;
     uint32_t opx_drops;
-
-    // counter polling
-    time_t last_poll;
-
-    bool poll_phase_interface;
-
-    // the current interface we are getting counters for
-    SFLAdaptor *poll_current;
-
-    // fields we collect before deciding on poll_current
-    struct {
-      SFLAdaptor *adaptor;
-      SFLMacAddress mac;
-      uint32_t ifIndex;
-      uint64_t speed;
-      bool enabled;
-      uint32_t mtu;
-      uint32_t operStatus;
-      uint32_t adminStatus;
-      bool duplex;
-      ETCTRFlags et_found;
-    } poll;
-
-    // the counters
-    SFLHost_nio_counters ctrs;
-    HSP_ethtool_counters et_ctrs;
-
     // ports listed individually in config
     UTHash *switchPorts;
   } HSP_mod_OPX;
+
 
   /*_________________---------------------------__________________
     _________________      readPackets          __________________
@@ -95,7 +75,7 @@ extern "C" {
 	myDebug(1, "got msg: %s", pbuf);
       }
 
-     // check metadata signature
+      // check metadata signature
       if(buf32[0] != 0xDEADBEEF) {
 	myDebug(1, "bad meta-data signature: %08X", buf32[0]);
 	continue;
@@ -208,24 +188,254 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________     openOPX              __________________
+    _________________     openOPX               __________________
     -----------------___________________________------------------
   */
 
-  static int openOPX(EVMod *mod)
-  {
+  static int openOPX(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-
     // register call-backs
     uint16_t opxPort = sp->opx.port ?: HSP_DEFAULT_OPX_PORT;
     int fd = 0;
     if(opxPort) {
       // TODO: should this really be "::1" and PF_INET6?  Or should we bind to both "127.0.0.1" and "::1" (cf mod_json)
       fd = UTSocketUDP("127.0.0.1", PF_INET, opxPort, HSP_OPX_RCV_BUF);
-     myDebug(1, "opx socket is %d", fd);
+      myDebug(1, "opx socket is %d", fd);
+    }
+    return fd;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   CPSSetSampleUDPPort     __________________
+    -----------------___________________________------------------
+  */
+
+  static bool CPSSetSampleUDPPort(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    bool ok = NO;
+    uint16_t udpPort =  sp->opx.port ?: HSP_DEFAULT_OPX_PORT;
+    // prepare transaction
+    cps_api_transaction_params_t tran;
+    if (cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
+      return NO;
+    cps_api_object_t obj;
+    if((obj = cps_api_object_create()) == NULL)
+      goto out;
+    // TARGET key pointing to sFlow entry (yang model "list")
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_SOCKET_ADDRESS_OBJ, cps_api_qualifier_TARGET);
+    // add attributes to set IP and port
+    char ip[4] = { 127,0,0,1 }; // network byte order
+    cps_api_object_attr_add(obj, BASE_SFLOW_SOCKET_ADDRESS_UDP_PORT, ip, 4);
+    cps_api_object_attr_add_u16(obj, BASE_SFLOW_SOCKET_ADDRESS_UDP_PORT, udpPort);
+    // add "set" action to transaction
+    if(cps_api_set(&tran,obj) != cps_api_ret_code_OK )
+      goto out;
+    // commit
+    if(cps_api_commit(&tran) != cps_api_ret_code_OK )
+      goto out;
+    ok = YES;
+
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSSetSampleUDPPort failed");
+    cps_api_transaction_close(&tran);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   CPSSyncEntryIDs         __________________
+    -----------------___________________________------------------
+    Learn the CPS ids for any entries currently in the table
+  */
+
+  static bool CPSSyncEntryIDs(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    bool ok = NO;
+    // clear existing ids
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor)
+      ADAPTOR_NIO(adaptor)->opx_id = 0;
+    // prepare GET request
+    cps_api_get_params_t gp;
+    cps_api_get_request_init(&gp);
+    cps_api_object_t obj;
+    if((obj = cps_api_object_list_create_obj_and_append(gp.filters)) == NULL)
+      goto out;
+    // TARGET key pointing to sFlow entry (yang model "list")
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
+    // GET
+    if (cps_api_get(&gp) != cps_api_ret_code_OK)
+      goto out;
+    ok = YES;
+    size_t mx = cps_api_object_list_size(gp.list);
+    for (size_t ix = 0 ; ix < mx ; ix++ ) {
+      cps_api_object_t obj = cps_api_object_list_get(gp.list,ix);
+      cps_api_object_attr_t attr_id = cps_api_object_attr_get(obj,BASE_SFLOW_ENTRY_ID);
+      cps_api_object_attr_t attr_ifIndex = cps_api_object_attr_get(obj,BASE_SFLOW_ENTRY_IFINDEX);
+      if(attr_id && attr_ifIndex) {
+	uint32_t ifIndex = cps_api_object_attr_data_u32(attr_ifIndex);
+	uint32_t id = cps_api_object_attr_data_u32(attr_id);
+	SFLAdaptor *adaptor = adaptorByIndex(sp, ifIndex);
+	if(adaptor) {
+	  ADAPTOR_NIO(adaptor)->opx_id = id;
+	  myDebug(1, "interface %s ifIndex=%u cps_session_id=%u", adaptor->deviceName, ifIndex, id);
+	}
+      }
     }
 
-    return fd;
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSSyncEntryIDs failed");
+    cps_api_get_request_close(&gp);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     CPSAddEntry           __________________
+    -----------------___________________________------------------
+    create new CPS entry and record the resulting ID
+  */
+
+  static bool CPSAddEntry(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
+    // prepare transaction
+    cps_api_transaction_params_t tran;
+    if (cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
+      return NO;
+    bool ok = NO;
+    cps_api_object_t obj;
+    if((obj = cps_api_object_create()) == NULL)
+      goto out;
+    // TARGET key pointing to sFlow entry (yang model "list")
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
+    // add attributes
+    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_IFINDEX, adaptor->ifIndex);
+    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_DIRECTION, BASE_CMN_TRAFFIC_PATH_INGRESS);
+    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_SAMPLING_RATE, sampling_n);
+    // "create" action
+    if(cps_api_create(&tran,obj) != cps_api_ret_code_OK )
+      goto out;
+    // commit
+    if(cps_api_commit(&tran) != cps_api_ret_code_OK )
+      goto out;
+    ok = YES;
+    // read back new id
+    cps_api_object_attr_t attr_id = cps_api_object_attr_get(obj, BASE_SFLOW_ENTRY_ID);
+    if(attr_id)
+      ADAPTOR_NIO(adaptor)->opx_id = cps_api_object_attr_data_u32(attr_id);
+
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSAddEntry failed");
+    cps_api_transaction_close(&tran);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________      CPSGetEntry          __________________
+    -----------------___________________________------------------
+    read attributes from existing entry
+  */
+
+  static bool CPSGetEntry(EVMod *mod, SFLAdaptor *adaptor, uint32_t *p_sampling_n, uint32_t *p_dirn) {
+    bool ok = NO;
+    // prepare GET
+    cps_api_get_params_t gp;
+    cps_api_get_request_init(&gp);
+    cps_api_object_t obj;
+    if((obj = cps_api_object_list_create_obj_and_append(gp.filters)) == NULL)
+      return NO;
+    // TARGET key pointing to sFlow entry (yang model "list")
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
+    // query by ENTRY_ID
+    uint32_t id = ADAPTOR_NIO(adaptor)->opx_id;
+    cps_api_set_key_data(obj, BASE_SFLOW_ENTRY_ID, cps_api_object_ATTR_T_U32, &id, sizeof(id));
+    // GET
+    int status;
+    if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
+      myLog(LOG_ERR, "CPSGetEntry failed: %d", status);
+      goto out;
+    }
+    size_t mx = cps_api_object_list_size(gp.list);
+    myDebug(1, "CPSGetEntry(%u) returned %u entries\n", id, mx);
+    if(mx != 1)
+      goto out;
+    ok = YES;
+    cps_api_object_t gobj = cps_api_object_list_get(gp.list, 0);
+    cps_api_object_attr_t id_attr = cps_api_object_attr_get(gobj,BASE_SFLOW_ENTRY_ID);
+    cps_api_object_attr_t ifIndex_attr = cps_api_object_attr_get(gobj,BASE_SFLOW_ENTRY_IFINDEX);
+    cps_api_object_attr_t rate_attr = cps_api_object_attr_get(gobj,BASE_SFLOW_ENTRY_SAMPLING_RATE);
+    cps_api_object_attr_t dirn_attr = cps_api_object_attr_get(gobj,BASE_SFLOW_ENTRY_DIRECTION);
+
+    if(cps_api_object_attr_data_u32(id_attr) != id)
+      goto out;
+    if(cps_api_object_attr_data_u32(ifIndex_attr) != adaptor->ifIndex)
+      goto out;
+
+    if(rate_attr && p_sampling_n)
+      (*p_sampling_n) = cps_api_object_attr_data_u32(rate_attr);
+    if(dirn_attr && p_dirn)
+      (*p_dirn) = cps_api_object_attr_data_u32(dirn_attr);
+
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSGetEntry failed");
+    cps_api_get_request_close(&gp);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________      CPSSetEntry          __________________
+    -----------------___________________________------------------
+    write attributes to existing entry
+  */
+
+  static bool CPSSetEntry(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
+    bool ok = NO;
+    // prepare transaction
+    cps_api_transaction_params_t tran;
+    if(cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
+      return false;
+    cps_api_object_t obj = cps_api_object_create();
+    if(obj == NULL)
+      goto out;
+    // TARGET attributes
+    uint32_t id = ADAPTOR_NIO(adaptor)->opx_id;
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
+    cps_api_set_key_data(obj, BASE_SFLOW_ENTRY_ID,cps_api_object_ATTR_T_U32, &id, sizeof(id));
+    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_DIRECTION, BASE_CMN_TRAFFIC_PATH_INGRESS);
+    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_SAMPLING_RATE, sampling_n);
+    // SET
+    if (cps_api_set(&tran, obj) != cps_api_ret_code_OK)
+      goto out;
+    if(cps_api_commit(&tran) != cps_api_ret_code_OK)
+      goto out;
+    ok = YES;
+
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSSetEntry failed");
+    cps_api_transaction_close(&tran);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   CPSSetSamplingRate      __________________
+    -----------------___________________________------------------
+  */
+
+  static bool CPSSetSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
+    if(!ADAPTOR_NIO(adaptor)->opx_id)
+      return CPSAddEntry(mod, adaptor, sampling_n); // not there - add it
+
+    uint32_t current_n=0, current_dirn=0;
+    if(!CPSGetEntry(mod, adaptor, &current_n, &current_dirn))
+      return NO; // GET failed
+
+    if(current_n == sampling_n
+       && current_dirn == BASE_CMN_TRAFFIC_PATH_INGRESS)
+      return YES; // no change
+
+    return CPSSetEntry(mod, adaptor, sampling_n);
   }
 
   /*_________________---------------------------__________________
@@ -233,13 +443,8 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static int srateOutputLine(void *magic, char *line) {
-    return YES;
-  }
-
   static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-
     if(adaptor->ifSpeed == 0) {
       // by refusing to set a sampling rate for a port
       // with speed == 0 we can stabilize the startup.
@@ -254,63 +459,218 @@ extern "C" {
       return NO;
     }
 
-    bool hw_sampling = NO;
-    UTStringArray *cmdline = strArrayNew();
-    strArrayAdd(cmdline, HSP_OPX_SWITCHPORT_CONFIG_PROG);
-    // usage:  <prog> [enable|disable] <interface> <direction>  <rate>
-#define HSP_MAX_TOK_LEN 16
-    strArrayAdd(cmdline, "enable");
-    strArrayAdd(cmdline, adaptor->deviceName);
-    strArrayAdd(cmdline, "ingress");
-    strArrayAdd(cmdline, "0");  // placeholder for sampling N in slot 4
-    strArrayAdd(cmdline, NULL); // extra NULL
-#define HSP_MAX_EXEC_LINELEN 1024
-    char outputLine[HSP_MAX_EXEC_LINELEN];
-    niostate->sampling_n = sampling_n;
-    if(niostate->sampling_n != niostate->sampling_n_set) {
-      myDebug(1, "setSamplingRate(%s) %u -> %u",
+    if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
+      // resync and try again
+      myLog(LOG_INFO, "setSamplingRate: resync and try again");
+      CPSSyncEntryIDs(mod);
+      if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
+	myLog(LOG_ERR, "setSamplingRate: failed to set rate=%u on interface %s (opx_id==%u)",
+	      sampling_n,
 	      adaptor->deviceName,
-	      niostate->sampling_n_set,
-	      niostate->sampling_n);
-      char srate[HSP_MAX_TOK_LEN];
-      snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-      strArrayInsert(cmdline, 4, srate);
-
-      if(debug(1)) {
-	char *cmd_str = strArrayStr(cmdline, NULL, NULL, " ", NULL);
-	myDebug(1, "exec command:[%s]", cmd_str);
-	my_free(cmd_str);
-      }
-
-      if(sampling_n == 0) {
-	// use "<script> disable <port>" instead of "<script> enable <port> ingress 0"
-	// although both should have the same effect.
-	strArrayInsert(cmdline, 1, "disable");
-	strArrayInsert(cmdline, 3, NULL);
-      }
-
-      int status;
-      if(myExec(niostate, strArray(cmdline), srateOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
-	if(WEXITSTATUS(status) != 0) {
-	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d",
-		HSP_OPX_SWITCHPORT_CONFIG_PROG,
-		WEXITSTATUS(status));
-	}
-	else {
-	  myDebug(1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
-	  // hardware or kernel sampling was successfully configured
-	  niostate->sampling_n_set = niostate->sampling_n;
-	  hw_sampling = YES;
-	}
-      }
-      else {
-	myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
-	      strArrayAt(cmdline, 0),
-	      adaptor->deviceName);
+	      niostate->opx_id);
+	return NO;
       }
     }
-    strArrayFree(cmdline);
-    return hw_sampling;
+    return YES;
+  }
+
+  /*_________________---------------------------__________________
+    _________________  CPSPollIfState           __________________
+    -----------------___________________________------------------
+  */
+
+  static bool CPSPollIfState(EVMod *mod, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    bool ok = NO;
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    if(!nio->switchPort)
+      return NO;
+    // prepare GET
+    cps_api_get_params_t gp;
+    cps_api_get_request_init(&gp);
+    cps_api_object_t obj = cps_api_object_list_create_obj_and_append(gp.filters);
+    if (obj == NULL)
+      goto out;
+    // OBSERVED key with ifType and name
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+				    DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_OBJ,
+				    cps_api_qualifier_OBSERVED);
+
+    cps_api_object_attr_add(obj,IF_INTERFACES_STATE_INTERFACE_TYPE,
+    			    (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
+    			    sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
+
+    cps_api_set_key_data(obj,
+			 IF_INTERFACES_STATE_INTERFACE_NAME,
+			 cps_api_object_ATTR_T_BIN,
+    			 adaptor->deviceName,
+			 strlen(adaptor->deviceName)+1);
+    // GET
+    if (cps_api_get(&gp) != cps_api_ret_code_OK)
+      goto out;
+    ok = YES;
+    size_t mx = cps_api_object_list_size(gp.list);
+    myDebug(1, "CPSPollIfState: get returned %u results", mx);
+    for (size_t ix = 0 ; ix < mx ; ++ix ) {
+      cps_api_object_t gobj = cps_api_object_list_get(gp.list,ix);
+      cps_api_object_it_t it;
+      cps_api_object_it_begin(gobj,&it);
+      for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
+	uint32_t ctrid = cps_api_object_attr_id(it.attr);
+	myDebug(2, "CPSPollIfState: field id=%u", ctrid);
+	uint64_t speed;
+	switch(ctrid) {
+
+	case IF_INTERFACES_INTERFACE_ENABLED:
+	  nio->up = cps_api_object_attr_data_u32(it.attr);
+	  myDebug(1, "enabled=%u", nio->up);
+	  break;
+
+	case IF_INTERFACES_STATE_INTERFACE_IF_INDEX:
+	  myDebug(1, "ifIndex=%u (adaptor ifIndex=%u)",
+		  cps_api_object_attr_data_u32(it.attr),
+		  adaptor->ifIndex);
+	  break;
+
+	case IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS:
+	  et_ctrs->adminStatus = cps_api_object_attr_data_u32(it.attr);
+	  nio->et_found |= HSP_ETCTR_ADMIN;
+	  myDebug(1, "admin-status=%u", et_ctrs->adminStatus);
+	  break;
+
+	case IF_INTERFACES_STATE_INTERFACE_OPER_STATUS:
+	  et_ctrs->operStatus = cps_api_object_attr_data_u32(it.attr);
+	  nio->et_found |= HSP_ETCTR_OPER;
+	  myDebug(1, "oper-status=%u", et_ctrs->operStatus);
+	  break;
+
+	case IF_INTERFACES_STATE_INTERFACE_SPEED:
+	  speed = cps_api_object_attr_data_u64(it.attr);
+	  // setting the speed may trigger a sampling-rate change
+	  myDebug(1, "ifSpeed=%"PRIu64, speed);
+	  setAdaptorSpeed(sp, adaptor, speed);
+	  break;
+
+	  // TODO: how to get these?
+	  //case IF_INTERFACES_STATE_INTERFACE_TYPE:
+	  //case IF_INTERFACES_STATE_INTERFACE_PHYS_ADDRESS:
+	  //case DELL_IF_IF_INTERFACES_INTERFACE_PHYS_ADDRESS:
+	  //case DELL_IF_IF_INTERFACES_STATE_INTERFACE_FC_MTU:
+	  //case DELL_IF_IF_INTERFACES_STATE_INTERFACE_DUPLEX:
+	}
+      }
+    }
+
+  out:
+    cps_api_get_request_close(&gp);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________  CPSPollIfCounters        __________________
+    -----------------___________________________------------------
+  */
+
+  static bool CPSPollIfCounters(EVMod *mod, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs) {
+    bool ok = NO;
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    if(!nio->switchPort)
+      return NO;
+    // prepare GET
+    cps_api_get_params_t gp;
+    cps_api_get_request_init(&gp);
+    cps_api_object_t obj = cps_api_object_list_create_obj_and_append(gp.filters);
+    if (obj == NULL)
+      goto out;
+
+    // Setting for "OBSERVED" stats for now - assuming they are collected from hardware
+    // at least every second.  This is an interim solution.  Should really be REALTIME,
+    // or else the counters collected from the ASIC should be announced immediately they
+    // are read so we can just listen for them here and send them out if they are due.
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj),
+				    DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_OBJ,
+				    cps_api_qualifier_OBSERVED);
+
+    cps_api_object_attr_add(obj,IF_INTERFACES_STATE_INTERFACE_TYPE,
+    			    (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
+    			    sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
+
+    cps_api_set_key_data(obj,
+			 IF_INTERFACES_STATE_INTERFACE_NAME,
+			 cps_api_object_ATTR_T_BIN,
+    			 adaptor->deviceName,
+			 strlen(adaptor->deviceName)+1);
+    // GET
+    if (cps_api_get(&gp) != cps_api_ret_code_OK)
+      goto out;
+    ok = YES;
+    size_t mx = cps_api_object_list_size(gp.list);
+    myDebug(1, "CPSPollIfCounters: get returned %u results", mx);
+    for (size_t ix = 0 ; ix < mx ; ++ix ) {
+      cps_api_object_t gobj = cps_api_object_list_get(gp.list,ix);
+      cps_api_object_it_t it;
+      cps_api_object_it_begin(gobj,&it);
+      for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
+	uint32_t ctrid = cps_api_object_attr_id(it.attr);
+	uint64_t ctr64 = cps_api_object_attr_data_u64(it.attr);
+	myDebug(2, "CPSPollIfCounters: %s id(%u) hex(%x) == %"PRIu64,
+		adaptor->deviceName,
+		ctrid,
+		ctrid,
+		ctr64);
+	switch(ctrid) {
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_OCTETS:
+	  ctrs->bytes_in = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_UNICAST_PKTS:
+	  ctrs->pkts_in = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_BROADCAST_PKTS:
+	  et_ctrs->bcasts_in = ctr64;
+	  nio->et_found |= HSP_ETCTR_BC_IN;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_MULTICAST_PKTS:
+	  et_ctrs->mcasts_in = ctr64;
+	  nio->et_found |= HSP_ETCTR_MC_IN;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_DISCARDS:
+	  ctrs->drops_in = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_ERRORS:
+	  ctrs->errs_in = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_IN_UNKNOWN_PROTOS:
+	  et_ctrs->unknown_in = ctr64;
+	  nio->et_found |= HSP_ETCTR_UNKN;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_OCTETS:
+	  ctrs->bytes_out = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_UNICAST_PKTS:
+	  ctrs->pkts_out = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_BROADCAST_PKTS:
+	  et_ctrs->bcasts_out = ctr64;
+	  nio->et_found |= HSP_ETCTR_BC_OUT;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_MULTICAST_PKTS:
+	  et_ctrs->mcasts_out = ctr64;
+	  nio->et_found |= HSP_ETCTR_MC_OUT;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_DISCARDS:
+	  ctrs->drops_out = ctr64;
+	  break;
+	case IF_INTERFACES_STATE_INTERFACE_STATISTICS_OUT_ERRORS:
+	  ctrs->errs_out = ctr64;
+	  break;
+	  // case DELL_BASE_IF_CMN_IF_INTERFACES_STATE_INTERFACE_STATISTICS_TIME_STAMP:
+	}
+      }
+    }
+
+  out:
+    cps_api_get_request_close(&gp);
+    return ok;
   }
 
   /*_________________---------------------------__________________
@@ -318,215 +678,31 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  UTStringArray *tokenize(char *in, char *sep, char *buf, int bufLen) {
-    UTStringArray *ans = strArrayNew();
-    char *p = in;
-    while(parseNextTok(&p, sep, NO, 0, YES, buf, bufLen) != NULL)
-      if(my_strlen(buf)) strArrayAdd(ans, buf);
-    return ans;
-  }
-
-  static void checkByMac(EVMod *mod, SFLAdaptor *adaptor, SFLMacAddress *mac) {
+  static void pollCounters(EVMod *mod, SFLAdaptor *adaptor) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    SFLAdaptor *byMac = adaptorByMac(sp, mac);
-    if(byMac != adaptor) {
-      u_char macstr[13];
-      macstr[0] = '\0';
-      printHex(mac->mac, 6, macstr, 13, NO);
-      myDebug(1, "OPX mac %s points to interface %s (not %s)",
-	      macstr,
-	      byMac ? byMac->deviceName : "<none>",
-	      adaptor->deviceName);
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+
+    SFLHost_nio_counters ctrs = { 0 };
+    HSP_ethtool_counters et_ctrs = { 0 };
+    uint64_t allocated1 = cps_api_objects_allocated();
+    
+    CPSPollIfState(mod, adaptor, &ctrs, &et_ctrs);
+    CPSPollIfCounters(mod, adaptor, &ctrs, &et_ctrs);
+    accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs);
+    nio->last_update = sp->pollBus->now.tv_sec;
+    
+    uint64_t allocated2 = cps_api_objects_allocated();
+    if(allocated1 != allocated2) {
+      myLog(LOG_ERR, "pollCounters(%s): CPS objects not freed=%"PRIu64,
+	    adaptor->deviceName,
+	    allocated2 - allocated1);
+      cps_api_list_stats();
     }
   }
 
-  static void checkByIndex(EVMod *mod, SFLAdaptor *adaptor, uint32_t ifIndex) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    SFLAdaptor *byIndex = adaptorByIndex(sp, ifIndex);
-    if(byIndex != adaptor) {
-      myDebug(1, "OPX ifIndex %u points to interface %s (not %s)",
-	      ifIndex,
-	      byIndex ? byIndex->deviceName : "<none>",
-	      adaptor->deviceName);
-    }
-  }
-
-  static void setPollCurrent(EVMod *mod, SFLAdaptor *adaptor)
-  {
-    HSP_mod_OPX *mdata = (HSP_mod_OPX *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(mdata->poll_current != adaptor) {
-      if(mdata->poll_current) {
-	// finished with this adaptor - accumulate counters
-	accumulateNioCounters(sp, mdata->poll_current, &mdata->ctrs, &mdata->et_ctrs);
-	ADAPTOR_NIO(mdata->poll_current)->last_update = sp->pollBus->now.tv_sec;
-      }
-      mdata->poll_current = adaptor;
-      if(adaptor) {
-	// starting new adaptor
-	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-        if(!nio->switchPort) {
-          mdata->poll_current = NULL;
-        }
-        else {
-	  // apply the interface-phase info we have collected
-	  memset(&mdata->ctrs, 0, sizeof(mdata->ctrs));
-	  memset(&mdata->et_ctrs, 0, sizeof(mdata->et_ctrs));
-	  nio->up = mdata->poll.enabled;
-	  nio->et_found = mdata->poll.et_found;
-	  mdata->et_ctrs.adminStatus = mdata->poll.adminStatus;
-	  mdata->et_ctrs.operStatus = mdata->poll.operStatus;
-	  adaptor->ifDirection = mdata->poll.duplex ? 1 : 2;
-	  // setting the speed may trigger a sampling-rate change
-	  setAdaptorSpeed(sp, adaptor, mdata->poll.speed);
-	  // check that we already have the right MAC and ifIndex
-	  checkByMac(mod, adaptor, &mdata->poll.mac);
-	  checkByIndex(mod, adaptor, mdata->poll.ifIndex);
-	}
-      }
-      // clear poll structure for next interface phase
-      memset(&mdata->poll, 0, sizeof(mdata->poll));
-    }
-  }
-
-  static int pollAllOutputLine(void *magic, char *line) {
-    EVMod *mod = (EVMod *)magic;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSP_mod_OPX *mdata = (HSP_mod_OPX *)mod->data;
-    // By making / a delimiter too we can ignore the prefix and look
-    // only at the last two or three tokens.
-    char tokbuf[HSP_MAX_EXEC_LINELEN];
-    UTStringArray *tokens = tokenize(line, " /=", tokbuf, HSP_MAX_EXEC_LINELEN);
-    int nt = strArrayN(tokens);
-    if(nt < 3) goto out;
-    char *phase = strArrayAt(tokens, nt - 3);
-    char *var = strArrayAt(tokens, nt - 2);
-    char *val = strArrayAt(tokens, nt - 1);
-    if(! (phase && var && val)) goto out;
-    uint64_t val64 = strtoll(val, NULL, 0);
-
-    // we can look up by MAC, ifIndex or name,  but name is
-    // the most reliable here because we use that to classify
-    // the switch ports in the first place.  The others are
-    // checked just for consistency.
-
-    // We expect phase to transition from "interface" to "stats" to
-    // "statistics". We just collect fields during the "interface" phase,
-    // then and decide which port we are looking at (poll_current)
-    // when it ends.
-
-    if(my_strequal(phase, "interface")) {
-      mdata->poll_phase_interface = YES;
-    }
-    else {
-      if(mdata->poll_phase_interface) {
-	// interface phase over - decision time:
-	setPollCurrent(mod, mdata->poll.adaptor);
-      }
-      mdata->poll_phase_interface = NO;
-    }
-     
-    if(mdata->poll_phase_interface) {
-      if(my_strequal(var, "phys-address")) {
-	if(hexToBinary((u_char *)val, (u_char *)&mdata->poll.mac.mac, 6) != 6) {
-	  myLog(LOG_ERR, "badly formatted MAC: %s", val);
-	}
-      }
-      else if(my_strequal(var, "speed")) mdata->poll.speed = val64;
-      else if(my_strequal(var, "duplex")) mdata->poll.duplex = (bool)val64;
-      else if(my_strequal(var, "if-index")) mdata->poll.ifIndex = val64;
-      else if(my_strequal(var, "mtu")) 	mdata->poll.mtu = val64;
-      else if(my_strequal(var, "enabled")) mdata->poll.enabled = (bool)val64;
-      else if(my_strequal(var, "admin-status")) {
-	mdata->poll.adminStatus = val64;
-	mdata->poll.et_found |= HSP_ETCTR_ADMIN;
-      }
-      else if(my_strequal(var, "oper-status")) {
-	mdata->poll.operStatus = val64;
-	mdata->poll.et_found |= HSP_ETCTR_OPER;
-      }
-      else if(my_strequal(var, "name")) mdata->poll.adaptor = adaptorByName(sp, val);
-    }
-    else {
-      if(!mdata->poll_current)
-	goto out;
-
-      SFLAdaptor *adaptor = mdata->poll_current;
-      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-      
-      if(my_strequal(var, "in-octets"))  mdata->ctrs.bytes_in = val64;
-      else if(my_strequal(var, "out-octets")) mdata->ctrs.bytes_out = val64;
-      else if(my_strequal(var, "ether-rx-no-errors")) mdata->ctrs.pkts_in = val64; // includes bcasts and mcasts
-      else if(my_strequal(var, "ether-tx-no-errors")) mdata->ctrs.pkts_out = val64; // includes bcasts and mcasts
-      else if(my_strequal(var, "in-errors")) mdata->ctrs.errs_in = val64;
-      else if(my_strequal(var, "out-errors")) mdata->ctrs.errs_out = val64;
-      else if(my_strequal(var, "in-discards")) mdata->ctrs.drops_in = val64;
-      else if(my_strequal(var, "out-discards")) mdata->ctrs.drops_out = val64;
-      else if(my_strequal(var, "in-unknown-protos")) {
-	mdata->et_ctrs.unknown_in = val64;
-	nio->et_found |= HSP_ETCTR_UNKN;
-      }
-      else if(my_strequal(var, "in-multicast-pkts")) {
-	mdata->et_ctrs.mcasts_in = val64;
-	nio->et_found |= HSP_ETCTR_MC_IN;
-      }
-      else if(my_strequal(var, "out-multicast-pkts")) {
-	mdata->et_ctrs.mcasts_out = val64;
-	nio->et_found |= HSP_ETCTR_MC_OUT;
-      }
-      else if(my_strequal(var, "in-broadcast-pkts")) {
-	mdata->et_ctrs.bcasts_in = val64;
-	nio->et_found |= HSP_ETCTR_BC_IN;
-      }
-      else if(my_strequal(var, "out-broadcast-pkts")) {
-	mdata->et_ctrs.bcasts_out = val64;
-	nio->et_found |= HSP_ETCTR_BC_OUT;
-      }
-    }
-
-  out:
-    strArrayFree(tokens);
-    return YES;
-  }
-
-  static bool pollAllCounters(EVMod *mod) {
-    UTStringArray *cmdline = strArrayNew();
-    strArrayAdd(cmdline, HSP_OPX_SWITCHPORT_STATS_PROG_0);
-    strArrayAdd(cmdline, HSP_OPX_SWITCHPORT_STATS_PROG_1);
-    strArrayAdd(cmdline, NULL); // trailing NULL
-
-#define HSP_MAX_EXEC_LINELEN 1024
-    char outputLine[HSP_MAX_EXEC_LINELEN];
-
-    if(debug(1)) {
-      char *cmd_str = strArrayStr(cmdline, NULL, NULL, " ", NULL);
-      myDebug(1, "exec command:[%s]", cmd_str);
-      my_free(cmd_str);
-    }
-
-    int status;
-    if(myExec(mod, strArray(cmdline), pollAllOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
-      if(WEXITSTATUS(status) != 0) {
-	myLog(LOG_ERR, "myExec(%s) exitStatus=%d",
-	      HSP_OPX_SWITCHPORT_SPEED_PROG,
-	      WEXITSTATUS(status));
-      }
-      else {
-	myDebug(1, "pollAllCounters() succeeded");
-      }
-    }
-    else {
-      myLog(LOG_ERR, "myExec() calling %s failed",
-	    strArrayAt(cmdline, 0));
-    }
-    setPollCurrent(mod, NULL);
-    strArrayFree(cmdline);
-    return YES;
-  }
-
- /*_________________---------------------------__________________
-    _________________   markSwitchPort         __________________
-    -----------------__________________________------------------
+  /*_________________---------------------------__________________
+    _________________   markSwitchPort          __________________
+    -----------------___________________________------------------
   */
 
   static bool markSwitchPort(EVMod *mod, SFLAdaptor *adaptor)  {
@@ -565,11 +741,11 @@ extern "C" {
     _________________    evt_poll_config_first  __________________
     -----------------___________________________------------------
   */
-  
+
   static void evt_poll_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     // only get here if we have a valid config,  so we can announce
     // that we are ready to go. The man page says to ignore the
-    // return value,  but we'll log in anyway when debugging...
+    // return value,  but we'll log it anyway when debugging...
     int ans = sd_notify(0, "READY=1");
     myDebug(1, "opx.evt_poll_config_first(): sd_notify() returned %d", ans);
   }
@@ -600,11 +776,23 @@ extern "C" {
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
+    // make sure CPS sFlow is pointed at the right socket
+    CPSSetSampleUDPPort(mod);
+
+    uint64_t allocated1 = cps_api_objects_allocated();
+
     // The sampling-rate settings may have changed.
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByName, adaptor) {
       uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
       setSamplingRate(mod, adaptor, sampling_n);
+    }
+
+    uint64_t allocated2 = cps_api_objects_allocated();
+    if(allocated2 != allocated1) {
+      myDebug(1, "evt_poll_config_changed: CPS objects not freed=%"PRIu64,
+	      allocated2 - allocated1);
+      cps_api_list_stats();
     }
   }
 
@@ -634,9 +822,13 @@ extern "C" {
   */
 
   static void evt_poll_intfs_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     // need to refresh speed/status meta-data for all interfaces
     // may trigger sampling-rate setting if speed changes (see below)
-    pollAllCounters(mod);
+    CPSSyncEntryIDs(mod);
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByIndex, adaptor)
+      pollCounters(mod, adaptor);
   }
 
   /*_________________---------------------------__________________
@@ -651,8 +843,17 @@ extern "C" {
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
+    uint64_t allocated1 = cps_api_objects_allocated();
+
     uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
     setSamplingRate(mod, adaptor, sampling_n);
+
+    uint64_t allocated2 = cps_api_objects_allocated();
+    if(allocated2 != allocated1) {
+      myDebug(1, "evt_poll_speed_changed: CPS objects not freed=%"PRIu64,
+	      allocated2 - allocated1);
+      cps_api_list_stats();
+    }
   }
 
   /*_________________---------------------------__________________
@@ -661,8 +862,7 @@ extern "C" {
   */
 
   static void evt_poll_update_nio(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-   SFLAdaptor *adaptor = *(SFLAdaptor **)data;
-   HSP_mod_OPX *mdata = (HSP_mod_OPX *)mod->data;
+    SFLAdaptor *adaptor = *(SFLAdaptor **)data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
     if(sp->sFlowSettings == NULL)
@@ -673,12 +873,8 @@ extern "C" {
     // for refreshing the host-adaptor counters (eth0 etc.)
     if(adaptor == NULL)
       return;
-    
-    if(mdata->last_poll != sp->pollBus->now.tv_sec) {
-      // update all counters in one go
-       pollAllCounters(mod);
-       mdata->last_poll = sp->pollBus->now.tv_sec;
-    }
+
+    pollCounters(mod, adaptor);
   }
 
   /*_________________---------------------------__________________
@@ -713,7 +909,7 @@ extern "C" {
 
     // ask that bond counters be accumuated from their components
     setSynthesizeBondCounters(mod, YES);
-    
+
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_READ), evt_poll_intf_read);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_poll_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_SPEED), evt_poll_speed_changed);
@@ -745,7 +941,7 @@ extern "C" {
 	UTHashAdd(mdata->switchPorts, prt);
     }
   }
-  
+
 
 #if defined(__cplusplus)
 } /* extern "C" */
