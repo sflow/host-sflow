@@ -33,8 +33,12 @@ extern "C" {
 #include <grp.h>
 #include <sys/resource.h> // for setrlimit()
 #include <limits.h> // for UINT_MAX, LLONG_MAX
+
+#include <linux/version.h>
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0))
 #include "linux/in.h" // for IP_UNICAST_IF
 #include "linux/in6.h" // for IPV6_UNICAST_IF
+#endif
 
 #if defined(__GLIBC__) || defined(__UCLIBC__)
 // for signal backtrace, if supported by libc

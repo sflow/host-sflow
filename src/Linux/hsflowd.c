@@ -589,7 +589,7 @@ extern "C" {
     stable.  It is particularly helpful when the polling interval is
     short.
   */
-  
+
   void flushCounters(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     if(sp->counterSampleQueued) {
@@ -606,7 +606,7 @@ extern "C" {
     _________________       tock                __________________
     -----------------___________________________------------------
   */
-  
+
   static void evt_poll_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // we registered for this event after the other modules were loaded,  so
@@ -854,16 +854,16 @@ extern "C" {
   static void pre_config_first(HSP *sp) {
     // make sure we are ready for someone to call getSampler/getPoller
     updatePollingInterval(sp);
-    
+
     // before we do anything else,  read the interfaces again - this time with a full discovery
     // so that modules can weigh in if required,  and, for example, sampling-rates can be set
     // correctly.
     readInterfaces(sp, YES, NULL, NULL, NULL, NULL, NULL);
-    
+
     // print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
     if(debug(1))
       malloc_stats();
-    
+
     // add a <physicalEntity> poller to represent the whole physical host
     SFLDataSource_instance dsi;
     // ds_class = <physicalEntity>, ds_index = <my physical>, ds_instance = 0
@@ -878,6 +878,8 @@ extern "C" {
     _________________   bindCollectorToDevice   __________________
     -----------------___________________________------------------
   */
+
+#ifdef IP_UNICAST_IF
 
   static bool bindCollectorToDevice(HSPCollector *coll, bool v6) {
     myDebug(1, "bindCollectorToDevice: device=%s", coll->deviceName);
@@ -901,6 +903,7 @@ extern "C" {
     }
     return YES;
   }
+#endif
 
   /*_________________---------------------------__________________
     _________________   openCollectorSockets    __________________
@@ -1106,7 +1109,7 @@ extern "C" {
     _________________   evt_config_shake     __________________
     -----------------________________________------------------
   */
-  
+
   static void evt_config_shake(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     myDebug(1, "evt_config_shake: reply from %s", (char *)data);
@@ -1248,7 +1251,7 @@ extern "C" {
     _________________   synthesizeBondCounters  __________________
     -----------------___________________________------------------
   */
-  
+
   void setSynthesizeBondCounters(EVMod *mod, bool val) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     myDebug(1, "setSynthesizeBondCounters =  %s", val ? "YES" : "NO");
@@ -1301,7 +1304,7 @@ extern "C" {
     }
     return NO;
   }
-      
+
 
   static int getMyLimit(int resource, char *resourceName) {
     struct rlimit rlim = {0};
@@ -1515,7 +1518,7 @@ extern "C" {
     sp->uuid[8] &= 0x3F;
     sp->uuid[8] |= 0x80;
   }
-  
+
   /*_________________---------------------------__________________
     _________________         main              __________________
     -----------------___________________________------------------
@@ -1738,7 +1741,7 @@ extern "C" {
     myLog(LOG_INFO, "autoload EAPI module");
     sp->eapi.eapi = YES;
 #endif /* HSP_LOAD_EOS */
-     
+
     // a sucessful read of the config file is required
     if(HSPReadConfigFile(sp) == NO) {
       myLog(LOG_ERR, "failed to read config file");
