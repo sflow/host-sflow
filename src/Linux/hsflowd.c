@@ -875,6 +875,34 @@ extern "C" {
 
 
   /*_________________---------------------------__________________
+    _________________   bindCollectorToDevice   __________________
+    -----------------___________________________------------------
+  */
+
+  static bool bindCollectorToDevice(HSPCollector *coll, bool v6) {
+    myDebug(1, "bindCollectorToDevice: device=%s", coll->deviceName);
+    if(coll->deviceIfIndex==0) {
+      myLog(LOG_ERR, "bindCollectorToDevice : no ifIndex for device=%s", coll->deviceName);
+      return NO;
+    }
+    // optarg is int, but set to value of ifIndex in 32-bit network-byte-order representation
+    int ifIndex = htonl(coll->deviceIfIndex);
+    if(setsockopt(coll->socket,
+		  v6 ? SOL_IPV6 : SOL_IP,
+		  v6 ? IPV6_UNICAST_IF : IP_UNICAST_IF,
+		  &ifIndex,
+		  sizeof(ifIndex)) == -1) {
+      myLog(LOG_ERR, "bindCollectorToDevice : device=%s ifIndex=%d setsockopt (v6=%u) failed : %s",
+	    coll->deviceName,
+	    coll->deviceIfIndex,
+	    v6,
+	    strerror(errno));
+      return NO;
+    }
+    return YES;
+  }
+
+  /*_________________---------------------------__________________
     _________________   openCollectorSockets    __________________
     -----------------___________________________------------------
   */
@@ -951,6 +979,10 @@ extern "C" {
 	if((coll->socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	  myLog(LOG_ERR, "IPv4 send socket open failed : %s", strerror(errno));
 	}
+#ifdef IP_UNICAST_IF
+	else if (coll->deviceName)
+	  bindCollectorToDevice(coll, NO);
+#endif
       }
       break;
     case SFLADDRESSTYPE_IP_V6:
@@ -962,6 +994,10 @@ extern "C" {
 	if((coll->socket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	  myLog(LOG_ERR, "IPv6 send socket open failed : %s", strerror(errno));
 	}
+#ifdef IP_UNICAST_IF
+	else if (coll->deviceName)
+	  bindCollectorToDevice(coll, YES);
+#endif
       }
       break;
     }
@@ -975,10 +1011,16 @@ extern "C" {
     return NULL;
   }
 
-  static void openCollectorSockets(HSPSFlowSettings *settings) {
+  static void openCollectorSockets(HSP *sp, HSPSFlowSettings *settings) {
     // open the collector sockets if not open already
     for(HSPCollector *coll = settings->collectors; coll; coll=coll->nxt) {
       if(coll->socket <= 0) {
+	if(coll->deviceName) {
+	  // get ifIndex for device
+	  SFLAdaptor *ad = adaptorByName(sp, coll->deviceName);
+	  if(ad)
+	    coll->deviceIfIndex = ad->ifIndex;
+	}
 	if(coll->namespace) {
 	  // fork a new thread that can switch to the namespace before opening the socket
 	  pthread_attr_t attr;
@@ -1031,7 +1073,7 @@ extern "C" {
       if(settings) {
 	// open collector sockets before this goes live
 	// (old collector sockets will be closed as they are freed)
-	openCollectorSockets(settings);
+	openCollectorSockets(sp, settings);
       }
       // atomic pointer-switch.  No need for lock.  At least
       // not on the  platforms we expect to run on.

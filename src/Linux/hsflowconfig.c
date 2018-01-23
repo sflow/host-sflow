@@ -469,6 +469,7 @@ extern "C" {
     sFlowSettings->numCollectors++;
     col->udpPort = SFL_DEFAULT_COLLECTOR_PORT;
     col->namespace = NULL;
+    col->deviceName = NULL;
     return col;
   }
 
@@ -481,6 +482,8 @@ extern "C" {
       my_free(coll);
       if(coll->namespace)
 	my_free(coll->namespace);
+      if(coll->deviceName)
+	my_free(coll->deviceName);
       coll = nextColl;
     }
     settings->collectors = NULL;
@@ -1416,6 +1419,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_NAMESPACE:
 	      if((tok = expectNamespace(sp, tok, &col->namespace)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_DEV:
+	      if((tok = expectDevice(sp, tok, &col->deviceName)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
