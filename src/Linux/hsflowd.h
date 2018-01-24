@@ -36,8 +36,19 @@ extern "C" {
 
 #include <linux/version.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0))
-#include "linux/in.h" // for IP_UNICAST_IF
-#include "linux/in6.h" // for IPV6_UNICAST_IF
+  // Interface binding (for VRF) is supported.
+  // on some releases we risk triggering a flood of
+  // "redefinition" compiler errors if we include
+  // these...
+  //#include "linux/in.h" // for IP_UNICAST_IF
+  //#include "linux/in6.h" // for IPV6_UNICAST_IF
+  //... so just define the numbers we need:
+#ifndef IP_UNICAST_IF
+#define IP_UNICAST_IF 50
+#endif
+#ifndef IPV6_UNICAST_IF
+#define IPV6_UNICAST_IF 76
+#endif
 #endif
 
 #if defined(__GLIBC__) || defined(__UCLIBC__)
