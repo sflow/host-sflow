@@ -483,6 +483,7 @@ extern "C" {
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     time_t clk = evt->bus->now.tv_sec;
+    time_t clk_nS = evt->bus->now.tv_nsec;
 
     // reset the pollActions
     UTArrayReset(sp->pollActions);
@@ -497,6 +498,8 @@ extern "C" {
     // sync_receiver lock,  which is needed when the final
     // counter sample is submitted for XDR serialization.
     SEMLOCK_DO(sp->sync_agent) {
+      // update agent 'now' (also updated by packet samples):
+      sfl_agent_set_now(sp->agent, clk, evt->bus->now.tv_nsec);
       // only run the poller_tick()s here,  not the full agent_tick()
       // we'll call receiver_flush at the end of this tick/tock cycle,
       // and skip the sampler_tick() altogether.

@@ -247,8 +247,8 @@ extern "C" {
   {
     if(--ps->refCount == 0) {
       EVBus *bus = EVCurrentBus();
-      sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
       SEMLOCK_DO(sp->sync_agent) {
+	sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
 	sfl_sampler_writeFlowSample(ps->sampler, ps->fs);
 	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES]++;
       }
