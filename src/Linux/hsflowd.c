@@ -483,7 +483,6 @@ extern "C" {
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     time_t clk = evt->bus->now.tv_sec;
-    time_t clk_nS = evt->bus->now.tv_nsec;
 
     // reset the pollActions
     UTArrayReset(sp->pollActions);

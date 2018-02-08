@@ -5,7 +5,7 @@ mkdir -p /packages && chown 777 /packages
 
 git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
-&& make deb FEATURES="OPX DBUS SYSTEMD"
+&& make deb FEATURES="OPX"
 
 echo "=== ldd check ========="
 ldd src/Linux/mod_opx.so
