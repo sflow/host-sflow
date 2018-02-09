@@ -30,6 +30,28 @@ extern "C" {
 
 #define HSP_MAX_EXEC_LINELEN 1024
 
+  // lookup table copied from nas_os_if_utils.py
+  static uint32_t opx_yang_speed_map_mbps[] = {
+    0,
+    10,     // 10Mbps
+    100,    // 100 Mbps
+    1000,   // 1Gbps
+    10000,  // 10Gbps
+    25000,  // 25 Gbps
+    40000,  // 40Gbps
+    100000, // 100Gbps
+    0,      // default speed
+    20000,  // 20 Gbps
+    50000,  // 50 Gbps
+    200000, // 200 Gbps
+    400000, // 400 Gbps
+    4000,   // 4GFC
+    8000,   // 8 GFC
+    16000,  // 16 GFC
+    32000   // 32 GFC
+  };
+#define OPX_YANG_SPEED_MAP_MAXINDEX 16
+
   typedef struct _HSP_mod_OPX {
     // active on two threads (buses)
     EVBus *packetBus;
@@ -497,13 +519,13 @@ extern "C" {
 				    cps_api_qualifier_OBSERVED);
 
     cps_api_object_attr_add(obj,IF_INTERFACES_STATE_INTERFACE_TYPE,
-    			    (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
-    			    sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
+			    (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
+			    sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
 
     cps_api_set_key_data(obj,
 			 IF_INTERFACES_STATE_INTERFACE_NAME,
 			 cps_api_object_ATTR_T_BIN,
-    			 adaptor->deviceName,
+			 adaptor->deviceName,
 			 strlen(adaptor->deviceName)+1);
     // GET
     if (cps_api_get(&gp) != cps_api_ret_code_OK)
@@ -546,6 +568,10 @@ extern "C" {
 
 	case IF_INTERFACES_STATE_INTERFACE_SPEED:
 	  speed = cps_api_object_attr_data_u64(it.attr);
+	  if(speed <= OPX_YANG_SPEED_MAP_MAXINDEX) {
+	    speed = opx_yang_speed_map[speed];
+	    speed *= 1000000LL;
+	  }
 	  // setting the speed may trigger a sampling-rate change
 	  myDebug(1, "ifSpeed=%"PRIu64, speed);
 	  setAdaptorSpeed(sp, adaptor, speed);
@@ -592,13 +618,13 @@ extern "C" {
 				    cps_api_qualifier_OBSERVED);
 
     cps_api_object_attr_add(obj,IF_INTERFACES_STATE_INTERFACE_TYPE,
-    			    (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
-    			    sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
+			    (const char *)IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD,
+			    sizeof(IF_INTERFACE_TYPE_IANAIFT_IANA_INTERFACE_TYPE_IANAIFT_ETHERNETCSMACD));
 
     cps_api_set_key_data(obj,
 			 IF_INTERFACES_STATE_INTERFACE_NAME,
 			 cps_api_object_ATTR_T_BIN,
-    			 adaptor->deviceName,
+			 adaptor->deviceName,
 			 strlen(adaptor->deviceName)+1);
     // GET
     if (cps_api_get(&gp) != cps_api_ret_code_OK)
@@ -685,12 +711,12 @@ extern "C" {
     SFLHost_nio_counters ctrs = { 0 };
     HSP_ethtool_counters et_ctrs = { 0 };
     uint64_t allocated1 = cps_api_objects_allocated();
-    
+
     CPSPollIfState(mod, adaptor, &ctrs, &et_ctrs);
     CPSPollIfCounters(mod, adaptor, &ctrs, &et_ctrs);
     accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs);
     nio->last_update = sp->pollBus->now.tv_sec;
-    
+
     uint64_t allocated2 = cps_api_objects_allocated();
     if(allocated1 != allocated2) {
       myLog(LOG_ERR, "pollCounters(%s): CPS objects not freed=%"PRIu64,
