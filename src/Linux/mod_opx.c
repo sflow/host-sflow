@@ -569,7 +569,7 @@ extern "C" {
 	case IF_INTERFACES_STATE_INTERFACE_SPEED:
 	  speed = cps_api_object_attr_data_u64(it.attr);
 	  if(speed <= OPX_YANG_SPEED_MAP_MAXINDEX) {
-	    speed = opx_yang_speed_map[speed];
+	    speed = opx_yang_speed_map_mbps[speed];
 	    speed *= 1000000LL;
 	  }
 	  // setting the speed may trigger a sampling-rate change
