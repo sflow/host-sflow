@@ -667,7 +667,7 @@ extern "C" {
   int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
   char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen);
   void adaptorHTPrint(UTHash *ht, char *prefix);
-  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed);
+  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
 
   // readPackets.c
 #define HSP_SAMPLEOPT_BRIDGE      0x0001

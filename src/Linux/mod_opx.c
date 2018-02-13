@@ -472,12 +472,16 @@ extern "C" {
       // with speed == 0 we can stabilize the startup.
       // Now sampling will only be configured as ports
       // are discovered or come up (or change speed).
+      myDebug(1, "setSamplingRate: do not set: %s ifSpeed==0",
+	      adaptor->deviceName);
       return NO;
     }
 
     if(niostate->switchPort == NO
        || niostate->loopback
        || niostate->bond_master) {
+      myDebug(1, "setSamplingRate: do not set: %s not switchPort component",
+	      adaptor->deviceName);
       return NO;
     }
 
@@ -574,7 +578,7 @@ extern "C" {
 	  }
 	  // setting the speed may trigger a sampling-rate change
 	  myDebug(1, "ifSpeed=%"PRIu64, speed);
-	  setAdaptorSpeed(sp, adaptor, speed);
+	  setAdaptorSpeed(sp, adaptor, speed, "mod_opx");
 	  break;
 
 	  // TODO: how to get these?

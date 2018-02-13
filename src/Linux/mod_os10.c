@@ -378,7 +378,7 @@ extern "C" {
 	  mdata->et_ctrs.operStatus = mdata->poll.operStatus;
 	  adaptor->ifDirection = mdata->poll.duplex ? 1 : 2;
 	  // setting the speed may trigger a sampling-rate change
-	  setAdaptorSpeed(sp, adaptor, mdata->poll.speed);
+	  setAdaptorSpeed(sp, adaptor, mdata->poll.speed, "mod_os10");
 	  // check that we already have the right MAC and ifIndex
 	  checkByMac(mod, adaptor, &mdata->poll.mac);
 	  checkByIndex(mod, adaptor, mdata->poll.ifIndex);

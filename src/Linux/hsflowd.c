@@ -215,12 +215,17 @@ extern "C" {
     return myAdaptors;
   }
 
-  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed)
+  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method)
   {
     bool changed = (speed != adaptor->ifSpeed);
     adaptor->ifSpeed = speed;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     nio->changed_speed = changed;
+    myDebug(1, "setAdaptorSpeed(%s): %s ifSpeed == %"PRIu64" (changed=%s)",
+	    method,
+	    adaptor->deviceName,
+	    speed,
+	    changed ? "YES":"NO");
     if(changed
        && sp->rootModule) {
       EVEventTxAll(sp->rootModule, HSPEVENT_INTF_SPEED, &adaptor, sizeof(adaptor));

@@ -281,14 +281,14 @@ extern "C" {
         if(adaptor->ifSpeed != 0) {
           changed = YES;
         }
-        setAdaptorSpeed(sp, adaptor, 0);
+        setAdaptorSpeed(sp, adaptor, 0, "ETHTOOL_GLINKSETTINGS1");
       }
       else {
         uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
         if(adaptor->ifSpeed != ifSpeed_bps) {
           changed = YES;
         }
-        setAdaptorSpeed(sp, adaptor, ifSpeed_bps);
+        setAdaptorSpeed(sp, adaptor, ifSpeed_bps, "ETHTOOL_GLINKSETTINGS2");
       }
     }
     return changed;
@@ -325,14 +325,14 @@ extern "C" {
 	if(adaptor->ifSpeed != 0) {
 	  changed = YES;
 	}
-	setAdaptorSpeed(sp, adaptor, 0);
+	setAdaptorSpeed(sp, adaptor, 0, "ETHTOOL_GSET1");
       }
       else {
 	uint64_t ifSpeed_bps = ifSpeed_mb * 1000000;
 	if(adaptor->ifSpeed != ifSpeed_bps) {
 	  changed = YES;
 	}
-	setAdaptorSpeed(sp, adaptor, ifSpeed_bps);
+	setAdaptorSpeed(sp, adaptor, ifSpeed_bps, "ETHTOOL_GSET2");
       }
     }
     return changed;
