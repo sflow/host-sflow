@@ -833,17 +833,16 @@ extern "C" {
 
   static void evt_poll_intf_read(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     SFLAdaptor *adaptor = *(SFLAdaptor **)data;
-    if(markSwitchPort(mod, adaptor)) {
-      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-      // turn off the use of ethtool_GSET so it doesn't get the wrong speed
-      // and turn off other ethtool requests because they won't add to the picture
-      nio->ethtool_GSET = NO;
-      nio->ethtool_GLINKSETTINGS = NO;
-      nio->ethtool_GSTATS = NO;
-      nio->ethtool_GDRVINFO = NO;
-      // the /proc/net/dev counters are invalid too
-      nio->procNetDev = NO;
-    }
+    markSwitchPort(mod, adaptor);
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    // turn off the use of ethtool_GSET so it doesn't get the wrong speed
+    // and turn off other ethtool requests because they won't add to the picture
+    nio->ethtool_GSET = NO;
+    nio->ethtool_GLINKSETTINGS = NO;
+    nio->ethtool_GSTATS = NO;
+    nio->ethtool_GDRVINFO = NO;
+    // the /proc/net/dev counters are invalid too
+    nio->procNetDev = NO;
   }
 
   /*_________________---------------------------__________________
