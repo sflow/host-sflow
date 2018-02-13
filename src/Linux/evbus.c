@@ -14,6 +14,14 @@ extern "C" {
   // inter-bus (inter-thread) messages automatically in EVEventTx
   static __thread EVBus *threadBus;
 
+  EVBus *EVCurrentBus() {
+    return threadBus;
+  }
+
+  void EVCurrentBusSet(EVBus *bus) {
+    threadBus = bus;  // assign to thread-local var
+  }
+
   /*_________________--------------------------------------------------__________________
     _________________  minimal module-loader with event bus mechanism  __________________
     -----------------__________________________________________________------------------
@@ -318,7 +326,7 @@ extern "C" {
 
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     int sent = 0;
-    if(evt->bus == threadBus) {
+    if(evt->bus == EVCurrentBus()) {
       // local event
       EVAction *act;
       if(evt->actionsChanged) {
@@ -443,7 +451,7 @@ extern "C" {
     EVBus *bus = (EVBus *)magic;
     EVMod *mod = bus->root->rootModule;
     assert(bus->running == NO);
-    threadBus = bus; // assign to thread-local var
+    EVCurrentBusSet(bus);
     bus->running = YES;
     EVEvent *start = EVGetEvent(bus, EVEVENT_START);
     EVEvent *tick = EVGetEvent(bus, EVEVENT_TICK);
@@ -532,7 +540,7 @@ extern "C" {
     // a single read() call resulted in 0, 1 or >1 lines found,  or hit EOF with a trailing
     // line in the buffer.
     // insist this is only called from the same thread that opened the socket
-    assert(sock->bus == threadBus);
+    assert(sock->bus == EVCurrentBus());
     if(sock->fd <= 0)
       (*lineCB)(mod, sock, EVSOCKETREAD_BADF, magic);
 
@@ -640,10 +648,6 @@ extern "C" {
 	bus->thread = NULL;
       }
     }
-  }
-
-  EVBus *EVCurrentBus() {
-    return threadBus;
   }
 
   void EVBusRun(EVBus *bus) {

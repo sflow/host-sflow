@@ -1797,6 +1797,13 @@ extern "C" {
     // convenience ptr to the poll-bus
     sp->pollBus = EVGetBus(sp->rootModule, HSPBUS_POLL, YES);
 
+    // Events are going to be exchanged through this bus even before we start it running,
+    // so have to make sure EVCurrentBus() is correct. Otherwise all events will be queued
+    // as inter-thread events (changing the execution sequence).  For example, it is
+    // important that HSPEVENT_INTF_READ propagates fully to all receivers on the poll-bus
+    // before read_ethtool_info() is called on the next line in readInterfaces.c.
+    EVCurrentBusSet(sp->pollBus);
+
     // register for events that we are going to handle here in the main pollBus thread.  The
     // events that form the config sequence are requested here before the modules are loaded
     // so that these functions are called first for each event. For example, a module callback

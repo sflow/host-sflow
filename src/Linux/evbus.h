@@ -174,6 +174,7 @@ extern "C" {
   void EVBusRun(EVBus *bus);
   void EVBusStop(EVBus *bus);
   EVBus *EVCurrentBus(void);
+  void EVCurrentBusSet(EVBus *bus);
   void EVRun(EVBus *mainBus);
   void EVStop(EVMod *mod);
   void EVLog(uint32_t rl_secs, int syslogType, char *fmt, ...);
