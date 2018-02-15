@@ -285,7 +285,7 @@ extern "C" {
     bool ethtool_GLINKSETTINGS:1;
     bool ethtool_GSET:1;
     bool ethtool_GSTATS:1;
-    bool procNetDev:1;
+    //    bool procNetDev:1;
     bool changed_speed:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
@@ -695,6 +695,9 @@ extern "C" {
   // VM lifecycle
   HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);
   void removeAndFreeVM(EVMod *mod, HSPVMState *state);
+
+  // logging support
+  void log_backtrace(int sig, siginfo_t *info);
 
 #if defined(__cplusplus)
 } /* extern "C" */

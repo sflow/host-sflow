@@ -784,7 +784,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void log_backtrace(int sig, siginfo_t *info) {
+  void log_backtrace(int sig, siginfo_t *info) {
 #ifdef HAVE_BACKTRACE
 #define HSP_NUM_BACKTRACE_PTRS 50
     static void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
