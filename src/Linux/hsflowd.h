@@ -285,7 +285,7 @@ extern "C" {
     bool ethtool_GLINKSETTINGS:1;
     bool ethtool_GSET:1;
     bool ethtool_GSTATS:1;
-    //    bool procNetDev:1;
+    bool procNetDev:1;
     bool changed_speed:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
