@@ -712,6 +712,12 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
+    if(nio->loopback
+       || nio->bond_master) {
+      // bond counters will be synthesized - don't try to poll them here
+      return;
+    }
+
     SFLHost_nio_counters ctrs = { 0 };
     HSP_ethtool_counters et_ctrs = { 0 };
     uint64_t allocated1 = cps_api_objects_allocated();
