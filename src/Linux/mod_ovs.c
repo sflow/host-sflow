@@ -326,7 +326,8 @@ extern "C" {
       if(strcmp(var, "agent") == 0) {
 	char quoted[SFVS_MAX_LINELEN];
 	snprintf(quoted, SFVS_MAX_LINELEN, "\"%s\"", val);
-	if(strcmp(quoted, mdata->config.agent_dev) != 0) {
+	if(my_strequal(val, mdata->config.agent_dev) == NO
+	   && my_strequal(quoted, mdata->config.agent_dev) == NO) {
 	  addSFlowSetting(mod, "agent", mdata->config.agent_dev);
 	}
       }
