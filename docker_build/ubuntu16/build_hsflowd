@@ -5,6 +5,10 @@ git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
 && make deb FEATURES="HOST"
 
+echo "=== ldd check ========="
+ldd src/Linux/mod_systemd.so
+echo "======================="
+
 for deb in `ls *.deb`; do cp "$deb" "/packages/${deb/hsflowd/hsflowd-$1}"; done
 echo ""
 echo "files in /packages:"
