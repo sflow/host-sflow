@@ -234,6 +234,7 @@ extern "C" {
 
   static bool CPSSetSampleUDPPort(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    int status;
     bool ok = NO;
     uint16_t udpPort =  sp->opx.port ?: HSP_DEFAULT_OPX_PORT;
     // prepare transaction
@@ -250,11 +251,15 @@ extern "C" {
     cps_api_object_attr_add(obj, BASE_SFLOW_SOCKET_ADDRESS_UDP_PORT, ip, 4);
     cps_api_object_attr_add_u16(obj, BASE_SFLOW_SOCKET_ADDRESS_UDP_PORT, udpPort);
     // add "set" action to transaction
-    if(cps_api_set(&tran,obj) != cps_api_ret_code_OK )
+    if((status = cps_api_set(&tran,obj)) != cps_api_ret_code_OK ) {
+      myDebug(1, "CPSSetSampleUDPPort: cps_api_set failed (status=%d)", status);
       goto out;
+    }
     // commit
-    if(cps_api_commit(&tran) != cps_api_ret_code_OK )
+    if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK ) {
+      myDebug(1, "CPSSetSampleUDPPort: cps_api_commit failed (status=%d)", status);
       goto out;
+    }
     ok = YES;
 
   out:
@@ -272,6 +277,7 @@ extern "C" {
 
   static bool CPSSyncEntryIDs(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    int status;
     bool ok = NO;
     // clear existing ids
     SFLAdaptor *adaptor;
@@ -286,8 +292,10 @@ extern "C" {
     // TARGET key pointing to sFlow entry (yang model "list")
     cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
     // GET
-    if (cps_api_get(&gp) != cps_api_ret_code_OK)
+    if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSSyncEntryIDs: cps_api_get failed (status=%d)", status);
       goto out;
+    }
     ok = YES;
     size_t mx = cps_api_object_list_size(gp.list);
     for (size_t ix = 0 ; ix < mx ; ix++ ) {
@@ -323,6 +331,7 @@ extern "C" {
     cps_api_transaction_params_t tran;
     if (cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
       return NO;
+    int status;
     bool ok = NO;
     cps_api_object_t obj;
     if((obj = cps_api_object_create()) == NULL)
@@ -334,11 +343,15 @@ extern "C" {
     cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_DIRECTION, BASE_CMN_TRAFFIC_PATH_INGRESS);
     cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_SAMPLING_RATE, sampling_n);
     // "create" action
-    if(cps_api_create(&tran,obj) != cps_api_ret_code_OK )
+    if((status = cps_api_create(&tran,obj)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSAddEntry: cps_api_create failed (status=%d)", status);
       goto out;
+    }
     // commit
-    if(cps_api_commit(&tran) != cps_api_ret_code_OK )
+    if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK ) {
+      myDebug(1, "CPSAddEntry: cps_api_commit failed (status=%d)", status);
       goto out;
+    }
     ok = YES;
     // read back new id
     cps_api_object_attr_t attr_id = cps_api_object_attr_get(obj, BASE_SFLOW_ENTRY_ID);
@@ -374,7 +387,7 @@ extern "C" {
     // GET
     int status;
     if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
-      myLog(LOG_ERR, "CPSGetEntry failed: %d", status);
+      myLog(LOG_ERR, "CPSGetEntry cps_api_get failed (status=%d)", status);
       goto out;
     }
     size_t mx = cps_api_object_list_size(gp.list);
@@ -406,12 +419,12 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________      CPSSetEntry          __________________
+    _________________   CPSSetEntrySamplingRate __________________
     -----------------___________________________------------------
-    write attributes to existing entry
   */
 
-  static bool CPSSetEntry(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
+  static bool CPSSetEntrySamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
+    int status;
     bool ok = NO;
     // prepare transaction
     cps_api_transaction_params_t tran;
@@ -424,20 +437,72 @@ extern "C" {
     uint32_t id = ADAPTOR_NIO(adaptor)->opx_id;
     cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
     cps_api_set_key_data(obj, BASE_SFLOW_ENTRY_ID,cps_api_object_ATTR_T_U32, &id, sizeof(id));
-    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_DIRECTION, BASE_CMN_TRAFFIC_PATH_INGRESS);
     cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_SAMPLING_RATE, sampling_n);
     // SET
-    if (cps_api_set(&tran, obj) != cps_api_ret_code_OK)
+    if ((status = cps_api_set(&tran, obj)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSSetEntrySamplingRate: cps_api_set failed (status=%d)", status);
       goto out;
-    if(cps_api_commit(&tran) != cps_api_ret_code_OK)
+    }
+    if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSSetEntrySamplingRate: cps_api_commit failed (status=%d)", status);
       goto out;
+    }
     ok = YES;
 
   out:
     if(!ok)
-      myLog(LOG_ERR, "CPSSetEntry failed");
+      myLog(LOG_ERR, "CPSSetEntrySamplingRate failed");
     cps_api_transaction_close(&tran);
     return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   CPSSetEntrySamplingDirn __________________
+    -----------------___________________________------------------
+  */
+
+  static bool CPSSetEntrySamplingDirn(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_dirn) {
+    int status;
+    bool ok = NO;
+    // prepare transaction
+    cps_api_transaction_params_t tran;
+    if(cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
+      return false;
+    cps_api_object_t obj = cps_api_object_create();
+    if(obj == NULL)
+      goto out;
+    // TARGET attributes
+    uint32_t id = ADAPTOR_NIO(adaptor)->opx_id;
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
+    cps_api_set_key_data(obj, BASE_SFLOW_ENTRY_ID,cps_api_object_ATTR_T_U32, &id, sizeof(id));
+    cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_DIRECTION, sampling_dirn);
+    // SET
+    if ((status = cps_api_set(&tran, obj)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSSetEntrySamplingDirn: cps_api_set failed (status=%d)", status);
+      goto out;
+    }
+    if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSSetEntrySamplingDirn: cps_api_commit failed (status=%d)", status);
+      goto out;
+    }
+    ok = YES;
+
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSSetEntrySamplingDirn failed");
+    cps_api_transaction_close(&tran);
+    return ok;
+  }
+
+  /*_________________---------------------------__________________
+    _________________      CPSSetEntry          __________________
+    -----------------___________________________------------------
+    write attributes to existing entry
+  */
+
+  static bool CPSSetEntry(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
+    return (CPSSetEntrySamplingRate(mod, adaptor, sampling_n)
+	    && CPSSetEntrySamplingDirn(mod, adaptor, BASE_CMN_TRAFFIC_PATH_INGRESS));
   }
 
   /*_________________---------------------------__________________
@@ -507,6 +572,7 @@ extern "C" {
 
   static bool CPSPollIfState(EVMod *mod, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    int status;
     bool ok = NO;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     if(!nio->switchPort)
@@ -532,8 +598,10 @@ extern "C" {
 			 adaptor->deviceName,
 			 strlen(adaptor->deviceName)+1);
     // GET
-    if (cps_api_get(&gp) != cps_api_ret_code_OK)
+    if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSPollIfState: cps_api_get failed (status=%d)", status);
       goto out;
+    }
     ok = YES;
     size_t mx = cps_api_object_list_size(gp.list);
     myDebug(1, "CPSPollIfState: get returned %u results", mx);
@@ -603,6 +671,7 @@ extern "C" {
 
   static bool CPSPollIfCounters(EVMod *mod, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs) {
     bool ok = NO;
+    int status;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     if(!nio->switchPort)
       return NO;
@@ -631,8 +700,10 @@ extern "C" {
 			 adaptor->deviceName,
 			 strlen(adaptor->deviceName)+1);
     // GET
-    if (cps_api_get(&gp) != cps_api_ret_code_OK)
+    if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
+      myDebug(1, "CPSPollIfCounters: cps_api_get failed (status=%d)", status);
       goto out;
+    }
     ok = YES;
     size_t mx = cps_api_object_list_size(gp.list);
     myDebug(1, "CPSPollIfCounters: get returned %u results", mx);
