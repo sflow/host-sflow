@@ -234,7 +234,7 @@ extern "C" {
 
   static bool CPSSetSampleUDPPort(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    int status;
+    cps_api_return_code_enum_val_t status;
     bool ok = NO;
     uint16_t udpPort =  sp->opx.port ?: HSP_DEFAULT_OPX_PORT;
     // prepare transaction
@@ -277,7 +277,7 @@ extern "C" {
 
   static bool CPSSyncEntryIDs(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    int status;
+    cps_api_return_code_enum_val_t status;
     bool ok = NO;
     // clear existing ids
     SFLAdaptor *adaptor;
@@ -331,7 +331,7 @@ extern "C" {
     cps_api_transaction_params_t tran;
     if (cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
       return NO;
-    int status;
+    cps_api_return_code_enum_val_t status;
     bool ok = NO;
     cps_api_object_t obj;
     if((obj = cps_api_object_create()) == NULL)
@@ -385,7 +385,7 @@ extern "C" {
     uint32_t id = ADAPTOR_NIO(adaptor)->opx_id;
     cps_api_set_key_data(obj, BASE_SFLOW_ENTRY_ID, cps_api_object_ATTR_T_U32, &id, sizeof(id));
     // GET
-    int status;
+    cps_api_return_code_enum_val_t status;
     if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
       myLog(LOG_ERR, "CPSGetEntry cps_api_get failed (status=%d)", status);
       goto out;
@@ -424,7 +424,7 @@ extern "C" {
   */
 
   static bool CPSSetEntrySamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_n) {
-    int status;
+    cps_api_return_code_enum_val_t status;
     bool ok = NO;
     // prepare transaction
     cps_api_transaction_params_t tran;
@@ -462,7 +462,7 @@ extern "C" {
   */
 
   static bool CPSSetEntrySamplingDirn(EVMod *mod, SFLAdaptor *adaptor, uint32_t sampling_dirn) {
-    int status;
+    cps_api_return_code_enum_val_t status;
     bool ok = NO;
     // prepare transaction
     cps_api_transaction_params_t tran;
@@ -572,7 +572,7 @@ extern "C" {
 
   static bool CPSPollIfState(EVMod *mod, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    int status;
+    cps_api_return_code_enum_val_t status;
     bool ok = NO;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     if(!nio->switchPort)
@@ -671,7 +671,7 @@ extern "C" {
 
   static bool CPSPollIfCounters(EVMod *mod, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs) {
     bool ok = NO;
-    int status;
+    cps_api_return_code_enum_val_t status;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     if(!nio->switchPort)
       return NO;
