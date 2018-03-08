@@ -122,9 +122,10 @@ extern "C" {
 #define HSP_DOCKER_SOCK  "/var/run/docker.sock"
 #define HSP_DOCKER_MAX_CONCURRENT 3
 #define HSP_DOCKER_HTTP " HTTP/1.1\nHost: " HSP_DOCKER_SOCK "\n\n"
-#define HSP_DOCKER_REQ_EVENTS "GET /events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
-#define HSP_DOCKER_REQ_CONTAINERS "GET /containers/json" HSP_DOCKER_HTTP
-#define HSP_DOCKER_REQ_INSPECT_ID "GET /containers/%s/json" HSP_DOCKER_HTTP
+#define HSP_DOCKER_API "v1.24"
+#define HSP_DOCKER_REQ_EVENTS "GET /" HSP_DOCKER_API "/events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
+#define HSP_DOCKER_REQ_CONTAINERS "GET /" HSP_DOCKER_API "/containers/json" HSP_DOCKER_HTTP
+#define HSP_DOCKER_REQ_INSPECT_ID "GET /" HSP_DOCKER_API "/containers/%s/json" HSP_DOCKER_HTTP
 #define HSP_CONTENT_LENGTH_REGEX "^Content-Length: ([0-9]+)$"
   
 #define HSP_DOCKER_CMD "/usr/bin/docker"
