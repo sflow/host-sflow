@@ -178,7 +178,7 @@ extern "C" {
 	dev_out = adaptorByIndex(sp, ifOut);
 
       if(dev_in == NULL
-	 || ADAPTOR_NIO(dev_in)->sampling_n_set == 0) {
+	 /* || ADAPTOR_NIO(dev_in)->sampling_n_set == 0*/) {
 	// sampling not configured yet - may have just
 	// restarted hsflowd
 	continue;
