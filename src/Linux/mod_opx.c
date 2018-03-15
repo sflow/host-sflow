@@ -550,17 +550,21 @@ extern "C" {
       return NO;
     }
 
-    if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
-      // resync and try again
-      myLog(LOG_INFO, "setSamplingRate: resync and try again");
-      CPSSyncEntryIDs(mod);
+    niostate->sampling_n = sampling_n;
+    if(niostate->sampling_n != niostate->sampling_n_set) {
       if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
-	myLog(LOG_ERR, "setSamplingRate: failed to set rate=%u on interface %s (opx_id==%u)",
-	      sampling_n,
-	      adaptor->deviceName,
-	      niostate->opx_id);
-	return NO;
+	// resync and try again
+	myLog(LOG_INFO, "setSamplingRate: resync and try again");
+	CPSSyncEntryIDs(mod);
+	if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
+	  myLog(LOG_ERR, "setSamplingRate: failed to set rate=%u on interface %s (opx_id==%u)",
+		sampling_n,
+		adaptor->deviceName,
+		niostate->opx_id);
+	  return NO;
+	}
       }
+      niostate->sampling_n_set = sampling_n;
     }
     return YES;
   }
