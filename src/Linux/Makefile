@@ -1,6 +1,32 @@
 # This software is distributed under the following license:
 # http://sflow.net/license.html
 
+#########  platform checks  #########
+
+# detect Debian systems
+ifndef DEBIAN
+  DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
+endif
+
+# detect Red Hat systems
+ifndef REDHAT
+  REDHAT=$(shell if [ -r /etc/redhat-release ]; then echo "yes"; else echo "no"; fi)
+endif
+
+HSFLOWD_INITSCRIPT=scripts/hsflowd
+HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service
+HSFLOWD_DBUS_CONF=scripts/net.sflow.hsflowd.conf
+
+ifeq ($(DEBIAN),yes)
+  HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
+endif
+ifeq ($(REDHAT),yes)
+  HSFLOWD_INITSCRIPT=scripts/hsflowd.redhat
+endif
+
+INSTALL=install
+
+#########  object files  #########
 FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX DBUS SYSTEMD EAPI
 FEATURES_CUMULUS= CUMULUS NFLOG SYSTEMD
 FEATURES_EOS= EAPI
@@ -38,6 +64,7 @@ endif
 ifeq ("$(strip $(FEATURES))","OPX")
   XTGTS += $(FEATURES_OPX)
   CFLAGS_LOAD += -DHSP_LOAD_OPX
+  HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.opx
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
@@ -165,32 +192,6 @@ ifeq ($(XENSTORE_H),yes)
   CFLAGS_XEN += -DHSP_XENSTORE_H
 endif
 
-#########  platform checks  #########
-
-# detect Debian systems
-ifndef DEBIAN
-  DEBIAN=$(shell if [ -r /etc/debian_version ]; then echo "yes"; else echo "no"; fi)
-endif
-
-# detect Red Hat systems
-ifndef REDHAT
-  REDHAT=$(shell if [ -r /etc/redhat-release ]; then echo "yes"; else echo "no"; fi)
-endif
-
-HSFLOWD_INITSCRIPT=scripts/hsflowd
-HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service
-HSFLOWD_DBUS_CONF=scripts/net.sflow.hsflowd.conf
-
-ifeq ($(DEBIAN),yes)
-  HSFLOWD_INITSCRIPT=scripts/hsflowd.deb
-endif
-ifeq ($(REDHAT),yes)
-  HSFLOWD_INITSCRIPT=scripts/hsflowd.redhat
-endif
-
-INSTALL=install
-
-#########  object files  #########
 
 OBJS_HSFLOWD= hsflowconfig.o \
               hsflowd.o \
