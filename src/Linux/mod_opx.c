@@ -451,6 +451,9 @@ extern "C" {
     ok = YES;
     // clear the id
     ADAPTOR_NIO(adaptor)->opx_id = 0;
+  out:
+    if(!ok)
+      myLog(LOG_ERR, "CPSDeleteEntry failed");
     cps_api_transaction_close(&tran);
     return ok;
   }
