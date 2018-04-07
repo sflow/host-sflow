@@ -138,7 +138,8 @@ deb: $(PROG)
 	install -m 555 DEBIAN_build/preinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/postinst debian/DEBIAN; \
 	install -m 555 DEBIAN_build/prerm debian/DEBIAN; \
-	cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL INSTROOT="../../debian" install; \
+	cd src/$$PLATFORM; $(MAKE) VERSION=$$MYVER RELEASE=$$MYREL INSTROOT="../../debian" install; cd ../..; \
+        pwd; \
 	cd debian; \
 	find . -type d | xargs chmod 755; \
 	md5sum `find usr etc -type f` > DEBIAN/md5sums; \
