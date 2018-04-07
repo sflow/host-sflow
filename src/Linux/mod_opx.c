@@ -417,6 +417,43 @@ extern "C" {
     cps_api_get_request_close(&gp);
     return ok;
   }
+  /*_________________---------------------------__________________
+    _________________      CPSDeleteEntry       __________________
+    -----------------___________________________------------------
+  */
+
+  static bool CPSDeleteEntry(EVMod *mod, SFLAdaptor *adaptor) {
+    // prepare transaction
+    cps_api_transaction_params_t tran;
+    if (cps_api_transaction_init(&tran) != cps_api_ret_code_OK )
+      return NO;
+    cps_api_return_code_enum_val_t status;
+    bool ok = NO;
+    // prepare DELETE
+    cps_api_object_t obj;
+    if((obj = cps_api_object_create()) == NULL)
+      goto out;
+    // TARGET key pointing to sFlow entry (yang model "list")
+    cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
+    // query by ENTRY_ID
+    uint32_t id = ADAPTOR_NIO(adaptor)->opx_id;
+    cps_api_set_key_data(obj, BASE_SFLOW_ENTRY_ID, cps_api_object_ATTR_T_U32, &id, sizeof(id));
+    // DELETE
+    if ((status = cps_api_delete(&tran, obj)) != cps_api_ret_code_OK) {
+      myLog(LOG_ERR, "CPSDeleteEntry cps_api_delete failed (status=%d)", status);
+      goto out;
+    }
+    // commit
+    if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK ) {
+      myDebug(1, "CPSDeleteEntry: cps_api_commit failed (status=%d)", status);
+      goto out;
+    }
+    ok = YES;
+    // clear the id
+    ADAPTOR_NIO(adaptor)->opx_id = 0;
+    cps_api_get_request_close(&gp);
+    return ok;
+  }
 
   /*_________________---------------------------__________________
     _________________   CPSSetEntrySamplingRate __________________
@@ -553,9 +590,10 @@ extern "C" {
     niostate->sampling_n = sampling_n;
     if(niostate->sampling_n != niostate->sampling_n_set) {
       if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
-	// resync and try again
-	myLog(LOG_INFO, "setSamplingRate: resync and try again");
+	// resync, delete and try again
+	myLog(LOG_INFO, "setSamplingRate: resync, delete and try again");
 	CPSSyncEntryIDs(mod);
+	CPSDeleteEntry(mod, adaptor);
 	if(!CPSSetSamplingRate(mod, adaptor, sampling_n)) {
 	  myLog(LOG_ERR, "setSamplingRate: failed to set rate=%u on interface %s (opx_id==%u)",
 		sampling_n,
@@ -999,7 +1037,10 @@ extern "C" {
     // turn off any hardware-sampling that we enabled
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByName, adaptor) {
-      setSamplingRate(mod, adaptor, 0);
+      if(ADAPTOR_NIO(adaptor)->opx_id) {
+	setSamplingRate(mod, adaptor, 0);
+	CPSDeleteEntry(mod, adaptor);
+      }
     }
   }
 
