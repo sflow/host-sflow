@@ -123,6 +123,7 @@ deb: $(PROG)
 	MYARCH=`uname -m|sed 's/x86_64/amd64/'`; \
 	MYVER=`./getVersion`; \
 	MYREL=`./getRelease`; \
+	PLATFORM=`uname`; \
 	mkdir -p debian/DEBIAN; \
 	mkdir -p debian/usr/sbin; \
 	mkdir -p debian/etc/init.d; \
