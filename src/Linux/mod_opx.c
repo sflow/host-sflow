@@ -451,7 +451,7 @@ extern "C" {
     ok = YES;
     // clear the id
     ADAPTOR_NIO(adaptor)->opx_id = 0;
-    cps_api_get_request_close(&gp);
+    cps_api_transaction_close(&tran);
     return ok;
   }
 
