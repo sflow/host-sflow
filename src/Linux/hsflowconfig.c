@@ -507,13 +507,6 @@ extern "C" {
     return col;
   }
 
-  static HSPPort *newOS10Port(HSP *sp) {
-    HSPPort *prt = (HSPPort *)my_calloc(sizeof(HSPPort));
-    ADD_TO_LIST(sp->os10.ports, prt);
-    sp->os10.numPorts++;
-    return prt;
-  }
-
   static HSPPort *newOPXPort(HSP *sp) {
     HSPPort *prt = (HSPPort *)my_calloc(sizeof(HSPPort));
     ADD_TO_LIST(sp->opx.ports, prt);
@@ -1289,7 +1282,7 @@ extern "C" {
 	    break;
 	  case HSPTOKEN_OS10:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	    sp->os10.os10 = YES;
+	    sp->opx.opx = YES;
 	    level[++depth] = HSPOBJ_OS10;
 	    break;
 	  case HSPTOKEN_OPX:
@@ -1622,29 +1615,8 @@ extern "C" {
 	  }
 	  break;
 
+	  // OS10 is now the same as OPX internally (starting with 2.0.17)
 	case HSPOBJ_OS10:
-	  {
-	    switch(tok->stok) {
-	    case HSPTOKEN_UDPPORT:
-	      if((tok = expectInteger32(sp, tok, &sp->os10.port,0,65535)) == NULL) return NO;
-	      break;
-	    case HSPTOKEN_SWITCHPORT:
-	      if((tok = expectRegex(sp, tok, &sp->os10.swp_regex)) == NULL) return NO;
-	      sp->os10.swp_regex_str = my_strdup(tok->str);
-	      break;
-	    case HSPTOKEN_PORT:
-	      if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	      newOS10Port(sp);
-	      level[++depth] = HSPOBJ_PORT;
-	      break;
-	    default:
-	      unexpectedToken(sp, tok, level[depth]);
-	      return NO;
-	      break;
-	    }
-	  }
-	  break;
-
 	case HSPOBJ_OPX:
 	  {
 	    switch(tok->stok) {
@@ -1672,10 +1644,9 @@ extern "C" {
 	  {
 	    HSPPort *prt = NULL;
 	    if(depth) {
-	      if (level[depth-1] == HSPOBJ_OPX)
+	      if (level[depth-1] == HSPOBJ_OPX
+		  || level[depth-1] == HSPOBJ_OS10)
 		prt = sp->opx.ports;
-	      if (level[depth-1] == HSPOBJ_OS10)
-		prt = sp->os10.ports;
 	    }
 	    if(prt == NULL) {
 	      unexpectedToken(sp, tok, level[depth]);

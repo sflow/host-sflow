@@ -25,7 +25,6 @@ will typically be required for compilation:
  XEN: libxenctrl libxenstore xenctrl.h xenstore.h
  SYSTEMD: dbus-dev(el) openssl-dev(el)
  DBUS: dbus-dev(el)
- OS10: libsystemd-daemon-dev
  OPX: libsystemd-daemon-dev
 
 To start the daemon, run:

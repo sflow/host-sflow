@@ -30,7 +30,7 @@ INSTALL=install
 FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX DBUS SYSTEMD EAPI
 FEATURES_CUMULUS= CUMULUS NFLOG SYSTEMD
 FEATURES_EOS= EAPI
-FEATURES_OS10= OS10 DBUS
+FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
 FEATURES_XEN= XEN OVS
 FEATURES_HOST= NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD
@@ -59,7 +59,8 @@ ifeq ("$(strip $(FEATURES))","EOS")
 endif
 ifeq ("$(strip $(FEATURES))","OS10")
   XTGTS += $(FEATURES_OS10)
-  CFLAGS_LOAD += -DHSP_LOAD_OS10
+  CFLAGS_LOAD += -DHSP_LOAD_OPX
+  HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.os10
 endif
 ifeq ("$(strip $(FEATURES))","OPX")
   XTGTS += $(FEATURES_OPX)
@@ -158,11 +159,12 @@ LIBS_CUMULUS=
 CFLAGS_OVS=
 LIBS_OVS=
 
-CFLAGS_OS10=
-LIBS_OS10= -lsystemd
-
 CFLAGS_OPX= -I/usr/include/opx
 LIBS_OPX= -lsystemd -lopx_cps_api_common -lopx_cps_class_map
+# For OS10 the same libraries are under different names:
+ifeq ("$(strip $(FEATURES))","OS10")
+  LIBS_OPX= -lsystemd -lcps-api-common -lcps-class-map-util
+endif
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
@@ -218,7 +220,6 @@ OBJS_TCP=mod_tcp.o
 OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
-OBJS_OS10=mod_os10.o
 OBJS_OPX=mod_opx.o
 OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o
@@ -259,7 +260,7 @@ OVS: mod_ovs.so
 
 CUMULUS: mod_cumulus.so
 
-OS10: mod_os10.so
+OS10: mod_opx.so
 
 OPX: mod_opx.so
 
@@ -386,16 +387,6 @@ mod_cumulus.so: $(OBJS_CUMULUS)
 
 #----------------------------
 
-
-mod_os10.o: mod_os10.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_OS10)
-
-mod_os10.so: $(OBJS_OS10)
-	$(LD) -o $@ $(OBJS_OS10) $(LDFLAGS_SHARED) $(LIBS_OS10)
-
-#----------------------------
-
-
 mod_opx.o: mod_opx.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_OPX)
 
@@ -500,7 +491,6 @@ mod_tcp.o: mod_tcp.c $(HEADERS)
 mod_nvml.o: mod_nvml.c $(HEADERS)
 mod_cumulus.o: mod_cumulus.c $(HEADERS)
 mod_ovs.o: mod_ovs.c $(HEADERS)
-mod_os10.o: mod_os10.c $(HEADERS)
 mod_opx.o: mod_opx.c $(HEADERS)
 mod_dbus.o: mod_dbus.c $(HEADERS)
 mod_systemd.o: mod_systemd.c $(HEADERS)

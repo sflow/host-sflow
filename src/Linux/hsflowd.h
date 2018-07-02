@@ -276,7 +276,6 @@ extern "C" {
     bool bond_master:1;
     bool bond_slave:1;
     bool switchPort:1;
-    bool os10Port:1;
     bool opxPort:1;
     bool vm_or_container:1;
     bool modinfo_tested:1;
@@ -467,14 +466,6 @@ extern "C" {
     struct {
       bool ovs;
     } ovs;
-    struct {
-      bool os10;
-      uint32_t port; // UDP port for hw samples
-      char *swp_regex_str;
-      regex_t *swp_regex;
-      HSPPort *ports; // alternative way to list switch ports
-      uint32_t numPorts;
-    } os10;
     struct {
       bool opx;
       uint32_t port; // UDP port for hw samples
@@ -678,7 +669,6 @@ extern "C" {
 #define HSP_SAMPLEOPT_ULOG        0x0020
 #define HSP_SAMPLEOPT_NFLOG       0x0040
 #define HSP_SAMPLEOPT_PCAP        0x0080
-#define HSP_SAMPLEOPT_OS10        0x0100
 #define HSP_SAMPLEOPT_CUMULUS     0x0200
 #define HSP_SAMPLEOPT_INGRESS     0x0400
 #define HSP_SAMPLEOPT_EGRESS      0x0800

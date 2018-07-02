@@ -1,0 +1,13 @@
+[Unit]
+Description=Host sFlow
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/hsflowd -m %m -d
+TimeoutStopSec=10
+Environment=LD_LIBRARY_PATH=/opt/dell/os10/lib:/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:/usr/lib:/lib
+Environment=PYTHONPATH=/opt/dell/os10/lib:/opt/dell/os10/lib/python
+
+[Install]
+WantedBy=multi-user.target
