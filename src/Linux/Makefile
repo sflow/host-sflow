@@ -163,6 +163,7 @@ CFLAGS_OPX= -I/usr/include/opx
 LIBS_OPX= -lsystemd -lopx_cps_api_common -lopx_cps_class_map
 # For OS10 the same libraries are under different names:
 ifeq ("$(strip $(FEATURES))","OS10")
+  CFLAGS_OPX= -I/usr/include/ngos
   LIBS_OPX= -lsystemd -lcps-api-common -lcps-class-map-util
 endif
 
