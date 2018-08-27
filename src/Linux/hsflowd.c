@@ -15,7 +15,7 @@ extern "C" {
   int exitStatus = EXIT_SUCCESS;
   FILE *f_crash = NULL;
 
-  static void installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
+  static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
   static bool updatePollingInterval(HSP *sp);
 
   /*_________________---------------------------__________________
@@ -42,7 +42,6 @@ extern "C" {
   static void agentCB_sendPkt(void *magic, SFLAgent *agent, SFLReceiver *receiver, u_char *pkt, uint32_t pktLen)
   {
     HSP *sp = (HSP *)magic;
-
     // note that we are relying on any new settings being installed atomically from the DNS-SD
     // thread (it's just a pointer move,  so it should be atomic).  Otherwise we would want to
     // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
@@ -1053,6 +1052,15 @@ extern "C" {
     }
   }
 
+  static void closeCollectorSockets(HSP *sp, HSPSFlowSettings *settings) {
+    for(HSPCollector *coll = settings->collectors; coll; coll=coll->nxt) {
+      if(coll->socket > 0) {
+	close(coll->socket);
+	coll->socket = 0;
+      }
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________   installSFlowSettings    __________________
     -----------------___________________________------------------
@@ -1060,55 +1068,68 @@ extern "C" {
     Always increment the revision number whenever we change the sFlowSettings pointer
   */
 
-  static void installSFlowSettings(HSP *sp, HSPSFlowSettings *settings)
+  static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings)
   {
     char *settingsStr = sFlowSettingsString(sp, settings);
     myDebug(3, "installSFlowSettings: <%s>", settingsStr);
     if(my_strequal(sp->sFlowSettings_str, settingsStr)) {
       // no change - don't increment the revision number
       // (which will mean that the file is not rewritten either)
-      if(settingsStr) my_free(settingsStr);
+      if(settingsStr)
+	my_free(settingsStr);
+      return NO;
     }
-    else {
-      // new config
-      myDebug(3, "installSFlowSettings: detected new config");
-      bool firstConfig = YES;
-      if(sp->sFlowSettings_str) {
-	firstConfig = NO;
-	my_free(sp->sFlowSettings_str);
-      }
-      sp->sFlowSettings_str = settingsStr;
-      sp->revisionNo++;
-      if(settings) {
-	// open collector sockets before this goes live
-	// (old collector sockets will be closed as they are freed)
-	openCollectorSockets(sp, settings);
-      }
-      // atomic pointer-switch.  No need for lock.  At least
-      // not on the  platforms we expect to run on.
-      sp->sFlowSettings = settings;
 
-      // announce the change
-      if(firstConfig) {
-	// make sure certain things are in place before we proceed. This
-	// could be done with an event such as CONFIG_PRE, but then
-	// we would have to handshake before raising CONFIG_FIRST
-	pre_config_first(sp);
-	// now offer it to the modules
-	EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
-      }
-      myDebug(3, "installSFlowSettings: announcing config change");
-      EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_CHANGED, NULL, 0);
-      // delay the config-done event until every thread has processed the
-      // config change.  This is especially important the first time because
-      // we are about to drop priviledges.  If we plow on and do that here
-      // we will drop them before another module on another bus gets to, for
-      // example, open a pcap socket.  Use the handshake mechanism to get
-      // every bus to reply.  Then we know we can proceed.
-      sp->config_shake_countdown = EVBusCount(sp->rootModule);
-      EVEventTxAll(sp->rootModule, EVEVENT_HANDSHAKE, HSPEVENT_CONFIG_SHAKE, strlen(HSPEVENT_CONFIG_SHAKE));
-      // EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
+    // new config
+    myDebug(1, "installSFlowSettings: detected new config");
+    // keep pointers to old settings so we can free them below
+    char *prev_settings_str = sp->sFlowSettings_str;
+    HSPSFlowSettings *prev_settings = sp->sFlowSettings;
+
+    // install new settings
+    sp->sFlowSettings_str = settingsStr;
+    sp->revisionNo++;
+    if(settings) {
+      // open collector sockets before this goes live
+      openCollectorSockets(sp, settings);
     }
+    // atomic pointer-switch.  No need for lock.  At least
+    // not on the  platforms we expect to run on.
+    sp->sFlowSettings = settings;
+
+    // announce the change
+    if(prev_settings_str == NULL) {
+      // firstConfig
+      // make sure certain things are in place before we proceed. This
+      // could be done with an event such as CONFIG_PRE, but then
+      // we would have to handshake before raising CONFIG_FIRST
+      pre_config_first(sp);
+      // now offer it to the modules
+      EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_FIRST, NULL, 0);
+    }
+
+    myDebug(3, "installSFlowSettings: announcing config change");
+    EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_CHANGED, NULL, 0);
+    // delay the config-done event until every thread has processed the
+    // config change.  This is especially important the first time because
+    // we are about to drop priviledges.  If we plow on and do that here
+    // we will drop them before another module on another bus gets to
+    // complete a privileged action, such as opening a pcap socket.
+    // Use the handshake mechanism to get every bus to reply.
+    // Then we know we can proceed.
+    sp->config_shake_countdown = EVBusCount(sp->rootModule);
+    EVEventTxAll(sp->rootModule, EVEVENT_HANDSHAKE, HSPEVENT_CONFIG_SHAKE, strlen(HSPEVENT_CONFIG_SHAKE));
+    // this now happens in evt_config_shake below...
+    // EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
+
+    // cleanup
+    if(prev_settings_str)
+      my_free(prev_settings_str);
+    if(prev_settings) {
+      closeCollectorSockets(sp, prev_settings);
+      freeSFlowSettings(prev_settings);
+    }
+    return YES;
   }
 
   /*_________________------------------------__________________
@@ -1139,9 +1160,6 @@ extern "C" {
 
   static void evt_config_start(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(sp->sFlowSettings_dyn_prev)
-      freeSFlowSettings(sp->sFlowSettings_dyn_prev);
-    sp->sFlowSettings_dyn_prev = sp->sFlowSettings_dyn;
     sp->sFlowSettings_dyn = newSFlowSettings();
   }
 
@@ -1177,7 +1195,11 @@ extern "C" {
     }
     else {
       // C: make this new one the running config.
-      installSFlowSettings(sp, sp->sFlowSettings_dyn);
+      if(!installSFlowSettings(sp, sp->sFlowSettings_dyn)) {
+	// not accepted (probably no change from last time)
+	freeSFlowSettings(sp->sFlowSettings_dyn);
+	sp->sFlowSettings_dyn = NULL;
+      }
     }
   }
 

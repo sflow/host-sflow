@@ -413,7 +413,6 @@ extern "C" {
     // config settings
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dyn;
-    HSPSFlowSettings *sFlowSettings_dyn_prev;
     HSPSFlowSettings *sFlowSettings;
     char *sFlowSettings_str;
 

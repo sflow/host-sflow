@@ -480,8 +480,13 @@ extern "C" {
   {
     for(HSPCollector *coll = settings->collectors; coll; ) {
       HSPCollector *nextColl = coll->nxt;
-      if(coll->socket > 0)
-	close(coll->socket);
+      if(coll->socket > 0) {
+	// treat this as an error condition.  The sockets should
+	// be closed or zeroed in advance. This way it is easier
+	// to create and free configs without incurring unwelcome
+	// side effects.
+	myLog(LOG_ERR, "clearCollectors: socket still open");
+      }
       my_free(coll);
       if(coll->namespace)
 	my_free(coll->namespace);
@@ -496,7 +501,13 @@ extern "C" {
   {
     for(HSPCollector *coll = from->collectors; coll; coll = coll->nxt) {
       HSPCollector *newColl = newCollector(to);
+      HSPCollector *nxtPtr = newColl->nxt;
+      // shallow copy - note this may also copy open socket fd.
       *newColl = *coll;
+      // post copy
+      newColl->nxt = nxtPtr;
+      newColl->namespace = my_strdup(newColl->namespace);
+      newColl->deviceName = my_strdup(newColl->deviceName);
     }
   }
 
