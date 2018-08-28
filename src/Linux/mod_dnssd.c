@@ -175,8 +175,8 @@ extern "C" {
 			    ans_len,
 			    res_len);
 	    if(callback) {
-	      char fqdn_port[PACKETSZ];
-	      sprintf(fqdn_port, "%s/%u", fqdn, res_prt);
+	      char fqdn_port[MAXDNAME+10];
+	      snprintf(fqdn_port, MAXDNAME+10, "%s/%u", fqdn, res_prt);
 	      // use key == NULL to indicate that the value is host:port
 	      (*callback)(mod, rtype, res_ttl, NULL, 0, (u_char *)fqdn_port, strlen(fqdn_port));
 	    }

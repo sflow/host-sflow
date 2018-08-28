@@ -943,7 +943,7 @@ extern "C" {
 	      et_stats->n_stats = niostate->et_nctrs;
 
 	      // now issue the ioctl
-	      strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name));
+	      strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name)-1);
 	      ifr.ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, &ifr) >= 0) {
 		if(getDebug() > 2) {

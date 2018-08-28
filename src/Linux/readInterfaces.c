@@ -581,7 +581,7 @@ extern "C" {
       myDebug(3, "detectInterfaceChange: testing %s", ad->deviceName);
       struct ifreq ifr;
       memset(&ifr, 0, sizeof(ifr));
-      strncpy(ifr.ifr_name, ad->deviceName, sizeof(ifr.ifr_name));
+      strncpy(ifr.ifr_name, ad->deviceName, sizeof(ifr.ifr_name)-1);
       if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
 	myDebug(1, "device %s Get SIOCGIFFLAGS failed : %s",
 		ad->deviceName,
@@ -653,7 +653,7 @@ extern "C" {
       int devNameLen = my_strlen(devName);
       if(devNameLen == 0 || devNameLen >= IFNAMSIZ) continue;
       // we set the ifr_name field to make our queries
-      strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
+      strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name)-1);
 
       myDebug(3, "reading interface %s", devName);
 
