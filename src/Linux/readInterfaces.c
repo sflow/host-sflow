@@ -228,11 +228,12 @@ extern "C" {
     } link_modes;
   };
 
-  static bool ethtool_get_GLINKSETTINGS(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor)
+  static bool ethtool_get_GLINKSETTINGS(HSP *sp, struct ifreq *ifr, int fd, SFLAdaptor *adaptor, bool *sysCallOK)
   {
     // Try to get the ethtool info for this interface so we can infer the
     // ifDirection and ifSpeed. Learned from openvswitch (http://www.openvswitch.org).
-    int changed = NO;
+    bool changed = NO;
+    (*sysCallOK) = NO;
     int err;
     struct {
       struct ethtool_link_settings req;
@@ -266,6 +267,9 @@ extern "C" {
 	return NO;
       }
 
+      // indicate to caller that this has worked
+      (*sysCallOK) = YES;
+
       uint32_t direction = ecmd.req.duplex ? 1 : 2;
       if(direction != adaptor->ifDirection) {
 	changed = YES;
@@ -294,8 +298,9 @@ extern "C" {
     return changed;
   }
 
-#else /* ETHTOOL_GLINKSETTINGS */
+#endif /* ETHTOOL_GLINKSETTINGS */
 
+#ifdef ETHTOOL_GSET
 /*________________--------------------------__________________
   ________________  ethtool_get_GSET        __________________
   ----------------__________________________------------------
@@ -338,7 +343,7 @@ extern "C" {
     return changed;
   }
 
-#endif /* not ETHTOOL_GLINKSETTINGS */
+#endif /* ETHTOOL_GSET */
 
 #if ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEINFO )
 
@@ -528,12 +533,17 @@ extern "C" {
     }
 #endif
 
+    // GLINKSETTINGS should eventually take over from GSET
+    bool glinkSettingsOK = NO;
 #ifdef ETHTOOL_GLINKSETTINGS
     if(nio->ethtool_GLINKSETTINGS) {
-      changed |= ethtool_get_GLINKSETTINGS(sp, ifr, fd, adaptor);
+      changed |= ethtool_get_GLINKSETTINGS(sp, ifr, fd, adaptor, &glinkSettingsOK);
     }
-#else
-    if(nio->ethtool_GSET) {
+#endif
+
+#ifdef ETHTOOL_GSET
+    // But fall back on GSET if the GLINKSETTINGS syscall fails (e.g. Debian 9)
+    if(glinkSettingsOK==NO && nio->ethtool_GSET) {
       changed |= ethtool_get_GSET(sp, ifr, fd, adaptor);
     }
 #endif
