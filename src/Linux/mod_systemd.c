@@ -21,10 +21,12 @@ extern "C" {
 #include <sched.h>
 #include <dbus/dbus.h>
 #include <openssl/sha.h>
+#include <dirent.h>
 
 #include "hsflowd.h"
 #include "cpu_utils.h"
 #include "util_dbus.h"
+#include "util_netlink.h"
 
   // limit the number of chars we will read from each line in /proc
 #define MAX_PROC_LINELEN 256
@@ -70,11 +72,12 @@ extern "C" {
     bool memoryAccounting:1;
     bool blockIOAccounting:1;
     HSPUnitCounters cntr;
+    uint listenSocksRev;
   } HSPDBusUnit;
 
   typedef struct _HSPDBusProcess {
     pid_t pid;
-    bool marked;
+    bool marked:1;
     HSPUnitCounters cntr;
     HSPUnitCounters last;
   } HSPDBusProcess;
@@ -84,6 +87,19 @@ extern "C" {
     char *id;
   } HSPVMState_SYSTEMD;
 
+  typedef struct _HSPSapId {
+    // SFLAddress addr;
+    uint16_t port;
+    uint8_t protocol;
+  } HSPSapId;
+    
+  typedef struct _HSPListenSock {
+    HSPSapId sapId;
+    uint32_t inode;
+    HSPDBusUnit *unit;
+    bool marked:1;
+  } HSPListenSock;
+
   typedef struct _HSP_mod_SYSTEMD {
     DBusConnection *connection;
     DBusError error;
@@ -92,6 +108,7 @@ extern "C" {
     uint32_t dbus_rx;
     UTHash *units;
     EVBus *pollBus;
+    EVBus *packetBus;
     UTHash *vmsByUUID;
     UTHash *vmsByID;
     UTHash *pollActions;
@@ -105,6 +122,12 @@ extern "C" {
     uint32_t page_size;
     char *cgroup_procs;
     char *cgroup_acct;
+    UTHash *listenSocks;
+    UTHash *listenSocksByInode;
+    int nl_sock;
+    uint32_t nextListenSockQuery;
+    uint listenSocksRev;
+    uint packetSamples;
   } HSP_mod_SYSTEMD;
 
   /*_________________---------------------------__________________
@@ -237,7 +260,8 @@ extern "C" {
     return unit;
   }
 
-  static void HSPDBusUnitFree(HSPDBusUnit *unit) {
+  static void HSPDBusUnitFree(EVMod *mod, HSPDBusUnit *unit) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     if(unit->name) my_free(unit->name);
     if(unit->obj) my_free(unit->obj);
     if(unit->cgroup) my_free(unit->cgroup);
@@ -245,6 +269,12 @@ extern "C" {
     UTHASH_WALK(unit->processes, process)
       my_free(process);
     UTHashFree(unit->processes);
+    if(mdata->listenSocks) {
+      HSPListenSock *listenSock;
+      UTHASH_WALK(mdata->listenSocks, listenSock)
+	if(listenSock->unit == unit)
+	  listenSock->unit = NULL;
+    }
     my_free(unit);
   }
 
@@ -406,6 +436,77 @@ extern "C" {
     return gotData;
   }
 
+  /*________________---------------------------__________________
+    ________________    readProcessFDs         __________________
+    ----------------___________________________------------------
+    build socket_inode->unit while counting FDs
+    TODO: is there not a more efficient way to do this?
+  */
+
+  static uint32_t readProcessFDs(EVMod *mod, HSPDBusUnit *unit, HSPDBusProcess *process, bool mapListenSocks) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    uint32_t countFDs = 0;
+    char path[HSP_SYSTEMD_MAX_FNAME_LEN];
+    sprintf(path, "/proc/%u/fd", process->pid);
+    DIR *dstream = opendir(path);
+    if(dstream) {
+      struct dirent *ptr;
+      while((ptr = readdir(dstream)) != NULL) {
+	if(ptr->d_name[0] != '.') {
+	  countFDs++;
+	  if(mapListenSocks) {
+	    char linkPath[HSP_SYSTEMD_MAX_FNAME_LEN];
+	    if(snprintf(linkPath, HSP_SYSTEMD_MAX_FNAME_LEN, "%s/%s", path, ptr->d_name) > 0) {
+	      char linkStr[HSP_SYSTEMD_MAX_FNAME_LEN];
+	      ssize_t linkStrLen = readlink(linkPath, linkStr, HSP_SYSTEMD_MAX_FNAME_LEN);
+	      if(linkStrLen > 0) {
+		linkStr[linkStrLen]='\0';
+		if(linkStr[linkStrLen-1] == ']'
+		   && strncmp(linkStr, "socket:[", 8) == 0) {
+		  uint32_t ino = atoi(linkStr + 8);
+		  HSPListenSock search = { .inode = ino };
+		  HSPListenSock *listenSock = UTHashGet(mdata->listenSocksByInode, &search);
+		  if(listenSock) {
+		    myDebug(1, "fd link inode = %u", ino);
+		    listenSock->unit = unit;
+		  }
+		}
+	      }
+	    }
+	  }
+	}
+      }
+      closedir(dstream);
+    }
+    return countFDs;
+  }
+
+  /*________________---------------------------__________________
+    ________________ accumulateFileDescriptors __________________
+    ----------------___________________________------------------
+  */
+
+  static uint32_t accumulateFileDescriptors(EVMod *mod, HSPDBusUnit *unit, uint32_t *pMaxByProcess) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    // re-map the sockets for these processes if there was any change at all
+    // to the listenSocks hash table since the last time we were here.
+    bool mapListenSocks = mdata->listenSocks && (mdata->listenSocksRev != unit->listenSocksRev);
+    HSPDBusProcess *process;
+    uint32_t unitFDs = 0;
+    uint32_t maxProcessFDs = 0;
+    UTHASH_WALK(unit->processes, process) {
+      uint32_t processFDs = readProcessFDs(mod, unit, process, mapListenSocks);
+      unitFDs += processFDs;
+      if(processFDs > maxProcessFDs)
+	maxProcessFDs = processFDs;
+    }
+    if(pMaxByProcess)
+      *pMaxByProcess = maxProcessFDs;
+    if(mapListenSocks)
+      unit->listenSocksRev = mdata->listenSocksRev;
+    return unitFDs;
+  }
+
   /*_________________---------------------------__________________
     _________________     readCgroupCounters    __________________
     -----------------___________________________------------------
@@ -487,17 +588,9 @@ extern "C" {
     parElem.counterBlock.host_par.dsIndex = HSP_DEFAULT_PHYSICAL_DSINDEX;
     SFLADD_ELEMENT(&cs, &parElem);
 
-    // TODO: can we gather NIO stats by PID?  It looks like maybe not.  The numbers
-    // in /proc/<pid>/net/dev are the same as in /proc/net/dev.  mod_docker gets the
-    // numbers because veth devices are used to connect between network namespaces
-    // but with no cgroup network accounting we would have to follow the links in
-    // /proc/<pid>/fd/* and accumuate the list of socket inodes,  then query those
-    // inodes for the counters -- assuming that sockets are not shared between processes
-    // in different cgroups.  The fact that sockets can appear and disappear in a
-    // short timeframe makes this hard to deal with accurately.  Collecting the listen
-    // ports (SAPs) for a service would make more sense.  Then that list could be
-    // exported,  and packet-samples could be annotated with service name if they
-    // were to or from one of those SAPs.
+    // TODO: can we gather NIO stats by PID?  It looks like maybe not, unless
+    // they are tracked by cgroup.  Marking traffic samples (via listen sockets)
+    // is more useful anyway because it breaks the data out by remote IP etc.
     // VM Net I/O
     // SFLCounters_sample_element nioElem = { 0 };
     // nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
@@ -550,7 +643,7 @@ extern "C" {
       rss = accumulateProcessRAM(mod, unit);
     }
     memElem.counterBlock.host_vrt_mem.memory = rss;
-    // TODO: get max memory (from DBUS?)
+    // TODO: get max memory (from DBUS? from /proc/<pid>/oom?)
     // memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
     SFLADD_ELEMENT(&cs, &memElem);
 
@@ -595,6 +688,18 @@ extern "C" {
     }
     // TODO: can we fill in capacity, allocation and available?
     SFLADD_ELEMENT(&cs, &dskElem);
+
+    // count file-descriptors and build inode->unit here. That way
+    // the fd-counter is correct, but it also has the effect of
+    // smoothing the /proc walks out over the polling interval
+    uint32_t maxProcessFDs = 0;
+    accumulateFileDescriptors(mod, unit, &maxProcessFDs);
+    // TODO: add fd count to new structure (or append to existing one)
+    // it could be a total for the vm/container as well as a max for any
+    // one process.  I guess it could also tally files, sockets etc.
+    // separately,  but the main reason for doing this is to detect when
+    // the ulimit might soon be reached. Running out of file-descriptors
+    // is such a classic meltdown scenario...
 
     SEMLOCK_DO(sp->sync_agent) {
       sfl_poller_writeCountersSample(vm->poller, &cs);
@@ -800,7 +905,7 @@ extern "C" {
 	      if(process)
 		process->marked = NO;
 	      else {
-		HSPDBusProcess *process = (HSPDBusProcess *)my_calloc(sizeof(HSPDBusProcess));
+		process = (HSPDBusProcess *)my_calloc(sizeof(HSPDBusProcess));
 		process->pid = pid64;
 		UTHashAdd(unit->processes, process);
 	      }
@@ -940,7 +1045,7 @@ extern "C" {
     UTHASH_WALK(mdata->units, unit) {
       if(unit->marked) {
 	UTHashDel(mdata->units, unit);
-	HSPDBusUnitFree(unit);
+	HSPDBusUnitFree(mod, unit);
       }
     }
   }
@@ -994,6 +1099,191 @@ extern "C" {
     }
   }
 
+  /*_________________---------------------------__________________
+    _________________   requestListenSocks      __________________
+    -----------------___________________________------------------
+  */
+  #define MAGIC_SEQ_TCP4 515514
+  #define MAGIC_SEQ_TCP6 515516
+  #define MAGIC_SEQ_UDP4 515524
+  #define MAGIC_SEQ_UDP6 515526
+
+  static void requestListenSocks(EVMod *mod, uint32_t seqNo) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    int family=0,protocol=0;
+    switch(seqNo) {
+    case MAGIC_SEQ_TCP4:
+      family = AF_INET;
+      protocol = IPPROTO_TCP;
+      break;
+    case MAGIC_SEQ_TCP6:
+      family = AF_INET6;
+      protocol = IPPROTO_TCP;
+      break;
+    case MAGIC_SEQ_UDP4:
+      family = AF_INET;
+      protocol = IPPROTO_UDP;
+      break;
+    case MAGIC_SEQ_UDP6:
+      family = AF_INET6;
+      protocol = IPPROTO_UDP;
+      break;
+    }
+    if(family) {
+      // UDP sockets use the same state flags as TCP, with TCP_CLOSE being
+      // the initial state for a listening socket, bound or unbound,
+      // and TCP_ESTABLISHED being the state for a client socket.
+      EnumKernelTCPState state = (protocol == IPPROTO_TCP) ? TCP_LISTEN : TCP_CLOSE;
+      struct inet_diag_req_v2 diag_req = { .sdiag_family = family,
+					   .sdiag_protocol = protocol,
+					   .idiag_states = (1<<state),
+					   .id.idiag_cookie = { INET_DIAG_NOCOOKIE,
+								INET_DIAG_NOCOOKIE } };
+      UTNLDiag_send(mdata->nl_sock, &diag_req, sizeof(diag_req), YES, seqNo);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________         readNL            __________________
+    -----------------___________________________------------------
+  */
+
+  static void diagCB(void *magic, int sockFd, uint32_t seqNo, struct inet_diag_msg *diag_msg, int rtalen) {
+    EVMod *mod = (EVMod *)magic;
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    char *protocol = NULL;
+    HSPListenSock search = { 0 };
+    // use the seqNo as a "queryNo" to imply family and protocol since it does
+    // not appear in the diag_msg sockid.
+    switch(seqNo) {
+    case MAGIC_SEQ_TCP4:
+      protocol = "TCP4";
+      search.sapId.protocol = IPPROTO_TCP;
+      //search.sapId.addr.type = SFLADDRESSTYPE_IP_V4;
+      break;
+    case MAGIC_SEQ_TCP6:
+      protocol = "TCP6";
+      search.sapId.protocol = IPPROTO_TCP;
+      //search.sapId.addr.type = SFLADDRESSTYPE_IP_V6;
+      break;
+    case MAGIC_SEQ_UDP4:
+      protocol = "UDP4";
+      search.sapId.protocol = IPPROTO_UDP;
+      //search.sapId.addr.type = SFLADDRESSTYPE_IP_V4;
+      break;
+    case MAGIC_SEQ_UDP6:
+      protocol = "UDP6";
+      search.sapId.protocol = IPPROTO_UDP;
+      //search.sapId.addr.type = SFLADDRESSTYPE_IP_V6;
+      break;
+    }
+    if(protocol) {
+      struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
+      myDebug(1, "diag_msg: %s UID=%u(%s) state=%u rqueue=%u inode=%u sock=%s",
+	      protocol,
+	      diag_msg->idiag_uid,
+	      uid_info->pw_name,
+	      diag_msg->idiag_state,
+	      diag_msg->idiag_rqueue,
+	      diag_msg->idiag_inode,
+	      UTNLDiag_sockid_print(&diag_msg->id));
+      //if(search.sapId.addr.type == SFLADDRESSTYPE_IP_V4)
+      // memcpy(&search.sapId.addr.address.ip_v4, diag_msg->id.idiag_src, 4);
+      //else
+      // memcpy(&search.sapId.addr.address.ip_v6, diag_msg->id.idiag_src, 16);
+      search.sapId.port = ntohs(diag_msg->id.idiag_sport);
+      HSPListenSock *listenSock = UTHashGet(mdata->listenSocks, &search);
+      if(listenSock) {
+	listenSock->marked = NO;
+	if(listenSock->inode != diag_msg->idiag_inode) {
+	  UTHashDel(mdata->listenSocksByInode, listenSock);
+	  listenSock->inode = diag_msg->idiag_inode;
+	  UTHashAdd(mdata->listenSocksByInode, listenSock);
+	  mdata->listenSocksRev++;
+	}
+      }
+      else {
+	listenSock = (HSPListenSock *)my_calloc(sizeof(HSPListenSock));
+	listenSock->sapId = search.sapId;
+	listenSock->inode = diag_msg->idiag_inode;
+	UTHashAdd(mdata->listenSocks, listenSock);
+	UTHashAdd(mdata->listenSocksByInode, listenSock);
+	mdata->listenSocksRev++;
+      }
+    }
+  }
+
+  static void readNL(EVMod *mod, EVSocket *sock, void *magic) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    UTNLDiag_recv(mod, mdata->nl_sock, diagCB);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    dsIndexForSAP          __________________
+    -----------------___________________________------------------
+    packet bus!
+  */
+  static uint32_t dsIndexForSAP(EVMod *mod, uint8_t protocol, uint16_t port) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSPListenSock search = { .sapId = { .protocol = protocol, .port = port } };
+    HSPListenSock *lsock = UTHashGet(mdata->listenSocks, &search);
+    if(lsock
+       && lsock->unit) {
+      HSPVMState_SYSTEMD *container = UTHashGet(mdata->vmsByUUID, lsock->unit->uuid);
+      if(container) {
+	HSPVMState *vm = (HSPVMState *)&container->vm;
+	return vm->dsIndex;
+      }
+    }
+    return 0;
+  }
+	
+  /*_________________---------------------------__________________
+    _________________       evt_flow_sample     __________________
+    -----------------___________________________------------------
+    packet bus!
+  */
+
+  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    mdata->packetSamples++; // used to enable socket lookup
+    HSPPendingSample *ps = (HSPPendingSample *)data;
+    int ip_ver = decodePendingSample(ps);
+    if((ip_ver == 4 || ip_ver == 6)
+       && (ps->ipproto == IPPROTO_TCP || ps->ipproto == IPPROTO_UDP)) {
+      // was it to/from this host?
+      bool local_src = isLocalAddress(sp, &ps->src);
+      bool local_dst = isLocalAddress(sp, &ps->dst);
+      if(local_src || local_dst) {
+	// yes - was it to/from a known socket?
+	uint16_t l4ports[2];
+	memcpy(l4ports, ps->hdr + ps->l4_offset, 4);
+	uint16_t srcPort = htons(l4ports[0]);
+	uint16_t dstPort = htons(l4ports[1]);
+	uint32_t src_dsIndex=0, dst_dsIndex=0;
+	if(local_src)
+	  src_dsIndex = dsIndexForSAP(mod, ps->ipproto, srcPort);
+	if(local_dst)
+	  dst_dsIndex = dsIndexForSAP(mod, ps->ipproto, dstPort);
+	if(src_dsIndex || dst_dsIndex) {
+	  // yes - add annotation
+	  myDebug(1, "%s adding entities structure: src=%u dst=%u", mod->name, src_dsIndex, dst_dsIndex);
+	  SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
+	  entElem->tag = SFLFLOW_EX_ENTITIES;
+	  if(src_dsIndex) {
+	    entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
+	    entElem->flowType.entities.src_dsIndex = src_dsIndex;
+	  }
+	  if(dst_dsIndex) {
+	    entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
+	    entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
+	  }
+	  SFLADD_ELEMENT(ps->fs, entElem);
+	}
+      }
+    }
+  }
 
   /*_________________---------------------------__________________
     _________________    evt_config_first       __________________
@@ -1003,6 +1293,46 @@ extern "C" {
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     mdata->countdownToResync = HSP_SYSTEMD_WAIT_STARTUP;
+    if(mdata->listenSocks) {
+      if((mdata->nl_sock = UTNLDiag_open()) > 0)
+	EVBusAddSocket(mod, EVCurrentBus(), mdata->nl_sock, readNL, NULL);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    markListenSockets      __________________
+    -----------------___________________________------------------
+    TODO: lock?
+  */
+  static void markListenSockets(EVMod *mod) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSPListenSock *lsock;
+    UTHASH_WALK(mdata->listenSocks, lsock)
+      lsock->marked = YES;
+  }
+  
+  /*_________________---------------------------__________________
+    _________________    sweepListenSockets     __________________
+    -----------------___________________________------------------
+    TODO: lock?
+  */
+  static void sweepListenSockets(EVMod *mod) {
+    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+    HSPListenSock *lsock;
+    UTHASH_WALK(mdata->listenSocks, lsock) {
+      if(lsock->marked) {
+	UTHashDel(mdata->listenSocks, lsock);
+	UTHashDel(mdata->listenSocksByInode, lsock);
+	// TODO: we could just invalidate the socket with a bit,
+	// or by clearing the inode.  That might be more
+	// stable memory-wise?  Especially if a unit is
+	// appearing and disappearing repeatedly.  It depends
+	// on how big the table could get. 32K entries max
+	// if not using address in SapId.
+	my_free(lsock);
+	mdata->listenSocksRev++;
+      }
+    }
   }
 
   /*_________________---------------------------__________________
@@ -1013,9 +1343,36 @@ extern "C" {
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    // Space the listen socket requests apart by clicking through a state machine here.
+    // This is partly to smooth the netlink load and partly because the netlink socket
+    // will not let us queue multiple requests at once (not sure why not).
+    if(mdata->nextListenSockQuery) {
+      // run this query
+      requestListenSocks(mod, mdata->nextListenSockQuery);
+      // decide what to do next tick
+      switch(mdata->nextListenSockQuery) {
+      case MAGIC_SEQ_TCP4: mdata->nextListenSockQuery = MAGIC_SEQ_TCP6; break;
+      case MAGIC_SEQ_TCP6: mdata->nextListenSockQuery = MAGIC_SEQ_UDP4; break;
+      case MAGIC_SEQ_UDP4: mdata->nextListenSockQuery = MAGIC_SEQ_UDP6; break;
+      case MAGIC_SEQ_UDP6:
+	// that was the last one - clean up
+	mdata->nextListenSockQuery = 0;
+	sweepListenSockets(mod);
+	break;
+      }
+    }
+	
     if(mdata->countdownToResync) {
       if(--mdata->countdownToResync == 0) {
+	// refresh units
 	dbusSynchronize(mod);
+	if(mdata->listenSocks && mdata->packetSamples) {
+	  // kick off the sequence that refreshes the listenSockets
+	  markListenSockets(mod);
+	  mdata->nextListenSockQuery = MAGIC_SEQ_TCP4;
+	}
+	// next countdown
 	mdata->countdownToResync = sp->systemd.refreshVMListSecs ?: sp->refreshVMListSecs;
       }
     }
@@ -1173,9 +1530,16 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     mdata->page_size = sysconf(_SC_PAGE_SIZE);
 #endif
 
-    // this mod operates entirely on the pollBus thread
-    mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
+    // packet bus
+    if(sp->systemd.markTraffic) {
+      mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+      EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
+      mdata->listenSocks = UTHASH_NEW(HSPListenSock, sapId, UTHASH_SYNC); // need sync (poll + packet thread)
+      mdata->listenSocksByInode = UTHASH_NEW(HSPListenSock, inode, UTHASH_DFLT); // only used in poll thread
+    }
 
+    // poll bus
+    mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_SYSTEMD, vm.uuid, UTHASH_DFLT);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_SYSTEMD, id, UTHASH_SKEY);
     mdata->pollActions = UTHASH_NEW(HSPVMState_SYSTEMD, id, UTHASH_IDTY);

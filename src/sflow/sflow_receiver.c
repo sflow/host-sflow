@@ -575,6 +575,13 @@ static void putTCPInfo(SFLReceiver *receiver, SFLExtended_TCP_info *tcp_info) {
     putNet32(receiver, tcp_info->min_rtt);
 }
 
+static void putEntities(SFLReceiver *receiver, SFLExtended_entities *entities) {
+    putNet32(receiver, entities->src_dsClass);
+    putNet32(receiver, entities->src_dsIndex);
+    putNet32(receiver, entities->dst_dsClass);
+    putNet32(receiver, entities->dst_dsIndex);
+}
+
 static uint32_t appCountersEncodingLength(SFLAPPCounters *appctrs) {
   uint32_t elemSiz = 0;
   elemSiz += stringEncodingLength(&appctrs->application);
@@ -685,6 +692,7 @@ static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_PROXY_SOCKET6:
     case SFLFLOW_EX_SOCKET6: elemSiz = XDRSIZ_SFLEXTENDED_SOCKET6;  break;
     case SFLFLOW_EX_TCP_INFO: elemSiz = XDRSIZ_SFLEXTENDED_TCP_INFO;  break;
+    case SFLFLOW_EX_ENTITIES: elemSiz = XDRSIZ_SFLEXTENDED_ENTITIES; break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -818,6 +826,7 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     case SFLFLOW_EX_PROXY_SOCKET6:
     case SFLFLOW_EX_SOCKET6: putSocket6(receiver, &elem->flowType.socket6); break;
     case SFLFLOW_EX_TCP_INFO: putTCPInfo(receiver, &elem->flowType.tcp_info); break;
+    case SFLFLOW_EX_ENTITIES: putEntities(receiver, &elem->flowType.entities); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;

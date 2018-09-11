@@ -848,6 +848,18 @@ extern "C" {
   return sp->adaptorsByName->entries;
 }
 
+/*________________---------------------------__________________
+  ________________   isLocalAddress          __________________
+  ----------------___________________________------------------
+*/
+  bool isLocalAddress(HSP *sp, SFLAddress *addr) {
+    UTHash *localHT = (addr->type == SFLADDRESSTYPE_IP_V6)
+      ? sp->localIP6
+      : sp->localIP;
+    return (UTHashGet(localHT, addr) != NULL);
+  }
+  
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

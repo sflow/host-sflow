@@ -398,7 +398,7 @@ extern "C" {
 	  char *p = line;
 	  char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
 	  if(devName && my_strlen(devName) < IFNAMSIZ) {
-	    strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name));
+	    strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name)-1);
 	    // Get the flags for this interface
 	    if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
 	      fprintf(stderr, "container device %s Get SIOCGIFFLAGS failed : %s",

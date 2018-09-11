@@ -7,6 +7,10 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
+#include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip6.h>
 
   /*_________________-----------------------------------__________________
     _________________   agentCB_getCounters_interface   __________________
@@ -550,6 +554,189 @@ extern "C" {
     syncBondPolling(sp);
 
     return count;
+  }
+
+  /*_________________---------------------------__________________
+    _________________     decodePacketHeader    __________________
+    -----------------___________________________------------------
+  */
+
+#define NFT_ETHHDR_SIZ 14
+#define NFT_8022_SIZ 3
+#define NFT_MAX_8023_LEN 1500
+
+#define NFT_MIN_SIZ (NFT_ETHHDR_SIZ + sizeof(struct iphdr))
+
+  static int decodePacketHeader(SFLSampled_header *header, uint8_t *ipproto, int *l3_offset, int *l4_offset)
+  {
+    uint8_t *start = header->header_bytes;
+    uint8_t *end = start + header->header_length;
+    uint8_t *ptr = start;
+    uint16_t type_len = 0;
+    
+    switch(header->header_protocol) {
+
+    case SFLHEADER_IPv4:
+      type_len = 0x0800;
+      break;
+
+    case SFLHEADER_IPv6:
+      type_len = 0x86DD;
+      break;
+
+    case SFLHEADER_ETHERNET_ISO8023:
+      // ethernet
+      if((end - ptr) < NFT_ETHHDR_SIZ)
+	return -1; // not enough for an Ethernet header
+      ptr += 6;
+      ptr += 6;
+      type_len = (ptr[0] << 8) + ptr[1];
+      ptr += 2;
+      
+      if(type_len == 0x8100) {
+	// 802.1Q
+	if((end - ptr) < 4)
+	  return -1; // not enough for an 802.1Q header
+	// VLAN  - next two bytes
+	// uint32_t vlanData = (ptr[0] << 8) + ptr[1];
+	// uint32_t vlan = vlanData & 0x0fff;
+	// uint32_t priority = vlanData >> 13;
+	ptr += 2;
+	//  _____________________________________ 
+	// |   pri  | c |         vlan-id        | 
+	//  ------------------------------------- 
+	// [priority = 3bits] [Canonical Format Flag = 1bit] [vlan-id = 12 bits] 
+	// now get the type_len again (next two bytes) 
+	type_len = (ptr[0] << 8) + ptr[1];
+	ptr += 2;
+      }
+
+      // now we're just looking for IP or IP6
+      if((end - start) < sizeof(struct iphdr))
+	return -1; // not enough for an IPv4 header (or IPX, or SNAP) 
+      
+      if(type_len <= NFT_MAX_8023_LEN) {
+	// assume 802.3+802.2 header 
+	// check for SNAP 
+	if(ptr[0] == 0xAA &&
+	   ptr[1] == 0xAA &&
+	   ptr[2] == 0x03) {
+	  ptr += 3;
+	  if(ptr[0] != 0 ||
+	     ptr[1] != 0 ||
+	     ptr[2] != 0) {
+	    return -1; // no further decode for vendor-specific protocol 
+	  }
+	  ptr += 3;
+	  // OUI == 00-00-00 means the next two bytes are the ethernet type (RFC 2895) 
+	  type_len = (ptr[0] << 8) + ptr[1];
+	  ptr += 2;
+	}
+	else {
+	  if (ptr[0] == 0x06 &&
+	      ptr[1] == 0x06 &&
+	      (ptr[2] & 0x01)) {
+	    // IP over 8022 
+	    ptr += 3;
+	    // force the type_len to be IP so we can inline the IP decode below 
+	    type_len = 0x0800;
+	  }
+	  else
+	    return -1;
+	}
+      }
+    }
+    
+    // type_len should be ethernet-type now
+    switch(type_len) {
+    case 0x0800:
+      // IPV4 - check again that we have enough header bytes 
+      if((end - ptr) < sizeof(struct iphdr))
+	return -1;
+      // look at first byte of header.... 
+      //  ___________________________ 
+      // |   version   |    hdrlen   | 
+      //  --------------------------- 
+      if((*ptr >> 4) != 4)
+	return -1; // not version 4 
+      if((*ptr & 15) < 5)
+	return -1; // not IP (hdr len must be 5 quads or more) 
+      // survived all the tests - store the offset to the start of the ip header 
+      *l3_offset = (ptr - start);
+      *l4_offset = (*l3_offset) + ((*ptr & 15) * 4);
+      *ipproto = ptr[9];
+      return 4; // IPv4
+      
+    case 0x86DD:
+      // IPV6 
+      // look at first byte of header.... 
+      if((*ptr >> 4) != 6)
+	return -1; // not version 6 
+      // survived all the tests - store the offset to the start of the ip6 header 
+      *l3_offset = (ptr - start);
+      *ipproto = ptr[6];
+      ptr += sizeof(struct ip6_hdr);
+      bool decodingOptions = YES;
+      while(decodingOptions
+	    && ptr < end) {
+	switch(*ipproto) {
+	  // these we can skip
+	case 0:  // hop
+	case 43: // routing
+	case 51: // auth
+	case 60: // dest options
+	  *ipproto = ptr[0];
+	  // second byte gives option len in units of 8, not counting first 8
+	  ptr += 8 * (ptr[1] + 1);
+	  break;
+	  // the rest we cannot skip (or don't want to)
+	  // case 1: // ICMP6
+	  // case 6: // TCP
+	  // case 17: // UDP
+	  // case 44: // fragment
+	  // case 50: // encyption
+	default:
+	  decodingOptions = NO;
+	  break;
+	}
+      }
+      *l4_offset = (ptr - start);
+      return 6; // IPv6
+    }
+
+    // type_len did not match
+    return -2;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   decodePendingSample     __________________
+    -----------------___________________________------------------
+  */
+
+  int decodePendingSample(HSPPendingSample *ps) {
+    if(!ps->decoded) {
+      for(SFLFlow_sample_element *elem = ps->fs->elements; elem != NULL; elem = elem->nxt) {
+	if(elem->tag == SFLFLOW_HEADER) {
+	  SFLSampled_header *header = &elem->flowType.header;
+	  ps->hdr = header->header_bytes;
+	  ps->ipversion = decodePacketHeader(header, &ps->ipproto, &ps->l3_offset, &ps->l4_offset);
+	  // extract IP src/dst addresses too, since they are so likely to be used
+	  if(ps->ipversion == 4) {
+	    ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V4;
+	    memcpy(&ps->src.address.ip_v4, ps->hdr + ps->l3_offset + 12, 4);
+	    memcpy(&ps->dst.address.ip_v4, ps->hdr + ps->l3_offset + 16, 4);
+	  }
+	  if(ps->ipversion == 6) {
+	    ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V6;
+	    memcpy(&ps->src.address.ip_v6, ps->hdr + ps->l3_offset + 8, 16);
+	    memcpy(&ps->dst.address.ip_v6, ps->hdr + ps->l3_offset + 24, 16);
+	  }
+	  break;
+	}
+      }
+      ps->decoded = YES;
+    }
+    return ps->ipversion;
   }
 
 #if defined(__cplusplus)

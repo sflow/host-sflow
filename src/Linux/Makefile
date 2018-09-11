@@ -95,7 +95,7 @@ endif
 
 #########  compilation flags  #########
 
-HEADERS= util.h util_dbus.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h Makefile
+HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h Makefile
 
 # compiler
 #CC= g++
@@ -147,7 +147,7 @@ LIBS_NFLOG= -lnfnetlink
 CFLAGS_PCAP=
 LIBS_PCAP=-lpcap
 
-CFLAGS_TCP=
+CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP -DUTIL_NETLINK
 LIBS_TCP=
 
 CFLAGS_NVML= -I/usr/include/nvidia/gdk
@@ -169,6 +169,9 @@ endif
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
+
+CFLAGS_NETLINK=
+LIBS_NETLINK=
 
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
 LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
@@ -217,13 +220,13 @@ OBJS_DOCKER=mod_docker.o
 OBJS_ULOG=mod_ulog.o
 OBJS_NFLOG=mod_nflog.o
 OBJS_PCAP=mod_pcap.o
-OBJS_TCP=mod_tcp.o
+OBJS_TCP=mod_tcp.o util_netlink.o
 OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
 OBJS_OPX=mod_opx.o
 OBJS_DBUS=mod_dbus.o util_dbus.o
-OBJS_SYSTEMD=mod_systemd.o util_dbus.o
+OBJS_SYSTEMD=mod_systemd.o util_dbus.o util_netlink.o
 OBJS_EAPI=mod_eapi.o
 
 BUILDTGTS=hsflowd \
@@ -280,6 +283,11 @@ hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
 
 util_dbus.o: util_dbus.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_DBUS)
+
+######## Netlink utils ##########
+
+util_netlink.o: util_netlink.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_NETLINK)
 
 #########  modules  #########
 

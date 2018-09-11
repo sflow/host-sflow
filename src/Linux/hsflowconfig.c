@@ -1712,6 +1712,9 @@ extern "C" {
 	    case HSPTOKEN_CGROUP_ACCT:
 	      if((tok = expectFormat(sp, tok, &sp->systemd.cgroup_acct)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_CGROUP_TRAFFIC:
+	      if((tok = expectONOFF(sp, tok, &sp->systemd.markTraffic)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

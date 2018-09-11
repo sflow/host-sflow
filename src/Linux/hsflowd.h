@@ -367,6 +367,19 @@ extern "C" {
     SFLSampler *sampler;
     int refCount;
     UTArray *ptrsToFree;
+    // header decode
+    int ipversion;
+    uint8_t *hdr;
+    SFLAddress src;
+    SFLAddress dst;
+    int l3_offset;
+    int l4_offset;
+    uint8_t ipproto;
+    bool decoded:1;
+    // local address test
+    bool localTest:1;
+    bool localSrc:1;
+    bool localDst:1;
   } HSPPendingSample;
 
   typedef enum {
@@ -507,6 +520,7 @@ extern "C" {
       bool dropPriv;
       char *cgroup_procs;
       char *cgroup_acct;
+      bool markTraffic;
     } systemd;
     struct {
       bool eapi;
@@ -616,6 +630,7 @@ extern "C" {
   // read functions
   bool detectInterfaceChange(HSP *sp);
   int readInterfaces(HSP *sp, bool full_discovery, uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed);
+  bool isLocalAddress(HSP *sp, SFLAddress *addr);
   const char *devTypeName(EnumHSPDevType devType);
   int readCpuCounters(SFLHost_cpu_counters *cpu);
   int readMemoryCounters(SFLHost_mem_counters *mem);
@@ -679,6 +694,7 @@ extern "C" {
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len);
   void holdPendingSample(HSPPendingSample *ps);
   void releasePendingSample(HSP *sp, HSPPendingSample *ps);
+  int decodePendingSample(HSPPendingSample *ps);
   SFLPoller *forceCounterPolling(HSP *sp, SFLAdaptor *adaptor);
 
   // VM lifecycle
