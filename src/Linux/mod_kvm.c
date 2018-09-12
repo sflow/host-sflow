@@ -536,7 +536,8 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_KVM);
-
+    retainRootRequest(mod, "needed by virConnectOpenReadOnly() to create user runtime directory");
+      
     // open the libvirt connection - failure is not an option
     int virErr = virInitialize();
     if(virErr != 0) {
