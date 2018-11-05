@@ -62,8 +62,8 @@ extern "C" {
 	char buf_val[MAX_PROC_LINE_CHARS];
 	// buf_var is up to first ':', buf_val is the rest
 	if(sscanf(line, "%[^:]:%[^\n]", buf_var, buf_val) == 2) {
-	  char *tok_var = trimWhitespace(buf_var);
-	  char *tok_val = trimWhitespace(buf_val);
+	  char *tok_var = trimWhitespace(buf_var, my_strnlen(buf_var, MAX_PROC_LINE_CHARS-1));
+	  char *tok_val = trimWhitespace(buf_val, my_strnlen(buf_var, MAX_PROC_LINE_CHARS-1));
 
 	  if(readingMaster) {
 	    if(my_strequal(tok_var, "MII Status")) {
@@ -115,7 +115,7 @@ extern "C" {
 	  // detect transitions to slave data:
 	  if(my_strequal(tok_var, "Slave Interface")) {
 	    readingMaster = NO;
-	    currentSlave = adaptorByName(sp, trimWhitespace(tok_val));
+	    currentSlave = adaptorByName(sp, tok_val);
 	    slave_nio = currentSlave ? ADAPTOR_NIO(currentSlave) : NULL;
 	    myDebug(1, "updateBondCounters: bond %s slave %s %s",
 		  bond->deviceName,
@@ -908,7 +908,11 @@ extern "C" {
 		  &pkts_out,
 		  &errs_out,
 		  &drops_out) == 9) {
-	  SFLAdaptor *adaptor = adaptorByName(sp, deviceName);
+	  uint32_t devLen = my_strnlen(deviceName, MAX_PROC_LINE_CHARS-1);
+	  char *trimmed = trimWhitespace(deviceName, devLen);
+	  if(trimmed == NULL)
+	    continue;
+	  SFLAdaptor *adaptor = adaptorByName(sp, trimmed);
 	  if(adaptor) {
 
 	    if(filter && (filter != adaptor))

@@ -41,11 +41,15 @@ extern "C" {
 	int vlan;
 	++lineNo;
 	if(lineNo > 1 && sscanf(line, "%s | %d", devName, &vlan) == 2) {
-	  SFLAdaptor *adaptor = adaptorByName(sp,  trimWhitespace(devName));
-	  if(adaptor &&
-	     vlan >= 0 && vlan < 4096) {
-	    ADAPTOR_NIO(adaptor)->vlan = vlan;
-	    myDebug(1, "adaptor %s has 802.1Q vlan %d", devName, vlan);
+	  uint32_t devLen = my_strnlen(devName, MAX_PROC_LINE_CHARS-1);
+	  char *trimmed = trimWhitespace(devName, devLen);
+	  if (trimmed) {
+	    SFLAdaptor *adaptor = adaptorByName(sp,  trimmed);
+	    if(adaptor &&
+	       vlan >= 0 && vlan < 4096) {
+	      ADAPTOR_NIO(adaptor)->vlan = vlan;
+	      myDebug(1, "adaptor %s has 802.1Q vlan %d", devName, vlan);
+	    }
 	  }
 	}
       }
@@ -126,30 +130,34 @@ extern "C" {
 		addr,
 		scope);
 
-	  SFLAdaptor *adaptor = adaptorByName(sp, trimWhitespace(devName));
-	  if(adaptor) {
-	    HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-	    SFLAddress v6addr;
-	    v6addr.type = SFLADDRESSTYPE_IP_V6;
-	    if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
-	      if(addrHT) {
-		// add to localIP6 lookup
-		if(UTHashGet(addrHT, &v6addr) == NULL) {
-		  SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
-		  *addrCopy = v6addr;
-		  UTHashAdd(addrHT, addrCopy);
+	  uint32_t devLen = my_strnlen(devName, MAX_PROC_LINE_CHARS-1);
+	  char *trimmed = trimWhitespace(devName, devLen);
+	  if(trimmed) {
+	    SFLAdaptor *adaptor = adaptorByName(sp, trimmed);
+	    if(adaptor) {
+	      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
+	      SFLAddress v6addr;
+	      v6addr.type = SFLADDRESSTYPE_IP_V6;
+	      if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
+		if(addrHT) {
+		  // add to localIP6 lookup
+		  if(UTHashGet(addrHT, &v6addr) == NULL) {
+		    SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
+		    *addrCopy = v6addr;
+		    UTHashAdd(addrHT, addrCopy);
+		  }
 		}
-	      }
-	      // we interpret the scope from the address now
-	      // scope = remap_proc_net_if_inet6_scope(scope);
-	      EnumIPSelectionPriority ipPriority = agentAddressPriority(sp,
-									&v6addr,
-									niostate->vlan,
-									niostate->loopback);
-	      if(ipPriority > niostate->ipPriority) {
-		// write this in as the preferred sflow-agent-address for this adaptor
-		niostate->ipAddr = v6addr;
-		niostate->ipPriority = ipPriority;
+		// we interpret the scope from the address now
+		// scope = remap_proc_net_if_inet6_scope(scope);
+		EnumIPSelectionPriority ipPriority = agentAddressPriority(sp,
+									  &v6addr,
+									  niostate->vlan,
+									  niostate->loopback);
+		if(ipPriority > niostate->ipPriority) {
+		  // write this in as the preferred sflow-agent-address for this adaptor
+		  niostate->ipAddr = v6addr;
+		  niostate->ipPriority = ipPriority;
+		}
 	      }
 	    }
 	  }
@@ -581,7 +589,7 @@ extern "C" {
       myDebug(3, "detectInterfaceChange: testing %s", ad->deviceName);
       struct ifreq ifr;
       memset(&ifr, 0, sizeof(ifr));
-      strncpy(ifr.ifr_name, ad->deviceName, sizeof(ifr.ifr_name)-1);
+      strncpy(ifr.ifr_name, ad->deviceName, IFNAMSIZ-1);
       if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
 	myDebug(1, "device %s Get SIOCGIFFLAGS failed : %s",
 		ad->deviceName,
@@ -647,13 +655,12 @@ extern "C" {
       // the device name is always the first token before the ":"
       char buf[MAX_PROC_LINE_CHARS];
       char *p = line;
-      char *devName = parseNextTok(&p, " \t:", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
+      char *devName = parseNextTok(&p, " \t:", NO, '\0', YES, buf, MAX_PROC_LINE_CHARS);
       if(devName == NULL) continue;
-      devName = trimWhitespace(devName);
       int devNameLen = my_strlen(devName);
       if(devNameLen == 0 || devNameLen >= IFNAMSIZ) continue;
       // we set the ifr_name field to make our queries
-      strncpy(ifr.ifr_name, devName, sizeof(ifr.ifr_name)-1);
+      strncpy(ifr.ifr_name, devName, IFNAMSIZ-1);
 
       myDebug(3, "reading interface %s", devName);
 

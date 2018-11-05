@@ -461,16 +461,31 @@ extern "C" {
   ----------------___________________________------------------
 */
 
-  char *trimWhitespace(char *str)
+  char *trimWhitespace(char *str, uint32_t len)
   {
-    char *end;
+    // NULL -> NULL
+    if(str == NULL)
+      return NULL;
+    
+    // "" -> NULL
+    if(len == 0
+       || *str == '\0')
+      return NULL;
+    
+    char *end = str + len - 1;
 
     // Trim leading space
-    while(isspace(*str)) str++;
+    while(isspace(*str)) {
+      // also return NULL for a string with only spaces in it
+      // (don't want that condition to slip through unnoticed)
+      if(++str >= end)
+	return NULL;
+    }
 
     // Trim trailing space
-    end = str + strlen(str) - 1;
-    while(end > str && isspace(*end)) end--;
+    while(end > str
+	  && isspace(*end))
+      end--;
 
     // Write new null terminator
     *(end+1) = 0;
@@ -682,7 +697,7 @@ extern "C" {
       *str = a;
     }
 
-    return trim ? trimWhitespace(buf) : buf;
+    return trim ? trimWhitespace(buf, len) : buf;
   }
 
   /*_________________---------------------------__________________

@@ -535,7 +535,9 @@ extern "C" {
 		  &pkts_out,
 		  &errs_out,
 		  &drops_out) == 9) {
-	  if(my_strequal(trimWhitespace(deviceName), "lo") == NO) {
+	  uint32_t devLen = my_strnlen(deviceName, MAX_PROCDEV_LINE_CHARS-1);
+	  char *trimmed = trimWhitespace(deviceName, devLen);
+	  if(my_strequal(trimmed, "lo") == NO) {
 	    interfaces++;
 	    nio->bytes_in += bytes_in;
 	    nio->pkts_in += pkts_in;

@@ -137,7 +137,7 @@ extern "C" {
 #define SEMLOCK_DO(_sem) for(int DYNAMIC_LOCAL(_ctrl)=1; DYNAMIC_LOCAL(_ctrl) && lockOrDie(_sem); DYNAMIC_LOCAL(_ctrl)=0, releaseOrDie(_sem))
 
   // string utils
-  char *trimWhitespace(char *str);
+  char *trimWhitespace(char *str, uint32_t len);
   void setStr(char **fieldp, char *str);
 
   // string buffer
