@@ -1526,7 +1526,7 @@ extern "C" {
 
   int isAllZero(u_char *buf, int len) {
     for(int ii = 0; ii < len; ii++) {
-      if(buf[len] != 0) return NO;
+      if(buf[ii] != 0) return NO;
     }
     return YES;
   }
