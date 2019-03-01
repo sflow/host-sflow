@@ -504,6 +504,12 @@ extern "C" {
       uint32_t ds_options;
     } nflog;
     struct {
+      bool psample;
+      uint32_t group;
+      uint32_t samplingRate;
+      uint32_t ds_options;
+    } psample;
+    struct {
       bool pcap;
       HSPPcap *pcaps;
       uint32_t numPcaps;
@@ -689,6 +695,7 @@ extern "C" {
 #define HSP_SAMPLEOPT_DIRN_HOOK   0x1000
 #define HSP_SAMPLEOPT_ASIC        0x2000
 #define HSP_SAMPLEOPT_OPX         0x4000
+#define HSP_SAMPLEOPT_PSAMPLE     0x8000
 
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len);
