@@ -134,7 +134,7 @@ extern "C" {
     _________________   setSwitchPortSamplingRates  __________________
     -----------------_______________________________------------------
     return YES = hardware/kernel sampling configured OK
-    return NO  = hardware/kernel sampling not set - assume 1:1 on ULOG/NFLOG
+    return NO  = hardware/kernel sampling not set - assume 1:1 on PSAMPLE/NFLOG/ULOG
   */
 
   static int execOutputLine(void *magic, char *line) {
@@ -178,7 +178,7 @@ extern "C" {
       int status;
       if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	if(WEXITSTATUS(status) != 0) {
-	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
+	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming PSAMPLE/NFLOG/ULOG is 1:1",
 		HSP_CUMULUS_SWITCHPORT_CONFIG_PROG,
 		WEXITSTATUS(status));
 	}
@@ -235,10 +235,16 @@ extern "C" {
 
   static uint32_t sampling_channel(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    // channel number depends on whether we are using ULOG or NFLOG
-    // (though it defaults to 1 in either case)
+    EVMod *psampleMod = EVGetModule(mod, "mod_psample");
     EVMod *nflogMod = EVGetModule(mod, "mod_nflog");
-    return (nflogMod && nflogMod->libHandle) ? sp->nflog.group : sp->ulog.group;
+
+
+    if (psampleMod && psampleMod->libHandle)
+      return sp->psample.group;
+    else if (nflogMod && nflogMod->libHandle)
+      return sp->nflog.group
+    else
+      return sp->ulog.group;
   }
 
   /*_________________---------------------------__________________
