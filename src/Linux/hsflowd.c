@@ -1723,7 +1723,7 @@ extern "C" {
     // explicitly in the config file - but do this before we read
     // the config so that overrides are possible.
 #ifdef HSP_LOAD_CUMULUS
-    myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG and SYSTEMD modules");
+    myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG, PSAMPLE and SYSTEMD modules");
     sp->cumulus.cumulus = YES;
     sp->systemd.systemd = YES;
     uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
@@ -1743,6 +1743,18 @@ extern "C" {
     sp->nflog.nflog = YES;
     sp->nflog.group = 1;
     sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
+    // Cumulus Linux 4.0 or later uses PSAMPLE group 1
+    // So it should be compiled with:
+    // make deb FEATURES="CUMULUS PSAMPLE"
+    sp->psample.psample = YES;
+    sp->psample.group = 1;
+    // Note that the DIRN_HOOK is no longer available
+    // and we assume ingress-only sampling
+    sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
+      | HSP_SAMPLEOPT_IF_POLLER
+      | HSP_SAMPLEOPT_ASIC
+      | HSP_SAMPLEOPT_INGRESS
+      | HSP_SAMPLEOPT_CUMULUS;
 #endif /* HSP_LOAD_CUMULUS */
 
 #ifdef HSP_LOAD_OPX
@@ -1864,6 +1876,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_ulog", sp->modulesPath);
     if(sp->nflog.nflog)
       EVLoadModule(sp->rootModule, "mod_nflog", sp->modulesPath);
+    if(sp->psample.psample)
+      EVLoadModule(sp->rootModule, "mod_psample", sp->modulesPath);
     if(sp->nvml.nvml)
       EVLoadModule(sp->rootModule, "mod_nvml", sp->modulesPath);
     if(sp->ovs.ovs)

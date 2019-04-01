@@ -12,6 +12,7 @@ extern "C" {
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <linux/genetlink.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -49,7 +50,9 @@ extern "C" {
   typedef void (*UTNLDiagCB)(void *magic, int sockFd, uint32_t seqNo, struct inet_diag_msg *diag_msg, int rtalen);
   void UTNLDiag_recv(void *magic, int sockFd, UTNLDiagCB diagCB);
 
-  char *UTNLDiag_sockid_print(struct inet_diag_sockid *sockid);
+  int UTNLGeneric_open(uint32_t mod_id);
+
+  int UTNLGeneric_send(int sockfd, uint32_t mod_id, int type, int cmd, int req_type, void *req, int req_len, uint32_t seqNo);
   
 #if defined(__cplusplus)
 } /* extern "C" */

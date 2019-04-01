@@ -27,8 +27,8 @@ endif
 INSTALL=install
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX DBUS SYSTEMD EAPI
-FEATURES_CUMULUS= CUMULUS NFLOG SYSTEMD
+FEATURES_ALL= ULOG NFLOG PSAMPLE PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX DBUS SYSTEMD EAPI
+FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD
 FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
@@ -144,10 +144,13 @@ LIBS_ULOG=
 CFLAGS_NFLOG= -I/usr/include/libnfnetlink
 LIBS_NFLOG= -lnfnetlink
 
+CFLAGS_PSAMPLE=
+LIBS_PSAMPLE=
+
 CFLAGS_PCAP=
 LIBS_PCAP=-lpcap
 
-CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP -DUTIL_NETLINK
+CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP
 LIBS_TCP=
 
 CFLAGS_NVML= -I/usr/include/nvidia/gdk
@@ -219,6 +222,7 @@ OBJS_KVM=mod_kvm.o
 OBJS_DOCKER=mod_docker.o
 OBJS_ULOG=mod_ulog.o
 OBJS_NFLOG=mod_nflog.o
+OBJS_PSAMPLE=mod_psample.o util_netlink.o
 OBJS_PCAP=mod_pcap.o
 OBJS_TCP=mod_tcp.o util_netlink.o
 OBJS_NVML=mod_nvml.o
@@ -253,6 +257,8 @@ DOCKER: mod_docker.so
 ULOG: mod_ulog.so
 
 NFLOG: mod_nflog.so
+
+PSAMPLE: mod_psample.so
 
 PCAP: mod_pcap.so
 
@@ -322,6 +328,15 @@ mod_nflog.o: mod_nflog.c $(HEADERS)
 
 mod_nflog.so: $(OBJS_NFLOG)
 	$(LD) -o $@ $(OBJS_NFLOG) $(LDFLAGS_SHARED) $(LIBS_NFLOG)
+
+#----------------------------
+
+
+mod_psample.o: mod_psample.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c  $(CFLAGS_PSAMPLE)
+
+mod_psample.so: $(OBJS_PSAMPLE)
+	$(LD) -o $@ $(OBJS_PSAMPLE) $(LDFLAGS_SHARED) $(LIBS_PSAMPLE)
 
 #----------------------------
 
@@ -495,6 +510,7 @@ mod_kvm.o: mod_kvm.c $(HEADERS)
 mod_docker.o: mod_docker.c $(HEADERS)
 mod_ulog.o: mod_ulog.c $(HEADERS)
 mod_nflog.o: mod_nflog.c $(HEADERS)
+mod_psample.o: mod_psample.c $(HEADERS)
 mod_pcap.o: mod_pcap.c $(HEADERS)
 mod_tcp.o: mod_tcp.c $(HEADERS)
 mod_nvml.o: mod_nvml.c $(HEADERS)

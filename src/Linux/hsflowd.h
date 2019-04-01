@@ -329,6 +329,8 @@ extern "C" {
     uint32_t sampling_n;
     uint32_t sampling_n_set;
     uint32_t netlink_drops;
+    // allow psample to apply subsampling if n is unexpected
+    uint32_t subSampleCount;
     // allow mod_xen to write regex-extracted fields here
     int xen_domid;
     int xen_netid;
@@ -345,7 +347,7 @@ extern "C" {
 
 #define HSPBUS_POLL "poll" // main thread
 #define HSPBUS_CONFIG "config" // DNS-SD
-#define HSPBUS_PACKET "packet" // pcap,ulog,nflog,json,tcp packet processing
+#define HSPBUS_PACKET "packet" // pcap,ulog,nflog,json,tcp,psample packet processing
 
 // The generic start,tick,tock,final,end events are defined in evbus.h
 #define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // (csample *) building counter-sample
@@ -503,6 +505,11 @@ extern "C" {
       uint32_t samplingRate;
       uint32_t ds_options;
     } nflog;
+    struct {
+      bool psample;
+      uint32_t group;
+      uint32_t ds_options;
+    } psample;
     struct {
       bool pcap;
       HSPPcap *pcaps;
@@ -689,6 +696,7 @@ extern "C" {
 #define HSP_SAMPLEOPT_DIRN_HOOK   0x1000
 #define HSP_SAMPLEOPT_ASIC        0x2000
 #define HSP_SAMPLEOPT_OPX         0x4000
+#define HSP_SAMPLEOPT_PSAMPLE     0x8000
 
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n);
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len);

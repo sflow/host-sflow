@@ -60,6 +60,7 @@ extern "C" {
     HSPOBJ_DOCKER,
     HSPOBJ_ULOG,
     HSPOBJ_NFLOG,
+    HSPOBJ_PSAMPLE,
     HSPOBJ_PCAP,
     HSPOBJ_TCP,
     HSPOBJ_CUMULUS,
@@ -1260,6 +1261,11 @@ extern "C" {
 	    sp->nflog.nflog = YES;
 	    level[++depth] = HSPOBJ_NFLOG;
 	    break;
+	  case HSPTOKEN_PSAMPLE:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->psample.psample = YES;
+	    level[++depth] = HSPOBJ_PSAMPLE;
+	    break;
 	  case HSPTOKEN_PCAP:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->pcap.pcap = YES;
@@ -1534,6 +1540,20 @@ extern "C" {
 	    case HSPTOKEN_PROBABILITY:
 	    case HSPTOKEN_NFLOGPROBABILITY:
 	      if((tok = expectDouble(sp, tok, &sp->nflog.probability, 0.0, 1.0)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_PSAMPLE:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_GROUP:
+	      if((tok = expectInteger32(sp, tok, &sp->psample.group, 1, 32)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

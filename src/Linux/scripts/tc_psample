@@ -1,0 +1,7 @@
+DEV=$1
+RATE=$2
+GROUP=$3
+
+tc qdisc add dev $DEV handle ffff: ingress
+tc filter add dev $DEV parent ffff: matchall \
+action sample rate $RATE group $GROUP

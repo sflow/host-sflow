@@ -242,6 +242,7 @@ extern "C" {
   int UTFileExists(char *path);
 
   // sockets
+  void UTSocketRcvbuf(int fd, int requested);
   int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize);
   int UTUnixDomainSocket(char *path);
 

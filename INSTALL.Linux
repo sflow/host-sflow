@@ -20,11 +20,11 @@ will typically be required for compilation:
 
  NFLOG:  libnfnetlink-dev(el)
  PCAP:  libpcap-dev(el)
- KVM: libvirt-dev(el) libxml2-dev(el)
- NVML: libnvidia-ml nvml.h
- XEN: libxenctrl libxenstore xenctrl.h xenstore.h
- SYSTEMD: dbus-dev(el) openssl-dev(el)
- DBUS: dbus-dev(el)
+ KVM: libvirt-dev(el), libxml2-dev(el)
+ NVML: libnvidia-ml, nvml.h
+ XEN: libxenctrl, libxenstore, xenctrl.h, xenstore.h
+ SYSTEMD: dbus-dev(el) or libdbus-1-dev, openssl-dev(el)
+ DBUS: dbus-dev(el) or libdbus-1-dev
  OPX: libsystemd-daemon-dev
 
 To start the daemon, run:
