@@ -438,6 +438,7 @@ extern "C" {
     if(sp->psample.ds_options == 0)
       sp->psample.ds_options = (HSP_SAMPLEOPT_IF_SAMPLER
 				| HSP_SAMPLEOPT_IF_POLLER
+				| HSP_SAMPLEOPT_BRIDGE
 				| HSP_SAMPLEOPT_PSAMPLE
 				| HSP_SAMPLEOPT_INGRESS);
     
