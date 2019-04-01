@@ -1152,7 +1152,7 @@ extern "C" {
     EVMod *mod = (EVMod *)magic;
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     char *protocol = NULL;
-    HSPListenSock search = { 0 };
+    HSPListenSock search = { };
     // use the seqNo as a "queryNo" to imply family and protocol since it does
     // not appear in the diag_msg sockid.
     switch(seqNo) {

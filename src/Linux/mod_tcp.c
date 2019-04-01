@@ -135,28 +135,6 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    diag_sockid_print      __________________
-    -----------------___________________________------------------
-  */
-
-  static char *diag_sockid_print(struct inet_diag_sockid *sockid) {
-    static char buf[256];
-    snprintf(buf, 256, "%08x:%08x:%08x:%08x %u - %08x:%08x:%08x:%08x %u if:%u",
-	     sockid->idiag_src[0],
-	     sockid->idiag_src[1],
-	     sockid->idiag_src[2],
-	     sockid->idiag_src[3],
-	     sockid->idiag_sport,
-	     sockid->idiag_dst[0],
-	     sockid->idiag_dst[1],
-	     sockid->idiag_dst[2],
-	     sockid->idiag_dst[3],
-	     sockid->idiag_dport,
-	     sockid->idiag_if);
-    return buf;
-  }
-  
-  /*_________________---------------------------__________________
     _________________     parse_diag_msg        __________________
     -----------------___________________________------------------
   */
@@ -206,7 +184,7 @@ extern "C" {
 	  memcpy(&tcpi, RTA_DATA(attr), readLen);
 	  myDebug(1, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
 		  tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
-		  diag_sockid_print(&diag_msg->id));
+		  UTNLDiag_sockid_print(&diag_msg->id));
 	  if(found) {
 	    myDebug(1, "found TCPSample: %s RTT:%uuS", tcpSamplePrint(found), tcpi.tcpi_rtt);
 	    HSPPendingSample *ps;

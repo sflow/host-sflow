@@ -43,6 +43,8 @@ extern "C" {
        TCP_CLOSING 
   } EnumKernelTCPState;
 
+  char *UTNLDiag_sockid_print(struct inet_diag_sockid *sockid);
+
   int UTNLDiag_open(void);
 
   int UTNLDiag_send(int sockfd, void *req, int req_len, bool dump, uint32_t seqNo);

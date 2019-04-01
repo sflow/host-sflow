@@ -9,6 +9,28 @@ extern "C" {
 #include "util_netlink.h"
 
   /*_________________---------------------------__________________
+    _________________    UTNLDiag_sockid_print  __________________
+    -----------------___________________________------------------
+  */
+
+  char *UTNLDiag_sockid_print(struct inet_diag_sockid *sockid) {
+    static char buf[256];
+    snprintf(buf, 256, "%08x:%08x:%08x:%08x %u - %08x:%08x:%08x:%08x %u if:%u",
+	     sockid->idiag_src[0],
+	     sockid->idiag_src[1],
+	     sockid->idiag_src[2],
+	     sockid->idiag_src[3],
+	     sockid->idiag_sport,
+	     sockid->idiag_dst[0],
+	     sockid->idiag_dst[1],
+	     sockid->idiag_dst[2],
+	     sockid->idiag_dst[3],
+	     sockid->idiag_dport,
+	     sockid->idiag_if);
+    return buf;
+  }
+
+  /*_________________---------------------------__________________
     _________________      UTNLDiag_send        __________________
     -----------------___________________________------------------
   */
