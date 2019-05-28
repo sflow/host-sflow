@@ -42,7 +42,7 @@ extern "C" {
     FILE *procFile = fopen(procFileName, "r");
     if(procFile) {
       // limit the number of chars we will read from each line
-      // (there can be more than this - fgets will chop for us)
+      // (there can be more than this - my_readline will chop for us)
 #define MAX_PROC_LINE_CHARS 240
       char line[MAX_PROC_LINE_CHARS];
       SFLAdaptor *currentSlave = NULL;
@@ -57,7 +57,8 @@ extern "C" {
       memset(bond_nio->lacp.partnerSystemID, 0, 6);
       int readingMaster = YES; // bond master data comes first
       int gotActorID = NO;
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	char buf_var[MAX_PROC_LINE_CHARS];
 	char buf_val[MAX_PROC_LINE_CHARS];
 	// buf_var is up to first ':', buf_val is the rest
@@ -890,10 +891,11 @@ extern "C" {
       uint64_t errs_out = 0;
       uint64_t drops_out = 0;
       // limit the number of chars we will read from each line
-      // (there can be more than this - fgets will chop for us)
+      // (there can be more than this - my_readline will chop for us)
 #define MAX_PROC_LINE_CHARS 240
       char line[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	char deviceName[MAX_PROC_LINE_CHARS];
 	// assume the format is:
 	// Inter-|   Receive                                                |  Transmit

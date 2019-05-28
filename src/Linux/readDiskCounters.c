@@ -71,11 +71,12 @@ int remote_mount(const char *device, const char *type)
       uint64_t total_sectors_written = 0;
 
       // limit the number of chars we will read from each line
-      // (there can be more than this - fgets will chop for us)
+      // (there can be more than this - my_readline will chop for us)
 #define MAX_PROC_LINE_CHARS 240
       char line[MAX_PROC_LINE_CHARS];
       char devName[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	if(sscanf(line, "%"SCNu32" %"SCNu32" %s %"SCNu64" %*u %"SCNu64" %"SCNu64" %"SCNu64" %*u %"SCNu64" %"SCNu64"",
 		  &majorNo,
 		  &minorNo,
@@ -129,7 +130,8 @@ int remote_mount(const char *device, const char *type)
       char type[MAX_PROC_LINE_CHARS];
       char mode[MAX_PROC_LINE_CHARS];
       void *treeRoot = NULL;
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	if(sscanf(line, "%s %s %s %s", device, mount, type, mode) == 4) {
 	  // must start with /dev/ or /dev2/ or ubi:
 	  if(strncmp(device, "/dev/", 5) == 0 ||

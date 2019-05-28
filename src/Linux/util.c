@@ -446,6 +446,40 @@ extern "C" {
     return hash_fnv1a(bytes, len);
   }
 
+  int my_readline(FILE *ff, char *buf, uint32_t len, int *p_truncated) {
+    // read up to len-1 chars from line, but consume the whole line.
+    // return number of characters read (0 for empty line), or EOF if file
+    // was already at EOF. Always null-terminate the buffer. Indicate
+    // number of truncated characters with the pointer provided.
+    int ch;
+    uint32_t count=0;
+    bool atEOF=YES;
+    bool bufOK=(buf != NULL
+		&& len > 1);
+    if(p_truncated)
+      *p_truncated = 0;
+    while((ch = getc(ff)) != EOF) {
+      atEOF = NO;
+      // EOL on CR, LF or CRLF
+      if(ch == 10 || ch == 13) {
+	if(ch == 13) {
+	  // peek for CRLF
+	  if((ch = getc(ff)) != 10)
+	    ungetc(ch, ff);
+	}
+	break;
+      }
+      if(bufOK
+	 && count < (len-1))
+	buf[count++] = ch;
+      else if(p_truncated)
+	(*p_truncated)++;
+    }
+    if(bufOK)
+      buf[count] = '\0';
+    return atEOF ? EOF : count;
+  }
+
   /*_________________---------------------------__________________
     _________________     setStr                __________________
     -----------------___________________________------------------
@@ -1125,8 +1159,9 @@ extern "C" {
 	myLog(LOG_ERR, "fdopen() failed : %s", strerror(errno));
 	exit(EXIT_FAILURE);
       }
-      while(fgets(line, lineLen, ovs)) {
-	myDebug(2, "myExec input> <%s>", line);
+      int truncated;
+      while(my_readline(ovs, line, lineLen, &truncated) != EOF) {
+	myDebug(2, "myExec input> <%s>%s", line, truncated ? " TRUNCATED":"");
 	if((*lineCB)(magic, line) == NO) {
 	  myDebug(2, "myExec callback returned NO");
 	  ans = NO;

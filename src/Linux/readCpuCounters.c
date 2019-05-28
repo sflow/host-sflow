@@ -64,11 +64,12 @@ extern "C" {
 #define JIFFY_TO_MS(i) (((i) * 1000L) / HZ)
 
       // limit the number of chars we will read from each line
-      // (there can be more than this - fgets will chop for us)
+      // (there can be more than this - my_readline will chop for us)
 #define MAX_PROC_LINE_CHARS 240
       char line[MAX_PROC_LINE_CHARS];
       uint32_t lineNo = 0;
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	if(++lineNo == 1) {
 	  if(sscanf(line, "cpu %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
 		    &cpu_user,
@@ -152,7 +153,8 @@ extern "C" {
 #undef MAX_PROC_LINE_CHARS
 #define MAX_PROC_LINE_CHARS 80
       char line[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	if(strncmp(line, "cpu MHz", 7) == 0) {
 	  double cpu_mhz = 0.0;
 	  if(sscanf(line, "cpu MHz : %lf", &cpu_mhz) == 1) {

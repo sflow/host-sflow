@@ -19,8 +19,8 @@ extern "C" {
 
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
-  // (there can be more than this - fgets will chop for us)
-#define MAX_PROC_LINE_CHARS 160
+  // (there can be more than this - my_readline will chop for us)
+#define MAX_PROC_LINE_CHARS 320
 
 #include "cJSON.h"
 
@@ -230,7 +230,8 @@ extern "C" {
       char *fmt = multi ?
 	"%*s %s %"SCNu64 :
 	"%s %"SCNu64 ;
-      while(fgets(line, HSP_DOCKER_MAX_STATS_LINELEN, statsFile)) {
+      int truncated;
+      while(my_readline(statsFile, line, HSP_DOCKER_MAX_STATS_LINELEN, &truncated) != EOF) {
 	if(found == nvals && !multi) break;
 	if(sscanf(line, fmt, var, &val64) == 2) {
 	  for(int ii = 0; ii < nvals; ii++) {
@@ -392,7 +393,8 @@ extern "C" {
 	memset(&ifr, 0, sizeof(ifr));
 	char line[MAX_PROC_LINE_CHARS];
 	int lineNo = 0;
-	while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+	int truncated;
+	while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	  if(lineNo++ < 2) continue; // skip headers
 	  char buf[MAX_PROC_LINE_CHARS];
 	  char *p = line;
@@ -454,7 +456,9 @@ extern "C" {
 	return 0;
       }
       char line[MAX_PROC_LINE_CHARS];
-      while(fgets(line, MAX_PROC_LINE_CHARS, ovs)) containerLinkCB(sp, container, line);
+      int truncated;
+      while(my_readline(ovs, line, MAX_PROC_LINE_CHARS, &truncated) != EOF)
+	containerLinkCB(sp, container, line);
       fclose(ovs);
       wait(NULL); // block here until child is done
     }
@@ -517,10 +521,11 @@ extern "C" {
       uint64_t errs_out = 0;
       uint64_t drops_out = 0;
       // limit the number of chars we will read from each line
-      // (there can be more than this - fgets will chop for us)
+      // (there can be more than this - my_readline will chop for us)
 #define MAX_PROCDEV_LINE_CHARS 240
       char line[MAX_PROCDEV_LINE_CHARS];
-      while(fgets(line, MAX_PROCDEV_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROCDEV_LINE_CHARS, &truncated) != EOF) {
 	char deviceName[MAX_PROCDEV_LINE_CHARS];
 	// assume the format is:
 	// Inter-|   Receive                                                |  Transmit

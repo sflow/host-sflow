@@ -295,7 +295,8 @@ extern "C" {
     }
     else {
       char line[MAX_PROC_LINELEN];
-      if(fgets(line, MAX_PROC_LINELEN, statFile)) {
+      int truncated;
+      if(my_readline(statFile, line, MAX_PROC_LINELEN, &truncated) != EOF) {
 	char *p = line;
 	char buf[MAX_PROC_TOKLEN];
 	int tok = 0;
@@ -349,7 +350,8 @@ extern "C" {
     }
     else {
       char line[MAX_PROC_LINELEN];
-      if(fgets(line, MAX_PROC_LINELEN, statFile)) {
+      int truncated;
+      if(my_readline(statFile, line, MAX_PROC_LINELEN, &truncated) != EOF) {
 	char *p = line;
 	char buf[MAX_PROC_TOKLEN];
 	int tok = 0;
@@ -397,7 +399,8 @@ extern "C" {
     else {
       found = YES;
       char line[MAX_PROC_LINELEN];
-      while(fgets(line, MAX_PROC_LINELEN, statFile)) {
+      int truncated;
+      while(my_readline(statFile, line, MAX_PROC_LINELEN, &truncated) != EOF) {
 	char var[MAX_PROC_TOKLEN];
 	uint64_t val64;
 	if(sscanf(line, "%s %"SCNu64, var, &val64) == 2) {
@@ -528,7 +531,8 @@ extern "C" {
       char *fmt = multi ?
 	"%*s %s %"SCNu64 :
 	"%s %"SCNu64 ;
-      while(fgets(line, HSP_SYSTEMD_MAX_STATS_LINELEN, statsFile)) {
+      int truncated;
+      while(my_readline(statsFile, line, HSP_SYSTEMD_MAX_STATS_LINELEN, &truncated) != EOF) {
 	if(found == nvals && !multi) break;
 	if(sscanf(line, fmt, var, &val64) == 2) {
 	  for(int ii = 0; ii < nvals; ii++) {
@@ -897,7 +901,8 @@ extern "C" {
 	else {
 	  char line[MAX_PROC_LINELEN];
 	  uint64_t pid64;
-	  while(fgets(line, MAX_PROC_LINELEN, pidsFile)) {
+	  int truncated;
+	  while(my_readline(pidsFile, line, MAX_PROC_LINELEN, &truncated) != EOF) {
 	    if(sscanf(line, "%"SCNu64, &pid64) == 1) {
 	      myDebug(1, "got PID=%"PRIu64, pid64);
 	      HSPDBusProcess search = { .pid = pid64 };

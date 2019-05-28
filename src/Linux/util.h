@@ -112,6 +112,7 @@ extern "C" {
   int my_strequal(const char *s1, const char *s2);
   uint32_t my_strhash(const char *str);
   uint32_t my_binhash(const char *bytes, const uint32_t len);
+  int my_readline(FILE *ff, char *buf, uint32_t len, int *p_truncated);
 
   // mutual-exclusion semaphores
   static inline int lockOrDie(pthread_mutex_t *sem) {

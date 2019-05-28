@@ -947,7 +947,8 @@ extern "C" {
     HSPToken *tokens = newToken("start", 5);
     char line[HSP_MAX_LINELEN];
     uint32_t lineNo = 0;
-    while(fgets(line, HSP_MAX_LINELEN, cfg)) {
+    int truncated;
+    while(my_readline(cfg, line, HSP_MAX_LINELEN, &truncated) != EOF) {
       lineNo++;
       char *p = line;
       // comments start with '#'

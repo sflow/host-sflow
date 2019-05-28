@@ -19,8 +19,8 @@ extern "C" {
 
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
-  // (there can be more than this - fgets will chop for us)
-#define MAX_PROC_LINE_CHARS 160
+  // (there can be more than this - my_readline will chop for us)
+#define MAX_PROC_LINE_CHARS 320
 
 /*________________---------------------------__________________
   ________________      readVLANs            __________________
@@ -34,7 +34,8 @@ extern "C" {
     if(procFile) {
       char line[MAX_PROC_LINE_CHARS];
       int lineNo = 0;
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	// expect lines of the form "<device> VID: <vlan> ..."
 	// (with a header line on the first row)
 	char devName[MAX_PROC_LINE_CHARS];
@@ -110,7 +111,8 @@ extern "C" {
     if(procFile) {
       char line[MAX_PROC_LINE_CHARS];
       int lineNo = 0;
-      while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	// expect lines of the form "<address> <netlink_no> <prefix_len(HEX)> <scope(HEX)> <flags(HEX)> <deviceName>
 	// (with a header line on the first row)
 	char devName[MAX_PROC_LINE_CHARS];
@@ -650,7 +652,8 @@ extern "C" {
     memset(&ifr, 0, sizeof(ifr));
     char line[MAX_PROC_LINE_CHARS];
     int lineNo = 0;
-    while(fgets(line, MAX_PROC_LINE_CHARS, procFile)) {
+    int truncated;
+    while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
       if(lineNo++ < 2) continue; // skip headers
       // the device name is always the first token before the ":"
       char buf[MAX_PROC_LINE_CHARS];
