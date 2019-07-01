@@ -94,6 +94,8 @@ extern "C" {
     EnumHSPContainerState state;
     uint32_t inspect_tx:1;
     uint32_t inspect_rx:1;
+    uint32_t dup_name:1;
+    uint32_t dup_hostname:1;
     uint64_t memoryLimit;
   } HSPVMState_DOCKER;
 
@@ -118,6 +120,11 @@ extern "C" {
     int contentLength;
     int chunkLength;
   } HSPDockerRequest;
+
+  typedef struct _HSPDockerNameCount {
+    char *name;
+    uint32_t count;
+  } HSPDockerNameCount;
 
 #define HSP_DOCKER_SOCK  "/var/run/docker.sock"
 #define HSP_DOCKER_MAX_CONCURRENT 3
@@ -153,6 +160,10 @@ extern "C" {
     regex_t *contentLengthPattern;
     uint32_t countdownToResync;
     int cgroupPathIdx;
+    UTHash *nameCount;
+    UTHash *hostnameCount;
+    uint32_t dup_names;
+    uint32_t dup_hostnames;
   } HSP_mod_DOCKER;
 
 #define HSP_DOCKER_MAX_STATS_LINELEN 512
@@ -567,6 +578,7 @@ extern "C" {
   */
   static void getCounters_DOCKER(EVMod *mod, HSPVMState_DOCKER *container)
   {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFL_COUNTERS_SAMPLE_TYPE cs = { 0 };
     HSPVMState *vm = (HSPVMState *)&container->vm;
@@ -574,7 +586,14 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = my_strnequal(container->hostname, container->id, HSP_DOCKER_SHORTID_LEN) ? container->name : container->hostname;
+    bool hostname_is_id = my_strnequal(container->hostname, container->id, HSP_DOCKER_SHORTID_LEN);
+    char *hname = container->hostname;
+    // use container->name if it offers a unique ID and there is some problem
+    // with the hostname (not unique, or just the short form container->id)
+    if(mdata->dup_names == 0 &&
+       (mdata->dup_hostnames
+	|| hostname_is_id))
+      hname = container->name;
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, vm->uuid, 16);
@@ -765,6 +784,8 @@ extern "C" {
     if(container->id) my_free(container->id);
     if(container->name) my_free(container->name);
     if(container->hostname) my_free(container->hostname);
+    if(container->dup_name) mdata->dup_names--;
+    if(container->dup_hostname) mdata->dup_hostnames--;
     removeAndFreeVM(mod, &container->vm);
   }
 
@@ -881,19 +902,72 @@ extern "C" {
     return HSP_CS_UNKNOWN;
   }
 
-  static void setContainerName(HSPVMState_DOCKER *container, const char *name) {
-    char *str = (char *)name;
-    if(str && str[0] == '/') str++; // consume leading '/'
-    if(my_strequal(str, container->name) == NO) {
-      if(container->name) my_free(container->name);
-      container->name = my_strdup(str);
+  static void duplicateName(EVMod *mod, HSPVMState_DOCKER *container) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    if(!container->dup_name) {
+      container->dup_name = YES;
+      mdata->dup_names++;
     }
   }
 
-  static void setContainerHostname(HSPVMState_DOCKER *container, const char *hostname) {
+  static void duplicateHostname(EVMod *mod, HSPVMState_DOCKER *container) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    if(!container->dup_hostname) {
+      container->dup_hostname = YES;
+      mdata->dup_hostnames++;
+    }
+  }
+
+  static uint32_t incNameCount(UTHash *ht, const char *str) {
+    HSPDockerNameCount search = { .name = (char *)str };
+    HSPDockerNameCount *nc = UTHashGet(ht, &search);
+    if(nc == NULL) {
+      nc = (HSPDockerNameCount *)my_calloc(sizeof(HSPDockerNameCount));
+      nc->name = my_strdup(str);
+      UTHashAdd(ht, nc);
+    }
+    return ++nc->count;
+  }
+
+  static void decNameCount(UTHash *ht, const char *str) {
+    HSPDockerNameCount search = { .name = (char *)str };
+    HSPDockerNameCount *nc = UTHashGet(ht, &search);
+    if(nc) {
+      if(--nc->count == 0) {
+	UTHashDel(ht, nc);
+	my_free(nc->name);
+	my_free(nc);
+      }
+    }
+  }
+
+  static void setContainerName(EVMod *mod, HSPVMState_DOCKER *container, const char *name) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    char *str = (char *)name;
+    if(str && str[0] == '/') str++; // consume leading '/'
+    if(my_strequal(str, container->name) == NO) {
+      if(container->name) {
+	decNameCount(mdata->nameCount, container->name);
+	my_free(container->name);
+      }
+      container->name = my_strdup(str);
+      if(incNameCount(mdata->nameCount, str) > 1) {
+	duplicateName(mod,container);
+      }
+    }
+  }
+
+  static void setContainerHostname(EVMod *mod, HSPVMState_DOCKER *container, const char *hostname) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     if(my_strequal(hostname, container->hostname) == NO) {
-      if(container->hostname) my_free(container->hostname);
+      if(container->hostname) {
+	decNameCount(mdata->hostnameCount, container->hostname);
+	my_free(container->hostname);
+      }
       container->hostname = my_strdup(hostname);
+      if(incNameCount(mdata->hostnameCount, hostname) > 1) {
+	duplicateHostname(mod, container);
+      }
     }
   }
 
@@ -918,7 +992,7 @@ extern "C" {
     if(container == NULL)
       return;
     
-    setContainerName(container, jname->valuestring);
+    setContainerName(mod, container, jname->valuestring);
 
     cJSON *jpid = cJSON_GetObjectItem(jstate, "Pid");
     if(jpid)
@@ -935,7 +1009,7 @@ extern "C" {
     
     cJSON *jhn = cJSON_GetObjectItem(jconfig, "Hostname");
     if(jhn)
-      setContainerHostname(container, jhn->valuestring);
+      setContainerHostname(mod, container, jhn->valuestring);
 
     cJSON *jmem = cJSON_GetObjectItem(jhconfig, "Memory");
     if(jmem)
@@ -1019,7 +1093,7 @@ extern "C" {
 	    container->lastEvent = ev;
 	    if(container->state == HSP_CS_running) {
 	      // TODO: is this name or hostname?
-	      setContainerName(container, ctname->valuestring);
+	      setContainerName(mod, container, ctname->valuestring);
 	      if(!container->inspect_tx) {
 		// new entry - get meta-data
 		// will send counter-sample when complete
@@ -1077,7 +1151,7 @@ extern "C" {
 
       HSPVMState_DOCKER *container = getContainer(mod, id->valuestring, YES);
       container->state = containerState(state->valuestring);
-      setContainerName(container, name0->valuestring);
+      setContainerName(mod, container, name0->valuestring);
       if(!container->inspect_tx)
 	inspectContainer(mod, container);
     }
@@ -1346,6 +1420,8 @@ extern "C" {
     mdata->contentLengthPattern = UTRegexCompile(HSP_CONTENT_LENGTH_REGEX);
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_DOCKER, id, UTHASH_SKEY);
+    mdata->nameCount = UTHASH_NEW(HSPDockerNameCount, name, UTHASH_SKEY);
+    mdata->hostnameCount = UTHASH_NEW(HSPDockerNameCount, name, UTHASH_SKEY);
     mdata->pollActions = UTHASH_NEW(HSPVMState_DOCKER, id, UTHASH_IDTY);
     mdata->eventQueue = UTArrayNew(UTARRAY_DFLT);
     mdata->cgroupPathIdx = -1;
