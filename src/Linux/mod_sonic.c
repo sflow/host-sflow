@@ -15,13 +15,14 @@ extern "C" {
 #define HSP_DEFAULT_REDIS_HOST "127.0.0.1"
 #define HSP_DEFAULT_REDIS_PORT 6379
 
+#define HSP_SONIC_DB_APPL 0
 #define HSP_SONIC_DB_COUNTERS 2
-#define HSP_SONIC_DB_STATE 4
 
 #define HSP_SONIC_FIELD_IFINDEX "index"
 #define HSP_SONIC_FIELD_IFSPEED "speed"
 #define HSP_SONIC_FIELD_IFSPEED_UNITS 1000000LL
 #define HSP_SONIC_FIELD_IFALIAS "alias"
+#define HSP_SONIC_FIELD_IFOPERSTATUS "oper_status"
 #define HSP_SONIC_FIELD_IFADMINSTATUS "admin_status"
 
 #define HSP_SONIC_FIELD_IFIN_UCASTS "SAI_PORT_STAT_IF_IN_UCAST_PKTS"
@@ -401,10 +402,10 @@ extern "C" {
 	    prt->ifSpeed = db_getU64(c_val) * HSP_SONIC_FIELD_IFSPEED_UNITS;
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFALIAS))
 	    prt->ifAlias = my_strdup(c_val->str);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFADMINSTATUS)) {
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFADMINSTATUS))
 	    prt->adminUp = my_strequal(c_val->str, "up");
-	    prt->operUp = prt->adminUp; // TODO: where should we get oper_status?
-	  }
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFOPERSTATUS))
+	    prt->operUp = my_strequal(c_val->str, "up");
 	}
       }
       SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
@@ -436,8 +437,8 @@ extern "C" {
 
   static void db_getPortState(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    db_select(mod, HSP_SONIC_DB_STATE);
-    int status = redisAsyncCommand(mdata->db, db_portStateCB, prt, "HGETALL PORT|%s", prt->portName);
+    db_select(mod, HSP_SONIC_DB_APPL);
+    int status = redisAsyncCommand(mdata->db, db_portStateCB, prt, "HGETALL PORT_TABLE:%s", prt->portName);
     myDebug(1, "sonic redisAsyncCommand returned %d", status);
   }
 
@@ -525,7 +526,7 @@ extern "C" {
 	  | HSP_ETCTR_BC_IN
 	  | HSP_ETCTR_BC_OUT
 	  | HSP_ETCTR_UNKN
-	  // | HSP_ETCTR_OPER
+	  | HSP_ETCTR_OPER
 	  | HSP_ETCTR_ADMIN;
 	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs);
 	nio->last_update = sp->pollBus->now.tv_sec;
