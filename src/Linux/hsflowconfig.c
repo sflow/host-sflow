@@ -68,6 +68,7 @@ extern "C" {
     HSPOBJ_OVS,
     HSPOBJ_OS10,
     HSPOBJ_OPX,
+    HSPOBJ_SONIC,
     HSPOBJ_DBUS,
     HSPOBJ_SYSTEMD,
     HSPOBJ_EAPI,
@@ -1308,6 +1309,11 @@ extern "C" {
 	    sp->opx.opx = YES;
 	    level[++depth] = HSPOBJ_OPX;
 	    break;
+	  case HSPTOKEN_SONIC:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->sonic.sonic = YES;
+	    level[++depth] = HSPOBJ_SONIC;
+	    break;
 	  case HSPTOKEN_DBUS:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->dbus.dbus = YES;
@@ -1663,6 +1669,21 @@ extern "C" {
 	      if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	      newOPXPort(sp);
 	      level[++depth] = HSPOBJ_PORT;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_SONIC:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_SWITCHPORT:
+	      if((tok = expectRegex(sp, tok, &sp->opx.swp_regex)) == NULL) return NO;
+	      sp->opx.swp_regex_str = my_strdup(tok->str);
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

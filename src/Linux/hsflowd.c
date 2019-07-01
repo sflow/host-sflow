@@ -567,7 +567,7 @@ extern "C" {
 	installSFlowSettings(sp, sp->sFlowSettings);
       }
 
-      if(ad_added || ad_cameup || ad_wentdown || ad_changed) {
+      if(ad_added || ad_removed || ad_cameup || ad_wentdown || ad_changed) {
 	// test for switch ports
 	configSwitchPorts(sp); // in readPackets.c
 	// announce (e.g. to adjust sampling rates if ifSpeeds changed)
@@ -1764,6 +1764,15 @@ extern "C" {
     sp->dbus.dbus = YES;
 #endif /* HSP_LOAD_OPX */
 
+#ifdef HSP_LOAD_SONIC
+    // SONIC should be compiled with "make deb FEATURES="SONIC"
+    myLog(LOG_INFO, "autoload SONIC, PSAMPLE and DOCKER modules");
+    sp->sonic.sonic = YES;
+    sp->psample.psample = YES;
+    sp->psample.group = 1;
+    sp->docker.docker = YES;
+#endif /* HSP_LOAD_OPX */
+
 #ifdef HSP_LOAD_XEN
     myLog(LOG_INFO, "autoload XEN and OVS modules");
     sp->xen.xen = YES;
@@ -1886,6 +1895,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_cumulus", sp->modulesPath);
     if(sp->opx.opx)
       EVLoadModule(sp->rootModule, "mod_opx", sp->modulesPath);
+    if(sp->sonic.sonic)
+      EVLoadModule(sp->rootModule, "mod_sonic", sp->modulesPath);
     if(sp->dbus.dbus)
       EVLoadModule(sp->rootModule, "mod_dbus", sp->modulesPath);
     if(sp->systemd.systemd)

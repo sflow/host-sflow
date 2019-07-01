@@ -89,6 +89,9 @@ extern "C" {
 #define HSP_MOD_DIR /etc/hsflowd/modules
 #endif
 
+  // TODO: remove
+#define HSP_SONIC_TEST_REDISONLY 1
+
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
 #define HSP_DEFAULT_SUBAGENTID 100000
@@ -488,6 +491,11 @@ extern "C" {
       HSPPort *ports; // alternative way to list switch ports
       uint32_t numPorts;
     } opx;
+    struct {
+      bool sonic;
+      char *swp_regex_str;
+      regex_t *swp_regex;
+    } sonic;
     struct {
       bool nvml;
     } nvml;

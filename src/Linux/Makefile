@@ -27,11 +27,12 @@ endif
 INSTALL=install
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX DBUS SYSTEMD EAPI
+FEATURES_ALL= ULOG NFLOG PSAMPLE PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX SONIC DBUS SYSTEMD EAPI
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD
 FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
+FEATURES_SONIC= SONIC PSAMPLE DOCKER
 FEATURES_XEN= XEN OVS
 FEATURES_HOST= NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD
 
@@ -66,6 +67,10 @@ ifeq ("$(strip $(FEATURES))","OPX")
   XTGTS += $(FEATURES_OPX)
   CFLAGS_LOAD += -DHSP_LOAD_OPX
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.opx
+endif
+ifeq ("$(strip $(FEATURES))","SONIC")
+  XTGTS += $(FEATURES_SONIC)
+  CFLAGS_LOAD += -DHSP_LOAD_SONIC
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
@@ -170,6 +175,9 @@ ifeq ("$(strip $(FEATURES))","OS10")
   LIBS_OPX= -lsystemd -lcps-api-common -lcps-class-map-util
 endif
 
+CFLAGS_SONIC=
+LIBS_SONIC=-lhiredis
+
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 
@@ -229,6 +237,7 @@ OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
 OBJS_OPX=mod_opx.o
+OBJS_SONIC=mod_sonic.o
 OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o util_netlink.o
 OBJS_EAPI=mod_eapi.o
@@ -273,6 +282,8 @@ CUMULUS: mod_cumulus.so
 OS10: mod_opx.so
 
 OPX: mod_opx.so
+
+SONIC: mod_sonic.so
 
 DBUS: mod_dbus.so
 
@@ -416,6 +427,14 @@ mod_opx.o: mod_opx.c $(HEADERS)
 
 mod_opx.so: $(OBJS_OPX)
 	$(LD) -o $@ $(OBJS_OPX) $(LDFLAGS_SHARED) $(LIBS_OPX)
+
+#----------------------------
+
+mod_sonic.o: mod_sonic.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_SONIC)
+
+mod_sonic.so: $(OBJS_SONIC)
+	$(LD) -o $@ $(OBJS_SONIC) $(LDFLAGS_SHARED) $(LIBS_SONIC)
 
 #----------------------------
 
