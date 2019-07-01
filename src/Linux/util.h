@@ -209,6 +209,8 @@ extern "C" {
   void UTArrayFree(UTArray *ar);
   uint32_t UTArrayN(UTArray *ar);
   void *UTArrayAt(UTArray *ar, int i);
+  void UTArrayPush(UTArray *ar, void *obj);
+  void *UTArrayPop(UTArray *ar);
   uint32_t UTArraySnapshot(UTArray *ar, uint32_t buf_n, void *buf);
 #define UTARRAY_WALK(ar, obj) for(uint32_t _ii=0; _ii<UTArrayN(ar); _ii++) if(((obj)=(typeof(obj))UTArrayAt((ar), _ii)))
 

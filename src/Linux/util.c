@@ -806,6 +806,22 @@ extern "C" {
     return obj;
   }
 
+  void UTArrayPush(UTArray *ar, void *obj) {
+    UTArrayAdd(ar, obj);
+  }
+
+  void *UTArrayPop(UTArray *ar) {
+    void *obj = NULL;
+    SEMLOCK_DO(ar->sync) {
+      if(ar->n > 0) {
+	ar->n--;
+	obj = ar->objs[ar->n];
+	ar->objs[ar->n] = NULL;
+      }
+    }
+    return obj;
+  }
+
   bool UTArrayDel(UTArray *ar, void *obj) {
     bool ans = NO;
     SEMLOCK_DO(ar->sync) {
