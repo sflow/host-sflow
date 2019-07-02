@@ -89,9 +89,6 @@ extern "C" {
 #define HSP_MOD_DIR /etc/hsflowd/modules
 #endif
 
-  // TODO: remove
-#define HSP_SONIC_TEST_REDISONLY 1
-
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
 #define HSP_DEFAULT_SUBAGENTID 100000
@@ -569,6 +566,7 @@ extern "C" {
     UTHash *adaptorsByIndex;
     UTHash *adaptorsByPeerIndex;
     UTHash *adaptorsByMac;
+    bool allowDeleteAdaptor;
 
     // poll actions for tick-tock cycle
     UTArray *pollActions;

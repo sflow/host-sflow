@@ -177,6 +177,9 @@ endif
 
 CFLAGS_SONIC=
 LIBS_SONIC=-lhiredis
+ifeq ($(REDISONLY),yes)
+  CFLAGS_SONIC += -DHSP_SONIC_TEST_REDISONLY
+endif
 
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)

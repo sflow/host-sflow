@@ -142,6 +142,8 @@ extern "C" {
   }
 
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag) {
+    if(sp->allowDeleteAdaptor == NO)
+      return;
     deleteAdaptorFromHT(sp->adaptorsByName, ad, "byName");
     deleteAdaptorFromHT(sp->adaptorsByIndex, ad, "byIndex");
     deleteAdaptorFromHT(sp->adaptorsByMac, ad, "byMac");
@@ -1699,6 +1701,8 @@ extern "C" {
     sp->adaptorsByIndex = UTHASH_NEW(SFLAdaptor, ifIndex, UTHASH_SYNC);
     sp->adaptorsByPeerIndex = UTHASH_NEW(SFLAdaptor, peer_ifIndex, UTHASH_SYNC);
     sp->adaptorsByMac = UTHASH_NEW(SFLAdaptor, macs[0], UTHASH_SYNC);
+    // sometimes need to suppress the deleting of adaptors for test purposes.
+    sp->allowDeleteAdaptor = YES;
 
     // these ones do not need sync - always accessed from same thread
     sp->vmsByUUID = UTHASH_NEW(HSPVMState, uuid, UTHASH_DFLT);
