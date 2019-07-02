@@ -140,14 +140,15 @@ extern "C" {
     return sock;
   }
 
-  bool EVSocketClose(EVMod *mod, EVSocket *sock) {
+  bool EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD) {
     EVSocket *deleted;
     SEMLOCK_DO(mod->root->sync) {
       EVSocket search = { .fd = sock->fd };
       deleted = UTHashDelKey(mod->root->sockets, &search);
       assert(deleted == sock);
       if(sock->fd > 0) {
-	while(close(sock->fd) == -1 && errno == EINTR);
+	if(closeFD)
+	  while(close(sock->fd) == -1 && errno == EINTR);
 	sock->fd = 0;
       }
       if(sock->child_pid) {
@@ -560,12 +561,12 @@ extern "C" {
     if(cc < 0) {
       if(errno == EAGAIN || errno == EINTR) goto try_again;
       myLog(LOG_ERR, "EVSocketReadLines(): %s", strerror(errno));
-      EVSocketClose(mod, sock);
+      EVSocketClose(mod, sock, YES);
       (*lineCB)(mod, sock, EVSOCKETREAD_ERR, magic);
     }
     else if(cc == 0) {
       // EOF
-      EVSocketClose(mod, sock);
+      EVSocketClose(mod, sock, YES);
       // may have trailing line
       if(UTSTRBUF_LEN(sock->iobuf)) {
 	UTStrBuf_append_n(sock->ioline, UTSTRBUF_STR(sock->iobuf), UTSTRBUF_LEN(sock->iobuf));

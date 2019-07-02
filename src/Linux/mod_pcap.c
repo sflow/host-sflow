@@ -288,7 +288,7 @@ extern "C" {
       pcap_close(bpfs->pcap);
       bpfs->pcap = NULL;
     }
-    EVSocketClose(mod, bpfs->sock);
+    EVSocketClose(mod, bpfs->sock, YES);
     bpfs->sock = NULL;
   }
 

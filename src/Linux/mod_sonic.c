@@ -243,8 +243,9 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "sonic db_cleanupCB dbSock=%p", mdata->dbSock);
     if(mdata->dbSock) {
-      // TODO: might need an option to do this without actually calling close() on the socket fd
-      EVSocketClose(mod, mdata->dbSock);
+      // set flag to prevent close(fd) - it belongs to libhiredis
+      // and should be closed there.
+      EVSocketClose(mod, mdata->dbSock, NO);
       mdata->dbSock = NULL;
     }
   }
