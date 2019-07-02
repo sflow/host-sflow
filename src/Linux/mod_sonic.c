@@ -17,7 +17,10 @@ extern "C" {
 
 #define HSP_SONIC_DB_APPL 0
 #define HSP_SONIC_DB_COUNTERS 2
+#define HSP_SONIC_DB_CONFIG 4
 
+#define HSP_SONIC_FIELD_MAC "mac"
+#define HSP_SONIC_FIELD_LOCALAS "bgp_asn"
 #define HSP_SONIC_FIELD_IFINDEX "index"
 #define HSP_SONIC_FIELD_IFSPEED "speed"
 #define HSP_SONIC_FIELD_IFSPEED_UNITS 1000000LL
@@ -44,9 +47,12 @@ extern "C" {
 
 #define HSP_MAX_EXEC_LINELEN 1024
 
+#define ISEVEN(i) (((i) & 1) == 0)
+
   typedef enum {
     HSP_SONIC_STATE_INIT=0,
     HSP_SONIC_STATE_CONNECT,
+    HSP_SONIC_STATE_CONNECTED,
     HSP_SONIC_STATE_DISCOVER,
     HSP_SONIC_STATE_RUN } EnumSonicState;
 
@@ -67,13 +73,17 @@ extern "C" {
     EnumSonicState state;
     EVBus *pollBus;
     redisAsyncContext *db;
+    EVSocket *dbSock;
     int dbNo;
     UTHash *portsByName;
     UTArray *newPorts;
     bool changedSwitchPorts:1;
     UTStrBuf *replyBuf;
+    u_char actorSystemMAC[8];
+    uint32_t localAS;
   } HSP_mod_SONIC;
 
+  static void db_getMeta(EVMod *mod);
   static void discoverNewPorts(EVMod *mod);
 
   /*_________________---------------------------__________________
@@ -81,28 +91,32 @@ extern "C" {
     -----------------___________________________------------------
   */
   static char *db_replyStr(redisReply *reply, UTStrBuf *sbuf) {
-    switch (reply->type) {
-    case REDIS_REPLY_STRING:
-      UTStrBuf_printf(sbuf, "string(%d)=\"%s\"", reply->len, reply->str);
-      break;
-    case REDIS_REPLY_ARRAY:
-      UTStrBuf_printf(sbuf, "array(%d)", reply->elements);
-      break;
-    case REDIS_REPLY_INTEGER:
-      UTStrBuf_printf(sbuf, "integer(%lld)", reply->integer);
-      break;
-    case REDIS_REPLY_NIL:
-      UTStrBuf_printf(sbuf, "nil");
-      break;
-    case REDIS_REPLY_STATUS:
-      UTStrBuf_printf(sbuf, "status(%lld)=\"%s\"", reply->integer, reply->str ?: "");
-      break;
-    case REDIS_REPLY_ERROR:
-      UTStrBuf_printf(sbuf, "error(%lld)=\"%s\"", reply->integer, reply->str ?: "");
-      break;
-    default:
-      UTStrBuf_printf(sbuf, "unknown(%d)", reply->type);
-      break;
+    if(reply == NULL)
+      UTStrBuf_printf(sbuf, "<no reply>");
+    else {
+      switch (reply->type) {
+      case REDIS_REPLY_STRING:
+	UTStrBuf_printf(sbuf, "string(%d)=\"%s\"", reply->len, reply->str);
+	break;
+      case REDIS_REPLY_ARRAY:
+	UTStrBuf_printf(sbuf, "array(%d)", reply->elements);
+	break;
+      case REDIS_REPLY_INTEGER:
+	UTStrBuf_printf(sbuf, "integer(%lld)", reply->integer);
+	break;
+      case REDIS_REPLY_NIL:
+	UTStrBuf_printf(sbuf, "nil");
+	break;
+      case REDIS_REPLY_STATUS:
+	UTStrBuf_printf(sbuf, "status(%lld)=\"%s\"", reply->integer, reply->str ?: "");
+	break;
+      case REDIS_REPLY_ERROR:
+	UTStrBuf_printf(sbuf, "error(%lld)=\"%s\"", reply->integer, reply->str ?: "");
+	break;
+      default:
+	UTStrBuf_printf(sbuf, "unknown(%d)", reply->type);
+	break;
+      }
     }
     return UTSTRBUF_STR(sbuf);
   }
@@ -176,7 +190,6 @@ extern "C" {
     UTHASH_WALK(mdata->portsByName, prt) {
       if(prt->mark) {
 	myDebug(1, "sonic port removed %s", prt->portName);
-	// TODO: other places to remove?
 	UTHashDel(mdata->portsByName, prt);
 	my_free(prt->portName);
 	my_free(prt->oid);
@@ -191,15 +204,6 @@ extern "C" {
     _________________    redis event adaptor    __________________
     -----------------___________________________------------------
   */
-
-  static void db_disconnectCB(const redisAsyncContext *ctx, int status) {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "db_disconnectCB: status= %d", status);
-    // try to reconnect on tick
-    // TODO: test - take redis down and up again
-    mdata->state = HSP_SONIC_STATE_CONNECT;
-  }
 
   static void db_readCB(EVMod *mod, EVSocket *sock, void *magic)
   {
@@ -235,50 +239,59 @@ extern "C" {
   }
 
   static void db_cleanupCB(void *magic) {
-    myDebug(1, "sonic db_cleanupCB");
+    EVMod *mod = (EVMod *)magic;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    myDebug(1, "sonic db_cleanupCB dbSock=%p", mdata->dbSock);
+    if(mdata->dbSock) {
+      // TODO: might need an option to do this without actually calling close() on the socket fd
+      EVSocketClose(mod, mdata->dbSock);
+      mdata->dbSock = NULL;
+    }
   }
 
   /*_________________---------------------------__________________
-    _________________      db_connect           __________________
+    _________________    db_connect             __________________
     -----------------___________________________------------------
   */
 
-  static void db_infoCB(redisAsyncContext *ctx, void *magic, void *req_magic)
-  {
+
+  static void db_connectCB(const redisAsyncContext *ctx, int status) {
     EVMod *mod = (EVMod *)ctx->ev.data;
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    redisReply *reply = (redisReply *)magic;
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic info: reply=%s", db_replyStr(reply, mdata->replyBuf));
-    //redisReader *reader = redisReaderCreate();
-    //redisReaderFeed(reader, reply->str, reply->len);
-    //redisReply *reply2 = NULL;
-    //redisReaderGetReply(reader, (void **)&reply2);
-    mdata->state =  HSP_SONIC_STATE_DISCOVER;
+    myDebug(1, "sonic db_connectCB: status= %d", status);
+    if(status == REDIS_OK)
+      mdata->state = HSP_SONIC_STATE_CONNECTED;
   }
 
+  static void db_disconnectCB(const redisAsyncContext *ctx, int status) {
+    EVMod *mod = (EVMod *)ctx->ev.data;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    myDebug(1, "sonic db_disconnectCB: status= %d", status);
+    // try to reconnect on tick
+    mdata->state = HSP_SONIC_STATE_CONNECT;
+  }
 
   static void db_connect(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "sonic redis connect");
     mdata->db = redisAsyncConnect(HSP_DEFAULT_REDIS_HOST, HSP_DEFAULT_REDIS_PORT);
-    // TODO: check mdata->redisCtx->err;
-    redisAsyncSetDisconnectCallback(mdata->db, db_disconnectCB);
-    // mdata->redisCtx->onDisconnect = db_disconnectCB;
-    int fd = mdata->db->c.fd;
-    if(fd > 0) {
-      myDebug(1, "sonic redis fd == %d", fd);
-      EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, NULL /* magic */);
-      mdata->db->ev.addRead = db_addReadCB;
-      mdata->db->ev.delRead = db_delReadCB;
-      mdata->db->ev.addWrite = db_addWriteCB;
-      mdata->db->ev.delWrite = db_delWriteCB;
-      mdata->db->ev.cleanup = db_cleanupCB;
-      mdata->db->ev.data = mod;
-      
-      myDebug(1, "sonic sending command: INFO");
-      int status = redisAsyncCommand(mdata->db, db_infoCB, NULL /*privData*/, "INFO");
-      myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    if(mdata->db) {
+      redisAsyncSetConnectCallback(mdata->db, db_connectCB);
+      redisAsyncSetDisconnectCallback(mdata->db, db_disconnectCB);
+      int fd = mdata->db->c.fd;
+      if(fd > 0) {
+	myDebug(1, "sonic redis fd == %d", fd);
+	mdata->dbSock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, NULL /* magic */);
+	mdata->db->ev.addRead = db_addReadCB;
+	mdata->db->ev.delRead = db_delReadCB;
+	mdata->db->ev.addWrite = db_addWriteCB;
+	mdata->db->ev.delWrite = db_delWriteCB;
+	mdata->db->ev.cleanup = db_cleanupCB;
+	mdata->db->ev.data = mod;
+	// async connect requires something to do before it will complete,
+	// so go ahead and issue the first query...
+	db_getMeta(mod);
+      }
     }
   }
 
@@ -296,13 +309,70 @@ extern "C" {
     myDebug(1, "sonic select: reply=%s", db_replyStr(reply, mdata->replyBuf));
   }
 
-  static void db_select(EVMod *mod, int dbNo) {
+  static bool db_select(EVMod *mod, int dbNo) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(dbNo != mdata->dbNo) {
-      myDebug(1, "sonic sending command to select DB %u", dbNo);
-      int status = redisAsyncCommand(mdata->db, db_selectCB, NULL /*privData*/, "select %u", dbNo);
-      myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    if(dbNo == mdata->dbNo)
+      return YES;
+
+    myDebug(1, "sonic sending command to select DB %u", dbNo);
+    int status = redisAsyncCommand(mdata->db, db_selectCB, NULL /*privData*/, "select %u", dbNo);
+    myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    if(status == REDIS_OK) {
       mdata->dbNo = dbNo;
+      return YES;
+    }
+    return NO;
+  }
+
+  /*_________________---------------------------__________________
+    _________________      db_getMeta           __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_metaCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    EVMod *mod = (EVMod *)ctx->ev.data;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    redisReply *reply = (redisReply *)magic;
+    UTStrBuf_reset(mdata->replyBuf);
+    myDebug(1, "sonic meta: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    if(reply == NULL)
+      return;
+
+    if(reply->type == REDIS_REPLY_ARRAY
+       && reply->elements > 0
+       && ISEVEN(reply->elements)) {
+      for(int ii = 0; ii < reply->elements; ii += 2) {
+	redisReply *c_name = reply->element[ii];
+	redisReply *c_val = reply->element[ii + 1];
+	if(c_name->type == REDIS_REPLY_STRING) {
+	  UTStrBuf_reset(mdata->replyBuf);
+	  myDebug(1, "sonic meta: %s=%s", c_name->str, db_replyStr(c_val, mdata->replyBuf));
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_MAC)
+	     && c_val->type == REDIS_REPLY_STRING
+	     && c_val->str) {
+	    if(hexToBinary((u_char *)c_val->str, mdata->actorSystemMAC, 6) != 6)
+	      myLog(LOG_ERR, "unexpected system MAC: %s", c_val->str);
+	    else
+	      myDebug(1, "got system MAC: %s", c_val->str);
+	  }
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_LOCALAS))
+	    mdata->localAS = db_getU32(c_val);
+	}
+      }
+    }
+    mdata->state = HSP_SONIC_STATE_DISCOVER;
+  }
+
+  static void db_getMeta(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    myDebug(1, "sonic db_getMeta dbSock=%p", mdata->dbSock);
+    if(mdata->dbSock) {
+      if(db_select(mod, HSP_SONIC_DB_CONFIG)) {
+	myDebug(1, "sonic sending command to get system metadata");
+	int status = redisAsyncCommand(mdata->db, db_metaCB, NULL /*privData*/, "hgetall DEVICE_METADATA|localhost");
+	myDebug(1, "sonic redisAsyncCommand returned %d", status);
+      }
     }
   }
 
@@ -310,8 +380,6 @@ extern "C" {
     _________________      db_getPortNames      __________________
     -----------------___________________________------------------
   */
-
-#define ISEVEN(i) (((i) & 1) == 0)
 
   static void signalCounterDiscontinuity(EVMod *mod, HSPSonicPort *prt) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -329,9 +397,11 @@ extern "C" {
     EVMod *mod = (EVMod *)ctx->ev.data;
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
-    markPorts(mod);
     UTStrBuf_reset(mdata->replyBuf);
     myDebug(1, "sonic portNames: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    if(reply == NULL)
+      return;
+    markPorts(mod);
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -357,7 +427,7 @@ extern "C" {
 	    signalCounterDiscontinuity(mod, prt);
 	  }
 	  prt->mark = NO;
-	}
+	  }
       }
     }
     deleteMarkedPorts(mod);
@@ -366,10 +436,11 @@ extern "C" {
 
   static void db_getPortNames(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    db_select(mod, HSP_SONIC_DB_COUNTERS);
-    myDebug(1, "sonic sending command to get port name map");
-    int status = redisAsyncCommand(mdata->db, db_portNamesCB, NULL, "HGETALL COUNTERS_PORT_NAME_MAP");
-    myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    if(db_select(mod, HSP_SONIC_DB_COUNTERS)) {
+      myDebug(1, "sonic sending command to get port name map");
+      int status = redisAsyncCommand(mdata->db, db_portNamesCB, NULL, "HGETALL COUNTERS_PORT_NAME_MAP");
+      myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    }
   }
 
 
@@ -387,6 +458,8 @@ extern "C" {
     HSPSonicPort *prt = (HSPSonicPort *)req_magic;
     UTStrBuf_reset(mdata->replyBuf);
     myDebug(1, "sonic portState: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    if(reply == NULL)
+      return;
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -437,9 +510,10 @@ extern "C" {
 
   static void db_getPortState(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    db_select(mod, HSP_SONIC_DB_APPL);
-    int status = redisAsyncCommand(mdata->db, db_portStateCB, prt, "HGETALL PORT_TABLE:%s", prt->portName);
-    myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    if(db_select(mod, HSP_SONIC_DB_APPL)) {
+      int status = redisAsyncCommand(mdata->db, db_portStateCB, prt, "HGETALL PORT_TABLE:%s", prt->portName);
+      myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    }
   }
 
   static void discoverNewPorts(EVMod *mod) {
@@ -467,6 +541,8 @@ extern "C" {
 
     UTStrBuf_reset(mdata->replyBuf);
     myDebug(1, "sonic portCounters: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    if(reply == NULL)
+      return;
     memset(&prt->ctrs, 0, sizeof(prt->ctrs));
     memset(&prt->et_ctrs, 0, sizeof(prt->et_ctrs));
     if(reply->type == REDIS_REPLY_ARRAY
@@ -509,8 +585,6 @@ extern "C" {
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFOUT_BCASTS))
 	    prt->et_ctrs.bcasts_out = db_getU32(c_val);
 
-	  // TODO: ifAdminStatus, ifOperStatus - should they be polled here?
-	  // or do we poll the state often enough?
 	  prt->et_ctrs.operStatus = prt->operUp;
 	  prt->et_ctrs.adminStatus = prt->adminUp;
 	}
@@ -536,11 +610,12 @@ extern "C" {
 
   static void db_getPortCounters(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    db_select(mod, HSP_SONIC_DB_COUNTERS);
-    myDebug(1, "request: HGETALL COUNTERS:%s", prt->oid);
-    // TODO: consider getting only the counters we want
-    int status = redisAsyncCommand(mdata->db, db_portCountersCB, prt, "HGETALL COUNTERS:%s", prt->oid);
-    myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    if(db_select(mod, HSP_SONIC_DB_COUNTERS)) {
+      myDebug(1, "request: HGETALL COUNTERS:%s", prt->oid);
+      // TODO: consider getting only the counters we want
+      int status = redisAsyncCommand(mdata->db, db_portCountersCB, prt, "HGETALL COUNTERS:%s", prt->oid);
+      myDebug(1, "sonic redisAsyncCommand returned %d", status);
+    }
   }
 
   /*_________________---------------------------__________________
@@ -566,7 +641,6 @@ extern "C" {
 
   static void evt_poll_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     // only get here if we have a valid config
-    // TODO: set a state that will be picked up on tick()? So we can keep trying if it doesn't work?
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     mdata->state =  HSP_SONIC_STATE_CONNECT;
   }
@@ -582,7 +656,8 @@ extern "C" {
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
-    // TODO: not sure there is anything we need to do here
+    // TODO: may have to detect list of enabled/disabled switch ports here, although
+    // it's more likely that we will discover that from redis or config.json
   }
 
   /*_________________---------------------------__________________
@@ -595,21 +670,15 @@ extern "C" {
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
     myDebug(1, "evt_poll_intf_read(%s)", adaptor->deviceName);
-
-    // TODO: this might be the right place to look up in portsByMame, set the ifSpeed
-    // and mark it as a switch-port.  Except that maybe the redis walk has not been
-    // completed yet.  So we might need to use the switchport regex after all?
-
     // turn off the use of ethtool_GSET so it doesn't get the wrong speed
     // and turn off other ethtool requests because they won't add to the picture
-    // TODO: what about eth0 (software interface). It won't be a switch-port but
-    // sure it can be usefully queried with ethtool?
     nio->ethtool_GSET = NO;
     nio->ethtool_GLINKSETTINGS = NO;
     nio->ethtool_GSTATS = NO;
     nio->ethtool_GDRVINFO = NO;
     // the /proc/net/dev counters are invalid too
     nio->procNetDev = NO;
+    // TODO: can we turn off /proc/net/bonding/*,  or can we just assume it will be missing?
   }
 
   /*_________________---------------------------__________________
@@ -642,6 +711,10 @@ extern "C" {
     // for refreshing the host-adaptor counters (eth0 etc.)
     if(adaptor == NULL)
       return;
+
+    if(mdata->state != HSP_SONIC_STATE_RUN
+       && mdata->state != HSP_SONIC_STATE_DISCOVER)
+      return; // this can happen if we lose the redis connection and go back
 
     myDebug(1, "pollCounters(adaptor=%s)", adaptor->deviceName);
 
@@ -679,8 +752,13 @@ extern "C" {
       // got config - try to connect
       db_connect(mod);
       break;
+    case HSP_SONIC_STATE_CONNECTED:
+      // connected - learm static metadata
+      db_getMeta(mod);
+      break;
     case HSP_SONIC_STATE_DISCOVER:
-      db_getPortNames(mod); // TODO do this periodically
+      // learn dynamic port->oid mappings
+      db_getPortNames(mod);
       break;
     case HSP_SONIC_STATE_RUN:
       // check for new ports
