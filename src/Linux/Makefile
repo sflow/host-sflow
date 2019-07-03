@@ -13,6 +13,7 @@ ifndef REDHAT
   REDHAT=$(shell if [ -r /etc/redhat-release ]; then echo "yes"; else echo "no"; fi)
 endif
 
+HSFLOWD_CONF=scripts/hsflowd.conf
 HSFLOWD_INITSCRIPT=scripts/hsflowd
 HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service
 HSFLOWD_DBUS_CONF=scripts/net.sflow.hsflowd.conf
@@ -71,6 +72,7 @@ endif
 ifeq ("$(strip $(FEATURES))","SONIC")
   XTGTS += $(FEATURES_SONIC)
   CFLAGS_LOAD += -DHSP_LOAD_SONIC
+  HSFLOWD_CONF=scripts/hsflowd.conf.sonic
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
@@ -472,7 +474,7 @@ install:
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	$(INSTALL) -d $(CONF_D)
-	$(INSTALL) -m 644 scripts/hsflowd.conf $(CONF_D)
+	$(INSTALL) -m 644 $(HSFLOWD_CONF) $(CONF_D)/hsflowd.conf
 	$(INSTALL) -d $(SYSTEMD_D)
 	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMD_D)/hsflowd.service
 	$(INSTALL) -d $(INIT_D)

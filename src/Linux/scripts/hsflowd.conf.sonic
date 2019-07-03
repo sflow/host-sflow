@@ -1,0 +1,16 @@
+# hsflowd configuration file
+# http://sflow.net/host-sflow-linux-config.php
+
+sflow {
+  # sonic {} loaded automatically
+  # psample {} loaded automatically
+  # ======  Agent IP selection ======
+  # determined by sonic config DB
+  # ====== Sampling/Polling/Collectors ======
+  # determined by sonic config DB
+  # ====== collectors ======
+  # determined by sonic config DB
+  # ====== Docker container monitoring ======
+  docker { }
+}
+

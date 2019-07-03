@@ -1243,9 +1243,12 @@ extern "C" {
 
     if(sp->sFlowSettings == NULL
        || sp->sFlowSettings->collectors == NULL) {
-      myLog(LOG_ERR, "evt_config_first: no collectors defined");
-      if(!sp->DNSSD.DNSSD)
+      if(sp->DNSSD.DNSSD == NO
+	 && sp->eapi.eapi == NO
+	 && sp->sonic.sonic == NO) {
+	myLog(LOG_ERR, "evt_config_first: no collectors defined");
 	abort();
+      }
     }
   }
 
@@ -1770,11 +1773,10 @@ extern "C" {
 
 #ifdef HSP_LOAD_SONIC
     // SONIC should be compiled with "make deb FEATURES="SONIC"
-    myLog(LOG_INFO, "autoload SONIC, PSAMPLE and DOCKER modules");
+    myLog(LOG_INFO, "autoload SONIC abd PSAMPLE modules");
     sp->sonic.sonic = YES;
     sp->psample.psample = YES;
     sp->psample.group = 1;
-    sp->docker.docker = YES;
 #endif /* HSP_LOAD_OPX */
 
 #ifdef HSP_LOAD_XEN
@@ -1796,6 +1798,11 @@ extern "C" {
 
     if(sp->eapi.eapi && sp->DNSSD.DNSSD) {
       myLog(LOG_ERR, "cannot run eapi and dns-sd modules together");
+      exit(EXIT_FAILURE);
+    }
+    
+    if(sp->sonic.sonic && sp->DNSSD.DNSSD) {
+      myLog(LOG_ERR, "cannot run sonic and dns-sd modules together");
       exit(EXIT_FAILURE);
     }
 

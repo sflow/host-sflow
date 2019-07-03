@@ -1793,7 +1793,8 @@ extern "C" {
     else {
       if(sp->sFlowSettings_file->numCollectors == 0
 	 && sp->DNSSD.DNSSD == NO
-	 && sp->eapi.eapi == NO) {
+	 && sp->eapi.eapi == NO
+	 && sp->sonic.sonic == NO) {
 	myLog(LOG_ERR, "parse error in %s : no collectors are defined", sp->configFile);
 	parseOK = NO;
       }
