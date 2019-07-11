@@ -1777,7 +1777,11 @@ extern "C" {
     sp->sonic.sonic = YES;
     sp->psample.psample = YES;
     sp->psample.group = 1;
-#endif /* HSP_LOAD_OPX */
+    sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
+      | HSP_SAMPLEOPT_IF_POLLER
+      | HSP_SAMPLEOPT_ASIC
+      | HSP_SAMPLEOPT_INGRESS;
+#endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN
     myLog(LOG_INFO, "autoload XEN and OVS modules");
