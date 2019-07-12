@@ -67,25 +67,29 @@ extern "C" {
     char *ifAlias;
     SFLHost_nio_counters ctrs;
     HSP_ethtool_counters et_ctrs;
-    char *lagName;
     UTStringArray *components;
   } HSPSonicPort;
 
+  typedef struct _HSPSonicDBClient {
+    redisAsyncContext *ctx;
+    int dbNo;
+    EVMod *mod;
+    EVSocket *sock;
+    uint32_t reads;
+    uint32_t writes;
+    UTStrBuf *replyBuf;
+  } HSPSonicDBClient;
+  
   typedef struct _HSP_mod_SONIC {
     EnumSonicState state;
     EVBus *pollBus;
-    redisAsyncContext *db;
-    EVSocket *dbSock;
-    int dbNo;
+    HSPSonicDBClient *db;
+    HSPSonicDBClient *dbEvt;
     UTHash *portsByName;
     UTArray *newPorts;
     bool changedSwitchPorts:1;
-    UTStrBuf *replyBuf;
     u_char actorSystemMAC[8];
     uint32_t localAS;
-    // pub/sub client
-    redisAsyncContext *dbEvt;
-    EVSocket *dbEvtSock;
   } HSP_mod_SONIC;
 
   static void db_getMeta(EVMod *mod);
@@ -96,7 +100,10 @@ extern "C" {
     _________________      db_replyStr          __________________
     -----------------___________________________------------------
   */
-  static char *db_replyStr(redisReply *reply, UTStrBuf *sbuf) {
+
+  static char *db_replyStr(redisReply *reply, UTStrBuf *sbuf, bool reset) {
+    if(reset)
+      UTStrBuf_reset(sbuf);
     if(reply == NULL)
       UTStrBuf_printf(sbuf, "<no reply>");
     else {
@@ -165,6 +172,7 @@ extern "C" {
     _________________      db_getU64            __________________
     -----------------___________________________------------------
   */
+
   static uint32_t db_getU64(redisReply *reply) {
     uint64_t ans64 = 0;
     switch (reply->type) {
@@ -207,6 +215,87 @@ extern "C" {
       }
     }
   }
+
+  static void compileLags(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicPort *prt;
+    UTHASH_WALK(mdata->portsByName, prt) {
+      if(prt->components) {
+	char *details = strArrayStr(prt->components, "[", NULL, ",", "]");
+	myDebug(1, "compiling LAG %s: %s", prt->portName, details);
+	my_free(details);
+	SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
+	if(adaptor) {
+	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+	  nio->bond_master = YES;
+	  nio->bond_slave = NO;
+	  nio->lacp.portState.v.actorAdmin = prt->adminUp ? 2 : 0;
+	  nio->lacp.portState.v.actorOper = prt->operUp ? 2 : 0;
+	  nio->lacp.portState.v.partnerAdmin = prt->adminUp ? 2 : 0; // questionable assumption
+	  nio->lacp.portState.v.partnerOper = prt->operUp ? 2 : 0; // reasonable assumption
+	  // TODO: Do all LAGs really have same actor MAC?
+	  memcpy(nio->lacp.actorSystemID, mdata->actorSystemMAC, 6);
+	  // TODO: might be able to learn partnerSystemID from LLDP?
+	  memset(nio->lacp.partnerSystemID, 0, 6);
+	  for(int cc=0; cc < strArrayN(prt->components); cc++) {
+	    char *c_name = strArrayAt(prt->components, cc);
+	    HSPSonicPort *c_prt = getPort(mod, c_name, NO);
+	    if(c_prt) {
+	      SFLAdaptor *c_adaptor = adaptorByName(sp, c_prt->portName);
+	      if(c_adaptor) {
+		HSPAdaptorNIO *c_nio = ADAPTOR_NIO(c_adaptor);
+		c_nio->lacp.attachedAggID = prt->ifIndex;
+		memcpy(c_nio->lacp.actorSystemID, nio->lacp.actorSystemID, 6);
+		memcpy(c_nio->lacp.partnerSystemID, nio->lacp.partnerSystemID, 6);
+		if(c_nio->switchPort) {
+		  if(!nio->switchPort) {
+		    myDebug(1, "sonic marking bond %s as switchPort", prt->portName);
+		    nio->switchPort = YES;
+		  }
+		}
+		if(nio->switchPort
+		   && !c_nio->switchPort) {
+		  myDebug(1, "sonic warning: bond %s slave %s not marked as switchPort",
+			  prt->portName,
+			  c_prt->portName);
+		}
+		c_nio->bond_master = NO;
+		c_nio->bond_slave = YES;
+		c_nio->lacp.portState.v.actorAdmin = c_prt->adminUp ? 2 : 0;
+		c_nio->lacp.portState.v.actorOper = c_prt->operUp ? 2 : 0;
+		c_nio->lacp.portState.v.partnerAdmin = c_prt->adminUp ? 2 : 0; // questionable assumption
+		c_nio->lacp.portState.v.partnerOper = c_prt->operUp ? 2 : 0; // reasonable assumption
+	      }
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  static void resetLags(EVMod *mod) {
+    // just have to clear the nio bond flags from LAGs and
+    // components, and remove the components list from the LAG port.
+    // Any stale nio->lacp* settings will be overwritten with fresh
+    // values if port is still in LAG or is involved in a LAG again
+    // sometime later.
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicPort *prt;
+    UTHASH_WALK(mdata->portsByName, prt) {
+      SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
+      if(adaptor) {
+	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+	nio->bond_master = NO;
+	nio->bond_slave = NO;
+      }
+      if(prt->components) {
+	strArrayFree(prt->components);
+	prt->components = NULL;
+      }
+    }
+  }
       
   /*_________________---------------------------__________________
     _________________    mark and sweep         __________________
@@ -226,6 +315,7 @@ extern "C" {
     UTHASH_WALK(mdata->portsByName, prt) {
       if(prt->components) {
 	// LAG. If it's no longer current then
+	// the components will be removed and
 	// it will be deleted next time,
 	continue;
       }
@@ -238,23 +328,9 @@ extern "C" {
 	  my_free(prt->oid);
 	if(prt->ifAlias)
 	  my_free(prt->ifAlias);
-	if(prt->lagName)
-	  my_free(prt->lagName);
 	//if(prt->components)
 	//  strArrayFree(prt->components);
 	my_free(prt);
-      }
-    }
-  }
-
-  static void resetLags(EVMod *mod) {
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    HSPSonicPort *prt;
-    UTHASH_WALK(mdata->portsByName, prt) {
-      setStr(&prt->lagName, NULL);
-      if(prt->components) {
-	strArrayFree(prt->components);
-	prt->components = NULL;
       }
     }
   }
@@ -264,26 +340,22 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  static HSPSonicDBClient *newDBClient(EVMod *mod) {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)my_calloc(sizeof(HSPSonicDBClient));
+    db->replyBuf = UTStrBuf_new();
+    db->mod = mod;
+    return db;
+  }
+  
   static void db_readCB(EVMod *mod, EVSocket *sock, void *magic)
   {
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(3, "sonic db_readCB");
-    redisAsyncHandleRead(mdata->db);
-  }
-
-  static void db_addReadCB(void *magic) {
-    myDebug(3, "sonic db_addReadCB");
-    // nothing to do: evbus always ready to read
-  }
-
-  static void db_delReadCB(void *magic) {
-    myDebug(3, "sonic db_delReadCB");
+    HSPSonicDBClient *db = (HSPSonicDBClient *)magic;
+    db->reads++;
+    redisAsyncHandleRead(db->ctx);
   }
 
   static void db_addWriteCB(void *magic) {
-    EVMod *mod = (EVMod *)magic;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(3, "sonic db_addWriteCB");
+    HSPSonicDBClient *db = (HSPSonicDBClient *)magic;
     // We could modify evbus to regulate writes, but
     // since the write direction consists only of short
     // queries we just assume it's OK to go ahead.
@@ -291,76 +363,20 @@ extern "C" {
     // a second or so then we could set the file descriptor
     // to non-blocking mode with fcntl and looks for an
     // EWOULDBLOCK error.)
-    redisAsyncHandleWrite(mdata->db);
-  }
-
-  static void db_delWriteCB(void *magic) {
-    myDebug(3, "sonic db_delWriteCB");
+    db->writes++;
+    redisAsyncHandleWrite(db->ctx);
   }
 
   static void db_cleanupCB(void *magic) {
-    EVMod *mod = (EVMod *)magic;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "sonic db_cleanupCB dbSock=%p dbEvtSock=%p", mdata->dbSock);
-    if(mdata->dbSock) {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)magic;
+    myDebug(1, "sonic db_cleanupCB dbSock=%p", db->sock);
+    if(db->sock) {
       // set flag to prevent actual closing of file-descriptor.
       // It belongs to libhiredis and should be closed there.
-      EVSocketClose(mod, mdata->dbSock, NO);
-      mdata->dbSock = NULL;
+      EVSocketClose(db->mod, db->sock, NO);
+      db->sock = NULL;
     }
-    mdata->db = NULL;
-  }
-
-  /*_________________---------------------------__________________
-    _________________    redis event adaptor    __________________
-    -----------------___________________________------------------
-  */
-
-  static void dbEvt_readCB(EVMod *mod, EVSocket *sock, void *magic)
-  {
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(3, "sonic dbEvt_readCB");
-    redisAsyncHandleRead(mdata->dbEvt);
-  }
-
-  static void dbEvt_addReadCB(void *magic) {
-    myDebug(3, "sonic dbEvt_addReadCB");
-    // nothing to do: evbus always ready to read
-  }
-
-  static void dbEvt_delReadCB(void *magic) {
-    myDebug(3, "sonic dbEvt_delReadCB");
-  }
-
-  static void dbEvt_addWriteCB(void *magic) {
-    EVMod *mod = (EVMod *)magic;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(3, "sonic dbEvt_addWriteCB");
-    // We could modify evbus to regulate writes, but
-    // since the write direction consists only of short
-    // queries we just assume it's OK to go ahead.
-    // (If there were any danger of blocking for more than
-    // a second or so then we could set the file descriptor
-    // to non-blocking mode with fcntl and looks for an
-    // EWOULDBLOCK error.)
-    redisAsyncHandleWrite(mdata->dbEvt);
-  }
-
-  static void dbEvt_delWriteCB(void *magic) {
-    myDebug(3, "sonic dbEvt_delWriteCB");
-  }
-
-  static void dbEvt_cleanupCB(void *magic) {
-    EVMod *mod = (EVMod *)magic;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "sonic dbEvt_cleanupCB dbEvtSock=%p", mdata->dbEvtSock);
-    if(mdata->dbEvtSock) {
-      // set flag to prevent actual closing of file-descriptor.
-      // It belongs to libhiredis and should be closed there.
-      EVSocketClose(mod, mdata->dbEvtSock, NO);
-      mdata->dbEvtSock = NULL;
-    }
-    mdata->dbEvt = NULL;
+    // TODO: free client?
   }
 
   /*_________________---------------------------__________________
@@ -370,82 +386,63 @@ extern "C" {
 
 
   static void db_connectCB(const redisAsyncContext *ctx, int status) {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)db->mod->data;
     myDebug(1, "sonic db_connectCB: status= %d", status);
-    if(status == REDIS_OK)
+    if(status == REDIS_OK
+       && db == mdata->db)
       mdata->state = HSP_SONIC_STATE_CONNECTED;
+    // TODO: should this really be db->state?
   }
 
   static void db_disconnectCB(const redisAsyncContext *ctx, int status) {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)db->mod->data;
     myDebug(1, "sonic db_disconnectCB: status= %d", status);
-    // we will try to reconnect on tick
-    mdata->state = HSP_SONIC_STATE_CONNECT;
+    if(db == mdata->db)
+      mdata->state = HSP_SONIC_STATE_CONNECT;
+  }
+
+  static bool db_connectClient(EVMod *mod, HSPSonicDBClient *db) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    redisAsyncContext *ctx = db->ctx = redisAsyncConnect(HSP_DEFAULT_REDIS_HOST, HSP_DEFAULT_REDIS_PORT);
+    if(ctx) {
+      redisAsyncSetConnectCallback(ctx, db_connectCB);
+      redisAsyncSetDisconnectCallback(ctx, db_disconnectCB);
+      int fd = ctx->c.fd;
+      if(fd > 0) {
+	myDebug(1, "sonic redis fd == %d", fd);
+	db->sock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, db /* magic */);
+	// db->ev.addRead = db_addReadCB; // EVBus always ready to read
+	// db->ev.delRead = db_delReadCB; // no-op
+	ctx->ev.addWrite = db_addWriteCB;
+	// db->ev.delWrite = db_delWriteCB; // no-op
+	ctx->ev.cleanup = db_cleanupCB;
+	ctx->ev.data = db;
+	return YES;
+      }
+    }
+    return NO;
   }
 
   static void db_connect(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "sonic redis connect, current mdata->db=%p", mdata->db);
-    mdata->db = redisAsyncConnect(HSP_DEFAULT_REDIS_HOST, HSP_DEFAULT_REDIS_PORT);
-    if(mdata->db) {
-      redisAsyncSetConnectCallback(mdata->db, db_connectCB);
-      redisAsyncSetDisconnectCallback(mdata->db, db_disconnectCB);
-      int fd = mdata->db->c.fd;
-      if(fd > 0) {
-	myDebug(1, "sonic redis fd == %d", fd);
-	mdata->dbSock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, NULL /* magic */);
-	mdata->db->ev.addRead = db_addReadCB;
-	mdata->db->ev.delRead = db_delReadCB;
-	mdata->db->ev.addWrite = db_addWriteCB;
-	mdata->db->ev.delWrite = db_delWriteCB;
-	mdata->db->ev.cleanup = db_cleanupCB;
-	mdata->db->ev.data = mod;
-	// async connect requires something to do before it will complete,
-	// so go ahead and issue the first query...
-	db_getMeta(mod);
-      }
+    mdata->db = newDBClient(mod);
+    if(db_connectClient(mod, mdata->db)) {
+      // async connect requires something to do before it will complete,
+      // so go ahead and issue the first query...
+      db_getMeta(mod);
     }
-  }
-
-  /*_________________---------------------------__________________
-    _________________    dbEvt_connect          __________________
-    -----------------___________________________------------------
-  */
-
-
-  static void dbEvt_connectCB(const redisAsyncContext *ctx, int status) {
-    myDebug(1, "sonic dbEvt_connectCB: status= %d", status);
-  }
-
-  static void dbEvt_disconnectCB(const redisAsyncContext *ctx, int status) {
-    myDebug(1, "sonic dbEvt_disconnectCB: status= %d", status);
   }
 
   static void dbEvt_connect(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "sonic redis evt connect, current mdata->dbEvt=%p", mdata->dbEvt);
-    mdata->dbEvt = redisAsyncConnect(HSP_DEFAULT_REDIS_HOST, HSP_DEFAULT_REDIS_PORT);
-    if(mdata->dbEvt) {
-      redisAsyncSetConnectCallback(mdata->dbEvt, dbEvt_connectCB);
-      redisAsyncSetDisconnectCallback(mdata->dbEvt, dbEvt_disconnectCB);
-      int fd = mdata->dbEvt->c.fd;
-      if(fd > 0) {
-	myDebug(1, "sonic redis evt fd == %d", fd);
-	// might have been able to share these adaptor functions, but
-	// seems cleaner to keep them completely separate.
-	mdata->dbEvtSock = EVBusAddSocket(mod, mdata->pollBus, fd, dbEvt_readCB, NULL /* magic */);
-	mdata->dbEvt->ev.addRead = dbEvt_addReadCB;
-	mdata->dbEvt->ev.delRead = dbEvt_delReadCB;
-	mdata->dbEvt->ev.addWrite = dbEvt_addWriteCB;
-	mdata->dbEvt->ev.delWrite = dbEvt_delWriteCB;
-	mdata->dbEvt->ev.cleanup = dbEvt_cleanupCB;
-	mdata->dbEvt->ev.data = mod;
-	// async connect requires something to do before it will complete
-	// so go ahead and issue the subscribe query:
-	dbEvt_subscribe(mod);
-      }
+    mdata->dbEvt = newDBClient(mod);
+    if(db_connectClient(mod, mdata->dbEvt)) {
+      // issue subscribe queries
+      dbEvt_subscribe(mod);
     }
   }
 
@@ -456,22 +453,19 @@ extern "C" {
 
   static void db_selectCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
     redisReply *reply = (redisReply *)magic;
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic db_selectCB: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    myDebug(1, "sonic db_selectCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
   }
 
-  static bool db_select(EVMod *mod, int dbNo) {
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(dbNo == mdata->dbNo)
+  static bool db_select(HSPSonicDBClient *db, int dbNo) {
+    if(dbNo == db->dbNo)
       return YES;
     myDebug(1, "sonic db_select(%u)", dbNo);
-    int status = redisAsyncCommand(mdata->db, db_selectCB, NULL /*privData*/, "select %u", dbNo);
+    int status = redisAsyncCommand(db->ctx, db_selectCB, NULL /*privData*/, "select %u", dbNo);
     myDebug(1, "sonic db_select returned %d", status);
     if(status == REDIS_OK) {
-      mdata->dbNo = dbNo;
+      db->dbNo = dbNo;
       return YES;
     }
     return NO;
@@ -484,11 +478,10 @@ extern "C" {
 
   static void db_metaCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)db->mod->data;
     redisReply *reply = (redisReply *)magic;
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic db_metaCB: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    myDebug(1, "sonic db_metaCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
 
@@ -499,8 +492,7 @@ extern "C" {
 	redisReply *c_name = reply->element[ii];
 	redisReply *c_val = reply->element[ii + 1];
 	if(c_name->type == REDIS_REPLY_STRING) {
-	  UTStrBuf_reset(mdata->replyBuf);
-	  myDebug(1, "sonic db_metaCB: %s=%s", c_name->str, db_replyStr(c_val, mdata->replyBuf));
+	  myDebug(1, "sonic db_metaCB: %s=%s", c_name->str, db_replyStr(c_val, db->replyBuf, YES));
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_MAC)
 	     && c_val->type == REDIS_REPLY_STRING
 	     && c_val->str) {
@@ -517,13 +509,10 @@ extern "C" {
 
   static void db_getMeta(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "sonic db_getMeta dbSock=%p", mdata->dbSock);
-    if(mdata->dbSock) {
-      if(db_select(mod, HSP_SONIC_DB_CONFIG)) {
-	myDebug(1, "sonic db_getMeta");
-	int status = redisAsyncCommand(mdata->db, db_metaCB, NULL /*privData*/, "hgetall DEVICE_METADATA|localhost");
-	myDebug(1, "sonic db_getMeta returned %d", status);
-      }
+    myDebug(1, "sonic db_getMeta");
+    if(db_select(mdata->db, HSP_SONIC_DB_CONFIG)) {
+      int status = redisAsyncCommand(mdata->db->ctx, db_metaCB, NULL /*privData*/, "hgetall DEVICE_METADATA|localhost");
+      myDebug(1, "sonic db_getMeta returned %d", status);
     }
   }
 
@@ -545,11 +534,11 @@ extern "C" {
 
   static void db_portNamesCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic db_portNamesCB: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    myDebug(1, "sonic db_portNamesCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
     markPorts(mod);
@@ -584,9 +573,9 @@ extern "C" {
 
   static void db_getPortNames(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(db_select(mod, HSP_SONIC_DB_COUNTERS)) {
+    if(db_select(mdata->db, HSP_SONIC_DB_COUNTERS)) {
       myDebug(1, "sonic db_getPortNames()");
-      int status = redisAsyncCommand(mdata->db, db_portNamesCB, NULL, "HGETALL COUNTERS_PORT_NAME_MAP");
+      int status = redisAsyncCommand(mdata->db->ctx, db_portNamesCB, NULL, "HGETALL COUNTERS_PORT_NAME_MAP");
       myDebug(1, "sonic db_getPortNames() returned %d", status);
     }
   }
@@ -599,13 +588,13 @@ extern "C" {
 
   static void db_portStateCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     redisReply *reply = (redisReply *)magic;
     HSPSonicPort *prt = (HSPSonicPort *)req_magic;
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic db_portStateCB: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    myDebug(1, "sonic db_portStateCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
     if(reply->type == REDIS_REPLY_ARRAY
@@ -615,8 +604,7 @@ extern "C" {
 	redisReply *c_name = reply->element[ii];
 	redisReply *c_val = reply->element[ii + 1];
 	if(c_name->type == REDIS_REPLY_STRING) {
-	  UTStrBuf_reset(mdata->replyBuf);
-	  myDebug(1, "sonic db_portStateCB: %s=%s", c_name->str, db_replyStr(c_val, mdata->replyBuf));
+	  myDebug(1, "sonic db_portStateCB: %s=%s", c_name->str, db_replyStr(c_val, db->replyBuf, YES));
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFINDEX))
 	    prt->ifIndex = db_getU32(c_val);
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFSPEED))
@@ -662,9 +650,9 @@ extern "C" {
 
   static void db_getPortState(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(db_select(mod, HSP_SONIC_DB_APPL)) {
+    if(db_select(mdata->db, HSP_SONIC_DB_APPL)) {
       myDebug(1, "sonic db_getPortState()");
-      int status = redisAsyncCommand(mdata->db, db_portStateCB, prt, "HGETALL PORT_TABLE:%s", prt->portName);
+      int status = redisAsyncCommand(mdata->db->ctx, db_portStateCB, prt, "HGETALL PORT_TABLE:%s", prt->portName);
       myDebug(1, "sonic db_getPortState returned %d", status);
     }
   }
@@ -686,14 +674,13 @@ extern "C" {
 
   static void db_portCountersCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
     HSPSonicPort *prt = (HSPSonicPort *)req_magic;
 
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic portCounters: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    myDebug(1, "sonic portCounters: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
     memset(&prt->ctrs, 0, sizeof(prt->ctrs));
@@ -705,8 +692,7 @@ extern "C" {
 	redisReply *c_name = reply->element[ii];
 	redisReply *c_val = reply->element[ii + 1];
 	if(c_name->type == REDIS_REPLY_STRING) {
-	  UTStrBuf_reset(mdata->replyBuf);
-	  myDebug(1, "sonic portCounters: %s=%s", c_name->str, db_replyStr(c_val, mdata->replyBuf));
+	  myDebug(1, "sonic portCounters: %s=%s", c_name->str, db_replyStr(c_val, db->replyBuf, YES));
 	  
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_UCASTS))
 	    prt->ctrs.pkts_in = db_getU32(c_val);
@@ -763,10 +749,10 @@ extern "C" {
 
   static void db_getPortCounters(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(db_select(mod, HSP_SONIC_DB_COUNTERS)) {
+    if(db_select(mdata->db, HSP_SONIC_DB_COUNTERS)) {
       myDebug(1, "sonic getPortCounters(%s) oid=%s", prt->portName, prt->oid ?: "<none>");
       if(prt->oid) {
-	int status = redisAsyncCommand(mdata->db, db_portCountersCB, prt, "HGETALL COUNTERS:%s", prt->oid);
+	int status = redisAsyncCommand(mdata->db->ctx, db_portCountersCB, prt, "HGETALL COUNTERS:%s", prt->oid);
 	myDebug(1, "sonic getPortCounters() returned %d", status);
       }
       else {
@@ -783,12 +769,11 @@ extern "C" {
 
   static void db_getLagInfoCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
     redisReply *reply = (redisReply *)magic;
 
-    UTStrBuf_reset(mdata->replyBuf);
-    myDebug(1, "sonic getLagInfoCB: reply=%s", db_replyStr(reply, mdata->replyBuf));
+    myDebug(1, "sonic getLagInfoCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
     if(reply->type == REDIS_REPLY_ARRAY
@@ -811,22 +796,20 @@ extern "C" {
 	    if(member) {
 	      myDebug(1, "sonic getLagInfoCB: port %s is member of port-channel %s", member, lagName);
 	      strArrayAdd(lagPort->components, member);
-	      HSPSonicPort *prt = getPort(mod, member, NO);
-	      if(prt)
-		setStr(&prt->lagName, lagName);
 	    }
 	  }
 	}
       }
       printLags(mod);
+      compileLags(mod);
     }
   }
 
   static void db_getLagInfo(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(db_select(mod, HSP_SONIC_DB_CONFIG)) {
+    if(db_select(mdata->db, HSP_SONIC_DB_CONFIG)) {
       myDebug(1, "sonic getLagInfo()");
-      int status = redisAsyncCommand(mdata->db, db_getLagInfoCB, NULL, "KEYS PORTCHANNEL_MEMBER|*");
+      int status = redisAsyncCommand(mdata->db->ctx, db_getLagInfoCB, NULL, "KEYS PORTCHANNEL_MEMBER|*");
       myDebug(1, "sonic getLagInfo() returned %d", status);
     }
   }
@@ -837,10 +820,12 @@ extern "C" {
   */
 
   typedef void (*opCBFn)(EVMod *mod, char *key, char *op);
-  
+
+#if 0
   static void dbEvt_counterOp(EVMod *mod, char *portOID, char *op) {
     myDebug(1, "sonic dbEvt_counterOp: %s (%s)", portOID, op);
   }
+#endif
 
   static void dbEvt_lagOp(EVMod *mod, char *memberStr, char *op) {
     myDebug(1, "sonic dbEvt_lagOp: %s (%s)", memberStr, op);
@@ -855,12 +840,11 @@ extern "C" {
   
   static void dbEvt_subscribeCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
-    EVMod *mod = (EVMod *)ctx->ev.data;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
     redisReply *reply = (redisReply *)magic;
-    UTStrBuf_reset(mdata->replyBuf);
     myDebug(3, "sonic dbEvt_subscribeCB: reply=%s",
-	    db_replyStr(reply, mdata->replyBuf));
+	    db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
     if(reply->type == REDIS_REPLY_ARRAY
@@ -868,8 +852,7 @@ extern "C" {
       if(debug(3)) {
 	for(int ii = 0; ii < reply->elements; ii++) {
 	  redisReply *elem = reply->element[ii];
-	  UTStrBuf_reset(mdata->replyBuf);
-	  myDebug(1, "sonic dbEvt_subscribeCB: (%d)=%s", ii, db_replyStr(elem, mdata->replyBuf));
+	  myDebug(1, "sonic dbEvt_subscribeCB: (%d)=%s", ii, db_replyStr(elem, db->replyBuf, YES));
 	}
       }
       opCBFn opCB = (opCBFn)req_magic;
@@ -879,8 +862,8 @@ extern "C" {
 
   static void dbEvt_subscribePattern(EVMod *mod, char *pattern, opCBFn opCB) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(mdata->dbEvtSock) {
-      int status = redisAsyncCommand(mdata->dbEvt,
+    if(mdata->dbEvt) {
+      int status = redisAsyncCommand(mdata->dbEvt->ctx,
 				     dbEvt_subscribeCB,
 				     opCB,
 				     pattern);
@@ -890,11 +873,13 @@ extern "C" {
 
   static void dbEvt_subscribe(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "sonic dbEvt_subscribe dbEvtSock=%p", mdata->dbEvtSock);
+    myDebug(1, "sonic dbEvt_subscribe dbEvt=%p", mdata->dbEvt);
+ #if 0
     // TODO: possibly subscribe only to the updates for, say, Ethernet1 - though even that might
     // trigger every second or so, and would possibly have to retract and resubmit if the OID
     // number for Ethernet1 changed.
-    // dbEvt_subscribePattern(mod,  "psubscribe __keyspace@2__:COUNTERS:oid:*", dbEvt_counterOp);
+    dbEvt_subscribePattern(mod,  "psubscribe __keyspace@2__:COUNTERS:oid:*", dbEvt_counterOp);
+#endif
     dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:PORTCHANNEL_MEMBER*", dbEvt_lagOp);
     // TODO: subscripe to sflow config changes - adjust pattern when we know more about what will appear here
     dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW*", dbEvt_sflowOp);
@@ -1076,7 +1061,6 @@ extern "C" {
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     mdata->portsByName = UTHASH_NEW(HSPSonicPort, portName, UTHASH_SKEY);
     mdata->newPorts = UTArrayNew(UTARRAY_DFLT);
-    mdata->replyBuf = UTStrBuf_new();
     // retainRootRequest(mod, "Needed to call out to OPX scripts (PYTHONPATH)");
 
 #ifdef HSP_SONIC_TEST_REDISONLY
