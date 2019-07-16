@@ -227,6 +227,7 @@ extern "C" {
 	my_free(details);
 	SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
 	if(adaptor) {
+	  prt->ifIndex = adaptor->ifIndex;
 	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 	  nio->bond_master = YES;
 	  nio->bond_slave = NO;
@@ -245,7 +246,7 @@ extern "C" {
 	      SFLAdaptor *c_adaptor = adaptorByName(sp, c_prt->portName);
 	      if(c_adaptor) {
 		HSPAdaptorNIO *c_nio = ADAPTOR_NIO(c_adaptor);
-		c_nio->lacp.attachedAggID = prt->ifIndex;
+		c_nio->lacp.attachedAggID = adaptor->ifIndex;
 		memcpy(c_nio->lacp.actorSystemID, nio->lacp.actorSystemID, 6);
 		memcpy(c_nio->lacp.partnerSystemID, nio->lacp.partnerSystemID, 6);
 		if(c_nio->switchPort) {
@@ -632,7 +633,18 @@ extern "C" {
 #endif
 
       if(adaptor) {
-	// TODO: check that ifIndex matches!
+
+	// see if ifIndex matches
+	if(adaptor->ifIndex != prt->ifIndex) {
+	  myDebug(1, "warning: port=%s adaptor->ifIndex(%d) != prt->ifIndex(%d)",
+		  prt->portName,
+		  adaptor->ifIndex,
+		  prt->ifIndex);
+	  // let the adaptor one win - hopefully this mismatch will not
+	  // happen on a physical switch. Only on Sonic VS?
+	  prt->ifIndex = adaptor->ifIndex;
+	}
+
 	// TODO: readVlans
 	// TODO: read bond state (may need the nio->bond flag right away)
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
@@ -754,10 +766,6 @@ extern "C" {
       if(prt->oid) {
 	int status = redisAsyncCommand(mdata->db->ctx, db_portCountersCB, prt, "HGETALL COUNTERS:%s", prt->oid);
 	myDebug(1, "sonic getPortCounters() returned %d", status);
-      }
-      else {
-	// TODO: do we synthesize LAG counters here? Or do we just have to write the lag info down into AdaptorNio?
-	// TODO: Do we need to set the switchPort flag for the LAG?
       }
     }
   }
@@ -986,11 +994,15 @@ extern "C" {
 
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     
-    if(nio->loopback
-       || nio->bond_master) {
-      // bond counters will be synthesized - don't try to poll them here
+    if(nio->loopback)
+      return;
+
+    if(nio->bond_master) {
+      // trigger synthesizeBondMetaData
+      accumulateNioCounters(sp, adaptor, NULL, NULL);
       return;
     }
+
     HSPSonicPort *prt = getPort(mod, adaptor->deviceName, NO);
     if(prt) {
       // OK to queue 4 requests on the TCP connection, and ordering
