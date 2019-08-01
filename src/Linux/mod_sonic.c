@@ -43,6 +43,12 @@ extern "C" {
 #define HSP_SONIC_FIELD_IFOUT_ERRORS "SAI_PORT_STAT_IF_OUT_ERRORS"
 #define HSP_SONIC_FIELD_IFOUT_DISCARDS "SAI_PORT_STAT_IF_OUT_DISCARDS"
 
+#define HSP_SONIC_FIELD_SFLOW_ADMIN_STATE "admin_state"
+#define HSP_SONIC_FIELD_SFLOW_POLLING "polling_interval"
+#define HSP_SONIC_FIELD_SFLOW_AGENT "agent_id"
+#define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
+#define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
+  
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
 
 #define HSP_MAX_EXEC_LINELEN 1024
@@ -55,6 +61,14 @@ extern "C" {
     HSP_SONIC_STATE_CONNECTED,
     HSP_SONIC_STATE_DISCOVER,
     HSP_SONIC_STATE_RUN } EnumSonicState;
+
+  typedef struct _HSPSonicCollector {
+    char *collectorName;
+    bool mark:1;
+    bool parseOK:1;
+    char *ipStr;
+    uint32_t port;
+  } HSPSonicCollector;
 
   typedef struct _HSPSonicPort {
     char *portName;
@@ -90,10 +104,20 @@ extern "C" {
     bool changedSwitchPorts:1;
     u_char actorSystemMAC[8];
     uint32_t localAS;
+    bool sflow_enable;
+    uint32_t sflow_polling;
+    char *sflow_agent;
+    UTHash *collectors;
+    UTArray *newCollectors;
+    EVEvent *configStartEvent;
+    EVEvent *configEvent;
+    EVEvent *configEndEvent;
   } HSP_mod_SONIC;
 
   static void db_getMeta(EVMod *mod);
   static void discoverNewPorts(EVMod *mod);
+  static void discoverNewCollectors(EVMod *mod);
+  static void syncConfig(EVMod *mod);
   static void dbEvt_subscribe(EVMod *mod);
 
   /*_________________---------------------------__________________
@@ -133,23 +157,6 @@ extern "C" {
     }
     return UTSTRBUF_STR(sbuf);
   }
-
-#if 0
-  /*_________________---------------------------__________________
-    _________________      db_errorType         __________________
-    -----------------___________________________------------------
-  */
-  static char *db_errorType(int err) {
-    switch (err) {
-    case REDIS_ERR_IO: return "IO";
-    case REDIS_ERR_EOF: return "EOF";
-    case REDIS_ERR_PROTOCOL: return "PROTOCOL";
-    case REDIS_ERR_OOM: return "OOM";
-    case REDIS_ERR_OTHER: return "OTHER";
-    }
-    return "<unknown error type>";
-  }
-#endif
 
   /*_________________---------------------------__________________
     _________________      db_getU32            __________________
@@ -337,6 +344,47 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     collectors            __________________
+    -----------------___________________________------------------
+  */
+
+  static HSPSonicCollector *getCollector(EVMod *mod, char *collectorName, int create) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicCollector search = { .collectorName = collectorName };
+    HSPSonicCollector *coll = UTHashGet(mdata->collectors, &search);
+    if(coll == NULL
+       && create) {
+      coll = (HSPSonicCollector *)my_calloc(sizeof(HSPSonicCollector));
+      coll->collectorName = my_strdup(collectorName);
+      UTHashAdd(mdata->collectors, coll);
+    }
+    return coll;
+  }
+
+  static void markCollectors(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicCollector *coll;
+    UTHASH_WALK(mdata->collectors, coll)
+      coll->mark = YES;
+  }
+
+  static void deleteMarkedCollectors(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSPSonicCollector *coll;
+    UTHASH_WALK(mdata->collectors, coll) {
+      if(coll->mark) {
+	myDebug(1, "sonic collector removed %s", coll->collectorName);
+	UTHashDel(mdata->collectors, coll);
+	if(coll->collectorName)
+	  my_free(coll->collectorName);
+	if(coll->ipStr)
+	  my_free(coll->ipStr);
+	my_free(coll);
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________      redis adaptor        __________________
     -----------------___________________________------------------
   */
@@ -505,14 +553,13 @@ extern "C" {
 	}
       }
     }
-    mdata->state = HSP_SONIC_STATE_DISCOVER;
   }
 
   static void db_getMeta(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "sonic db_getMeta");
     if(db_select(mdata->db, HSP_SONIC_DB_CONFIG)) {
-      int status = redisAsyncCommand(mdata->db->ctx, db_metaCB, NULL /*privData*/, "hgetall DEVICE_METADATA|localhost");
+      int status = redisAsyncCommand(mdata->db->ctx, db_metaCB, NULL /*privData*/, "HGETALL DEVICE_METADATA|localhost");
       myDebug(1, "sonic db_getMeta returned %d", status);
     }
   }
@@ -565,7 +612,7 @@ extern "C" {
 	    signalCounterDiscontinuity(mod, prt);
 	  }
 	  prt->mark = NO;
-	  }
+	}
       }
     }
     deleteMarkedPorts(mod);
@@ -823,6 +870,172 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    db_getsFlowGlobal      __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_getsFlowGlobalCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    redisReply *reply = (redisReply *)magic;
+
+    myDebug(1, "sonic getSflowGlobalCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
+    if(reply == NULL)
+      return;
+    if(reply->type == REDIS_REPLY_ARRAY
+       && reply->elements > 0
+       && ISEVEN(reply->elements)) {
+      for(int ii = 0; ii < reply->elements; ii += 2) {
+	redisReply *f_name = reply->element[ii];
+	redisReply *f_val = reply->element[ii + 1];
+	if(f_name->type == REDIS_REPLY_STRING) {
+	  myDebug(1, "sonic sflow: %s=%s", f_name->str, db_replyStr(f_val, db->replyBuf, YES));
+	  
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_ADMIN_STATE))
+	    mdata->sflow_enable = my_strequal(f_val->str, "enable");
+	  
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_AGENT))
+	    mdata->sflow_agent = my_strdup(f_val->str);
+	  
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_POLLING))
+	    mdata->sflow_polling = db_getU32(f_val);
+	}
+      }
+    }
+    // if this is normal startup then don't syncConfig yet (that happens when the collectors
+    // have been discovered for the first time).  However if it was a dynamic reconfig then go
+    // ahead and syncConfig right away...
+    if(mdata->state != HSP_SONIC_STATE_CONNECTED)
+      syncConfig(mod);
+  }
+
+  static void db_getsFlowGlobal(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    if(db_select(mdata->db, HSP_SONIC_DB_CONFIG)) {
+      myDebug(1, "sonic getsFlowGlobal()");
+      int status = redisAsyncCommand(mdata->db->ctx, db_getsFlowGlobalCB, NULL, "HGETALL SFLOW|global");
+      myDebug(1, "sonic getsFlowGlobal() returned %d", status);
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    db_getCollectorInfo    __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_getCollectorInfoCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    redisReply *reply = (redisReply *)magic;
+    HSPSonicCollector *coll = (HSPSonicCollector *)req_magic;
+    myDebug(1, "sonic getCollectorInfoCB(%s): reply=%s",
+	    coll->collectorName,
+	    db_replyStr(reply, db->replyBuf, YES));
+    if(reply == NULL)
+      return;
+    if(reply->type == REDIS_REPLY_ARRAY
+       && reply->elements > 0
+       && ISEVEN(reply->elements)) {
+      for(int ii = 0; ii < reply->elements; ii += 2) {
+	redisReply *f_name = reply->element[ii];
+	redisReply *f_val = reply->element[ii + 1];
+	if(f_name->type == REDIS_REPLY_STRING) {
+	  myDebug(1, "sonic sflow collector: %s=%s", f_name->str, db_replyStr(f_val, db->replyBuf, YES));
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_COLLECTOR_IP)) {
+	    SFLAddress ip;
+	    coll->ipStr = my_strdup(f_val->str);
+	    coll->parseOK = parseNumericAddress(f_val->str, NULL, &ip, 0);
+	  }
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_COLLECTOR_PORT)) {
+	    coll->port = db_getU32(f_val);
+	    if(coll->port > 65536)
+	      coll->parseOK = NO;
+	  }
+	}
+      }
+    }
+    if(UTArrayN(mdata->newCollectors) == 0) {
+      // got them all, now sync
+      syncConfig(mod);
+    }
+    else {
+      // we still have more to discover
+      discoverNewCollectors(mod);
+    }
+  }
+
+  static void db_getCollectorInfo(EVMod *mod, HSPSonicCollector *coll) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    if(db_select(mdata->db, HSP_SONIC_DB_CONFIG)) {
+      myDebug(1, "sonic getCollectorInfo(%s)", coll->collectorName);
+      int status = redisAsyncCommand(mdata->db->ctx, db_getCollectorInfoCB, coll, "HGETALL SFLOW_COLLECTOR|%s", coll->collectorName);
+      myDebug(1, "sonic getCollectorInfo(%s) returned %d", coll->collectorName, status);
+    }
+  }
+
+  static void discoverNewCollectors(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    // kick off just one - starts a chain reaction if there are more.
+    HSPSonicCollector *coll = UTArrayPop(mdata->newCollectors);
+    if(coll)
+      db_getCollectorInfo(mod, coll);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    db_getCollectorNames   __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_getCollectorNamesCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    redisReply *reply = (redisReply *)magic;
+
+    myDebug(1, "sonic getCollectorNamesCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
+    if(reply == NULL)
+      return;
+    markCollectors(mod);
+    if(reply->type == REDIS_REPLY_ARRAY
+       && reply->elements > 0) {
+      for(int ii = 0; ii < reply->elements; ii++) {
+	redisReply *elem = reply->element[ii];
+	if(elem->type == REDIS_REPLY_STRING) {
+	  char *p = elem->str;
+#define HSP_SONIC_MAX_COLLECTORNAME_LEN 512
+	  char buf[HSP_SONIC_MAX_COLLECTORNAME_LEN];
+	  char *pcmem = parseNextTok(&p, "|", YES, 0, NO, buf, HSP_SONIC_MAX_COLLECTORNAME_LEN);
+	  if(my_strequal(pcmem, "SFLOW_COLLECTOR")) {
+	    char *collectorName = parseNextTok(&p, "|", YES, 0, NO, buf, HSP_SONIC_MAX_COLLECTORNAME_LEN);
+	    HSPSonicCollector *coll = getCollector(mod, collectorName, YES);
+	    coll->mark = NO;
+	    UTArrayPush(mdata->newCollectors, coll);
+	  }
+	}
+      }
+    }
+    deleteMarkedCollectors(mod);
+    // if this was initial startup then we need to bump the state-machine forward here
+    if(mdata->state == HSP_SONIC_STATE_CONNECTED)
+      mdata->state = HSP_SONIC_STATE_DISCOVER;
+    
+  }
+
+  static void db_getCollectorNames(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    if(db_select(mdata->db, HSP_SONIC_DB_CONFIG)) {
+      myDebug(1, "sonic getCollectorNames()");
+      int status = redisAsyncCommand(mdata->db->ctx, db_getCollectorNamesCB, NULL, "KEYS SFLOW_COLLECTOR|*");
+      myDebug(1, "sonic getCollectorNames() returned %d", status);
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________      dbEvt_subscribe      __________________
     -----------------___________________________------------------
   */
@@ -842,8 +1055,19 @@ extern "C" {
 
   static void dbEvt_sflowOp(EVMod *mod, char *key, char *op) {
     myDebug(1, "sonic dbEvt_sflowOp: %s (%s)", key, op);
-    // TODO: re-read list of disabled ports
-    // TODO: read and adjust polling interval
+    db_getsFlowGlobal(mod);
+  }
+
+  static void dbEvt_sflowCollectorOp(EVMod *mod, char *key, char *op) {
+    myDebug(1, "sonic dbEvt_sflowCollectorOp: %s (%s)", key, op);
+    db_getCollectorNames(mod);
+  }
+
+  static void dbEvt_sflowInterfaceOp(EVMod *mod, char *key, char *op) {
+    myDebug(1, "sonic dbEvt_sflowInterfaceOp: %s (%s)", key, op);
+    // This is a no-op because we will still poll counters for all
+    // interfaces and the sampling-rate settings are controlled
+    // externally (and learned in mod_psample).
   }
   
   static void dbEvt_subscribeCB(redisAsyncContext *ctx, void *magic, void *req_magic)
@@ -889,8 +1113,40 @@ extern "C" {
     dbEvt_subscribePattern(mod,  "psubscribe __keyspace@2__:COUNTERS:oid:*", dbEvt_counterOp);
 #endif
     dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:PORTCHANNEL_MEMBER*", dbEvt_lagOp);
-    // TODO: subscripe to sflow config changes - adjust pattern when we know more about what will appear here
-    dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW*", dbEvt_sflowOp);
+    dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW|global*", dbEvt_sflowOp);
+    dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW_COLLECTOR*", dbEvt_sflowCollectorOp);
+    dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW_SESSION*", dbEvt_sflowInterfaceOp);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    syncConfig             __________________
+    -----------------___________________________------------------
+  */
+  
+  static void syncConfig(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    myDebug(1, "sonic syncConfig");
+    char cfgLine[EV_MAX_EVT_DATALEN];
+    EVEventTx(mod, mdata->configStartEvent, NULL, 0);
+    int num_servers = 0;
+    if(mdata->sflow_enable) {
+      if(mdata->sflow_agent) {
+	snprintf(cfgLine, EV_MAX_EVT_DATALEN, "agent=%s", mdata->sflow_agent);
+	EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+      }
+      snprintf(cfgLine, EV_MAX_EVT_DATALEN, "polling=%u", mdata->sflow_polling);
+      EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+      HSPSonicCollector *coll;
+      UTHASH_WALK(mdata->collectors, coll) {
+	if(coll->parseOK) {
+	  num_servers++;
+	  // dynamic config requires the key=val form
+	  snprintf(cfgLine, EV_MAX_EVT_DATALEN, "collector=%s/%u", coll->ipStr, coll->port);
+	  EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+	}
+      }
+    }
+    EVEventTx(mod, mdata->configEndEvent, &num_servers, sizeof(num_servers));
   }
 
   /*_________________---------------------------__________________
@@ -907,32 +1163,6 @@ extern "C" {
       EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
       mdata->changedSwitchPorts = NO;
     }
-  }
-
-  /*_________________---------------------------__________________
-    _________________    evt_poll_config_first  __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_poll_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    // only get here if we have a valid config
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    mdata->state =  HSP_SONIC_STATE_CONNECT;
-  }
-
-  /*_________________---------------------------__________________
-    _________________    evt_config_changed     __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_poll_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-
-    if(sp->sFlowSettings == NULL)
-      return; // no config (yet - may be waiting for DNS-SD)
-
-    // TODO: may have to detect list of enabled/disabled switch ports here, although
-    // it's more likely that we will discover that from redis or config.json
   }
 
   /*_________________---------------------------__________________
@@ -1023,7 +1253,11 @@ extern "C" {
     
     switch(mdata->state) {
     case HSP_SONIC_STATE_INIT:
-      // waiting for evt_config_changed
+      // used to wait for evt_config_changed
+      // but now we start with no config (like DNS-SD)
+      // so get things started here after a polite
+      // startup delay of one tick:
+      mdata->state = HSP_SONIC_STATE_CONNECT;
       break;
     case HSP_SONIC_STATE_CONNECT:
       // got config - try to connect
@@ -1031,10 +1265,12 @@ extern "C" {
       dbEvt_connect(mod);
       break;
     case HSP_SONIC_STATE_CONNECTED:
-      // connected - learm static metadata
-      // This may now be redundant since db_connect()
-      // issues db_getMeta(mod) already.
-      db_getMeta(mod);
+      // connected - learn config
+      // note that db_connect() has called db_getMeta(mod) already
+      // the next step is to read the starting agent/polling/collector
+      // config. Any subsequent changes will be detected via dbEvt.
+      db_getsFlowGlobal(mod);
+      db_getCollectorNames(mod);
       break;
     case HSP_SONIC_STATE_DISCOVER:
       // learn dynamic port->oid mappings
@@ -1045,6 +1281,7 @@ extern "C" {
       // check for new ports
       discoverNewPorts(mod);
       syncSwitchPorts(mod);
+      discoverNewCollectors(mod);
       break;
     }
 
@@ -1072,7 +1309,9 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     mdata->portsByName = UTHASH_NEW(HSPSonicPort, portName, UTHASH_SKEY);
+    mdata->collectors = UTHASH_NEW(HSPSonicCollector, collectorName, UTHASH_SKEY);
     mdata->newPorts = UTArrayNew(UTARRAY_DFLT);
+    mdata->newCollectors = UTArrayNew(UTARRAY_DFLT);
     // retainRootRequest(mod, "Needed to call out to OPX scripts (PYTHONPATH)");
 
 #ifdef HSP_SONIC_TEST_REDISONLY
@@ -1088,9 +1327,6 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTFS_CHANGED), evt_poll_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_UPDATE_NIO), evt_poll_update_nio);
 
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_poll_config_first);
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_poll_config_changed);
-
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_FINAL), evt_final);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TICK), evt_tick);
 
@@ -1105,6 +1341,11 @@ extern "C" {
     if(sp->syncPollingInterval < HSP_SONIC_MIN_POLLING_INTERVAL) {
       sp->syncPollingInterval = HSP_SONIC_MIN_POLLING_INTERVAL;
     }
+
+    // to submit config changes just like DNS-SD
+    mdata->configStartEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_START);
+    mdata->configEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_LINE);
+    mdata->configEndEvent = EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_END);
 
   }
 
