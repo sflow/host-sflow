@@ -488,7 +488,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  void refreshAdaptorsAndAgentAddress(HSP *sp) {
+  static void refreshAdaptorsAndAgentAddress(HSP *sp) {
     uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
     if(readInterfaces(sp, YES, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
       myLog(LOG_ERR, "failed to re-read interfaces\n");

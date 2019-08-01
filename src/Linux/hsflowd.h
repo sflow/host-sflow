@@ -638,7 +638,6 @@ extern "C" {
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings);
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
   bool selectAgentAddress(HSP *sp, int *p_changed);
-  void refreshAdaptorsAndAgentAddress(HSP *sp);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr, bool atEnd);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
   void dynamic_config_line(HSPSFlowSettings *st, char *line);
