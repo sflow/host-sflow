@@ -893,7 +893,7 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  static int parseOrResolveAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family, int numeric)
+  static bool parseOrResolveAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family, int numeric)
   {
     struct addrinfo *info = NULL;
     struct addrinfo hints = { 0 };
@@ -949,12 +949,12 @@ extern "C" {
     return YES;
   }
 
-  int lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  bool lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
   {
     return parseOrResolveAddress(name, sa, addr, family, NO);
   }
 
-  int parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
+  bool parseNumericAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
   {
     return parseOrResolveAddress(name, sa, addr, family, YES);
   }
