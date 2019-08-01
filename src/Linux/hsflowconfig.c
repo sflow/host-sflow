@@ -489,11 +489,11 @@ extern "C" {
 	// side effects.
 	myLog(LOG_ERR, "clearCollectors: socket still open");
       }
-      my_free(coll);
       if(coll->namespace)
 	my_free(coll->namespace);
       if(coll->deviceName)
 	my_free(coll->deviceName);
+      my_free(coll);
       coll = nextColl;
     }
     settings->collectors = NULL;
@@ -967,7 +967,7 @@ extern "C" {
 
     return tokens;
   }
-
+  
   /*_________________---------------------------__________________
     _________________  agentAddressPriority     __________________
     -----------------___________________________------------------
