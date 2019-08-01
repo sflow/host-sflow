@@ -47,6 +47,9 @@ extern "C" {
     // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
     // bring us here where we read the list of collectors.
 
+    if(sp->suppress_sendPkt)
+      return;
+
     if(sp->sFlowSettings == NULL)
       return;
 
@@ -485,6 +488,44 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  void refreshAdaptorsAndAgentAddress(HSP *sp) {
+    uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
+    if(readInterfaces(sp, YES, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
+      myLog(LOG_ERR, "failed to re-read interfaces\n");
+    }
+    else {
+      myDebug(1, "interfaces added: %u removed: %u cameup: %u wentdown: %u changed: %u",
+	      ad_added, ad_removed, ad_cameup, ad_wentdown, ad_changed);
+    }
+    
+    int agentAddressChanged=NO;
+    if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
+      myLog(LOG_ERR, "failed to re-select agent address\n");
+      // TODO: what should we do in this case?
+    }
+    myDebug(1, "agentAddressChanged=%s", agentAddressChanged ? "YES" : "NO");
+    if(agentAddressChanged) {
+      SEMLOCK_DO(sp->sync_agent) {
+	sfl_agent_set_address(sp->agent, &sp->agentIP);
+      }
+      // this incs the revision No so it causes the
+      // output file to be rewritten below too.
+      installSFlowSettings(sp, sp->sFlowSettings);
+    }
+    
+    if(ad_added || ad_removed || ad_cameup || ad_wentdown || ad_changed) {
+      // test for switch ports
+      configSwitchPorts(sp); // in readPackets.c
+      // announce (e.g. to adjust sampling rates if ifSpeeds changed)
+      EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
+    }
+  }
+    
+  /*_________________---------------------------__________________
+    _________________       tick                __________________
+    -----------------___________________________------------------
+  */
+
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     time_t clk = evt->bus->now.tv_sec;
@@ -545,36 +586,7 @@ extern "C" {
        || clk >= sp->next_refreshAdaptorList) {
       sp->refreshAdaptorList = NO;
       sp->next_refreshAdaptorList = clk + sp->refreshAdaptorListSecs;
-      uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
-      if(readInterfaces(sp, YES, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
-	myLog(LOG_ERR, "failed to re-read interfaces\n");
-      }
-      else {
-	myDebug(1, "interfaces added: %u removed: %u cameup: %u wentdown: %u changed: %u",
-		ad_added, ad_removed, ad_cameup, ad_wentdown, ad_changed);
-      }
-
-      int agentAddressChanged=NO;
-      if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
-	  myLog(LOG_ERR, "failed to re-select agent address\n");
-	  // TODO: what should we do in this case?
-      }
-      myDebug(1, "agentAddressChanged=%s", agentAddressChanged ? "YES" : "NO");
-      if(agentAddressChanged) {
-	SEMLOCK_DO(sp->sync_agent) {
-	  sfl_agent_set_address(sp->agent, &sp->agentIP);
-	}
-	// this incs the revision No so it causes the
-	// output file to be rewritten below too.
-	installSFlowSettings(sp, sp->sFlowSettings);
-      }
-
-      if(ad_added || ad_removed || ad_cameup || ad_wentdown || ad_changed) {
-	// test for switch ports
-	configSwitchPorts(sp); // in readPackets.c
-	// announce (e.g. to adjust sampling rates if ifSpeeds changed)
-	EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
-      }
+      refreshAdaptorsAndAgentAddress(sp);
     }
 
     // rewrite the output if the config has changed
@@ -1125,9 +1137,12 @@ extern "C" {
     // EVEventTxAll(sp->rootModule, HSPEVENT_CONFIG_DONE, NULL, 0);
 
     // cleanup
-    if(prev_settings_str)
+    if(prev_settings_str
+       && prev_settings_str != sp->sFlowSettings_str)
       my_free(prev_settings_str);
-    if(prev_settings) {
+    if(prev_settings
+       && prev_settings != sp->sFlowSettings_file
+       && prev_settings != sp->sFlowSettings) {
       closeCollectorSockets(sp, prev_settings);
       freeSFlowSettings(prev_settings);
     }
@@ -1197,11 +1212,20 @@ extern "C" {
     }
     else {
       // C: make this new one the running config.
-      if(!installSFlowSettings(sp, sp->sFlowSettings_dyn)) {
-	// not accepted (probably no change from last time)
-	freeSFlowSettings(sp->sFlowSettings_dyn);
+      if(installSFlowSettings(sp, sp->sFlowSettings_dyn)) {
+	// accepted: clear pointer so we don't free these settings immediately below
 	sp->sFlowSettings_dyn = NULL;
+	// make sure any agentIP related changes take effect immediately
+	refreshAdaptorsAndAgentAddress(sp);
+	// and open the tap if it was closed
+	sp->suppress_sendPkt = NO;
       }
+    }
+    // if we didn't use the new settings for any reason then make
+    // sure we recover the space and avoid dangling the pointer.
+    if(sp->sFlowSettings_dyn) {
+      freeSFlowSettings(sp->sFlowSettings_dyn);
+      sp->sFlowSettings_dyn = NULL;
     }
   }
 
@@ -1773,7 +1797,7 @@ extern "C" {
 
 #ifdef HSP_LOAD_SONIC
     // SONIC should be compiled with "make deb FEATURES="SONIC"
-    myLog(LOG_INFO, "autoload SONIC abd PSAMPLE modules");
+    myLog(LOG_INFO, "autoload SONIC and PSAMPLE modules");
     sp->sonic.sonic = YES;
     sp->psample.psample = YES;
     sp->psample.group = 1;
@@ -1938,9 +1962,18 @@ extern "C" {
       // That calls evt_config_changed() below, which updates polling and
       // sampling settings.
     }
+
+    if(sp->DNSSD.DNSSD
+       || sp->sonic.sonic) {
+      // mod_dnssd and mod_sonic should start with a blank config.
+      // Sending should be suppressed until the config (especially agentIP)
+      // are fully established.
+      // TODO: should this apply to EAPI too?
+      sp->suppress_sendPkt = YES;
+    }
     else {
-      // just push in the config from the file. This will trigger a
-      // HSPEVENT_CONFIG_CHANGED right away.
+      // For all other cases we just push in the config from the file.
+      // This will trigger a HSPEVENT_CONFIG_CHANGED right away.
       installSFlowSettings(sp, sp->sFlowSettings_file);
     }
 
