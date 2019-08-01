@@ -583,6 +583,11 @@ extern "C" {
     SFL_COUNTERS_SAMPLE_TYPE cs = { 0 };
     HSPVMState *vm = (HSPVMState *)&container->vm;
 
+    if(sp->sFlowSettings == NULL) {
+      // do nothing if we haven't settled on the config yet
+      return;
+    }
+
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
@@ -1432,6 +1437,7 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
+    mdata->countdownToResync = HSP_DOCKER_WAIT_STARTUP;
   }
 
 #if defined(__cplusplus)
