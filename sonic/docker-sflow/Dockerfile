@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libssl-dev \
       libhiredis-dev
 
-RUN git clone https://github.com/sflow/host-sflow && cd host-sflow && make FEATURES="SONIC" && make install
+RUN git clone https://github.com/sflow/host-sflow && cd host-sflow && make all install FEATURES="SONIC"
 
 FROM ubuntu:18.04 as runner
 RUN apt-get update && apt-get install -y --no-install-recommends \

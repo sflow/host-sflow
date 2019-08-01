@@ -1,0 +1,3 @@
+#!/bin/bash
+
+docker build --network=host -t docker-sflow docker-sflow

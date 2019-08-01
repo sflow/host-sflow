@@ -3,4 +3,4 @@
 docker run --pid=host --network=host \
 -v /var/run/docker.sock:/var/run/docker.sock \
 -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
-docker-hsflowd:latest
+docker-sflow:latest
