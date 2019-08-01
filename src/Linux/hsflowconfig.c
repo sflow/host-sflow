@@ -1510,6 +1510,9 @@ extern "C" {
 	    case HSPTOKEN_FORGET_VMS:
 	      if((tok = expectInteger32(sp, tok, &sp->docker.forgetVMSecs, 60, 0xFFFFFFFF)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_HOSTNAME:
+	      if((tok = expectONOFF(sp, tok, &sp->docker.hostname)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

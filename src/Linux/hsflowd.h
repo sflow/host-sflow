@@ -471,6 +471,7 @@ extern "C" {
       bool docker;
       uint32_t refreshVMListSecs;
       uint32_t forgetVMSecs;
+      bool hostname;
     } docker;
     struct {
       bool cumulus;

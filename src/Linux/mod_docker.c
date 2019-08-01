@@ -172,6 +172,7 @@ extern "C" {
   static HSPDockerRequest *dockerRequest(EVMod *mod, UTStrBuf *cmd, HSPDockerCB jsonCB, bool eventFeed);
   static void  dockerRequestFree(EVMod *mod, HSPDockerRequest *req);
   static void dockerSynchronize(EVMod *mod);
+  static void decNameCount(UTHash *ht, const char *str);
 
   /*_________________---------------------------__________________
     _________________    utils to help debug    __________________
@@ -578,7 +579,6 @@ extern "C" {
   */
   static void getCounters_DOCKER(EVMod *mod, HSPVMState_DOCKER *container)
   {
-    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFL_COUNTERS_SAMPLE_TYPE cs = { 0 };
     HSPVMState *vm = (HSPVMState *)&container->vm;
@@ -589,16 +589,29 @@ extern "C" {
     }
 
     // host ID
+    char nameBuf[SFL_MAX_HOSTNAME_CHARS+1];
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    bool hostname_is_id = my_strnequal(container->hostname, container->id, HSP_DOCKER_SHORTID_LEN);
-    char *hname = container->hostname;
-    // use container->name if it offers a unique ID and there is some problem
-    // with the hostname (not unique, or just the short form container->id)
-    if(mdata->dup_names == 0 &&
-       (mdata->dup_hostnames
-	|| hostname_is_id))
+    char *hname = NULL;
+    bool duplicate = NO;
+    if(sp->docker.hostname) {
+      hname = container->hostname;
+      duplicate = container->dup_hostname;
+    }
+    else {
       hname = container->name;
+      duplicate = container->dup_name;
+    }
+    if(duplicate) {
+      // not unique - use <hname>.<short-id> instead
+      snprintf(nameBuf, SFL_MAX_HOSTNAME_CHARS, "%s.%s", hname, container->id);
+      // chop after short-id chars
+      int len2 = strlen(hname) + 1 + HSP_DOCKER_SHORTID_LEN;
+      if(len2 > SFL_MAX_HOSTNAME_CHARS)
+	len2 = SFL_MAX_HOSTNAME_CHARS;
+      nameBuf[len2] = '\0';
+      hname = nameBuf;
+    }
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, vm->uuid, 16);
@@ -787,8 +800,14 @@ extern "C" {
     }
 
     if(container->id) my_free(container->id);
-    if(container->name) my_free(container->name);
-    if(container->hostname) my_free(container->hostname);
+    if(container->name) {
+      decNameCount(mdata->nameCount, container->name);
+      my_free(container->name);
+    }
+    if(container->hostname) {
+      decNameCount(mdata->hostnameCount, container->hostname);
+      my_free(container->hostname);
+    }
     if(container->dup_name) mdata->dup_names--;
     if(container->dup_hostname) mdata->dup_hostnames--;
     removeAndFreeVM(mod, &container->vm);
