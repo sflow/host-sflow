@@ -73,6 +73,7 @@ ifeq ("$(strip $(FEATURES))","SONIC")
   XTGTS += $(FEATURES_SONIC)
   CFLAGS_LOAD += -DHSP_LOAD_SONIC
   HSFLOWD_CONF=scripts/hsflowd.conf.sonic
+  HSFLOWD_DBUS_CONF=
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
@@ -470,7 +471,7 @@ mod_eapi.so: $(OBJS_EAPI)
 
 #########  install  #########
 
-install:
+install: all
 	$(INSTALL) -d $(BIN_D)
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	$(INSTALL) -d $(CONF_D)
@@ -481,8 +482,10 @@ install:
 	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd
 	$(INSTALL) -d $(MOD_D)
 	$(INSTALL) -m 755 *.so $(MOD_D)
+ifneq ($(strip $(HSFLOWD_DBUS_CONF)),)
 	$(INSTALL) -d $(DBUS_D)
 	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
+endif
 
 #########  schedule  #########
 
