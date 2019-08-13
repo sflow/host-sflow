@@ -529,7 +529,7 @@ extern "C" {
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     time_t clk = evt->bus->now.tv_sec;
-
+    
     // reset the pollActions
     UTArrayReset(sp->pollActions);
 
@@ -1244,7 +1244,8 @@ extern "C" {
       SFL_DEFAULT_POLLING_INTERVAL;
 
     // apply constraints
-    if(pollingInterval < sp->minPollingInterval) {
+    if(pollingInterval > 0
+       && pollingInterval < sp->minPollingInterval) {
       pollingInterval = sp->minPollingInterval;
       myDebug(1, "override polling interval to min: %u", pollingInterval);
     }
