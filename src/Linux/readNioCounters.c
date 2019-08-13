@@ -349,7 +349,8 @@ extern "C" {
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
       if(nio->poller
-	 && nio->switchPort) {
+	 && nio->switchPort
+	 && nio->poller->sFlowCpInterval) {
 	uint32_t countdown = nio->poller->countersCountdown;
 	uint32_t nudgeBack = countdown % sp->syncPollingInterval;
 	uint32_t nudgeFwd = sp->syncPollingInterval - nudgeBack;
