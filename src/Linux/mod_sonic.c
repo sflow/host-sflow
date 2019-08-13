@@ -697,8 +697,10 @@ extern "C" {
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 	if(nio) {
 	  nio->up = prt->operUp;
-	  nio->switchPort = YES;
-	  mdata->changedSwitchPorts = YES;
+	  if(!nio->switchPort) {
+	    nio->switchPort = YES;
+	    mdata->changedSwitchPorts = YES;
+	  }
 	}
 	setAdaptorSpeed(sp, adaptor, prt->ifSpeed, "MOD_SONIC");
       }
