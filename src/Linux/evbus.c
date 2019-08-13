@@ -448,6 +448,19 @@ extern "C" {
     return (secs * 1000) + (nanos / 1000000);
   }
 
+  void EVTimeAdd_nS(struct timespec *t, int nS) {
+    assert(nS <= 1000000000);
+    t->tv_nsec += nS;
+    if(t->tv_nsec > 1000000000) {
+      t->tv_sec++;
+      t->tv_nsec -= 1000000000;
+    }
+    else if(t->tv_nsec < 0) {
+      t->tv_sec--;
+      t->tv_nsec += 1000000000;
+    }
+  }
+
   static void *busRun(void *magic) {
     EVBus *bus = (EVBus *)magic;
     EVMod *mod = bus->root->rootModule;
@@ -474,16 +487,13 @@ extern "C" {
       busRead(bus);
 
       // Detect tick/deci boundaries.
-      // These tick/tock/deci events can skip if something
-      // blocks for too long in this thread,  so it's advisable
-      // to implement timeouts by comparing with a target time.
-      // We can do that more safely now that we are using a
-      // monotonic clock.
-      if(EVTimeDiff_nS(&bus->now_deci, &bus->now) > 100000000) {
-	bus->now_deci = bus->now;
+      // These tick/tock/deci events used to skip if something
+      // blocked for too long in this thread, but not any longer.
+      while(EVTimeDiff_nS(&bus->now_deci, &bus->now) > 100000000) {
+	EVTimeAdd_nS(&bus->now_deci, 100000000);
 	EVEventTx(mod, deci, NULL, 0);
-	if(EVTimeDiff_nS(&bus->now_tick, &bus->now) > 1000000000) {
-	  bus->now_tick = bus->now;
+	if(EVTimeDiff_nS(&bus->now_tick, &bus->now_deci) > 1000000000) {
+	  EVTimeAdd_nS(&bus->now_tick, 1000000000);
 	  EVEventTx(mod, tick, NULL, 0);
 	  EVEventTx(mod, tock, NULL, 0);
 	}

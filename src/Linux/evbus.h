@@ -170,6 +170,7 @@ extern "C" {
 
   int EVTimeDiff_nS(struct timespec *t1, struct timespec *t2);
   int EVTimeDiff_mS(struct timespec *t1, struct timespec *t2);
+  void EVTimeAdd_nS(struct timespec *t, int nS);
   void EVBusRunThread(EVBus *bus, size_t stacksize);
   void EVBusRun(EVBus *bus);
   void EVBusStop(EVBus *bus);
