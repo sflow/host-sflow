@@ -497,7 +497,7 @@ extern "C" {
       myDebug(1, "interfaces added: %u removed: %u cameup: %u wentdown: %u changed: %u",
 	      ad_added, ad_removed, ad_cameup, ad_wentdown, ad_changed);
     }
-    
+
     int agentAddressChanged=NO;
     if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
       myLog(LOG_ERR, "failed to re-select agent address\n");
@@ -512,7 +512,7 @@ extern "C" {
       // output file to be rewritten below too.
       installSFlowSettings(sp, sp->sFlowSettings);
     }
-    
+
     if(ad_added || ad_removed || ad_cameup || ad_wentdown || ad_changed) {
       // test for switch ports
       configSwitchPorts(sp); // in readPackets.c
@@ -520,7 +520,7 @@ extern "C" {
       EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
     }
   }
-    
+
   /*_________________---------------------------__________________
     _________________       tick                __________________
     -----------------___________________________------------------
@@ -529,7 +529,7 @@ extern "C" {
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     time_t clk = evt->bus->now.tv_sec;
-    
+
     // reset the pollActions
     UTArrayReset(sp->pollActions);
 
@@ -1829,7 +1829,7 @@ extern "C" {
       myLog(LOG_ERR, "cannot run eapi and dns-sd modules together");
       exit(EXIT_FAILURE);
     }
-    
+
     if(sp->sonic.sonic && sp->DNSSD.DNSSD) {
       myLog(LOG_ERR, "cannot run sonic and dns-sd modules together");
       exit(EXIT_FAILURE);
