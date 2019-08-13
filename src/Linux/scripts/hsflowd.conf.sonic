@@ -11,6 +11,6 @@ sflow {
   # ====== collectors ======
   # determined by sonic config DB
   # ====== Docker container monitoring ======
-  docker { }
+  # docker { }
 }
 
