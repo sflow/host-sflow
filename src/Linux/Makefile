@@ -73,7 +73,6 @@ ifeq ("$(strip $(FEATURES))","SONIC")
   XTGTS += $(FEATURES_SONIC)
   CFLAGS_LOAD += -DHSP_LOAD_SONIC
   HSFLOWD_CONF=scripts/hsflowd.conf.sonic
-  HSFLOWD_DBUS_CONF=
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
