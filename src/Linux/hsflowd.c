@@ -477,6 +477,10 @@ extern "C" {
     if(sp->sFlowSettings_str) fputs(sp->sFlowSettings_str, sp->f_out);
     // repeat the revision number. The reader knows that if the revison number
     // has not changed under his feet then he has a consistent config.
+
+    // TODO: if settings did not override agentIP, print here
+    // TODO: if settings did not override agent (device), print here
+
     fprintf(sp->f_out, "rev_end=%u\n", sp->revisionNo);
     fflush(sp->f_out);
     // chop off anything that may be lingering from before

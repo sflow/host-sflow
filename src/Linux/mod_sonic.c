@@ -49,6 +49,7 @@ extern "C" {
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
   
+#define HSP_SONIC_DEFAULT_POLLING_INTERVAL 20
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
 
 #define HSP_MAX_EXEC_LINELEN 1024
@@ -886,6 +887,10 @@ extern "C" {
     myDebug(1, "sonic getSflowGlobalCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
+    // first extract the latest settings
+    bool sflow_enable = NO;
+    char *sflow_agent = NULL;
+    uint32_t sflow_polling = HSP_SONIC_DEFAULT_POLLING_INTERVAL;;
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -896,15 +901,32 @@ extern "C" {
 	  myDebug(1, "sonic sflow: %s=%s", f_name->str, db_replyStr(f_val, db->replyBuf, YES));
 	  
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_ADMIN_STATE))
-	    mdata->sflow_enable = my_strequal(f_val->str, "enable");
+	    sflow_enable = my_strequal(f_val->str, "enable");
 	  
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_AGENT))
-	    mdata->sflow_agent = my_strdup(f_val->str);
+	    sflow_agent = f_val->str;
 	  
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_POLLING))
-	    mdata->sflow_polling = db_getU32(f_val);
+	    sflow_polling = db_getU32(f_val);
 	}
       }
+    }
+    // now see if there are any changes. 
+    if(sflow_enable != mdata->sflow_enable) {
+      myDebug(1, "sonic sflow_enable %u -> %u", mdata->sflow_enable, sflow_enable);
+      mdata->sflow_enable = sflow_enable;
+    }
+    // The sflow_agent entry will disappear if it is deleted from the config, so sflow_agent
+    // may still be NULL here:
+    if(!my_strequal(sflow_agent, mdata->sflow_agent)) {
+      myDebug(1, "sonic sflow_agent %s -> %s",
+	      mdata->sflow_agent ?: "<not set>",
+	      sflow_agent ?: "<not set>");
+      setStr(&mdata->sflow_agent, sflow_agent);
+    }      
+    if(sflow_polling != mdata->sflow_polling) {
+      myDebug(1, "sonic sflow_polling %u -> %u", mdata->sflow_polling, sflow_polling);
+      mdata->sflow_polling = sflow_polling;
     }
     // if this is normal startup then don't syncConfig yet (that happens when the collectors
     // have been discovered for the first time).  However if it was a dynamic reconfig then go

@@ -598,7 +598,12 @@ extern "C" {
 	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
 	}
       }
-      // agentIP can ovrride the config file here if set,  but otherwise print the address we selected
+      // agentIP can override the config file here if set,  but otherwise print the address we selected
+      // TODO: should avoid writing in previously set agentIP or agentDevice. Should only write that in
+      // if it was an override. In installSFlowSettings we have to be careful to detect that a new config
+      // was submitted but still print the agentIP and agent lines to /etc/hsflowd.auto.  Before doing that
+      // however, we have to check for any change to agentIP, agent or agentCIDR,  and if so run the
+      // selectAgentAddress election again to pick an agentIP.
       SFLAddress agIP = settings->agentIP.type ? settings->agentIP : sp->agentIP;
       char ipbuf[51];
       UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&agIP, ipbuf, 50));
