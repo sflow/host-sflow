@@ -81,9 +81,11 @@ extern "C" {
 	    myDebug(1, "Error in netlink message: %d : %s", err_msg->error, strerror(-err_msg->error));
 	    break;
 	  }
-	  struct inet_diag_msg *diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
-	  int rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
-	  (*diagCB)(magic, sockFd, nlh->nlmsg_seq, diag_msg, rtalen);
+	  if(nlh->nlmsg_type == SOCK_DIAG_BY_FAMILY) {
+	    struct inet_diag_msg *diag_msg = (struct inet_diag_msg*) NLMSG_DATA(nlh);
+	    int rtalen = nlh->nlmsg_len - NLMSG_LENGTH(sizeof(*diag_msg));
+	    (*diagCB)(magic, sockFd, nlh->nlmsg_seq, diag_msg, rtalen);
+	  }
 	  nlh = NLMSG_NEXT(nlh, numbytes);
 	}
       }

@@ -144,6 +144,12 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    if(diag_msg == NULL)
+      return;
+    if(diag_msg->idiag_family != AF_INET
+       && diag_msg->idiag_family != AF_INET6)
+      return;
+    
     // see if we can get back to the sample that triggered this lookup
     HSPTCPSample search = { .conn_req.id = diag_msg->id };
     HSPTCPSample *found = UTHashDelKey(mdata->sampleHT, &search);
@@ -153,7 +159,7 @@ extern "C" {
     myDebug(1, "diag_msg: UDP=%s UID=%u(%s) inode=%u",
 	    found ? (found->udp ? "YES":"NO") : "<sample not found>",
 	    diag_msg->idiag_uid,
-	    uid_info->pw_name,
+	    uid_info ? uid_info->pw_name : "<user not found>",
 	    diag_msg->idiag_inode);
     // Theoretically we could follow the inode back to
     // the socket and get the application (command line)
@@ -164,6 +170,7 @@ extern "C" {
       struct rtattr *attr = (struct rtattr *)(diag_msg + 1);
       
       while(RTA_OK(attr, rtalen)) {
+	// may also see INET_DIAG_MARK here
 	if(attr->rta_type == INET_DIAG_INFO) {
 	  // The payload is a struct tcp_info as defined in linux/tcp.h,  but we use
 	  // struct my_tcp_info - copied from a system running kernel rev 4.7.3.  New
