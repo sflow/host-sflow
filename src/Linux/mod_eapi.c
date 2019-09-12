@@ -42,7 +42,7 @@ extern "C" {
     int chunkLength;
   } HSPEapiRequest;
 
-#define HSP_EAPI_SOCK  "/var/run/command-api.sock"
+#define HSP_EAPI_SOCK  VARFS_STR "/run/command-api.sock"
 #define HSP_EAPI_HTTP "HTTP/1.0\nHost: localhost\n"
 #define HSP_EAPI_CONTENT "Content-Type: application/json\nContent-Length: %u\n\n"
 #define HSP_EAPI_REQ_FMT "POST / " HSP_EAPI_HTTP HSP_EAPI_CONTENT "%s"

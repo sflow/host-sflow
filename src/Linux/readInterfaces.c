@@ -30,7 +30,7 @@ extern "C" {
   void readVLANs(HSP *sp)
   {
     // mark interfaces that are specific to a VLAN
-    FILE *procFile = fopen("/proc/net/vlan/config", "r");
+    FILE *procFile = fopen(PROCFS_STR "/net/vlan/config", "r");
     if(procFile) {
       char line[MAX_PROC_LINE_CHARS];
       int lineNo = 0;
@@ -107,7 +107,7 @@ extern "C" {
 
   void readIPv6Addresses(HSP *sp, UTHash *addrHT)
   {
-    FILE *procFile = fopen("/proc/net/if_inet6", "r");
+    FILE *procFile = fopen(PROCFS_STR "/net/if_inet6", "r");
     if(procFile) {
       char line[MAX_PROC_LINE_CHARS];
       int lineNo = 0;
@@ -646,7 +646,7 @@ extern "C" {
     return 0;
   }
 
-  FILE *procFile = fopen("/proc/net/dev", "r");
+  FILE *procFile = fopen(PROCFS_STR "/net/dev", "r");
   if(procFile) {
     struct ifreq ifr;
     memset(&ifr, 0, sizeof(ifr));

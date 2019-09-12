@@ -38,7 +38,7 @@ extern "C" {
 
   void updateBondCounters(HSP *sp, SFLAdaptor *bond) {
     char procFileName[256];
-    snprintf(procFileName, 256, "/proc/net/bonding/%s", bond->deviceName);
+    snprintf(procFileName, 256, PROCFS_STR "/net/bonding/%s", bond->deviceName);
     FILE *procFile = fopen(procFileName, "r");
     if(procFile) {
       // limit the number of chars we will read from each line
@@ -874,7 +874,7 @@ extern "C" {
     }
 
     FILE *procFile;
-    procFile= fopen("/proc/net/dev", "r");
+    procFile= fopen(PROCFS_STR "/net/dev", "r");
     if(procFile) {
       int fd = socket (PF_INET, SOCK_DGRAM, 0);
       struct ifreq ifr;

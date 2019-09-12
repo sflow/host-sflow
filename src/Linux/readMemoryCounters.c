@@ -26,7 +26,7 @@ extern "C" {
     // zero the structure so we can accumulate into it.
     memset(mem, 0, sizeof(*mem));
 
-    procFile= fopen("/proc/meminfo", "r");
+    procFile= fopen(PROCFS_STR "/meminfo", "r");
     if(procFile) {
       int truncated;
       while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
@@ -44,7 +44,7 @@ extern "C" {
       fclose(procFile);
     }
 
-    procFile= fopen("/proc/vmstat", "r");
+    procFile= fopen(PROCFS_STR "/vmstat", "r");
     if(procFile) {
       int truncated;
       while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {

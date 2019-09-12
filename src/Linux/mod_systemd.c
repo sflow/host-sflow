@@ -43,8 +43,8 @@ extern "C" {
 
 #define HSP_DBUS_MONITOR 0
 
-#define HSP_SYSTEMD_CGROUP_PROCS "/sys/fs/cgroup/systemd/%s/cgroup.procs"
-#define HSP_SYSTEMD_CGROUP_ACCT "/sys/fs/cgroup/%s%s/%s"
+#define HSP_SYSTEMD_CGROUP_PROCS SYSFS_STR "/fs/cgroup/systemd/%s/cgroup.procs"
+#define HSP_SYSTEMD_CGROUP_ACCT SYSFS_STR "/fs/cgroup/%s%s/%s"
   
   typedef void (*HSPDBusHandler)(EVMod *mod, DBusMessage *dbm, void *magic);
 
@@ -288,7 +288,7 @@ extern "C" {
     uint64_t cpu_total = 0;
     // compare with the reading of /proc/stat in readCpuCounters.c
     char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
-    sprintf(path, "/proc/%u/stat", process->pid);
+    sprintf(path, PROCFS_STR "/%u/stat", process->pid);
     FILE *statFile = fopen(path, "r");
     if(statFile == NULL) {
       myDebug(2, "cannot open %s : %s", path, strerror(errno));
@@ -343,7 +343,7 @@ extern "C" {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     uint64_t rss = 0;
     char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
-    sprintf(path, "/proc/%u/statm", process->pid);
+    sprintf(path, PROCFS_STR "/%u/statm", process->pid);
     FILE *statFile = fopen(path, "r");
     if(statFile == NULL) {
       myDebug(2, "cannot open %s : %s", path, strerror(errno));
@@ -391,7 +391,7 @@ extern "C" {
     uint64_t rd_bytes = 0;
     uint64_t wr_bytes = 0;
     char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
-    sprintf(path, "/proc/%u/io", process->pid);
+    sprintf(path, PROCFS_STR "/%u/io", process->pid);
     FILE *statFile = fopen(path, "r");
     if(statFile == NULL) {
       myDebug(2, "cannot open %s : %s", path, strerror(errno));
@@ -450,7 +450,7 @@ extern "C" {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     uint32_t countFDs = 0;
     char path[HSP_SYSTEMD_MAX_FNAME_LEN];
-    sprintf(path, "/proc/%u/fd", process->pid);
+    sprintf(path, PROCFS_STR "/%u/fd", process->pid);
     DIR *dstream = opendir(path);
     if(dstream) {
       struct dirent *ptr;

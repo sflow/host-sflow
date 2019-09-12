@@ -48,7 +48,7 @@ int remote_mount(const char *device, const char *type)
   int readDiskCounters(HSP *sp, SFLHost_dsk_counters *dsk) {
     int gotData = NO;
     FILE *procFile;
-    procFile= fopen("/proc/diskstats", "r");
+    procFile= fopen(PROCFS_STR "/diskstats", "r");
     if(procFile) {
       // ASCII numbers in /proc/diskstats may be 64-bit (if not now
       // then someday), so it seems safer to read into
@@ -120,7 +120,7 @@ int remote_mount(const char *device, const char *type)
     // borrowed heavily from ganglia/linux/metrics.c for this part where
     // we read the mount points and then interrogate them to add up the
     // disk space on local disks.
-    procFile = fopen("/proc/mounts", "r");
+    procFile = fopen(PROCFS_STR "/mounts", "r");
     if(procFile) {
 #undef MAX_PROC_LINE_CHARS
 #define MAX_PROC_LINE_CHARS 240

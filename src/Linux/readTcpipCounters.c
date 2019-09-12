@@ -48,7 +48,7 @@ extern "C" {
     FILE *procFile;
     char line[MAX_PROC_LINE_CHARS];
 
-    procFile= fopen("/proc/net/snmp", "r");
+    procFile= fopen(PROCFS_STR "/net/snmp", "r");
     if(procFile) {
       int truncated;
       while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {

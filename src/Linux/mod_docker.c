@@ -78,9 +78,9 @@ extern "C" {
 
   // patterns to substitute with cgroup, longid and counter-filename
   static const char *HSP_CGROUP_PATHS[] = {
-    "/sys/fs/cgroup/%s/docker/%s/%s",
-    "/sys/fs/cgroup/%s/system.slice/docker/%s",
-    "/sys/fs/cgroup/%s/system.slice/docker-%s.scope/%s",
+    SYSFS_STR "/fs/cgroup/%s/docker/%s/%s",
+    SYSFS_STR "/fs/cgroup/%s/system.slice/docker/%s",
+    SYSFS_STR "/fs/cgroup/%s/system.slice/docker-%s.scope/%s",
     NULL
   };
 
@@ -126,7 +126,7 @@ extern "C" {
     uint32_t count;
   } HSPDockerNameCount;
 
-#define HSP_DOCKER_SOCK  "/var/run/docker.sock"
+#define HSP_DOCKER_SOCK  VARFS_STR "/run/docker.sock"
 #define HSP_DOCKER_MAX_CONCURRENT 3
 #define HSP_DOCKER_HTTP " HTTP/1.1\nHost: " HSP_DOCKER_SOCK "\n\n"
 #define HSP_DOCKER_API "v1.24"
@@ -135,9 +135,6 @@ extern "C" {
 #define HSP_DOCKER_REQ_INSPECT_ID "GET /" HSP_DOCKER_API "/containers/%s/json" HSP_DOCKER_HTTP
 #define HSP_CONTENT_LENGTH_REGEX "^Content-Length: ([0-9]+)$"
   
-#define HSP_DOCKER_CMD "/usr/bin/docker"
-#define HSP_NETNS_DIR "/var/run/netns"
-#define HSP_IP_CMD "/usr/sbin/ip"
 #define HSP_DOCKER_MAX_FNAME_LEN 255
 #define HSP_DOCKER_MAX_LINELEN 512
 #define HSP_DOCKER_SHORTID_LEN 12
@@ -368,7 +365,7 @@ extern "C" {
 
       // open /proc/<nspid>/ns/net
       char topath[HSP_DOCKER_MAX_FNAME_LEN+1];
-      snprintf(topath, HSP_DOCKER_MAX_FNAME_LEN, "/proc/%u/ns/net", nspid);
+      snprintf(topath, HSP_DOCKER_MAX_FNAME_LEN, PROCFS_STR "/%u/ns/net", nspid);
       int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
       if(nsfd < 0) {
 	fprintf(stderr, "cannot open %s : %s", topath, strerror(errno));
@@ -399,7 +396,7 @@ extern "C" {
 	return 0;
       }
 
-      FILE *procFile = fopen("/proc/net/dev", "r");
+      FILE *procFile = fopen(PROCFS_STR "/net/dev", "r");
       if(procFile) {
 	struct ifreq ifr;
 	memset(&ifr, 0, sizeof(ifr));
@@ -521,7 +518,7 @@ extern "C" {
   static int readContainerNIO(EVMod *mod, HSPVMState_DOCKER *container, SFLHost_nio_counters *nio) {
     char statsFileName[HSP_DOCKER_MAX_FNAME_LEN+1];
     int interfaces = 0;
-    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, "/proc/%u/net/dev", container->pid);
+    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, PROCFS_STR "/%u/net/dev", container->pid);
     FILE *procFile = fopen(statsFileName, "r");
     if(procFile) {
       uint64_t bytes_in = 0;

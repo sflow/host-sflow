@@ -953,7 +953,7 @@ extern "C" {
       // switch namespace now
       // (1) open /var/run/netns/<namespace>
       char topath[HSP_MAX_NETNS_PATH];
-      snprintf(topath, HSP_MAX_NETNS_PATH, "/var/run/netns/%s", coll->namespace);
+      snprintf(topath, HSP_MAX_NETNS_PATH, VARFS_STR "/run/netns/%s", coll->namespace);
       int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
       if(nsfd < 0) {
 	myLog(LOG_ERR, "cannot open %s : %s", topath, strerror(errno));

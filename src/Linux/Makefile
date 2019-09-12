@@ -73,6 +73,9 @@ ifeq ("$(strip $(FEATURES))","SONIC")
   XTGTS += $(FEATURES_SONIC)
   CFLAGS_LOAD += -DHSP_LOAD_SONIC
   HSFLOWD_CONF=scripts/hsflowd.conf.sonic
+  # hsflowd runs as container with --net=host and some host-fs mountpoints. Expect something like:
+  # make deb FEATURES=SONIC PROCFS=/rootfs/proc SYSFS=/rootfs/sys VARFS=/rootfs/var ETCFS=/tmp/etc
+  # so that docker run command can expose host directories selectively
 endif
 ifeq ("$(strip $(FEATURES))","XEN")
   XTGTS += $(FEATURES_XEN)
@@ -83,6 +86,24 @@ ifeq ("$(strip $(FEATURES))","HOST")
 endif
 
 $(info $$XTGTS is [$(XTGTS)])
+
+# alternative mount points (to support hsflowd running in container
+# and/or with no root privileges)
+
+ifndef PROCFS
+  PROCFS=/proc
+endif
+ifndef SYSFS
+  SYSFS=/sys
+endif
+ifndef ETCFS
+  ETCFS=/etc
+endif
+ifndef VARFS
+  VARFS=/var
+endif
+
+CFLAGS_MOUNTPOINTS=-DPROCFS=$(PROCFS) -DSYSFS=$(SYSFS) -DETCFS=$(ETCFS) -DVARFS=$(VARFS)
 
 # INSTROOT may be passed in
 BIN_D=$(BINDIR)
@@ -197,6 +218,7 @@ LIBS_EAPI=
 
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
+CFLAGS += $(CFLAGS_MOUNTPOINTS)
 CFLAGS += -DUTHEAP
 CFLAGS += -DHSP_OPTICAL_STATS
 CFLAGS += -DHSP_MOD_DIR=$(MODDIR)

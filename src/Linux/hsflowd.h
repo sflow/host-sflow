@@ -81,12 +81,17 @@ extern "C" {
     linkedlist = obj; \
   } while(0)
 
+#define PROCFS_STR STRINGIFY_DEF(PROCFS)
+#define SYSFS_STR STRINGIFY_DEF(SYSFS)
+#define ETCFS_STR STRINGIFY_DEF(ETCFS)
+#define VARFS_STR STRINGIFY_DEF(VARFS)
+
 #define HSP_DAEMON_NAME "hsflowd"
-#define HSP_DEFAULT_PIDFILE "/var/run/hsflowd.pid"
-#define HSP_DEFAULT_CONFIGFILE "/etc/hsflowd.conf"
-#define HSP_DEFAULT_OUTPUTFILE "/etc/hsflowd.auto"
+#define HSP_DEFAULT_PIDFILE VARFS_STR "/run/hsflowd.pid"
+#define HSP_DEFAULT_CONFIGFILE ETCFS_STR "/hsflowd.conf"
+#define HSP_DEFAULT_OUTPUTFILE ETCFS_STR "/hsflowd.auto"
 #ifndef HSP_MOD_DIR
-#define HSP_MOD_DIR /etc/hsflowd/modules
+#define HSP_MOD_DIR ETCFS ## /hsflowd/modules
 #endif
 
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
