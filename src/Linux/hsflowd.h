@@ -91,7 +91,9 @@ extern "C" {
 #define HSP_DEFAULT_CONFIGFILE ETCFS_STR "/hsflowd.conf"
 #define HSP_DEFAULT_OUTPUTFILE ETCFS_STR "/hsflowd.auto"
 #ifndef HSP_MOD_DIR
-#define HSP_MOD_DIR ETCFS ## /hsflowd/modules
+  // this one does not use ETC_FS, since the modules
+  // are always installed at this path
+#define HSP_MOD_DIR /etc/hsflowd/modules
 #endif
 
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
