@@ -16,6 +16,7 @@ extern "C" {
 
 #include "hsflowd.h"
 #include "cpu_utils.h"
+#include "math.h"
 
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
@@ -97,6 +98,7 @@ extern "C" {
     uint64_t cpu_total;
     uint64_t mem_usage;
     SFLHost_nio_counters net;
+    SFLHost_vrt_dsk_counters dsk;
   } HSPVMState_DOCKER;
 
   struct _HSPDockerRequest; // fwd decl
@@ -484,7 +486,7 @@ extern "C" {
       break;
     }
     cpuElem.counterBlock.host_vrt_cpu.state = virState;
-    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = container->cpu_count ?: (uint32_t)(container->cpu_count_dbl);
+    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = container->cpu_count ?: (uint32_t)round(container->cpu_count_dbl);
     cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(container->cpu_total / 1000000); // convert to mS
     SFLADD_ELEMENT(&cs, &cpuElem);
 
@@ -497,38 +499,8 @@ extern "C" {
     // VM disk I/O counters
     SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-    // TODO: get from docker stats
-#if 0
-    HSPNameVal dskValsB[] = {
-      { "Read",0,0 },
-      { "Write",0,0},
-      { NULL,0,0},
-    };
-    if(readContainerCountersMulti(mod, "blkio", container->id, "blkio.io_service_bytes_recursive", 2, dskValsB)) {
-      if(dskValsB[0].nv_found) {
-	dskElem.counterBlock.host_vrt_dsk.rd_bytes += dskValsB[0].nv_val64;
-      }
-      if(dskValsB[1].nv_found) {
-	dskElem.counterBlock.host_vrt_dsk.wr_bytes += dskValsB[1].nv_val64;
-      }
-    }
-
-    HSPNameVal dskValsO[] = {
-      { "Read",0,0 },
-      { "Write",0,0},
-      { NULL,0,0},
-    };
-
-    if(readContainerCountersMulti(mod, "blkio", container->id, "blkio.io_serviced_recursive", 2, dskValsO)) {
-      if(dskValsO[0].nv_found) {
-	dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
-      }
-      if(dskValsO[1].nv_found) {
-	dskElem.counterBlock.host_vrt_dsk.wr_req += dskValsO[1].nv_val64;
-      }
-    }
     // TODO: fill in capacity, allocation, available fields
-#endif
+    memcpy(&dskElem.counterBlock.host_vrt_dsk, &container->dsk, sizeof(container->dsk));
     SFLADD_ELEMENT(&cs, &dskElem);
 
     // include my slice of the adaptor list (the ones from my private namespace)
@@ -844,15 +816,136 @@ extern "C" {
   
   static void dockerAPI_stats(EVMod *mod, UTStrBuf *buf, cJSON *jcont, HSPDockerRequest *req) {
     // Example output
-    // TODO: may need to ask for newer API version?
     /*
 {
     "blkio_stats": {
         "io_merged_recursive": [],
         "io_queue_recursive": [],
-        "io_service_bytes_recursive": [],
+        "io_service_bytes_recursive": [
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Read",
+                "value": 29769728
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Write",
+                "value": 0
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Sync",
+                "value": 29769728
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Async",
+                "value": 0
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Total",
+                "value": 29769728
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Read",
+                "value": 29769728
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Write",
+                "value": 0
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Sync",
+                "value": 29769728
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Async",
+                "value": 0
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Total",
+                "value": 29769728
+            }
+        ],
         "io_service_time_recursive": [],
-        "io_serviced_recursive": [],
+        "io_serviced_recursive": [
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Read",
+                "value": 337
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Write",
+                "value": 0
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Sync",
+                "value": 337
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Async",
+                "value": 0
+            },
+            {
+                "major": 8,
+                "minor": 48,
+                "op": "Total",
+                "value": 337
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Read",
+                "value": 337
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Write",
+                "value": 0
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Sync",
+                "value": 337
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Async",
+                "value": 0
+            },
+            {
+                "major": 253,
+                "minor": 0,
+                "op": "Total",
+                "value": 337
+            }
+        ],
         "io_time_recursive": [],
         "io_wait_time_recursive": [],
         "sectors_recursive": []
@@ -960,7 +1053,8 @@ extern "C" {
     cJSON *jcpu = cJSON_GetObjectItem(jcont, "cpu_stats");
     cJSON *jmem = cJSON_GetObjectItem(jcont, "memory_stats");
     cJSON *jnet = cJSON_GetObjectItem(jcont, "networks");
-  
+    cJSON *jdsk = cJSON_GetObjectItem(jcont, "blkio_stats");
+
     // since the stats request does not include the container id we
     // stashed it in the request object. We could have stashed the
     // container pointer but that might have been awkward if the
@@ -1026,6 +1120,57 @@ extern "C" {
 	cJSON *dev_errs_out = cJSON_GetObjectItem(dev, "tx_errors");
 	if(dev_errs_out)
 	  container->net.errs_out += (uint64_t)dev_errs_out->valuedouble;
+      }
+    }
+
+    if(jdsk) {
+      // clear and accumulate over what may be multiple devices
+      memset(&container->dsk, 0, sizeof(container->dsk));
+      cJSON *jbytesArray = cJSON_GetObjectItem(jdsk, "io_service_bytes_recursive");
+      if(jbytesArray) {
+	int entries = cJSON_GetArraySize(jbytesArray);
+	for(int ii = 0; ii < entries; ii++) {
+	  cJSON *jbytes = cJSON_GetArrayItem(jbytesArray, ii);
+	  if(jbytes) {
+	    cJSON *value = cJSON_GetObjectItem(jbytes, "value");
+	    if(value) {
+	      uint64_t val64 = (uint64_t)value->valuedouble;
+	      if(val64 > 0) {
+		cJSON *operation = cJSON_GetObjectItem(jbytes, "op");
+		if(operation) {
+		  if(my_strequal(operation->valuestring, "Read"))
+		    container->dsk.rd_bytes += val64;
+		  else if(my_strequal(operation->valuestring, "Write"))
+		    container->dsk.wr_bytes += val64;
+		  // ignore "Sync" and "Async"
+		}
+	      }
+	    }
+	  }
+	}
+      }
+      cJSON *jreqArray = cJSON_GetObjectItem(jdsk, "io_serviced_recursive");
+      if(jreqArray) {
+	int entries = cJSON_GetArraySize(jreqArray);
+	for(int ii = 0; ii < entries; ii++) {
+	  cJSON *jreq = cJSON_GetArrayItem(jreqArray, ii);
+	  if(jreq) {
+	    cJSON *value = cJSON_GetObjectItem(jreq, "value");
+	    if(value) {
+	      uint64_t val64 = (uint64_t)value->valuedouble;
+	      if(val64 > 0) {
+		cJSON *operation = cJSON_GetObjectItem(jreq, "op");
+		if(operation) {
+		  if(my_strequal(operation->valuestring, "Read"))
+		    container->dsk.rd_req += val64;
+		  else if(my_strequal(operation->valuestring, "Write"))
+		    container->dsk.wr_req += val64;
+		  // ignore "Sync" and "Async"
+		}
+	      }
+	    }
+	  }
+	}
       }
     }
 
