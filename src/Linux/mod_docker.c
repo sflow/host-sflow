@@ -76,14 +76,6 @@ extern "C" {
     "exited",
   };
 
-  // patterns to substitute with cgroup, longid and counter-filename
-  static const char *HSP_CGROUP_PATHS[] = {
-    SYSFS_STR "/fs/cgroup/%s/docker/%s/%s",
-    SYSFS_STR "/fs/cgroup/%s/system.slice/docker/%s",
-    SYSFS_STR "/fs/cgroup/%s/system.slice/docker-%s.scope/%s",
-    NULL
-  };
-
   typedef struct _HSPVMState_DOCKER {
     HSPVMState vm; // superclass: must come first
     char *id;
@@ -94,12 +86,21 @@ extern "C" {
     EnumHSPContainerState state;
     uint32_t inspect_tx:1;
     uint32_t inspect_rx:1;
+    uint32_t stats_tx:1;
+    uint32_t stats_rx:1;
     uint32_t dup_name:1;
     uint32_t dup_hostname:1;
     uint64_t memoryLimit;
+    // we now populate stats here too
+    uint32_t cpu_count;
+    double cpu_count_dbl;
+    uint64_t cpu_total;
+    uint64_t mem_usage;
+    SFLHost_nio_counters net;
   } HSPVMState_DOCKER;
 
-  typedef void (*HSPDockerCB)(EVMod *mod, UTStrBuf *buf, cJSON *obj);
+  struct _HSPDockerRequest; // fwd decl
+  typedef void (*HSPDockerCB)(EVMod *mod, UTStrBuf *buf, cJSON *obj, struct _HSPDockerRequest *req);
 
   typedef enum {
     HSPDOCKERREQ_HEADERS=0,
@@ -119,6 +120,7 @@ extern "C" {
     HSPDockerRequestState state;
     int contentLength;
     int chunkLength;
+    char *id;
   } HSPDockerRequest;
 
   typedef struct _HSPDockerNameCount {
@@ -133,6 +135,7 @@ extern "C" {
 #define HSP_DOCKER_REQ_EVENTS "GET /" HSP_DOCKER_API "/events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
 #define HSP_DOCKER_REQ_CONTAINERS "GET /" HSP_DOCKER_API "/containers/json" HSP_DOCKER_HTTP
 #define HSP_DOCKER_REQ_INSPECT_ID "GET /" HSP_DOCKER_API "/containers/%s/json" HSP_DOCKER_HTTP
+#define HSP_DOCKER_REQ_STATS_ID "GET /" HSP_DOCKER_API "/containers/%s/stats?stream=false" HSP_DOCKER_HTTP
 #define HSP_CONTENT_LENGTH_REGEX "^Content-Length: ([0-9]+)$"
   
 #define HSP_DOCKER_MAX_FNAME_LEN 255
@@ -170,6 +173,7 @@ extern "C" {
   static void  dockerRequestFree(EVMod *mod, HSPDockerRequest *req);
   static void dockerSynchronize(EVMod *mod);
   static void decNameCount(UTHash *ht, const char *str);
+  static void getContainerStats(EVMod *mod, HSPVMState_DOCKER *container);
 
   /*_________________---------------------------__________________
     _________________    utils to help debug    __________________
@@ -192,91 +196,6 @@ extern "C" {
     HSPVMState_DOCKER *container;
     UTHASH_WALK(ht, container)
       myLog(LOG_INFO, "%s: %s", prefix, containerStr(container, buf, 1024));
-  }
-
-
-  /*_________________---------------------------__________________
-    _________________     readCgroupCounters    __________________
-    -----------------___________________________------------------
-  */
-
-  static bool readCgroupCounters(EVMod *mod, char *cgroup, char *longId, char *fname, int nvals, HSPNameVal *nameVals, int multi) {
-    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
-    
-    int found = 0;
-
-    char statsFileName[HSP_DOCKER_MAX_FNAME_LEN+1];
-    
-    if(mdata->cgroupPathIdx == -1) {
-      // iterate to choose path the first time
-      for(;;) {
-	const char *fmt = HSP_CGROUP_PATHS[++mdata->cgroupPathIdx];
-	if(fmt == NULL) {
-	  myLog(LOG_ERR, "readCgroupCounters: not found: cgroup=%s container=%s file=%s", cgroup, longId, fname);
-	  return NO;
-	}
-	myDebug(1, "testing cgroup path: %s", fmt);
-	snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, fmt, cgroup, longId, fname);
-	FILE *statsFile = fopen(statsFileName, "r");
-	if(statsFile) {
-	  myDebug(1, "success using path pattern: %s", fmt);
-	  fclose(statsFile);
-	}
-	break;
-      }
-    }	
-
-    const char *fmt = HSP_CGROUP_PATHS[mdata->cgroupPathIdx];
-    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, fmt, cgroup, longId, fname);
-    FILE *statsFile = fopen(statsFileName, "r");
-    if(statsFile == NULL) {
-      myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
-    }
-    else {
-      char line[HSP_DOCKER_MAX_STATS_LINELEN];
-      char var[HSP_DOCKER_MAX_STATS_LINELEN];
-      uint64_t val64;
-      char *fmt = multi ?
-	"%*s %s %"SCNu64 :
-	"%s %"SCNu64 ;
-      int truncated;
-      while(my_readline(statsFile, line, HSP_DOCKER_MAX_STATS_LINELEN, &truncated) != EOF) {
-	if(found == nvals && !multi) break;
-	if(sscanf(line, fmt, var, &val64) == 2) {
-	  for(int ii = 0; ii < nvals; ii++) {
-	    char *nm = nameVals[ii].nv_name;
-	    if(nm == NULL) break; // null name is double-check
-	    if(strcmp(var, nm) == 0)  {
-	      nameVals[ii].nv_found = YES;
-	      nameVals[ii].nv_val64 += val64;
-	      found++;
-	    }
-	  }
-        }
-      }
-      fclose(statsFile);
-    }
-    return (found > 0);
-  }
-
-  /*_________________---------------------------__________________
-    _________________  readContainerCounters    __________________
-    -----------------___________________________------------------
-  */
-
-    static int readContainerCounters(EVMod *mod, char *cgroup, char *longId, char *fname, int nvals, HSPNameVal *nameVals) {
-      return readCgroupCounters(mod, cgroup, longId, fname, nvals, nameVals, 0);
-  }
-
-  /*_________________-----------------------------__________________
-    _________________  readContainerCountersMulti __________________
-    -----------------_____________________________------------------
-    Variant where the stats file has per-device numbers that need to be summed.
-    The device id is assumed to be the first space-separated token on each line.
-*/
-
-  static int readContainerCountersMulti(EVMod *mod, char *cgroup, char *longId, char *fname, int nvals, HSPNameVal *nameVals) {
-    return readCgroupCounters(mod, cgroup, longId, fname, nvals, nameVals, 1);
   }
 
   /*________________---------------------------__________________
@@ -475,101 +394,6 @@ extern "C" {
     return container->vm.interfaces->num_adaptors;
   }
 
-
-  /*________________---------------------------__________________
-    ________________   readContainerNIO        __________________
-    ----------------___________________________------------------
-   used to get these by extracting the totals for the adaptors
-   referred to by getContainerPeerAdaptors() -- i.e. the adaptors
-   in the global namespace that we know to be connected back to
-   that container.  But with Docker swarm we end up missing the
-   traffic that goes via the extra namespace that they create.
-   Since we have the container Pid,  we can reach in directly
-   to /proc/<pid>/net/dev and read from there.
-  */
-  
-#ifdef HSP_DOCKER_PEER_ADAPTORS_OK
-
-  static int getContainerPeerAdaptors(HSP *sp, HSPVMState *vm, SFLAdaptorList *peerAdaptors, int capacity)
-  {
-    // we want the slice of global-namespace adaptors that are veth peers of the adaptors
-    // that belong to this container.
-    for(uint32_t j=0; j < vm->interfaces->num_adaptors; j++) {
-      SFLAdaptor *vm_adaptor = vm->interfaces->adaptors[j];
-      SFLAdaptor *adaptor = adaptorByPeerIndex(sp, vm_adaptor->ifIndex);
-      if(adaptor) {
-	HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
-	if(niostate->up
-	   && (niostate->switchPort == NO)
-	   && (niostate->loopback == NO)
-	   && peerAdaptors->num_adaptors < capacity) {
-	  // include this one (if we have room)
-	  if(peerAdaptors->num_adaptors < capacity) {
-	    peerAdaptors->adaptors[peerAdaptors->num_adaptors++] = adaptor;
-	  }
-	}
-      }
-    }
-    return peerAdaptors->num_adaptors;
-  }
-
-#else
-
-  static int readContainerNIO(EVMod *mod, HSPVMState_DOCKER *container, SFLHost_nio_counters *nio) {
-    char statsFileName[HSP_DOCKER_MAX_FNAME_LEN+1];
-    int interfaces = 0;
-    snprintf(statsFileName, HSP_DOCKER_MAX_FNAME_LEN, PROCFS_STR "/%u/net/dev", container->pid);
-    FILE *procFile = fopen(statsFileName, "r");
-    if(procFile) {
-      uint64_t bytes_in = 0;
-      uint64_t pkts_in = 0;
-      uint64_t errs_in = 0;
-      uint64_t drops_in = 0;
-      uint64_t bytes_out = 0;
-      uint64_t pkts_out = 0;
-      uint64_t errs_out = 0;
-      uint64_t drops_out = 0;
-      // limit the number of chars we will read from each line
-      // (there can be more than this - my_readline will chop for us)
-#define MAX_PROCDEV_LINE_CHARS 240
-      char line[MAX_PROCDEV_LINE_CHARS];
-      int truncated;
-      while(my_readline(procFile, line, MAX_PROCDEV_LINE_CHARS, &truncated) != EOF) {
-	char deviceName[MAX_PROCDEV_LINE_CHARS];
-	// assume the format is:
-	// Inter-|   Receive                                                |  Transmit
-	//  face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
-	if(sscanf(line, "%[^:]:%"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64" %*u %*u %*u %*u %"SCNu64" %"SCNu64" %"SCNu64" %"SCNu64"",
-		  deviceName,
-		  &bytes_in,
-		  &pkts_in,
-		  &errs_in,
-		  &drops_in,
-		  &bytes_out,
-		  &pkts_out,
-		  &errs_out,
-		  &drops_out) == 9) {
-	  uint32_t devLen = my_strnlen(deviceName, MAX_PROCDEV_LINE_CHARS-1);
-	  char *trimmed = trimWhitespace(deviceName, devLen);
-	  if(my_strequal(trimmed, "lo") == NO) {
-	    interfaces++;
-	    nio->bytes_in += bytes_in;
-	    nio->pkts_in += pkts_in;
-	    nio->errs_in += errs_in;
-	    nio->drops_in += drops_in;
-	    nio->bytes_out += bytes_out;
-	    nio->pkts_out += pkts_out;
-	    nio->errs_out += errs_out;
-	    nio->drops_out += drops_out;
-	  }
-	}
-      }
-      fclose(procFile);
-    }
-    return interfaces;
-  }
-#endif
-  
   /*________________---------------------------__________________
     ________________   getCounters_DOCKER      __________________
     ----------------___________________________------------------
@@ -630,32 +454,12 @@ extern "C" {
     // VM Net I/O
     SFLCounters_sample_element nioElem = { 0 };
     nioElem.tag = SFLCOUNTERS_HOST_VRT_NIO;
-    
-#ifdef HSP_DOCKER_PEER_ADAPTORS_OK
-    // conjure the list of global-namespace adaptors that are
-    // actually veth adaptors peered to adaptors belonging to this
-    // container, and make that the list of adaptors that we sum counters over.
-    SFLAdaptorList peerAdaptors;
-    SFLAdaptor *adaptors[HSP_MAX_VIFS];
-    peerAdaptors.adaptors = adaptors;
-    peerAdaptors.capacity = HSP_MAX_VIFS;
-    peerAdaptors.num_adaptors = 0;
-    if(getContainerPeerAdaptors(sp, vm, &peerAdaptors, HSP_MAX_VIFS) > 0) {
-      readNioCounters(sp, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio, NULL, &peerAdaptors);
-      SFLADD_ELEMENT(&cs, &nioElem);
-    }
-#else
-    if(readContainerNIO(mod, container, (SFLHost_nio_counters *)&nioElem.counterBlock.host_vrt_nio)) {
-      SFLADD_ELEMENT(&cs, &nioElem);
-    }
-#endif
+    memcpy(&nioElem.counterBlock.host_vrt_nio, &container->net, sizeof(container->net));
+    SFLADD_ELEMENT(&cs, &nioElem);
 
     // VM cpu counters [ref xenstat.c]
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = 0;
-    SFL_UNDEF_COUNTER(cpuElem.counterBlock.host_vrt_cpu.cpuTime);
-
     // map container->state into SFLVirDomainState
     enum SFLVirDomainState virState = SFL_VIR_DOMAIN_NOSTATE;
     switch(container->state) {
@@ -680,48 +484,21 @@ extern "C" {
       break;
     }
     cpuElem.counterBlock.host_vrt_cpu.state = virState;
-
-    // get cpu time if we can
-    HSPNameVal cpuVals[] = {
-      { "user",0,0 },
-      { "system",0,0},
-      { NULL,0,0},
-    };
-    if(readContainerCounters(mod, "cpuacct", container->id, "cpuacct.stat", 2, cpuVals)) {
-      uint64_t cpu_total = 0;
-      if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
-      if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
-      cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(JIFFY_TO_MS(cpu_total));
-    }
-    // always add this one - even if no counters found - so as to send the container state
+    cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = container->cpu_count ?: (uint32_t)(container->cpu_count_dbl);
+    cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(container->cpu_total / 1000000); // convert to mS
     SFLADD_ELEMENT(&cs, &cpuElem);
 
     SFLCounters_sample_element memElem = { 0 };
     memElem.tag = SFLCOUNTERS_HOST_VRT_MEM;
-    HSPNameVal memVals[] = {
-      { "total_rss",0,0 },
-      { "hierarchical_memory_limit",0,0},
-      { NULL,0,0},
-    };
-    if(readContainerCounters(mod, "memory", container->id, "memory.stat", 2, memVals)) {
-      if(memVals[0].nv_found) {
-	memElem.counterBlock.host_vrt_mem.memory = memVals[0].nv_val64;
-      }
-      if(memVals[1].nv_found && memVals[1].nv_val64 != (uint64_t)-1) {
-	uint64_t maxMem = memVals[1].nv_val64;
-	// allow the limit we got from docker inspect to override if it is lower
-	// (but it seems likely that it's always going to be the same number)
-	if(container->memoryLimit > 0
-	   && container->memoryLimit < maxMem)
-	  maxMem = container->memoryLimit;
-	memElem.counterBlock.host_vrt_mem.maxMemory = maxMem;
-      }
-      SFLADD_ELEMENT(&cs, &memElem);
-    }
+    memElem.counterBlock.host_vrt_mem.memory = container->mem_usage;
+    memElem.counterBlock.host_vrt_mem.maxMemory = container->memoryLimit;
+    SFLADD_ELEMENT(&cs, &memElem);
 
     // VM disk I/O counters
     SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
+    // TODO: get from docker stats
+#if 0
     HSPNameVal dskValsB[] = {
       { "Read",0,0 },
       { "Write",0,0},
@@ -751,6 +528,7 @@ extern "C" {
       }
     }
     // TODO: fill in capacity, allocation, available fields
+#endif
     SFLADD_ELEMENT(&cs, &dskElem);
 
     // include my slice of the adaptor list (the ones from my private namespace)
@@ -870,10 +648,14 @@ extern "C" {
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
-    // now we can execute pollActions without holding on to the semaphore
+    // now we can execute pollActions without holding on to the semaphore.
+    // But each pollAction now needs another step while we request and wait
+    // for the container stats query.  So now we initiate the stats query
+    // here and finally call getCounters_DOCKER when we have the answer.
     HSPVMState_DOCKER *container;
     UTHASH_WALK(mdata->pollActions, container) {
-      getCounters_DOCKER(mod, container);
+      // getCounters_DOCKER(mod, container);
+      getContainerStats(mod, container);
     }
     UTHashReset(mdata->pollActions);
   }
@@ -992,7 +774,7 @@ extern "C" {
     }
   }
 
-  static void dockerAPI_inspect(EVMod *mod, UTStrBuf *buf, cJSON *jcont) {
+  static void dockerAPI_inspect(EVMod *mod, UTStrBuf *buf, cJSON *jcont, HSPDockerRequest *req) {
     myDebug(1, "dockerAPI_inspect");
 
     cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
@@ -1036,11 +818,20 @@ extern "C" {
     if(jmem)
       container->memoryLimit = (uint64_t)jmem->valuedouble;
 
+    cJSON *jcpus = cJSON_GetObjectItem(jhconfig, "CpuCount");
+    if(jcpus)
+      container->cpu_count = (uint32_t)jcpus->valuedouble;
+
+    cJSON *jnanocpus = cJSON_GetObjectItem(jhconfig, "NanoCpus");
+    if(jnanocpus)
+      container->cpu_count_dbl = jnanocpus->valuedouble / 1e9;
+
     container->inspect_rx = YES;
     // now that we have the pid,  we can probe for the MAC and peer-ifIndex
     updateContainerAdaptors(mod, container);
-    // send initial counter-sample immediately
-    getCounters_DOCKER(mod, container);
+    // send initial counter-sample immediately...
+    // But to do this we call getContainerStats() first
+    getContainerStats(mod, container);
   }
 
   static void inspectContainer(EVMod *mod, HSPVMState_DOCKER *container) {
@@ -1050,8 +841,210 @@ extern "C" {
     UTStrBuf_free(req);
     container->inspect_tx = YES;
   }
+  
+  static void dockerAPI_stats(EVMod *mod, UTStrBuf *buf, cJSON *jcont, HSPDockerRequest *req) {
+    // Example output
+    // TODO: may need to ask for newer API version?
+    /*
+{
+    "blkio_stats": {
+        "io_merged_recursive": [],
+        "io_queue_recursive": [],
+        "io_service_bytes_recursive": [],
+        "io_service_time_recursive": [],
+        "io_serviced_recursive": [],
+        "io_time_recursive": [],
+        "io_wait_time_recursive": [],
+        "sectors_recursive": []
+    },
+    "cpu_stats": {
+        "cpu_usage": {
+            "percpu_usage": [
+                379915710187,
+                396983734043,
+                335805190563,
+                254528451875
+            ],
+            "total_usage": 1367233086668,
+            "usage_in_kernelmode": 811190000000,
+            "usage_in_usermode": 442110000000
+        },
+        "system_cpu_usage": 6322464450000000,
+        "throttling_data": {
+            "periods": 0,
+            "throttled_periods": 0,
+            "throttled_time": 0
+        }
+    },
+    "id": "2e781c0358b9940f7bc8399903b5af0d2e09f0b60714ef62f961280986467724",
+    "memory_stats": {
+        "limit": 3973283840,
+        "max_usage": 1359872,
+        "stats": {
+            "active_anon": 4096,
+            "active_file": 4096,
+            "cache": 4096,
+            "hierarchical_memory_limit": 9223372036854771712,
+            "hierarchical_memsw_limit": 9223372036854771712,
+            "inactive_anon": 131072,
+            "inactive_file": 0,
+            "mapped_file": 0,
+            "pgfault": 1080700,
+            "pgmajfault": 0,
+            "pgpgin": 236398,
+            "pgpgout": 236364,
+            "rss": 135168,
+            "rss_huge": 0,
+            "swap": 0,
+            "total_active_anon": 4096,
+            "total_active_file": 4096,
+            "total_cache": 4096,
+            "total_inactive_anon": 131072,
+            "total_inactive_file": 0,
+            "total_mapped_file": 0,
+            "total_pgfault": 1080700,
+            "total_pgmajfault": 0,
+            "total_pgpgin": 236398,
+            "total_pgpgout": 236364,
+            "total_rss": 135168,
+            "total_rss_huge": 0,
+            "total_swap": 0,
+            "total_unevictable": 0,
+            "unevictable": 0
+        },
+        "usage": 139264
+    },
+    "name": "/epic_ritchie",
+    "networks": {
+        "eth0": {
+            "rx_bytes": 656,
+            "rx_dropped": 0,
+            "rx_errors": 0,
+            "rx_packets": 8,
+            "tx_bytes": 656,
+            "tx_dropped": 0,
+            "tx_errors": 0,
+            "tx_packets": 8
+        }
+    },
+    "num_procs": 0,
+    "pids_stats": {
+        "current": 1
+    },
+    "precpu_stats": {
+        "cpu_usage": {
+            "percpu_usage": [
+                379915710187,
+                396983734043,
+                335805190563,
+                254528451875
+            ],
+            "total_usage": 1367233086668,
+            "usage_in_kernelmode": 811190000000,
+            "usage_in_usermode": 442110000000
+        },
+        "system_cpu_usage": 6322460430000000,
+        "throttling_data": {
+            "periods": 0,
+            "throttled_periods": 0,
+            "throttled_time": 0
+        }
+    },
+    "preread": "2019-09-18T18:34:22.922435672Z",
+    "read": "2019-09-18T18:34:23.933567531Z",
+    "storage_stats": {}
+}
+    */
+    myDebug(1, "dockerAPI_stats");
+  
+    cJSON *jcpu = cJSON_GetObjectItem(jcont, "cpu_stats");
+    cJSON *jmem = cJSON_GetObjectItem(jcont, "memory_stats");
+    cJSON *jnet = cJSON_GetObjectItem(jcont, "networks");
+  
+    // since the stats request does not include the container id we
+    // stashed it in the request object. We could have stashed the
+    // container pointer but that might have been awkward if the
+    // container dissappeared in between.
+    // Oh - it looks like both the id and name are included
+    // in API 1.21 and later. So we could go back to doing it
+    // that way.
+    HSPVMState_DOCKER *container = getContainer(mod, req->id, NO);
+    if(container == NULL)
+      return;
+  
+    // setContainerName(mod, container, jname->valuestring);
+  
+    if(jcpu) {
+      cJSON *jcpu_usage = cJSON_GetObjectItem(jcpu, "cpu_usage");
+      cJSON *jcpu_total = cJSON_GetObjectItem(jcpu_usage, "total_usage");
+      if(jcpu_total)
+	container->cpu_total = (uint64_t)jcpu_total->valuedouble;
+    }
 
-  static void dockerAPI_event(EVMod *mod, UTStrBuf *buf, cJSON *top) {
+    if(jmem) {
+      cJSON *jmem_usage = cJSON_GetObjectItem(jmem, "usage");
+      if(jmem_usage)
+	container->mem_usage = (uint64_t)jmem_usage->valuedouble;
+      // memory limit seems to appear here when it doesn't appear in the "inspect" step:
+      cJSON *jmem_limit = cJSON_GetObjectItem(jmem, "limit");
+      if(jmem_limit)
+	container->memoryLimit = (uint64_t)jmem_limit->valuedouble;
+    }
+
+    if(jnet) {
+      // clear and accumulate over what may be multiple devices
+      memset(&container->net, 0, sizeof(container->net));
+      for(cJSON *dev = jnet->child; dev; dev = dev->next) {
+	cJSON *dev_bytes_in = cJSON_GetObjectItem(dev, "rx_bytes");
+	if(dev_bytes_in)
+	  container->net.bytes_in += (uint64_t)dev_bytes_in->valuedouble;
+
+	cJSON *dev_pkts_in = cJSON_GetObjectItem(dev, "rx_packets");
+	if(dev_pkts_in)
+	  container->net.pkts_in += (uint64_t)dev_pkts_in->valuedouble;
+
+	cJSON *dev_drops_in = cJSON_GetObjectItem(dev, "rx_dropped");
+	if(dev_drops_in)
+	  container->net.drops_in += (uint64_t)dev_drops_in->valuedouble;
+
+	cJSON *dev_errs_in = cJSON_GetObjectItem(dev, "rx_errors");
+	if(dev_errs_in)
+	  container->net.errs_in += (uint64_t)dev_errs_in->valuedouble;
+
+	cJSON *dev_bytes_out = cJSON_GetObjectItem(dev, "tx_bytes");
+	if(dev_bytes_out)
+	  container->net.bytes_out += (uint64_t)dev_bytes_out->valuedouble;
+
+	cJSON *dev_pkts_out = cJSON_GetObjectItem(dev, "tx_packets");
+	if(dev_pkts_out)
+	  container->net.pkts_out += (uint64_t)dev_pkts_out->valuedouble;
+
+	cJSON *dev_drops_out = cJSON_GetObjectItem(dev, "tx_dropped");
+	if(dev_drops_out)
+	  container->net.drops_out += (uint64_t)dev_drops_out->valuedouble;
+
+	cJSON *dev_errs_out = cJSON_GetObjectItem(dev, "tx_errors");
+	if(dev_errs_out)
+	  container->net.errs_out += (uint64_t)dev_errs_out->valuedouble;
+      }
+    }
+
+    container->stats_rx = YES;
+    // now (finally) we get to send the counter sample
+    getCounters_DOCKER(mod, container);
+  }
+
+  static void getContainerStats(EVMod *mod, HSPVMState_DOCKER *container) {
+    UTStrBuf *req = UTStrBuf_new();
+    UTStrBuf_printf(req, HSP_DOCKER_REQ_STATS_ID, container->id);
+    HSPDockerRequest *reqObj = dockerRequest(mod, req, dockerAPI_stats, NO);
+    reqObj->id = my_strdup(container->id);
+    dockerAPIRequest(mod, reqObj);
+    UTStrBuf_free(req);
+    container->stats_tx = YES;
+  }
+
+  static void dockerAPI_event(EVMod *mod, UTStrBuf *buf, cJSON *top, HSPDockerRequest *req) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     myDebug(1, "dockerAPI_event");
     if(mdata->dockerSync == NO) {
@@ -1136,7 +1129,7 @@ extern "C" {
     } // actor
   }
     
-  static void dockerAPI_containers(EVMod *mod, UTStrBuf *buf, cJSON *top) {
+  static void dockerAPI_containers(EVMod *mod, UTStrBuf *buf, cJSON *top, HSPDockerRequest *req) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     myDebug(1, "dockerAPI_containers");
     // process containers
@@ -1155,20 +1148,24 @@ extern "C" {
       cJSON *name0 = cJSON_GetArrayItem(names, 0); // TODO: extra '/' at front?
       if(!name0) break;
 
-#if 0
       cJSON *networksettings = cJSON_GetObjectItem(ct, "NetworkSettings");
       if(networksettings) {
+	// TODO: use these instead of the namespace switch?
+	// but we don't get the ifIndex this way.  So now
+	// the question is whether we can look up the ifIndex
+	// (without switching namespaces) given the mac address.
 	cJSON *networks = cJSON_GetObjectItem(networksettings, "Networks");
-	if(networks) {
-	  cJSON *bridge = cJSON_GetObjectItem(networks, "bridge");
-	  if(bridge) {
-	    cJSON *macaddress = cJSON_GetObjectItem(bridge, "MacAddress");
-	    cJSON *ipv4address = cJSON_GetObjectItem(bridge, "IPAddress");
-	    // "GlobalIPv6Address" too ?
-	  }
+	for(cJSON *dev = networks->child; dev; dev = dev->next) {
+	  cJSON *macaddress = cJSON_GetObjectItem(dev, "MacAddress");
+	  cJSON *ip4address = cJSON_GetObjectItem(dev, "IPAddress");
+	  cJSON *ip6address = cJSON_GetObjectItem(dev, "GlobalIPv6Address");
+	  myDebug(1, "got network %s mac=%s v4=%s v6=%s",
+		  dev->valuestring,
+		  macaddress ? macaddress->valuestring : "<unknown>",
+		  ip4address ? ip4address->valuestring : "<unknown>",
+		  ip6address ? ip6address->valuestring : "<unknown>");
 	}
       }
-#endif
 
       HSPVMState_DOCKER *container = getContainer(mod, id->valuestring, YES);
       container->state = containerState(state->valuestring);
@@ -1183,7 +1180,7 @@ extern "C" {
     UTARRAY_WALK(mdata->eventQueue, qbuf) {
       cJSON *top = cJSON_Parse(UTSTRBUF_STR(qbuf));
       if(top) {
-	dockerAPI_event(mod, qbuf, top);
+	dockerAPI_event(mod, qbuf, top, req);
 	cJSON_Delete(top);
       }
       UTStrBuf_free(qbuf);
@@ -1209,7 +1206,7 @@ extern "C" {
     cJSON *top = cJSON_Parse(UTSTRBUF_STR(buf));
     if(top) {
       logJSON(1, "processDockerJSON:", top);
-      (*req->jsonCB)(mod, buf, top);
+      (*req->jsonCB)(mod, buf, top, req);
       cJSON_Delete(top);
     }
   }
@@ -1379,6 +1376,7 @@ extern "C" {
   static void  dockerRequestFree(EVMod *mod, HSPDockerRequest *req) {
     UTStrBuf_free(req->request);
     if(req->response) UTStrBuf_free(req->response);
+    if(req->id) my_free(req->id);
     my_free(req);
   }
 
