@@ -38,6 +38,19 @@ extern "C" {
     HSP_EV_destroy,
     HSP_EV_oom,
     HSP_EV_rm,
+    HSP_EV_attach,
+    HSP_EV_commit,
+    HSP_EV_copy,
+    HSP_EV_detach,
+    HSP_EV_exec_create,
+    HSP_EV_exec_detach,
+    HSP_EV_exec_start,
+    HSP_EV_export,
+    HSP_EV_health_status,
+    HSP_EV_rename,
+    HSP_EV_resize,
+    HSP_EV_top,
+    HSP_EV_update,
     HSP_EV_NUM_CODES
   } EnumHSPContainerEvent;
 
@@ -53,7 +66,20 @@ extern "C" {
     "die",
     "destroy",
     "oom",
-    "rm"
+    "rm", // taken out
+    "attach", // added for 1.24 vvv
+    "commit",
+    "copy",
+    "detach",
+    "exec_create",
+    "exec_detach",
+    "exec_start",
+    "export",
+    "health_status",
+    "rename",
+    "resize",
+    "top",
+    "update"
   };
 
   typedef enum {
@@ -1213,6 +1239,10 @@ extern "C" {
 	   && ctname->valuestring) {
 	  HSPVMState_DOCKER *container;
 	  EnumHSPContainerEvent ev = containerEvent(status->valuestring);
+	  if(ev == HSP_EV_UNKNOWN) {
+	    myDebug(1, "unrecognized event status: %s", status->valuestring);
+	    return;
+	  }
 	  EnumHSPContainerState st = HSP_CS_UNKNOWN;
 	  switch(ev) {
 	  case HSP_EV_create:
@@ -1236,8 +1266,23 @@ extern "C" {
 	    st = HSP_CS_exited;
 	    break;
 	  case HSP_EV_destroy:
-	  default:
 	    st = HSP_CS_deleted;
+	  case HSP_EV_attach:
+	  case HSP_EV_commit:
+	  case HSP_EV_copy:
+	  case HSP_EV_detach:
+	  case HSP_EV_exec_create:
+	  case HSP_EV_exec_detach:
+	  case HSP_EV_exec_start:
+	  case HSP_EV_export:
+	  case HSP_EV_health_status:
+	  case HSP_EV_rename:
+	  case HSP_EV_resize:
+	  case HSP_EV_top:
+	  case HSP_EV_update:
+	    // leave as HSP_CS_UNKNOWN so as not to trigger a state-change below,
+	    // but still allow for a name update.
+	    break;
 	  }
 
 	  container = getContainer(mod, id->valuestring, (st == HSP_CS_running));
@@ -1251,7 +1296,7 @@ extern "C" {
 	    }
 	    container->lastEvent = ev;
 	    if(container->state == HSP_CS_running) {
-	      // TODO: is this name or hostname?
+	      // note that "rename" event will get here
 	      setContainerName(mod, container, ctname->valuestring);
 	      if(!container->inspect_tx) {
 		// new entry - get meta-data
