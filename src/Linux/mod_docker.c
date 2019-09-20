@@ -1280,6 +1280,7 @@ extern "C" {
 	  case HSP_EV_resize:
 	  case HSP_EV_top:
 	  case HSP_EV_update:
+	  default:
 	    // leave as HSP_CS_UNKNOWN so as not to trigger a state-change below,
 	    // but still allow for a name update.
 	    break;
