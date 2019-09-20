@@ -53,19 +53,23 @@ extern "C" {
 	// more detailed counters may have been found via ethtool or equivalent:
 	if(adaptorNIO->et_found & HSP_ETCTR_MC_IN) {
 	  mcasts_in = (uint32_t)adaptorNIO->et_total.mcasts_in;
-	  pkts_in -= mcasts_in;
+	  if(adaptorNIO->procNetDev)
+	    pkts_in -= mcasts_in;
 	}
 	if(adaptorNIO->et_found & HSP_ETCTR_BC_IN) {
 	  bcasts_in = (uint32_t)adaptorNIO->et_total.bcasts_in;
-	  pkts_in -= bcasts_in;
+	  if(adaptorNIO->procNetDev)
+	    pkts_in -= bcasts_in;
 	}
 	if(adaptorNIO->et_found & HSP_ETCTR_MC_OUT) {
 	  mcasts_out = (uint32_t)adaptorNIO->et_total.mcasts_out;
-	  pkts_out -= mcasts_out;
+	  if(adaptorNIO->procNetDev)
+	    pkts_out -= mcasts_out;
 	}
 	if(adaptorNIO->et_found & HSP_ETCTR_BC_OUT) {
 	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
-	  pkts_out -= bcasts_out;
+	  if(adaptorNIO->procNetDev)
+	    pkts_out -= bcasts_out;
 	}
 	if(adaptorNIO->et_found & HSP_ETCTR_UNKN) {
 	  unknown_in = (uint32_t)adaptorNIO->et_total.unknown_in;
