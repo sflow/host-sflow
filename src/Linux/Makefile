@@ -181,7 +181,7 @@ LIBS_PCAP=-lpcap
 CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP
 LIBS_TCP=
 
-CFLAGS_NVML= -I/usr/include/nvidia/gdk
+CFLAGS_NVML= -I/usr/local/cuda-10.1/targets/x86_64-linux/include/
 LIBS_NVML= -lnvidia-ml
 
 CFLAGS_CUMULUS=
