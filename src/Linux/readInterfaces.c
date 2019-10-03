@@ -474,7 +474,7 @@ extern "C" {
 	adaptorNIO->et_found = 0;
 	for(int ii=0; ii < adaptorNIO->et_nctrs; ii++) {
 	  memcpy(cname, &ctrNames->data[ii * ETH_GSTRING_LEN], ETH_GSTRING_LEN);
-	  myDebug(1, "ethtool counter %s is at index %d", cname, ii);
+	  myDebug(3, "ethtool counter %s is at index %d", cname, ii);
 	  // then see if this is one of the ones we want,
 	  // and record the index if it is.
 	  if(staticStringsIndexOf(HSP_ethtool_mcasts_in_names, cname) != -1) {
