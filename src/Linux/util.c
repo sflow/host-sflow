@@ -176,7 +176,7 @@ extern "C" {
   void *my_os_calloc(size_t bytes)
   {
 #ifdef UTHEAP
-    myDebug(1, "my_os_calloc(%u)", bytes);
+    myDebug(4, "my_os_calloc(%u)", bytes);
 #endif
     void *mem = SYS_CALLOC(1, bytes);
     if(mem == NULL) {
@@ -190,7 +190,7 @@ extern "C" {
   void *my_os_realloc(void *ptr, size_t bytes)
   {
 #ifdef UTHEAP
-    myDebug(1, "my_os_realloc(%u)", bytes);
+    myDebug(4, "my_os_realloc(%u)", bytes);
 #endif
     void *mem = SYS_REALLOC(ptr, bytes);
     if(mem == NULL) {
