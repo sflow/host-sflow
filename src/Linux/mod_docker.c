@@ -173,7 +173,8 @@ extern "C" {
 #define HSP_DOCKER_WAIT_NOSOCKET 10
 #define HSP_DOCKER_WAIT_EVENTDROP 5
 #define HSP_DOCKER_WAIT_STARTUP 2
-  
+#define HSP_DOCKER_WAIT_RECHECK 120
+
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
     UTHash *vmsByUUID;
@@ -187,6 +188,7 @@ extern "C" {
     uint32_t currentRequests;
     regex_t *contentLengthPattern;
     uint32_t countdownToResync;
+    uint32_t countdownToRecheck;
     int cgroupPathIdx;
     UTHash *nameCount;
     UTHash *hostnameCount;
@@ -200,6 +202,7 @@ extern "C" {
   static HSPDockerRequest *dockerRequest(EVMod *mod, UTStrBuf *cmd, HSPDockerCB jsonCB, bool eventFeed);
   static void  dockerRequestFree(EVMod *mod, HSPDockerRequest *req);
   static void dockerSynchronize(EVMod *mod);
+  static void dockerContainerCapture(EVMod *mod);
   static void decNameCount(UTHash *ht, const char *str);
   static void getContainerStats(EVMod *mod, HSPVMState_DOCKER *container);
 
@@ -586,7 +589,7 @@ extern "C" {
     removeAndFreeVM(mod, &container->vm);
   }
 
-  static HSPVMState_DOCKER *getContainer(EVMod *mod, char *id, int create) {
+  static HSPVMState_DOCKER *getContainer(EVMod *mod, char *id, bool create, bool errorIfMissing) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     if(id == NULL) return NULL;
     HSPVMState_DOCKER cont = { .id = id };
@@ -596,9 +599,14 @@ extern "C" {
       char uuid[16];
       // turn container ID into a UUID - just take the first 16 bytes of the id
       if(parseUUID(id, uuid) == NO) {
-	myLog(LOG_ERR, " parsing container UUID from <%s>", id);
+	myLog(LOG_ERR, "parsing container UUID from <%s>", id);
 	abort();
       }
+
+      // complain if we had to create one that we should have found already
+      if(errorIfMissing)
+	myLog(LOG_ERR, "found running container not detected by event: <%s>", id);
+
       container = (HSPVMState_DOCKER *)getVM(mod, uuid, YES, sizeof(HSPVMState_DOCKER), VMTYPE_DOCKER, agentCB_getCounters_DOCKER_request);
       assert(container != NULL);
       if(container) {
@@ -641,6 +649,12 @@ extern "C" {
       myDebug(1, "docker resync in %u", mdata->countdownToResync);
       if(--mdata->countdownToResync == 0)
 	dockerSynchronize(mod);
+    }
+    if(mdata->countdownToRecheck) {
+      if(--mdata->countdownToRecheck == 0) {
+	myDebug(1, "docker container recheck");
+	dockerContainerCapture(mod);
+      }
     }
   }
 
@@ -789,7 +803,7 @@ extern "C" {
       return;
     }
     
-    HSPVMState_DOCKER *container = getContainer(mod, jid->valuestring, NO);
+    HSPVMState_DOCKER *container = getContainer(mod, jid->valuestring, NO, NO);
     if(container == NULL)
       return;
     
@@ -1088,7 +1102,7 @@ extern "C" {
     // Oh - it looks like both the id and name are included
     // in API 1.21 and later. So we could go back to doing it
     // that way.
-    HSPVMState_DOCKER *container = getContainer(mod, req->id, NO);
+    HSPVMState_DOCKER *container = getContainer(mod, req->id, NO, NO);
     if(container == NULL)
       return;
   
@@ -1226,98 +1240,128 @@ extern "C" {
     
     cJSON *status = cJSON_GetObjectItem(top, "status");
     cJSON *id = cJSON_GetObjectItem(top, "id");
+
+    if(status == NULL
+       || status->valuestring == NULL
+       || my_strlen(status->valuestring) == 0) {
+      myDebug(1, "ignoring event with no status");
+      return;
+    }
+
+    if(id == NULL
+       || id->valuestring == NULL
+       || my_strlen(id->valuestring) == 0) {
+      myDebug(1, "ignoring event with no id");
+      return;
+    }
+
+    // if it has a type, then it must be "container"
+    cJSON *type = cJSON_GetObjectItem(top, "Type");
+    if(type
+       && type->valuestring
+       && !my_strequal(type->valuestring, "container")) {
+      myDebug(1, "ignoring event for type %s", type->valuestring);
+      return;
+    }
+
+    // provisional name in case we don't get one below
+    char *containerName = id->valuestring;
+
+    // get name from Actor.Attributes.name
     cJSON *actor = cJSON_GetObjectItem(top, "Actor");
-    if(status
-       && status->valuestring
-       && id
-       && id->valuestring
-       && actor) {
+    if(actor) {
       cJSON *attributes = cJSON_GetObjectItem(actor, "Attributes");
       if(attributes) {
 	cJSON *ctname = cJSON_GetObjectItem(attributes, "name");
 	if(ctname
-	   && ctname->valuestring) {
-	  HSPVMState_DOCKER *container;
-	  EnumHSPContainerEvent ev = containerEvent(status->valuestring);
-	  if(ev == HSP_EV_UNKNOWN) {
-	    myDebug(1, "unrecognized event status: %s", status->valuestring);
-	    return;
-	  }
-	  EnumHSPContainerState st = HSP_CS_UNKNOWN;
-	  switch(ev) {
-	  case HSP_EV_create:
-	    st = HSP_CS_created;
-	    break;
-	  case HSP_EV_start:
-	  case HSP_EV_restart:
-	  case HSP_EV_unpause:
-	    st = HSP_CS_running;
-	    break;
-	  case HSP_EV_pause:
-	    st = HSP_CS_paused;
-	    break;
-	  case HSP_EV_stop:
-	    st = HSP_CS_stopped;
-	    break;
-	  case HSP_EV_kill:
-	  case HSP_EV_die:
-	  case HSP_EV_oom:
-	  case HSP_EV_rm:
-	    st = HSP_CS_exited;
-	    break;
-	  case HSP_EV_destroy:
-	    st = HSP_CS_deleted;
-	  case HSP_EV_attach:
-	  case HSP_EV_commit:
-	  case HSP_EV_copy:
-	  case HSP_EV_detach:
-	  case HSP_EV_exec_create:
-	  case HSP_EV_exec_detach:
-	  case HSP_EV_exec_start:
-	  case HSP_EV_export:
-	  case HSP_EV_health_status:
-	  case HSP_EV_rename:
-	  case HSP_EV_resize:
-	  case HSP_EV_top:
-	  case HSP_EV_update:
-	  default:
-	    // leave as HSP_CS_UNKNOWN so as not to trigger a state-change below,
-	    // but still allow for a name update.
-	    break;
-	  }
+	   && ctname->valuestring)
+	  containerName = ctname->valuestring;
+      }
+    }
 
-	  container = getContainer(mod, id->valuestring, (st == HSP_CS_running));
-	  if(container) {
-	    if(st != HSP_CS_UNKNOWN
-	       && st != container->state) {
-	      myDebug(1, "container state %s -> %s",
-		      HSP_CS_names[container->state],
-		      HSP_CS_names[st]);
-	      container->state = st;
-	    }
-	    container->lastEvent = ev;
-	    if(container->state == HSP_CS_running) {
-	      // note that "rename" event will get here
-	      setContainerName(mod, container, ctname->valuestring);
-	      if(!container->inspect_tx) {
-		// new entry - get meta-data
-		// will send counter-sample when complete
-		inspectContainer(mod, container);
-	      }
-	    }
-	    else {
-	      // we are going to remove this one
-	      // send final counter-sample. Have to
-	      // grab this now before the cgroup data
-	      // disappears from the filesystem...
-	      getCounters_DOCKER(mod, container);
-	      UTHashDel(mdata->pollActions, container);
-	      removeAndFreeVM_DOCKER(mod, container);
-	    }
-	  }
+    HSPVMState_DOCKER *container;
+    EnumHSPContainerEvent ev = containerEvent(status->valuestring);
+    if(ev == HSP_EV_UNKNOWN) {
+      myDebug(1, "unrecognized event status: %s", status->valuestring);
+      return;
+    }
+
+    EnumHSPContainerState st = HSP_CS_UNKNOWN;
+    switch(ev) {
+    case HSP_EV_create:
+      st = HSP_CS_created;
+      break;
+      // three ways to enter the running state
+    case HSP_EV_start:
+    case HSP_EV_restart:
+    case HSP_EV_unpause:
+      st = HSP_CS_running;
+      break;
+    case HSP_EV_pause:
+      st = HSP_CS_paused;
+      break;
+    case HSP_EV_stop:
+      st = HSP_CS_stopped;
+      break;
+    case HSP_EV_kill:
+    case HSP_EV_die:
+    case HSP_EV_oom:
+    case HSP_EV_rm:
+      st = HSP_CS_exited;
+      break;
+    case HSP_EV_destroy:
+      st = HSP_CS_deleted;
+      break;
+    case HSP_EV_attach:
+    case HSP_EV_commit:
+    case HSP_EV_copy:
+    case HSP_EV_detach:
+    case HSP_EV_exec_create:
+    case HSP_EV_exec_start:
+    case HSP_EV_exec_detach:
+    case HSP_EV_export:
+    case HSP_EV_health_status:
+    case HSP_EV_rename:
+    case HSP_EV_resize:
+    case HSP_EV_top:
+    case HSP_EV_update:
+    default:
+      // leave as HSP_CS_UNKNOWN so as not to trigger a state-change below,
+      // but still allow for a name update.
+      break;
+    }
+
+    // find container object. If it is now in the running state
+    // then we will also create it here if it is not found
+    container = getContainer(mod, id->valuestring, (st == HSP_CS_running), NO);
+    if(container) {
+      if(st != HSP_CS_UNKNOWN
+	 && st != container->state) {
+	myDebug(1, "container state %s -> %s",
+		HSP_CS_names[container->state],
+		HSP_CS_names[st]);
+	container->state = st;
+      }
+      container->lastEvent = ev;
+      if(container->state == HSP_CS_running) {
+	// note that "rename" event on a running container will get here
+	setContainerName(mod, container, containerName);
+	if(!container->inspect_tx) {
+	  // new entry - get meta-data
+	  // will send counter-sample when complete
+	  inspectContainer(mod, container);
 	}
-      } // attributes
-    } // actor
+      }
+      else {
+	// we are going to remove this one
+	// send final counter-sample. Have to
+	// grab this now before the cgroup data
+	// disappears from the filesystem...
+	getCounters_DOCKER(mod, container);
+	UTHashDel(mdata->pollActions, container);
+	removeAndFreeVM_DOCKER(mod, container);
+      }
+    }
   }
     
   static void dockerAPI_containers(EVMod *mod, UTStrBuf *buf, cJSON *top, HSPDockerRequest *req) {
@@ -1351,18 +1395,23 @@ extern "C" {
 	  cJSON *ip4address = cJSON_GetObjectItem(dev, "IPAddress");
 	  cJSON *ip6address = cJSON_GetObjectItem(dev, "GlobalIPv6Address");
 	  myDebug(1, "got network %s mac=%s v4=%s v6=%s",
-		  dev->valuestring,
+		  dev->string,
 		  macaddress ? macaddress->valuestring : "<unknown>",
 		  ip4address ? ip4address->valuestring : "<unknown>",
 		  ip6address ? ip6address->valuestring : "<unknown>");
 	}
       }
 
-      HSPVMState_DOCKER *container = getContainer(mod, id->valuestring, YES);
-      container->state = containerState(state->valuestring);
-      setContainerName(mod, container, name0->valuestring);
-      if(!container->inspect_tx)
-	inspectContainer(mod, container);
+      // If it is running, then we will create it here.  But if that happens after we thought
+      // we were sync'd then complain because it means we must have missed an event:
+      EnumHSPContainerState ctState = containerState(state->valuestring);
+      HSPVMState_DOCKER *container = getContainer(mod, id->valuestring, (ctState == HSP_CS_running), mdata->dockerSync);
+      if(container) {
+	container->state = ctState;
+	setContainerName(mod, container, name0->valuestring);
+	if(!container->inspect_tx)
+	  inspectContainer(mod, container);
+      }
     }
 
     // mark as sync'd and replay queued events
@@ -1594,6 +1643,12 @@ extern "C" {
     }
     UTQ_CLEAR(mdata->requestQ);
   }
+
+  static void dockerContainerCapture(EVMod *mod) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_CONTAINERS), dockerAPI_containers, NO));
+    mdata->countdownToRecheck = HSP_DOCKER_WAIT_RECHECK;
+  }
   
   static void dockerSynchronize(EVMod *mod) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
@@ -1604,7 +1659,7 @@ extern "C" {
     // start the event monitor before we capture the current state.  Events will be queued until we have
     // read all the current containers, then replayed.  At that point we will be "in sync".
     dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_EVENTS), dockerAPI_event, YES));
-    dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_CONTAINERS), dockerAPI_containers, NO));
+    dockerContainerCapture(mod);
   }
 
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
@@ -1642,7 +1697,6 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
-    mdata->countdownToResync = HSP_DOCKER_WAIT_STARTUP;
   }
 
 #if defined(__cplusplus)
