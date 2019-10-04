@@ -639,6 +639,20 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________   buildRegexPatterns      __________________
+    -----------------___________________________------------------
+  */
+  static void buildRegexPatterns(EVMod *mod) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    if(mdata->contentLengthPattern) {
+      // rebuild regex so it can clean up memory usage
+      regfree(mdata->contentLengthPattern);
+      my_free(mdata->contentLengthPattern);
+    }
+    mdata->contentLengthPattern = UTRegexCompile(HSP_CONTENT_LENGTH_REGEX);
+  }
+
+  /*_________________---------------------------__________________
     _________________    tick,tock              __________________
     -----------------___________________________------------------
   */
@@ -652,6 +666,9 @@ extern "C" {
     }
     if(mdata->countdownToRecheck) {
       if(--mdata->countdownToRecheck == 0) {
+	// ebuild regex patterns periodically
+	buildRegexPatterns(mod);
+	// and check for missed containers
 	myDebug(1, "docker container recheck");
 	dockerContainerCapture(mod);
       }
@@ -1687,7 +1704,7 @@ extern "C" {
 
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_DOCKER);
 
-    mdata->contentLengthPattern = UTRegexCompile(HSP_CONTENT_LENGTH_REGEX);
+    buildRegexPatterns(mod);
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_DOCKER, id, UTHASH_SKEY);
     mdata->nameCount = UTHASH_NEW(HSPDockerNameCount, name, UTHASH_SKEY);
