@@ -9,6 +9,7 @@ extern "C" {
 #include "util.h"
 
   static int debugLevel = 0;
+  static bool daemonFlag = YES;
 
   /*________________---------------------------__________________
     ________________       UTStrBuf            __________________
@@ -130,9 +131,10 @@ extern "C" {
 
   void myLogv(int syslogType, char *fmt, va_list args)
   {
-    if(debugLevel) {
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
+    if(debugLevel
+       || daemonFlag==NO) {
+      vfprintf(stdout, fmt, args);
+      fprintf(stdout, "\n");
     }
     else
       vsyslog(syslogType, fmt, args);
@@ -162,11 +164,20 @@ extern "C" {
     if(debug(level)) {
       va_list args;
       va_start(args, fmt);
-      fprintf(stderr, "dbg%d: ", level);
-      vfprintf(stderr, fmt, args);
-      fprintf(stderr, "\n");
+      fprintf(stdout, "dbg%d: ", level);
+      vfprintf(stdout, fmt, args);
+      fprintf(stdout, "\n");
     }
   }
+
+  void setDaemon(bool yesno) {
+    daemonFlag = yesno;
+  }
+
+  bool getDaemon() {
+    return daemonFlag;
+  }
+
 
   /*_________________---------------------------__________________
     _________________       my_os_allocation    __________________

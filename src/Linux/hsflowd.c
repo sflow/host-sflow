@@ -17,7 +17,7 @@ extern "C" {
 
   static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
   static bool updatePollingInterval(HSP *sp);
-
+  
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
     -----------------___________________________------------------
@@ -718,7 +718,6 @@ extern "C" {
     sp->outputFile = HSP_DEFAULT_OUTPUTFILE;
     sp->pidFile = HSP_DEFAULT_PIDFILE;
     sp->crashFile = NULL;
-    sp->daemonize = YES;
     sp->dropPriv = YES;
     sp->refreshAdaptorListSecs = HSP_REFRESH_ADAPTORS;
     sp->checkAdaptorListSecs = HSP_CHECK_ADAPTORS;
@@ -767,9 +766,9 @@ extern "C" {
 	break;
       case 'd':
 	// first 'd' just turns off daemonize, second increments debug
-	if(!sp->daemonize)
+	if(!getDaemon())
 	  setDebug(getDebug() + 1);
-	sp->daemonize=NO;
+	setDaemon(NO);
 	break;
       case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
@@ -1634,7 +1633,7 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-    if(sp->daemonize) {
+    if(getDaemon()) {
       // fork to daemonize
       pid_t pid = fork();
       if(pid < 0) {

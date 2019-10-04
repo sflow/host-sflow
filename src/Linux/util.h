@@ -75,8 +75,8 @@ extern "C" {
   int getDebug(void);
   int debug(int level);
   void myDebug(int level, char *fmt, ...);
-  void setDemonize(void);
-  int getDemonize(void);
+  void setDaemon(bool yesno);
+  bool getDaemon(void);
 
   // OS allocation
   void *my_os_calloc(size_t bytes);

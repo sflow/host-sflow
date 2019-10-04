@@ -555,7 +555,6 @@ extern "C" {
     bool configOK;
     char *outputFile;
     char *pidFile;
-    bool daemonize;
     bool dropPriv;
     uint32_t outputRevisionNo;
     FILE *f_out;
