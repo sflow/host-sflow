@@ -1171,7 +1171,8 @@ extern "C" {
     // strict rules,  but for simplicity we just allow the current object
     // to double as a state variable that determines what is allowed next.
 
-    for(HSPToken *tok = readTokens(sp); tok; tok = tok->nxt) {
+    HSPToken *tok = sp->config_tokens = readTokens(sp);
+    for( ; tok; tok = tok->nxt) {
 
       if(tok->stok
 	 && HSPSpecialTokens[tok->stok].deprecated)

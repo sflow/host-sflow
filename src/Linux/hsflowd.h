@@ -433,6 +433,7 @@ extern "C" {
     bool counterSampleQueued;
 
     // config settings
+    void *config_tokens;
     HSPSFlowSettings *sFlowSettings_file;
     HSPSFlowSettings *sFlowSettings_dyn;
     HSPSFlowSettings *sFlowSettings;

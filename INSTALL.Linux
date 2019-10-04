@@ -23,7 +23,7 @@ will typically be required for compilation:
  KVM: libvirt-dev(el), libxml2-dev(el)
  NVML: libnvidia-ml, nvml.h
  XEN: libxenctrl, libxenstore, xenctrl.h, xenstore.h
- SYSTEMD: dbus-dev(el) or libdbus-1-dev, openssl-dev(el)
+ SYSTEMD: dbus-dev(el) or libdbus-1-dev, openssl-dev(el), libssl-dev(el)
  DBUS: dbus-dev(el) or libdbus-1-dev
  OPX: libsystemd-daemon-dev
 

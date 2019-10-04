@@ -1445,7 +1445,7 @@ extern "C" {
   static void processDockerJSON(EVMod *mod, HSPDockerRequest *req, UTStrBuf *buf) {
     cJSON *top = cJSON_Parse(UTSTRBUF_STR(buf));
     if(top) {
-      logJSON(1, "processDockerJSON:", top);
+      logJSON(4, "processDockerJSON:", top);
       (*req->jsonCB)(mod, buf, top, req);
       cJSON_Delete(top);
     }
@@ -1516,6 +1516,7 @@ extern "C" {
       
     case HSPDOCKERREQ_ERR:
       // TODO: just wait for EOF, or should we force the socket to close?
+      myDebug(1, "processDockerResponse got error");
       break;
     }
   }
@@ -1646,7 +1647,9 @@ extern "C" {
 
   static void dockerContainerCapture(EVMod *mod) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
-    dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_CONTAINERS), dockerAPI_containers, NO));
+    UTStrBuf *req = UTStrBuf_wrap(HSP_DOCKER_REQ_CONTAINERS);
+    dockerAPIRequest(mod, dockerRequest(mod, req, dockerAPI_containers, NO));
+    UTStrBuf_free(req);
     mdata->countdownToRecheck = HSP_DOCKER_WAIT_RECHECK;
   }
   
@@ -1658,7 +1661,9 @@ extern "C" {
     mdata->cgroupPathIdx = -1;    
     // start the event monitor before we capture the current state.  Events will be queued until we have
     // read all the current containers, then replayed.  At that point we will be "in sync".
-    dockerAPIRequest(mod, dockerRequest(mod, UTStrBuf_wrap(HSP_DOCKER_REQ_EVENTS), dockerAPI_event, YES));
+    UTStrBuf *req = UTStrBuf_wrap(HSP_DOCKER_REQ_EVENTS);
+    dockerAPIRequest(mod, dockerRequest(mod, req, dockerAPI_event, YES));
+    UTStrBuf_free(req);
     dockerContainerCapture(mod);
   }
 
