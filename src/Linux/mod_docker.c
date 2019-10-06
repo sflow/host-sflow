@@ -141,6 +141,7 @@ extern "C" {
   typedef struct _HSPDockerRequest {
     struct _HSPDockerRequest *prev;
     struct _HSPDockerRequest *next;
+    uint32_t seqNo;
     UTStrBuf *request;
     UTStrBuf *response;
     HSPDockerCB jsonCB;
@@ -149,6 +150,9 @@ extern "C" {
     int contentLength;
     int chunkLength;
     char *id;
+    time_t sendTime;
+    EVSocket *sock;
+    time_t goTime_S;
   } HSPDockerRequest;
 
   typedef struct _HSPDockerNameCount {
@@ -174,6 +178,8 @@ extern "C" {
 #define HSP_DOCKER_WAIT_EVENTDROP 5
 #define HSP_DOCKER_WAIT_STARTUP 2
 #define HSP_DOCKER_WAIT_RECHECK 120
+#define HSP_DOCKER_WAIT_STATS 5
+#define HSP_DOCKER_REQ_TIMEOUT 20
 
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
@@ -184,8 +190,16 @@ extern "C" {
     bool dockerSync:1;
     bool dockerFlush:1;
     UTArray *eventQueue;
+
     UTQ(HSPDockerRequest) requestQ;
-    uint32_t currentRequests;
+    int32_t queuedRequests;
+    UTQ(HSPDockerRequest) waitQ;
+    int32_t waitingRequests;
+
+    int32_t generatedRequests;
+    int32_t currentRequests;
+    int32_t lostRequests;
+    UTHash *reqsBySeqNo;
     regex_t *contentLengthPattern;
     uint32_t countdownToResync;
     uint32_t countdownToRecheck;
@@ -205,6 +219,12 @@ extern "C" {
   static void dockerContainerCapture(EVMod *mod);
   static void decNameCount(UTHash *ht, const char *str);
   static void getContainerStats(EVMod *mod, HSPVMState_DOCKER *container);
+  static void serviceRequestQ(EVMod *mod);
+  static void serviceWaitQ(EVMod *mod);
+  static void serviceLostRequests(EVMod *mod);
+  static HSPDockerRequest *containerStatsRequest(EVMod *mod, HSPVMState_DOCKER *container);
+  static const char *containerEventName(EnumHSPContainerEvent ev);
+  static const char *containerStateName(EnumHSPContainerState st);
 
   /*_________________---------------------------__________________
     _________________    utils to help debug    __________________
@@ -563,6 +583,10 @@ extern "C" {
       myLog(LOG_INFO, "removeAndFreeVM: removing container with dsIndex=%u", container->vm.dsIndex);
     }
 
+    // remove from pollActions if present (necessary if this happens in tick() and before tock()
+    UTHashDel(mdata->pollActions, container);
+
+    // remove from hash tables
     if(UTHashDel(mdata->vmsByID, container) == NULL) {
       myLog(LOG_ERR, "UTHashDel (vmsByID) failed: container %s=%s", container->name, container->id);
       if(debug(1))
@@ -619,6 +643,20 @@ extern "C" {
     return container;
   }
 
+  
+  static void removeContainerIfNotRunning(EVMod *mod, HSPVMState_DOCKER *container) {
+    if(container
+       && container->lastEvent
+       && container->state != HSP_CS_running) {
+      myDebug(1, "remove container %s=%s (lastEvent=%s, state=%s)",
+	      container->name,
+	      container->id,
+	      containerEventName(container->lastEvent),
+	      containerStateName(container->state));
+      removeAndFreeVM_DOCKER(mod, container);
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________  updateContainerAdaptors  __________________
     -----------------___________________________------------------
@@ -659,6 +697,19 @@ extern "C" {
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+
+    if(mdata->currentRequests || mdata->queuedRequests || mdata->waitingRequests) {
+      myDebug(1, "docker currentRequests=%d, queuedRequests=%d, waitingRequests=%d, generatedRequests=%d, lostRequests=%d, containers=%d, names=%d, hostnames=%d",
+	      mdata->currentRequests,
+	      mdata->queuedRequests,
+	      mdata->waitingRequests,
+	      mdata->generatedRequests,
+	      mdata->lostRequests,
+	      UTHashN(mdata->vmsByID),
+	      UTHashN(mdata->nameCount),
+	      UTHashN(mdata->hostnameCount));
+    }
+
     if(mdata->countdownToResync) {
       myDebug(1, "docker resync in %u", mdata->countdownToResync);
       if(--mdata->countdownToResync == 0)
@@ -673,6 +724,11 @@ extern "C" {
 	dockerContainerCapture(mod);
       }
     }
+    if(!mdata->dockerFlush) {
+      serviceWaitQ(mod);
+      serviceRequestQ(mod);
+      serviceLostRequests(mod);
+    }
   }
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
@@ -681,12 +737,14 @@ extern "C" {
     // But each pollAction now needs another step while we request and wait
     // for the container stats query.  So now we initiate the stats query
     // here and finally call getCounters_DOCKER when we have the answer.
-    HSPVMState_DOCKER *container;
-    UTHASH_WALK(mdata->pollActions, container) {
-      // getCounters_DOCKER(mod, container);
-      getContainerStats(mod, container);
+    if(!mdata->dockerFlush) {
+      HSPVMState_DOCKER *container;
+      UTHASH_WALK(mdata->pollActions, container) {
+	// getCounters_DOCKER(mod, container);
+	getContainerStats(mod, container);
+      }
+      UTHashReset(mdata->pollActions);
     }
-    UTHashReset(mdata->pollActions);
   }
 
   /*_________________---------------------------__________________
@@ -725,6 +783,12 @@ extern "C" {
     }
     return HSP_EV_UNKNOWN;
   }
+
+  static const char *containerEventName(EnumHSPContainerEvent ev) {
+    return (ev < HSP_EV_NUM_CODES)
+      ? HSP_EV_names[ev]
+      : "<bad event code>";
+  }
   
   static EnumHSPContainerState containerState(char *str) {
     for(int ii = 0; ii<HSP_CS_NUM_CODES; ii++) {
@@ -732,6 +796,12 @@ extern "C" {
 	return ii;
     }
     return HSP_CS_UNKNOWN;
+  }
+
+  static const char *containerStateName(EnumHSPContainerState st) {
+    return (st < HSP_CS_NUM_CODES)
+      ? HSP_CS_names[st]
+      : "<bad state code>";
   }
 
   static void duplicateName(EVMod *mod, HSPVMState_DOCKER *container) {
@@ -804,6 +874,7 @@ extern "C" {
   }
 
   static void dockerAPI_inspect(EVMod *mod, UTStrBuf *buf, cJSON *jcont, HSPDockerRequest *req) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     myDebug(1, "dockerAPI_inspect");
 
     cJSON *jid = cJSON_GetObjectItem(jcont, "Id");
@@ -858,9 +929,22 @@ extern "C" {
     container->inspect_rx = YES;
     // now that we have the pid,  we can probe for the MAC and peer-ifIndex
     updateContainerAdaptors(mod, container);
-    // send initial counter-sample immediately...
-    // But to do this we call getContainerStats() first
-    getContainerStats(mod, container);
+    // send initial counter-sample immediately... even before we get the first
+    // stats query.  The gauges and counters will be 0 but that's OK.  In fact
+    // we really want to send a sample with all counters=0 to make sure the accounting
+    // is correct at the receiver.  The counters are supposed to start from 0.
+    getCounters_DOCKER(mod, container);
+    // We used to call getContainerStats(mod, container) here immiediately but
+    // too many of those requests seem to be ignored by the docker engine.  By waiting
+    // a few seconds we reduce the likelihood of that happening.  We could just wait
+    // for the normal polling interval to come around,  but if that is something like
+    // 60 seconds then it's a long time for us to not be reporting any gauges.
+    // So we introduce the waitQ,  which causes us to wait just a few seconds
+    // before sending the first stats request:
+    HSPDockerRequest *statsReq = containerStatsRequest(mod, container);
+    statsReq->goTime_S = EVCurrentBus()->now.tv_sec + HSP_DOCKER_WAIT_STATS;
+    UTQ_ADD_TAIL(mdata->waitQ, statsReq);
+    mdata->waitingRequests++;
   }
 
   static void inspectContainer(EVMod *mod, HSPVMState_DOCKER *container) {
@@ -1234,15 +1318,24 @@ extern "C" {
     container->stats_rx = YES;
     // now (finally) we get to send the counter sample
     getCounters_DOCKER(mod, container);
+    // maybe this was the last one?
+    removeContainerIfNotRunning(mod, container);
   }
 
-  static void getContainerStats(EVMod *mod, HSPVMState_DOCKER *container) {
+  static HSPDockerRequest *containerStatsRequest(EVMod *mod, HSPVMState_DOCKER *container) {
+    // build the request (but do not send it)
     UTStrBuf *req = UTStrBuf_new();
     UTStrBuf_printf(req, HSP_DOCKER_REQ_STATS_ID, container->id);
     HSPDockerRequest *reqObj = dockerRequest(mod, req, dockerAPI_stats, NO);
     reqObj->id = my_strdup(container->id);
-    dockerAPIRequest(mod, reqObj);
     UTStrBuf_free(req);
+    return reqObj;
+  }
+
+  static void getContainerStats(EVMod *mod, HSPVMState_DOCKER *container) {
+    // actually send the stats request
+    HSPDockerRequest *reqObj = containerStatsRequest(mod, container);
+    dockerAPIRequest(mod, reqObj);
     container->stats_tx = YES;
   }
 
@@ -1355,8 +1448,8 @@ extern "C" {
       if(st != HSP_CS_UNKNOWN
 	 && st != container->state) {
 	myDebug(1, "container state %s -> %s",
-		HSP_CS_names[container->state],
-		HSP_CS_names[st]);
+		containerStateName(container->state),
+		containerStateName(st));
 	container->state = st;
       }
       container->lastEvent = ev;
@@ -1370,13 +1463,12 @@ extern "C" {
 	}
       }
       else {
-	// we are going to remove this one
-	// send final counter-sample. Have to
-	// grab this now before the cgroup data
-	// disappears from the filesystem...
-	getCounters_DOCKER(mod, container);
-	UTHashDel(mdata->pollActions, container);
-	removeAndFreeVM_DOCKER(mod, container);
+	// we are going to remove this one, so request stats once more
+	// to trigger the final counter sample...
+	getContainerStats(mod, container);
+	// final GC happens when stats request comes back (or times out)
+	// The stats request will still succeed for a while after the
+	// container is stopped,  so there is no race.
       }
     }
   }
@@ -1394,10 +1486,9 @@ extern "C" {
 					  
       if(!id
 	 || !names
-	 //|| !networksettings
 	 || !state) break;
 
-      cJSON *name0 = cJSON_GetArrayItem(names, 0); // TODO: extra '/' at front?
+      cJSON *name0 = cJSON_GetArrayItem(names, 0);
       if(!name0) break;
 
       cJSON *networksettings = cJSON_GetObjectItem(ct, "NetworkSettings");
@@ -1478,13 +1569,13 @@ extern "C" {
   static void processDockerResponse(EVMod *mod, EVSocket *sock, HSPDockerRequest *req) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     char *line = UTSTRBUF_STR(sock->ioline);
-    myDebug(2, "readDockerAPI got answer: <%s>", line);
+    myDebug(2, "processDockerResponse got answer (seqNo=%d): <%s>", req->seqNo, line);
     switch(req->state) {
 
     case HSPDOCKERREQ_HEADERS:
       UTStrBuf_chomp(sock->ioline);
       if(UTRegexExtractInt(mdata->contentLengthPattern, line, 1, &req->contentLength, NULL, NULL)) {
-	myDebug(1, "got contentLength=%d", req->contentLength);
+	myDebug(1, "processDockerResponse seqNo=%d contentLength=%d", req->seqNo,  req->contentLength);
       }
       else if(UTSTRBUF_LEN(sock->ioline) == 0) {
 	req->state = req->contentLength
@@ -1505,8 +1596,8 @@ extern "C" {
       req->chunkLength = strtol(line, &endp, 16); // hex
       if(*endp != '\0') {
 	// failed to consume the whole string - must be an error.
-	myDebug(1, "Docker error: <%s> for request: <%s>",
-		line, UTSTRBUF_STR(req->request));
+	myDebug(1, "Docker error: <%s> for request(seqNo=%d): <%s>",
+		line, req->seqNo, UTSTRBUF_STR(req->request));
 	req->state = HSPDOCKERREQ_ERR;
       }
       else {
@@ -1533,11 +1624,81 @@ extern "C" {
       
     case HSPDOCKERREQ_ERR:
       // TODO: just wait for EOF, or should we force the socket to close?
-      myDebug(1, "processDockerResponse got error");
+      myDebug(1, "processDockerResponse seqNo=%d got error", req->seqNo);
       break;
     }
   }
-  
+
+  static void serviceRequestQ(EVMod *mod) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    while(mdata->currentRequests < HSP_DOCKER_MAX_CONCURRENT
+	  && !UTQ_EMPTY(mdata->requestQ)) {
+      // see if we have another request queued
+      HSPDockerRequest *nextReq;
+      UTQ_REMOVE_HEAD(mdata->requestQ, nextReq);
+      --mdata->queuedRequests;
+      dockerAPIRequest(mod, nextReq);
+    }
+  }
+
+  static void serviceWaitQ(EVMod *mod) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+
+      HSPDockerRequest *req, *req2;
+    while((req = UTQ_HEAD(mdata->waitQ)) != NULL) {
+      // stop at the first one that is not due yet
+      if(req->goTime_S > EVCurrentBus()->now.tv_sec)
+	break;
+      // move req from waitQ to requestQ
+      UTQ_REMOVE_HEAD(mdata->waitQ, req2);
+      assert(req == req2);
+      --mdata->waitingRequests;
+      UTQ_ADD_TAIL(mdata->requestQ, req);
+      mdata->queuedRequests++;
+    }
+  }
+
+  static void serviceLostRequests(EVMod *mod) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    HSPDockerRequest *req;
+    time_t now = EVCurrentBus()->now.tv_sec;
+    uint32_t reqs_queued=0;
+    uint32_t reqs_lost=0;
+    UTHASH_WALK(mdata->reqsBySeqNo, req) {
+      if(!req->eventFeed) {
+	if(req->sendTime == 0) {
+	  // assume queued
+	  reqs_queued++;
+	}
+	else if((now - req->sendTime) > HSP_DOCKER_REQ_TIMEOUT) {
+	  // timeout - the engine seems to have ignored this request
+	  reqs_lost++;
+	  myDebug(1, "serviceLostRequests: req lost seqNo=%d req=<%s>", req->seqNo, UTSTRBUF_STR(req->request));
+	  // have to do something about this or it fills up the currentRequests and
+	  // after that everything is queued and never serviced.
+	  // See if the container is still around - it may have to be removed if the lost
+	  // request was actually the last stats request and the container is not longer running:
+	  HSPVMState_DOCKER *container = getContainer(mod, req->id, NO, NO);
+	  if(container)
+	    removeContainerIfNotRunning(mod, container);
+
+	  // if the request was really sent out then it will have a socket
+	  if(req->sock) {
+	    // close the socket to save file descriptors - may flush something through so make
+	    // sure we do this before freeing the request
+	    EVSocketClose(mod, req->sock, YES);
+	    dockerRequestFree(mod, req);
+	    --mdata->currentRequests;
+	    mdata->lostRequests++;
+	  }
+	}
+      }
+    }
+    if(reqs_queued || reqs_lost) {
+      myDebug(1, "serviceLostRequests: reqs still queued=%d lost=%d (total lost=%d)", reqs_queued, reqs_lost, mdata->lostRequests);
+    }
+  }
+    
   static void readDockerCB(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSPDockerRequest *req = (HSPDockerRequest *)magic;
@@ -1545,12 +1706,14 @@ extern "C" {
     case EVSOCKETREAD_AGAIN:
       break;
     case EVSOCKETREAD_STR:
+      myDebug(1, "new string for request seqNo=%d=<%s>", req->seqNo, UTSTRBUF_STR(req->request));
       if(!mdata->dockerFlush) {
 	processDockerResponse(mod, sock, req);
 	UTStrBuf_reset(sock->ioline);
       }
       break;
     case EVSOCKETREAD_EOF:
+      myDebug(1, "EOF for request seqNo=%d=<%s>", req->seqNo, UTSTRBUF_STR(req->request));
       if(!mdata->dockerFlush) {
 	if(req->response)
 	  processDockerJSON(mod, req, req->response);
@@ -1559,12 +1722,15 @@ extern "C" {
     case EVSOCKETREAD_BADF:
     case EVSOCKETREAD_ERR:
       // clean up
-      assert(mdata->currentRequests > 0);
-      --mdata->currentRequests;
+      myDebug(1, "request done seqNo=%d=<%s>", req->seqNo, UTSTRBUF_STR(req->request));
 
       if(req->eventFeed) {
 	// we lost the event feed - need to flush and resync
 	mdata->dockerFlush = YES;
+      }
+      else {
+	assert(mdata->currentRequests > 0);
+	--mdata->currentRequests;
       }
 
       // free the request - (it's not in any other collection)
@@ -1577,14 +1743,10 @@ extern "C" {
 	mdata->dockerFlush = NO;
 	mdata->countdownToResync = HSP_DOCKER_WAIT_EVENTDROP;
       }
-      
+
       // see if we have another request queued
-      if(!mdata->dockerFlush
-	 && !UTQ_EMPTY(mdata->requestQ)) {
-	HSPDockerRequest *nextReq;
-	UTQ_REMOVE_HEAD(mdata->requestQ, nextReq);
-	dockerAPIRequest(mod, nextReq);
-      }
+    if(!mdata->dockerFlush)
+      serviceRequestQ(mod);
     }
   }
     
@@ -1597,12 +1759,13 @@ extern "C" {
     if(mdata->currentRequests >= HSP_DOCKER_MAX_CONCURRENT) {
       // just queue it
       UTQ_ADD_TAIL(mdata->requestQ, req);
+      mdata->queuedRequests++;
       return;
     }
     char *cmd = UTSTRBUF_STR(req->request);
     ssize_t len = UTSTRBUF_LEN(req->request);
     int fd = UTUnixDomainSocket(HSP_DOCKER_SOCK);
-    myDebug(1, "dockerAPIRequest(%s) fd==%d", cmd, fd);
+    myDebug(1, "dockerAPIRequest(%s) seqNo=%d, fd==%d", cmd, req->seqNo, fd);
     if(fd < 0)  {
       // looks like docker was stopped
       // wait longer before retrying
@@ -1610,11 +1773,14 @@ extern "C" {
       mdata->countdownToResync = HSP_DOCKER_WAIT_NOSOCKET;
     }
     else {
-      EVBusAddSocket(mod, mdata->pollBus, fd, readDockerAPI, req);
+      req->sock = EVBusAddSocket(mod, mdata->pollBus, fd, readDockerAPI, req);
       int cc;
       while((cc = write(fd, cmd, len)) != len && errno == EINTR);
       if(cc == len) {
-	mdata->currentRequests++;
+	if(!req->eventFeed) {
+	  req->sendTime = EVCurrentBus()->now.tv_sec;
+	  mdata->currentRequests++;
+	}
       }
       else {
 	myLog(LOG_ERR, "dockerAPIRequest - write(%s) returned %d != %u: %s",
@@ -1624,14 +1790,19 @@ extern "C" {
   }
 
   static HSPDockerRequest *dockerRequest(EVMod *mod, UTStrBuf *cmd, HSPDockerCB jsonCB, bool eventFeed) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSPDockerRequest *req = (HSPDockerRequest *)my_calloc(sizeof(HSPDockerRequest));
+    req->seqNo = ++mdata->generatedRequests;
     req->request = UTStrBuf_copy(cmd);
     req->jsonCB = jsonCB;
     req->eventFeed = eventFeed;
+    UTHashAdd(mdata->reqsBySeqNo, req);
     return req;
   }
 
   static void  dockerRequestFree(EVMod *mod, HSPDockerRequest *req) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    UTHashDel(mdata->reqsBySeqNo, req);
     UTStrBuf_free(req->request);
     if(req->response) UTStrBuf_free(req->response);
     if(req->id) my_free(req->id);
@@ -1660,6 +1831,21 @@ extern "C" {
       req = nx;
     }
     UTQ_CLEAR(mdata->requestQ);
+    mdata->queuedRequests = 0;
+    // 5. wait queue
+    for(req = mdata->waitQ.head; req; ) {
+      nx = req->next;
+      dockerRequestFree(mod, req);
+      req = nx;
+    }
+    UTQ_CLEAR(mdata->waitQ);
+    mdata->waitingRequests = 0;
+    // 6. reqsBySeqNo
+    // could now have dangling pointers to freed requests,
+    // so only safe thing to do is wipe it and risk leaking some memory. Although
+    // that would only happen if there were any requests outstanding that the engine
+    // had ignored ("lost" requests).
+    UTHashReset(mdata->reqsBySeqNo);
   }
 
   static void dockerContainerCapture(EVMod *mod) {
@@ -1712,6 +1898,7 @@ extern "C" {
     mdata->pollActions = UTHASH_NEW(HSPVMState_DOCKER, id, UTHASH_IDTY);
     mdata->eventQueue = UTArrayNew(UTARRAY_DFLT);
     mdata->cgroupPathIdx = -1;
+    mdata->reqsBySeqNo = UTHASH_NEW(HSPDockerRequest, seqNo, UTHASH_DFLT);
     
     // register call-backs
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
