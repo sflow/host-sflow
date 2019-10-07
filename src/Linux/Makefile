@@ -269,12 +269,11 @@ OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o util_netlink.o
 OBJS_EAPI=mod_eapi.o
 
-BUILDTGTS=hsflowd \
-          mod_json.so \
-          mod_dnssd.so \
-          $(XTGTS)
+BUILDTGTS= mod_json.so \
+           mod_dnssd.so \
+           $(XTGTS)
 
-all: $(BUILDTGTS)
+all: $(BUILDTGTS) hsflowd
 
 #########  feature dependencies #########
 
