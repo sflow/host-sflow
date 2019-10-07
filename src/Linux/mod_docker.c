@@ -161,7 +161,7 @@ extern "C" {
   } HSPDockerNameCount;
 
 #define HSP_DOCKER_SOCK  VARFS_STR "/run/docker.sock"
-#define HSP_DOCKER_MAX_CONCURRENT 3
+#define HSP_DOCKER_MAX_CONCURRENT 15
 #define HSP_DOCKER_HTTP " HTTP/1.1\nHost: " HSP_DOCKER_SOCK "\n\n"
 #define HSP_DOCKER_API "v1.24"
 #define HSP_DOCKER_REQ_EVENTS "GET /" HSP_DOCKER_API "/events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
@@ -1610,7 +1610,15 @@ extern "C" {
 
     case HSPDOCKERREQ_CONTENT: {
       int clen = req->chunkLength ?: req->contentLength;
-      assert(clen == UTSTRBUF_LEN(sock->ioline)); // assume no newlines in chunk
+      if(clen != UTSTRBUF_LEN(sock->ioline)) {
+	myLog(LOG_ERR, "ERROR req->chunkLength=%d req->contentLength=%d len(sock->ioline)=%d",
+	      req->chunkLength,
+	      req->contentLength,
+	      UTSTRBUF_LEN(sock->ioline));
+	myLog(LOG_ERR, "request (seqno=%d)=<%s>", req->seqNo, UTSTRBUF_STR(req->request));
+	myLog(LOG_ERR, "sock->ioline content=<%s>", UTSTRBUF_STR(sock->ioline));
+      }
+      assert(clen == UTSTRBUF_LEN(sock->ioline)); // assume no newlines in chunk (failing here!)
       if(req->eventFeed)
 	processDockerJSON(mod, req, sock->ioline);
       else {
