@@ -733,14 +733,15 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile]\n", command);
+    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile] [-l MODULESDir]\n", command);
     fprintf(stderr,"\n\
              -d:  do not daemonize, and log to stdout/stderr (repeat for more debug details)\n\
              -v:  print version number and exit\n\
              -P:  do not drop privileges (run as root)\n\
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
         -u UUID:  specify UUID as unique ID for this host\n\
-  -f CONFIGFile:  specify config file (default is " HSP_DEFAULT_CONFIGFILE ")\n\n\
+  -f CONFIGFile:  specify config file (default is " HSP_DEFAULT_CONFIGFILE ")\n\
+  -l MODULESDir:  specify modules directory (default is " STRINGIFY_DEF(HSP_MOD_DIR) ")\n \
    -c CRASHFile:  specify file to write crash info to (default is stderr)\n");
   fprintf(stderr, "=============== More Information ============================================\n");
   fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
@@ -758,7 +759,7 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dDvPp:f:o:u:m:?hc:")) != -1) {
+    while ((in = getopt(argc, argv, "dDvPp:f:l:o:u:m:?hc:")) != -1) {
       switch(in) {
       case 'v':
 	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
@@ -773,6 +774,7 @@ extern "C" {
       case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
       case 'f': sp->configFile = optarg; break;
+      case 'l': sp->modulesPath = my_strlen(optarg) ? optarg : NULL; break;
       case 'o': sp->outputFile = optarg; break;
       case 'c': sp->crashFile = optarg; break;
       case 'u':

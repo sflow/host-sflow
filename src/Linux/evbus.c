@@ -210,7 +210,8 @@ extern "C" {
 	myDebug(1, "dlopen(%s) failed : %s", path, dlerror());
       }
     }
-    else {
+    if(mod->libHandle == NULL) {
+      // try internal load, in case .o was included in executable
       if((mod->libHandle = dlopen(NULL, RTLD_NOW)) == NULL) {
 	myDebug(1, "dlopen(NULL) failed : %s", dlerror());
       }
