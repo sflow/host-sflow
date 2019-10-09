@@ -183,7 +183,8 @@ LIBS_TCP=
 
 NVML_CUDA_VERSION ?= 10.1
 CFLAGS_NVML= -I/usr/local/cuda-$(NVML_CUDA_VERSION)/targets/x86_64-linux/include/
-LIBS_NVML= -lnvidia-ml
+LIBDIR_NVML ?=/usr/local/cuda-$(NVML_CUDA_VERSION)/targets/x86-64-linux/lib/stubs/
+LIBS_NVML= -L$(LIBDIR_NVML) -lnvidia-ml
 
 CFLAGS_CUMULUS=
 LIBS_CUMULUS=
