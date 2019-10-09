@@ -181,7 +181,8 @@ LIBS_PCAP=-lpcap
 CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP
 LIBS_TCP=
 
-CFLAGS_NVML= -I/usr/local/cuda-10.1/targets/x86_64-linux/include/
+NVML_CUDA_VERSION ?= 10.1
+CFLAGS_NVML= -I/usr/local/cuda-$(NVML_CUDA_VERSION)/targets/x86_64-linux/include/
 LIBS_NVML= -lnvidia-ml
 
 CFLAGS_CUMULUS=
@@ -320,7 +321,7 @@ EAPI: mod_eapi.so
 #########  hsflowd  #########
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
+	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) mod_docker.o $(LIBS) $(LIBS_HSFLOWD) -rdynamic
 
 ######## DBUS utils ##########
 
