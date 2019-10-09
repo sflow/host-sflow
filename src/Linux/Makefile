@@ -181,9 +181,8 @@ LIBS_PCAP=-lpcap
 CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP
 LIBS_TCP=
 
-NVML_CUDA_VERSION ?= 10.1
-CFLAGS_NVML= -I/usr/local/cuda-$(NVML_CUDA_VERSION)/targets/x86_64-linux/include/
-LIBDIR_NVML ?= /usr/local/cuda-$(NVML_CUDA_VERSION)/targets/x86_64-linux/lib/stubs/
+CFLAGS_NVML ?= -I/usr/local/cuda/include/
+LIBDIR_NVML ?= /usr/local/cuda/lib64/stubs/
 LIBS_NVML= -L$(LIBDIR_NVML) -lnvidia-ml
 
 CFLAGS_CUMULUS=
