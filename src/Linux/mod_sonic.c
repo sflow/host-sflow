@@ -901,7 +901,7 @@ extern "C" {
 	  myDebug(1, "sonic sflow: %s=%s", f_name->str, db_replyStr(f_val, db->replyBuf, YES));
 	  
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_ADMIN_STATE))
-	    sflow_enable = my_strequal(f_val->str, "enable");
+	    sflow_enable = my_strequal(f_val->str, "up"); // note: was "enable" before
 	  
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_AGENT))
 	    sflow_agent = f_val->str;
