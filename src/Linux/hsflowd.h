@@ -166,6 +166,7 @@ extern "C" {
     uint64_t speed_min;
     uint64_t speed_max;
     bool speed_set;
+    bool outbound_only;
   } HSPPcap;
 
   typedef struct _HSPPort {

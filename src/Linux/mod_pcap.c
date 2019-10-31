@@ -32,6 +32,7 @@ extern "C" {
     bool promisc:1;
     bool vport:1;
     bool vport_set:1;
+    bool outbound_only:1;
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
   } BPFSoc;
@@ -197,6 +198,10 @@ extern "C" {
     }
 
     struct sock_filter code[] = {
+      // for outbound_only check
+      { 0x28,  0,  0, 0xfffff004 }, // ld direction
+      { 0x15,  0,  4, 0x00000004 }, // true:outbound, false:inbound
+      // for stochastic sampling
       { 0x20,  0,  0, 0xfffff038 }, // ld rand
       { 0x94,  0,  0, 0x00000100 }, // mod #256
       { 0x15,  0,  1, 0x00000001 }, // jneq #1, drop
@@ -205,12 +210,20 @@ extern "C" {
     };
 
     // overwrite the sampling-rate
-    code[1].k = bpfs->samplingRate;
-    myDebug(1, "PCAP: sampling rate set to %u for dev=%s", code[1].k, bpfs->deviceName);
-    struct sock_fprog bpf = {
-      .len = 5, // ARRAY_SIZE(code),
-      .filter = code,
-    };
+    code[3].k = bpfs->samplingRate;
+    myDebug(1, "PCAP: sampling rate set to %u for dev=%s", code[3].k, bpfs->deviceName);
+
+    // set filter code range for outboud_only or all
+    struct sock_fprog bpf = { 0, 0 };
+    if (bpfs->outbound_only) {
+      bpf.len = 7;
+      bpf.filter = code;
+    }
+    else {
+      bpf.len = 5;
+      bpf.filter = code + 2;
+    }
+    myDebug(1, "PCAP: sampling outbound_only=%s", bpfs->outbound_only? "on" : "off");
 
     // install the sock_filter directly, rather than using pcap_setfilter()
     int status = setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
@@ -307,6 +320,7 @@ extern "C" {
     bpfs->promisc = pcap->promisc;
     bpfs->vport = pcap->vport;
     bpfs->vport_set = pcap->vport_set;
+    bpfs->outbound_only = pcap->outbound_only;
     tap_open(mod, bpfs);
   }
 

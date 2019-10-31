@@ -1597,6 +1597,9 @@ extern "C" {
 	      if((tok = expectIntegerRange64(sp, tok, &pc->speed_min, &pc->speed_max, 0, LLONG_MAX)) == NULL) return NO;
 	      pc->speed_set = YES;
 	      break;
+	    case HSPTOKEN_OUTBOUND_ONLY:
+	      if((tok = expectONOFF(sp, tok, &pc->outbound_only)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
