@@ -321,7 +321,7 @@ EAPI: mod_eapi.so
 #########  hsflowd  #########
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) mod_docker.o $(LIBS) $(LIBS_HSFLOWD) -rdynamic
+	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
 
 ######## DBUS utils ##########
 
