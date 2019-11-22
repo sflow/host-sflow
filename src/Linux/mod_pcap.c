@@ -119,7 +119,7 @@ extern "C" {
 		 14 /* mac len */,
 		 buf + 14 /* payload */,
 		 hdr->caplen - 14, /* length of captured payload */
-		 hdr->len, /* length of packet (pdu) */
+		 hdr->len - 14, /* length of packet (pdu) */
 		 bpfs->drops, /* droppedSamples */
 		 bpfs->samplingRate);
     }

@@ -252,6 +252,11 @@ extern "C" {
       // so we can know for sure if this was ingress or egress sampled.
       // Assume ingress-sampling for now.
       SFLAdaptor *samplerDev = inDev;
+      if(!samplerDev) {
+        // handle startup race-condition where interface has not been discovered yet
+        myDebug(2, "psample: unknown ifindex %u (startup race-condition?)", ifin);
+        return;
+      }
 
       // See if the sample_n matches what we think was configured
       HSPAdaptorNIO *nio = ADAPTOR_NIO(samplerDev);
@@ -287,7 +292,7 @@ extern "C" {
 		   14, // mac hdr len
 		   pkt + 14, // payload
 		   pkt_len - 14, // captured payload len
-		   pkt_len, // whole pdu len
+		   pkt_len - 14, // whole pdu len
 		   drops,
 		   this_sample_n);
     }
