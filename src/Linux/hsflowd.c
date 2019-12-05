@@ -1240,13 +1240,14 @@ extern "C" {
   */
 
   static bool updatePollingInterval(HSP *sp) {
-    if(sp->sFlowSettings == NULL)
+    if(sp->sFlowSettings == NULL) {
+      // don't set actualPollingInterval until we have a config
+      // -- e.g. in case it is set to 0 rather than the default.
       return NO;
+    }
 
     // pick up the configured polling interval
-    uint32_t pollingInterval = sp->sFlowSettings ?
-      sp->sFlowSettings->pollingInterval :
-      SFL_DEFAULT_POLLING_INTERVAL;
+    uint32_t pollingInterval = sp->sFlowSettings->pollingInterval;
 
     // apply constraints
     if(pollingInterval > 0
@@ -1255,10 +1256,20 @@ extern "C" {
       myDebug(1, "override polling interval to min: %u", pollingInterval);
     }
 
-    bool changed = (pollingInterval != sp->actualPollingInterval);
-    // store for all to use and return the changed flag
-    sp->actualPollingInterval = pollingInterval;
-    return changed;
+    if(pollingInterval != sp->actualPollingInterval) {
+      // store for all to use
+      sp->actualPollingInterval = pollingInterval;
+      // make sure any existing pollers get the memo
+      if(sp->agent) {
+	SEMLOCK_DO(sp->sync_agent) {
+	  for(SFLPoller *pl = sp->agent->pollers; pl; pl = pl->nxt) {
+	    sfl_poller_set_sFlowCpInterval(pl, sp->actualPollingInterval);
+	  }
+	}
+      }
+      return YES;
+    }
+    return NO;
   }
 
   /*_________________---------------------------__________________
@@ -1492,13 +1503,7 @@ extern "C" {
     }
 
     // did the polling interval change?
-    if(updatePollingInterval(sp)) {
-      SEMLOCK_DO(sp->sync_agent) {
-	for(SFLPoller *pl = sp->agent->pollers; pl; pl = pl->nxt) {
-	  sfl_poller_set_sFlowCpInterval(pl, sp->actualPollingInterval);
-	}
-      }
-    }
+    updatePollingInterval(sp);
 
     // now that interfaces have been fully discovered (in evt_config_first)
     // and sflow agent is initialized, check to see if we should be exporting
