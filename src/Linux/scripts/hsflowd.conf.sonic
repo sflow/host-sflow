@@ -4,6 +4,8 @@
 sflow {
   # sonic {} loaded automatically
   # psample {} loaded automatically
+  # ====== detect new interfaces ======
+  refreshAdaptors=60
   # ======  Agent IP selection ======
   # determined by sonic config DB
   # ====== Sampling/Polling/Collectors ======
