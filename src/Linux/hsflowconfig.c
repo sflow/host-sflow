@@ -384,7 +384,9 @@ extern "C" {
       *p_devName = my_strdup(t->str);
       return t;
       // We now read the config file before we read the interfaces, so checking
-      // to ensure that this is a valid deviceName is now done later
+      // to ensure that this is a valid deviceName is now done later. Could therefore
+      // just use expectString() for this, but leave it here as a placeholder in
+      // case we want to tighten up the checks.
     }
     parseError(sp, tok, "expected device name", "");
     return NULL;
@@ -422,19 +424,20 @@ extern "C" {
     return NULL;
   }
 
-  // expectFormat
+  // expectString
 
-  static HSPToken *expectFormat(HSP *sp, HSPToken *tok, char **p_format)
+  static HSPToken *expectString(HSP *sp, HSPToken *tok, char **p_str, char *tokenType)
   {
     HSPToken *t = tok;
     t = t->nxt;
     if(t && t->str) {
-      *p_format = my_strdup(t->str);
+      *p_str = my_strdup(t->str);
       return t;
     }
-    parseError(sp, tok, "expected format", "");
+    parseError(sp, tok, "expected", tokenType);
     return NULL;
   }
+
 
   // expectRegex
 
@@ -447,19 +450,6 @@ extern "C" {
       return (*pattern) ? t : NULL;
     }
     parseError(sp, tok, "expected regex pattern", "");
-    return NULL;
-  }
-  // expectDevice
-
-  static HSPToken *expectNamespace(HSP *sp, HSPToken *tok, char **p_namespace)
-  {
-    HSPToken *t = tok;
-    t = t->nxt;
-    if(t && t->str) {
-      *p_namespace = my_strdup(t->str);
-      return t;
-    }
-    parseError(sp, tok, "expected namespace", "");
     return NULL;
   }
 
@@ -1444,7 +1434,7 @@ extern "C" {
 	      if((tok = expectInteger32(sp, tok, &col->udpPort, 1, 65535)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_NAMESPACE:
-	      if((tok = expectNamespace(sp, tok, &col->namespace)) == NULL) return NO;
+	      if((tok = expectString(sp, tok, &col->namespace, "namespace")) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_DEV:
 	      if((tok = expectDevice(sp, tok, &col->deviceName)) == NULL) return NO;
@@ -1758,10 +1748,10 @@ extern "C" {
 	      if((tok = expectONOFF(sp, tok, &sp->systemd.dropPriv)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_CGROUP_PROCS:
-	      if((tok = expectFormat(sp, tok, &sp->systemd.cgroup_procs)) == NULL) return NO;
+	      if((tok = expectString(sp, tok, &sp->systemd.cgroup_procs, "format")) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_CGROUP_ACCT:
-	      if((tok = expectFormat(sp, tok, &sp->systemd.cgroup_acct)) == NULL) return NO;
+	      if((tok = expectString(sp, tok, &sp->systemd.cgroup_acct, "format")) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_CGROUP_TRAFFIC:
 	      if((tok = expectONOFF(sp, tok, &sp->systemd.markTraffic)) == NULL) return NO;
@@ -1854,20 +1844,38 @@ extern "C" {
       if(tokenMatch(keyBuf, HSPTOKEN_COLLECTOR)) {
 	int valLen = my_strlen(valBuf);
 	if(valLen > 3) {
-	  uint32_t delim = strcspn(valBuf, "/");
-	  if(delim > 0 && delim < valLen) {
-	    valBuf[delim] = '\0';
-	    HSPCollector *coll = newCollector(st);
-	    if(lookupAddress(valBuf, (struct sockaddr *)&coll->sendSocketAddr,  &coll->ipAddr, 0) == NO) {
-	      myLog(LOG_ERR, "collector address lookup failed: %s", valBuf);
-	      // turn off the collector by clearing the address type
-	      coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
-	    }
-	    coll->udpPort = strtol(valBuf + delim + 1, NULL, 0);
-	    if(coll->udpPort < 1 || coll->udpPort > 65535) {
-	      myLog(LOG_ERR, "collector bad port: %d", coll->udpPort);
-	      // turn off the collector by clearing the address type
-	      coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	  HSPCollector *coll = newCollector(st);
+	  char partBuf[EV_MAX_EVT_DATALEN];
+	  uint32_t field = 0;
+	  char *str = valBuf;
+	  // collector=address/udpport/deviceName/namespace
+	  // This assumes we never have a '/' in one of these names.
+	  while(parseNextTok(&str, "/", YES, '"', YES, partBuf, EV_MAX_EVT_DATALEN)) {
+	    switch(field++) {
+	    case 0: // address
+	      if(lookupAddress(partBuf, (struct sockaddr *)&coll->sendSocketAddr, &coll->ipAddr, 0) == NO) {
+		myLog(LOG_ERR, "collector address lookup failed: %s", partBuf);
+		// turn off the collector by clearing the address type
+		coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	      }
+	      break;
+	    case 1: // udpport
+	      coll->udpPort = strtol(partBuf, NULL, 0);
+	      if(coll->udpPort < 1 || coll->udpPort > 65535) {
+		myLog(LOG_ERR, "collector bad port: %d", coll->udpPort);
+		// turn off the collector by clearing the address type
+		coll->ipAddr.type = SFLADDRESSTYPE_UNDEFINED;
+	      }
+	      break;
+	    case 2: // deviceName
+	      if(my_strlen(partBuf) > 0)
+		coll->deviceName = my_strdup(partBuf);
+	    case 3: // namespace
+	      if(my_strlen(partBuf) > 0)
+		coll->namespace = my_strdup(partBuf);
+	    default:
+	      myLog(LOG_ERR, "ignoring excess collector-spec fields");
+	      break;
 	    }
 	  }
 	}

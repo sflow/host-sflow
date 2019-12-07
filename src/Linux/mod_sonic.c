@@ -48,6 +48,7 @@ extern "C" {
 #define HSP_SONIC_FIELD_SFLOW_AGENT "agent_id"
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
+#define HSP_SONIC_FIELD_COLLECTOR_VRF "collector_vrf" // not defined yet, so name may change
   
 #define HSP_SONIC_DEFAULT_POLLING_INTERVAL 20
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
@@ -69,6 +70,7 @@ extern "C" {
     bool parseOK:1;
     char *ipStr;
     uint32_t port;
+    char *deviceName;
   } HSPSonicCollector;
 
   typedef struct _HSPSonicPort {
@@ -380,6 +382,8 @@ extern "C" {
 	  my_free(coll->collectorName);
 	if(coll->ipStr)
 	  my_free(coll->ipStr);
+	if(coll->deviceName)
+	  my_free(coll->deviceName);
 	my_free(coll);
       }
     }
@@ -979,6 +983,9 @@ extern "C" {
 	    if(coll->port > 65536)
 	      coll->parseOK = NO;
 	  }
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_COLLECTOR_VRF)) {
+	    coll->deviceName = my_strdup(f_val->str);
+	  }
 	}
       }
     }
@@ -1164,8 +1171,8 @@ extern "C" {
       UTHASH_WALK(mdata->collectors, coll) {
 	if(coll->parseOK) {
 	  num_servers++;
-	  // dynamic config requires the key=val form
-	  snprintf(cfgLine, EV_MAX_EVT_DATALEN, "collector=%s/%u", coll->ipStr, coll->port);
+	  // dynamic config requires the key=val form. Fields here are addr, port, dev and namespace
+	  snprintf(cfgLine, EV_MAX_EVT_DATALEN, "collector=%s/%u/%s", coll->ipStr, coll->port, coll->deviceName ?: "");
 	  EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
 	}
       }
