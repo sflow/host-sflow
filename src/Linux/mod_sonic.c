@@ -183,11 +183,15 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static uint32_t db_getU64(redisReply *reply) {
+  static uint64_t db_getU64(redisReply *reply) {
     uint64_t ans64 = 0;
     switch (reply->type) {
     case REDIS_REPLY_STRING:
+#if __WORDSIZE == 64
+      ans64 = strtoul(reply->str, NULL, 0);
+#else
       ans64 = strtoull(reply->str, NULL, 0);
+#endif
       break;
     case REDIS_REPLY_INTEGER:
       ans64 = (uint64_t)reply->integer;
@@ -766,8 +770,11 @@ extern "C" {
 	    prt->ctrs.errs_in = db_getU32(c_val);
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_DISCARDS))
 	    prt->ctrs.drops_in = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_OCTETS))
+
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_OCTETS)) {
+	    myDebug(1, "sonic portCounters bytes_in reply: %s=%s", c_name->str, db_replyStr(c_val, db->replyBuf, YES));
 	    prt->ctrs.bytes_in = db_getU64(c_val);
+	  }
 
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFOUT_UCASTS))
 	    prt->ctrs.pkts_out = db_getU32(c_val);
