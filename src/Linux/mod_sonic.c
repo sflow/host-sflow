@@ -795,6 +795,9 @@ extern "C" {
 	}
       }
     }
+
+    myDebug(1, "sonic getPortCounters(%s) bytes_in new: %"PRIu64, prt->portName, prt->ctrs.bytes_in);
+
     // sumbit counters for deltas to be accumulated
     SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
     if(adaptor) {
