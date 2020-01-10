@@ -375,9 +375,10 @@ extern "C" {
       coll->mark = YES;
   }
 
-  static void deleteMarkedCollectors(EVMod *mod) {
+  static int deleteMarkedCollectors(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     HSPSonicCollector *coll;
+    int nDeleted = 0;
     UTHASH_WALK(mdata->collectors, coll) {
       if(coll->mark) {
 	myDebug(1, "sonic collector removed %s", coll->collectorName);
@@ -389,8 +390,10 @@ extern "C" {
 	if(coll->deviceName)
 	  my_free(coll->deviceName);
 	my_free(coll);
+	nDeleted++;
       }
     }
+    return nDeleted;
   }
 
   /*_________________---------------------------__________________
@@ -1054,11 +1057,16 @@ extern "C" {
 	}
       }
     }
-    deleteMarkedCollectors(mod);
+    if(deleteMarkedCollectors(mod) > 0
+       && UTArrayN(mdata->newCollectors) == 0) {
+      // collector(s) deleted and none added, so we need to sync here.
+      // Otherwise the sync happens when the new collector(s) are fully discovered.
+      syncConfig(mod);
+    }
+
     // if this was initial startup then we need to bump the state-machine forward here
     if(mdata->state == HSP_SONIC_STATE_CONNECTED)
       mdata->state = HSP_SONIC_STATE_DISCOVER;
-    
   }
 
   static void db_getCollectorNames(EVMod *mod) {
