@@ -770,12 +770,8 @@ extern "C" {
 	    prt->ctrs.errs_in = db_getU32(c_val);
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_DISCARDS))
 	    prt->ctrs.drops_in = db_getU32(c_val);
-
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_OCTETS)) {
-	    myDebug(1, "sonic portCounters bytes_in reply: %s=%s", c_name->str, db_replyStr(c_val, db->replyBuf, YES));
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_OCTETS))
 	    prt->ctrs.bytes_in = db_getU64(c_val);
-	  }
-
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFOUT_UCASTS))
 	    prt->ctrs.pkts_out = db_getU32(c_val);
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFOUT_ERRORS))
@@ -802,8 +798,6 @@ extern "C" {
 	}
       }
     }
-
-    myDebug(1, "sonic getPortCounters(%s) bytes_in new: %"PRIu64, prt->portName, prt->ctrs.bytes_in);
 
     // sumbit counters for deltas to be accumulated
     SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);

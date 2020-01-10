@@ -731,13 +731,6 @@ extern "C" {
       // 64-bit byte counters
       NIO_COMPUTE_DELTA(bytes_in);
       NIO_COMPUTE_DELTA(bytes_out);
-
-      myDebug(1, "accumulateNioCounters(%s) bytes_in new: %"PRIu64" - old: %"PRIu64"  = delta: %"PRIu64" (max=%"PRIu64")",
-	      adaptor->deviceName,
-	      ctrs->bytes_in,
-	      nio->last_nio.bytes_in,
-	      delta.bytes_in,
-	      maxDeltaBytes);
     }
     else {
       // for case where byte counters are 32-bit,  we need
@@ -819,11 +812,6 @@ extern "C" {
       ET_ACCUMULATE(nio, mcasts_out);
       ET_ACCUMULATE(nio, bcasts_in);
       ET_ACCUMULATE(nio, bcasts_out);
-
-      myDebug(1, "accumulateNioCounters(%s) bytes_in new_total: %"PRIu64,
-	      adaptor->deviceName,
-	      nio->nio.bytes_in);
-
       
       if(nio->bond_slave
 	 && sp->synthesizeBondCounters) {
