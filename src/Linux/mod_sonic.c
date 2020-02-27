@@ -363,6 +363,7 @@ extern "C" {
        && create) {
       coll = (HSPSonicCollector *)my_calloc(sizeof(HSPSonicCollector));
       coll->collectorName = my_strdup(collectorName);
+      coll->port = SFL_DEFAULT_COLLECTOR_PORT;
       UTHashAdd(mdata->collectors, coll);
     }
     return coll;
@@ -989,6 +990,9 @@ extern "C" {
 	    coll->port = db_getU32(f_val);
 	    if(coll->port > 65536)
 	      coll->parseOK = NO;
+	    // interpret port=0 to mean port=<default>
+	    if(coll->port == 0)
+	      coll->port = SFL_DEFAULT_COLLECTOR_PORT;
 	  }
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_COLLECTOR_VRF)) {
 	    coll->deviceName = my_strdup(f_val->str);
