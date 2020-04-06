@@ -1054,9 +1054,11 @@ extern "C" {
 	  char *pcmem = parseNextTok(&p, "|", YES, 0, NO, buf, HSP_SONIC_MAX_COLLECTORNAME_LEN);
 	  if(my_strequal(pcmem, "SFLOW_COLLECTOR")) {
 	    char *collectorName = parseNextTok(&p, "|", YES, 0, NO, buf, HSP_SONIC_MAX_COLLECTORNAME_LEN);
-	    HSPSonicCollector *coll = getCollector(mod, collectorName, YES);
-	    coll->mark = NO;
-	    UTArrayPush(mdata->newCollectors, coll);
+	    if(collectorName) {
+	      HSPSonicCollector *coll = getCollector(mod, collectorName, YES);
+	      coll->mark = NO;
+	      UTArrayPush(mdata->newCollectors, coll);
+	    }
 	  }
 	}
       }
