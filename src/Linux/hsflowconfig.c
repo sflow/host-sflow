@@ -1870,9 +1870,11 @@ extern "C" {
 	    case 2: // deviceName
 	      if(my_strlen(partBuf) > 0)
 		coll->deviceName = my_strdup(partBuf);
+	      break;
 	    case 3: // namespace
 	      if(my_strlen(partBuf) > 0)
 		coll->namespace = my_strdup(partBuf);
+	      break;
 	    default:
 	      myLog(LOG_ERR, "ignoring excess collector-spec fields");
 	      break;
