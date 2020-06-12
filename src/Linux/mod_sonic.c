@@ -48,7 +48,7 @@ extern "C" {
 #define HSP_SONIC_FIELD_SFLOW_AGENT "agent_id"
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
-#define HSP_SONIC_FIELD_COLLECTOR_VRF "collector_vrf" // not defined yet, so name may change
+#define HSP_SONIC_FIELD_COLLECTOR_VRF "collector_vrf"
   
 #define HSP_SONIC_DEFAULT_POLLING_INTERVAL 20
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
@@ -976,6 +976,17 @@ extern "C" {
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
+      // reset fields that might have been deleted under our feet
+      coll->port = SFL_DEFAULT_COLLECTOR_PORT;
+      if(coll->ipStr) {
+	my_free(coll->ipStr);
+	coll->ipStr = NULL;
+      }
+      if(coll->deviceName) {
+	my_free(coll->deviceName);
+	coll->deviceName = NULL;
+      }
+      // now see what we got
       for(int ii = 0; ii < reply->elements; ii += 2) {
 	redisReply *f_name = reply->element[ii];
 	redisReply *f_val = reply->element[ii + 1];
