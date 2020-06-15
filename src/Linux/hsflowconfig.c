@@ -622,8 +622,12 @@ extern "C" {
 	// so let's hope the slave agents all do the right thing with that(!)
 	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
 	  char collectorStr[128];
-	  // <ip> <port> [<priority>]
-	  sprintf(collectorStr, "collector=%s %u\n", SFLAddress_print(&collector->ipAddr, ipbuf, 50), collector->udpPort);
+	  // ip/port/deviceName/namespace
+	  sprintf(collectorStr, "collector=%s/%u/%s/%s\n",
+		  SFLAddress_print(&collector->ipAddr, ipbuf, 50),
+		  collector->udpPort,
+		  collector->deviceName ?: "",
+		  collector->namespace ?: "");
 	  strArrayAdd(iplist, collectorStr);
 	}
       }
