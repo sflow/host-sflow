@@ -74,7 +74,7 @@ typedef struct _SFLDataSource_instance {
 #define SFL_COUNTERS_SAMPLE_TYPE SFLCounters_sample
   /* if index numbers are not going to use all 32 bits, then we can use
      the more compact encoding, with the dataSource class and index merged */
-#define SFL_DS_DATASOURCE(dsi) (((dsi).ds_class << 24) + (dsi).ds_index)
+#define SFL_DS_SOURCEID(cls,idx) ((cls) << 24) + (idx)
 #endif
 
 #define SFL_DS_INSTANCE(dsi) (dsi).ds_instance
@@ -140,6 +140,8 @@ typedef struct _SFLSampler {
   uint32_t samplesThisTick;
   uint32_t samplesLastTick;
   uint32_t backoffThreshold;
+  /* optional alias datasource index */
+  uint32_t ds_alias;
 } SFLSampler;
 
 /* declare */
@@ -165,6 +167,8 @@ typedef struct _SFLPoller {
   SFLReceiver *myReceiver;
   time_t countersCountdown;
   uint32_t countersSampleSeqNo;
+  /* optional alias datasource index */
+  uint32_t ds_alias;
 } SFLPoller;
 
 typedef void *(*allocFn_t)(void *magic,               /* callback to allocate space on heap */
@@ -312,6 +316,10 @@ void sfl_agent_set_now(SFLAgent *agent, time_t now_S, time_t now_nS);
 /* call this to change the designated sflow-agent-address */  
 void sfl_agent_set_address(SFLAgent *agent, SFLAddress *ip);
 
+/* use this to remap datasource index numbers on export */
+void sfl_sampler_set_dsAlias(SFLSampler *sampler, uint32_t ds_alias);
+void sfl_poller_set_dsAlias(SFLPoller *poller, uint32_t ds_alias);
+  
 /* convert stored "now" to mS since bootTime */
 uint32_t sfl_agent_uptime_mS(SFLAgent *agent);
 

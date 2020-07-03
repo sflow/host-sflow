@@ -358,6 +358,7 @@ extern "C" {
 
 // The generic start,tick,tock,final,end events are defined in evbus.h
 #define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // (csample *) building counter-sample
+#define HSPEVENT_INTF_COUNTER_SAMPLE "icsample"  // (csample *) building intf counter-sample
 #define HSPEVENT_FLOW_SAMPLE "flow_sample"       // (HSPPendingSample *) building flow-sample
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
 #define HSPEVENT_CONFIG_LINE "config_line"       // (line)...next config line
@@ -389,7 +390,14 @@ extern "C" {
     bool localTest:1;
     bool localSrc:1;
     bool localDst:1;
+    bool suppress:1;
   } HSPPendingSample;
+
+  typedef struct _HSPPendingCSample {
+    SFL_COUNTERS_SAMPLE_TYPE *cs;
+    SFLPoller *poller;
+    bool suppress:1;
+  } HSPPendingCSample;
 
   typedef enum {
     HSP_TELEMETRY_FLOW_SAMPLES=0,
@@ -398,6 +406,8 @@ extern "C" {
     HSP_TELEMETRY_RTFLOW_SAMPLES,
     HSP_TELEMETRY_DATAGRAMS,
     HSP_TELEMETRY_DROPPED_SAMPLES,
+    HSP_TELEMETRY_FLOW_SAMPLES_SUPPRESSED,
+    HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED,
     HSP_TELEMETRY_NUM_COUNTERS
   } EnumHSPTelemetry;
 
@@ -408,7 +418,9 @@ extern "C" {
     "rtmetric_samples",
     "rtflow_samples",
     "datagrams",
-    "dropped_samples"
+    "dropped_samples",
+    "flow_samples_suppressed",
+    "counter_samples_suppressed"
   };
 #endif
 

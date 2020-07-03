@@ -156,10 +156,26 @@ extern "C" {
 	  SFLADD_ELEMENT(cs, &sfp_elem);
 	}
 
-	SEMLOCK_DO(sp->sync_agent) {
-	  sfl_poller_writeCountersSample(poller, cs);
-	  sp->counterSampleQueued = YES;
-	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+	// circulate the cs to be annotated by other modules before it is sent out.
+	// This differs from the packet-sample treatment in that everything is
+	// on the stack.  If we ever wanted to delay counter samples until additional
+	// lookups were performed then this would all have to shift onto the heap.
+	HSPPendingCSample ps = { .poller = poller, .cs = cs };
+	EVEvent *evt_intf_cs = EVGetEvent(sp->pollBus, HSPEVENT_INTF_COUNTER_SAMPLE);
+	// TODO: can we specify pollBus only? Receiving this on another bus would
+	// be a disaster as we would not copy the whole structure here.
+	EVEventTx(sp->rootModule, evt_intf_cs, &ps, sizeof(ps));
+	// TODO: use HSPPendingCSample for HSPEVENT_HOST_COUNTER_SAMPLE too?
+	// (might be useful to consumers to get pointer to the poller too).
+	if(ps.suppress) {
+	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED]++;
+	}
+	else {
+	  SEMLOCK_DO(sp->sync_agent) {
+	    sfl_poller_writeCountersSample(poller, cs);
+	    sp->counterSampleQueued = YES;
+	    sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+	  }
 	}
       }
     }
@@ -255,13 +271,19 @@ extern "C" {
   {
     if(--ps->refCount == 0) {
       EVBus *bus = EVCurrentBus();
-      SEMLOCK_DO(sp->sync_agent) {
-	sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
-	sfl_sampler_writeFlowSample(ps->sampler, ps->fs);
-	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES]++;
+      if(ps->suppress) {
+	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES_SUPPRESSED]++;
+      }
+      else {
+	SEMLOCK_DO(sp->sync_agent) {
+	  sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
+	  sfl_sampler_writeFlowSample(ps->sampler, ps->fs);
+	  sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES]++;
+	}
       }
       void *ptr;
-      UTARRAY_WALK(ps->ptrsToFree, ptr) my_free(ptr);
+      UTARRAY_WALK(ps->ptrsToFree, ptr)
+	my_free(ptr);
       UTArrayFree(ps->ptrsToFree);
       my_free(ps->fs);
       my_free(ps);

@@ -109,6 +109,12 @@ so that the sflow collector will know to ignore the next delta.
 */
 void sfl_sampler_resetFlowSeqNo(SFLSampler *sampler) { sampler->flowSampleSeqNo = 0; }
 
+/*_________________---------------------------------__________________
+  _________________   datasource alias              __________________
+  -----------------_________________________________------------------
+Used where we want to export a remapped namespace for datasource index
+*/
+void sfl_sampler_set_dsAlias(SFLSampler *sampler, uint32_t ds_alias) { sampler->ds_alias = ds_alias; }
 
 /*_________________---------------------------__________________
   _________________    sfl_sampler_tick       __________________
@@ -141,11 +147,13 @@ void sfl_sampler_writeFlowSample(SFLSampler *sampler, SFL_FLOW_SAMPLE_TYPE *fs)
   /* increment the sequence number */
   fs->sequence_number = ++sampler->flowSampleSeqNo;
   /* copy the other header fields in */
+  uint32_t ds_class = SFL_DS_CLASS(sampler->dsi);
+  uint32_t ds_index = sampler->ds_alias ?: SFL_DS_INDEX(sampler->dsi);
 #ifdef SFL_USE_32BIT_INDEX
-  fs->ds_class = SFL_DS_CLASS(sampler->dsi);
-  fs->ds_index = SFL_DS_INDEX(sampler->dsi);
+  fs->ds_class = ds_class;
+  fs->ds_index = ds_index;
 #else
-  fs->source_id = SFL_DS_DATASOURCE(sampler->dsi);
+  fs->source_id = SFL_DS_SOURCEID(ds_class, ds_index);
 #endif
   /* the sampling rate may have been set already. */
   if(fs->sampling_rate == 0) fs->sampling_rate = sampler->sFlowFsPacketSamplingRate;
