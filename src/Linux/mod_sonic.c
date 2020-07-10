@@ -51,6 +51,7 @@ extern "C" {
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
 #define HSP_SONIC_FIELD_COLLECTOR_VRF "collector_vrf"
+#define HSP_SONIC_VRF_DEFAULT "default"
 
 #define HSP_SONIC_DEFAULT_POLLING_INTERVAL 20
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
@@ -1316,7 +1317,9 @@ extern "C" {
 	      coll->port = SFL_DEFAULT_COLLECTOR_PORT;
 	  }
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_COLLECTOR_VRF)) {
-	    coll->deviceName = my_strdup(f_val->str);
+	    // only set deviceName if the VRF is not the default
+	    if(!my_strequal(f_val->str, HSP_SONIC_VRF_DEFAULT))
+	      coll->deviceName = my_strdup(f_val->str);
 	  }
 	}
       }
