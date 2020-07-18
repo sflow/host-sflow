@@ -54,8 +54,28 @@ extern "C" {
 
   int UTNLGeneric_open(uint32_t mod_id);
 
+  uint32_t UTNLGeneric_pid(uint32_t mod_id);
+
   int UTNLGeneric_send(int sockfd, uint32_t mod_id, int type, int cmd, int req_type, void *req, int req_len, uint32_t seqNo);
-  
+
+  // linux/netlink.h defines struct nlattr but doesn't provide the walking macros NLA_OK, NLA_NEXT.
+  // rtnetlink.h provides RTA_OK, RTA_NEXT macros.
+  // nfnetlink_compat.h provides NFA_OK, NFA_NEXT macros.
+  // genetlink.h does not provide walking macros.
+  // libnl provides its own framework.
+  // So anticipating that eventually there will be a clean way to include just the struct nlattr
+  // walking macros for netlink (i.e. without having to link libnl) we will define them here with
+  // a UT prefix:
+
+#define UTNLA_OK(nla,len)	((len) > 0 && (nla)->nla_len >= sizeof(struct nlattr) \
+	&& (nla)->nla_len <= (len))
+#define UTNLA_NEXT(nla,attrlen)	((attrlen) -= NLA_ALIGN((nla)->nla_len), \
+	(struct nlattr *)(((char *)(nla)) + NLA_ALIGN((nla)->nla_len)))
+#define UTNLA_LENGTH(len)	(NLA_ALIGN(sizeof(struct nlattr)) + (len))
+#define UTNLA_SPACE(len)	NLA_ALIGN(UTNLA_LENGTH(len))
+#define UTNLA_DATA(nla)   ((void *)(((char *)(nla)) + UTNLA_LENGTH(0)))
+#define UTNLA_PAYLOAD(nla) ((int)((nla)->nla_len) - UTNLA_LENGTH(0))
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

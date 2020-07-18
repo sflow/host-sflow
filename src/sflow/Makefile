@@ -17,6 +17,7 @@ CC= gcc
 OBJS= sflow_agent.o \
       sflow_sampler.o \
       sflow_poller.o \
+      sflow_notifier.o \
       sflow_receiver.o
 
 libsflow.a: $(OBJS)
@@ -37,5 +38,6 @@ clean:
 sflow_agent.o: sflow_agent.c $(HEADERS)
 sflow_sampler.o: sflow_sampler.c $(HEADERS)
 sflow_poller.o: sflow_poller.c $(HEADERS)
+sflow_notifier.o: sflow_notifier.c $(HEADERS)
 sflow_receiver.o: sflow_receiver.c $(HEADERS)
 

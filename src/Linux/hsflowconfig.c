@@ -61,6 +61,7 @@ extern "C" {
     HSPOBJ_ULOG,
     HSPOBJ_NFLOG,
     HSPOBJ_PSAMPLE,
+    HSPOBJ_DROPMON,
     HSPOBJ_PCAP,
     HSPOBJ_TCP,
     HSPOBJ_CUMULUS,
@@ -1268,6 +1269,11 @@ extern "C" {
 	    sp->psample.psample = YES;
 	    level[++depth] = HSPOBJ_PSAMPLE;
 	    break;
+	  case HSPTOKEN_DROPMON:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->dropmon.dropmon = YES;
+	    level[++depth] = HSPOBJ_DROPMON;
+	    break;
 	  case HSPTOKEN_PCAP:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->pcap.pcap = YES;
@@ -1564,6 +1570,20 @@ extern "C" {
 	    switch(tok->stok) {
 	    case HSPTOKEN_GROUP:
 	      if((tok = expectInteger32(sp, tok, &sp->psample.group, 1, 32)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_DROPMON:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_GROUP:
+	      if((tok = expectInteger32(sp, tok, &sp->dropmon.group, 1, 32)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

@@ -63,6 +63,7 @@ void sfl_agent_release(SFLAgent *agent)
  
   SFLSampler *sm;
   SFLPoller *pl;
+  SFLNotifier *nf;
   SFLReceiver *rcv;
    /* release and free the samplers */
   for(sm = agent->samplers; sm != NULL; ) {
@@ -79,6 +80,14 @@ void sfl_agent_release(SFLAgent *agent)
     pl = nextPl;
   }
   agent->pollers = NULL;
+
+  /* release and free the notifiers */
+  for( nf = agent->notifiers; nf != NULL; ) {
+    SFLNotifier *nextNf = nf->nxt;
+    sflFree(agent, nf);
+    nf = nextNf;
+  }
+  agent->notifiers = NULL;
 
   /* release and free the receivers */
   for( rcv = agent->receivers; rcv != NULL; ) {
@@ -105,6 +114,7 @@ void sfl_agent_tick(SFLAgent *agent, time_t now)
   SFLReceiver *rcv;
   SFLSampler *sm;
   SFLPoller *pl;
+  SFLNotifier *nf;
 
   agent->now = now;
   /* pollers use ticks to decide when to ask for counters */
@@ -113,6 +123,8 @@ void sfl_agent_tick(SFLAgent *agent, time_t now)
   for( rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt) sfl_receiver_tick(rcv, now);
   /* samplers use ticks to decide when they are sampling too fast */
   for( sm = agent->samplers; sm != NULL; sm = sm->nxt) sfl_sampler_tick(sm, now);
+  /* notifiers use ticks to set leaky-bucket quota */
+  for( nf = agent->notifiers; nf != NULL; nf = nf->nxt) sfl_notifier_tick(nf, now);
 }
 
 /*_________________---------------------------__________________
@@ -258,6 +270,31 @@ SFLPoller *sfl_agent_addPoller(SFLAgent *agent,
 }
 
 /*_________________---------------------------__________________
+  _________________   sfl_agent_addNotifier   __________________
+  -----------------___________________________------------------
+*/
+
+SFLNotifier *sfl_agent_addNotifier(SFLAgent *agent, SFLDataSource_instance *pdsi)
+{
+  SFLNotifier *newnf;
+
+  // keep the list sorted
+  SFLNotifier *prev = NULL, *nf = agent->notifiers;
+  for(; nf != NULL; prev = nf, nf = nf->nxt) {
+    int64_t cmp = sfl_dsi_compare(pdsi, &nf->dsi);
+    if(cmp == 0) return nf;  // found - return existing one
+    if(cmp < 0) break;       // insert here
+  }
+  // either we found the insert point, or reached the end of the list...
+  newnf = (SFLNotifier *)sflAlloc(agent, sizeof(SFLNotifier));
+  sfl_notifier_init(newnf, agent, pdsi);
+  if(prev) prev->nxt = newnf;
+  else agent->notifiers = newnf;
+  newnf->nxt = nf;
+  return newnf;
+}
+
+/*_________________---------------------------__________________
   _________________  sfl_agent_removeSampler  __________________
   -----------------___________________________------------------
 */
@@ -294,6 +331,27 @@ int sfl_agent_removePoller(SFLAgent *agent, SFLDataSource_instance *pdsi)
       if(prev == NULL) agent->pollers = pl->nxt;
       else prev->nxt = pl->nxt;
       sflFree(agent, pl);
+      return 1;
+    }
+  }
+  /* not found */
+  return 0;
+}
+
+/*_________________---------------------------__________________
+  _________________  sfl_agent_removeNotifier __________________
+  -----------------___________________________------------------
+*/
+
+int sfl_agent_removeNotifier(SFLAgent *agent, SFLDataSource_instance *pdsi)
+{
+  SFLNotifier *prev, *nf;
+  /* find it, unlink it and free it */
+  for(prev = NULL, nf = agent->notifiers; nf != NULL; prev = nf, nf = nf->nxt) {
+    if(sfl_dsi_compare(pdsi, &nf->dsi) == 0) {
+      if(prev == NULL) agent->notifiers = nf->nxt;
+      else prev->nxt = nf->nxt;
+      sflFree(agent, nf);
       return 1;
     }
   }
@@ -383,6 +441,22 @@ SFLPoller *sfl_agent_getPoller(SFLAgent *agent, SFLDataSource_instance *pdsi)
 }
 
 /*_________________---------------------------__________________
+  _________________  sfl_agent_getNotifier    __________________
+  -----------------___________________________------------------
+*/
+
+SFLNotifier *sfl_agent_getNotifier(SFLAgent *agent, SFLDataSource_instance *pdsi)
+{
+  SFLNotifier *nf;
+
+  /* find it and return it */
+  for( nf = agent->notifiers; nf != NULL; nf = nf->nxt)
+    if(sfl_dsi_compare(pdsi, &nf->dsi) == 0) return nf;
+  /* not found */
+  return NULL;
+}
+
+/*_________________---------------------------__________________
   _________________  sfl_agent_getReceiver    __________________
   -----------------___________________________------------------
 */
@@ -426,6 +500,19 @@ SFLPoller *sfl_agent_getNextPoller(SFLAgent *agent, SFLDataSource_instance *pdsi
 }
 
 /*_________________---------------------------__________________
+  _________________ sfl_agent_getNextNotifier __________________
+  -----------------___________________________------------------
+*/
+
+SFLNotifier *sfl_agent_getNextNotifier(SFLAgent *agent, SFLDataSource_instance *pdsi)
+{
+  /* return the one lexograpically just after it - assume they are sorted
+     correctly according to the lexographical ordering of the object ids */
+  SFLNotifier *nf = sfl_agent_getNotifier(agent, pdsi);
+  return nf ? nf->nxt : NULL;
+}
+
+/*_________________---------------------------__________________
   _________________ sfl_agent_getNextReceiver __________________
   -----------------___________________________------------------
 */
@@ -446,8 +533,9 @@ void sfl_agent_resetReceiver(SFLAgent *agent, SFLReceiver *receiver)
   SFLReceiver *rcv;
   SFLSampler *sm;
   SFLPoller *pl;
-
-  /* tell samplers and pollers to stop sending to this receiver */
+  SFLNotifier *nf;
+  
+  /* tell samplers, pollers and notifiers to stop sending to this receiver */
   /* first get his receiverIndex */
   uint32_t rcvIdx = 0;
   for( rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt) {
@@ -459,6 +547,9 @@ void sfl_agent_resetReceiver(SFLAgent *agent, SFLReceiver *receiver)
       
       for( pl = agent->pollers; pl != NULL; pl = pl->nxt)
 	if(sfl_poller_get_sFlowCpReceiver(pl) == rcvIdx) sfl_poller_set_sFlowCpReceiver(pl, 0);
+
+      for( nf = agent->notifiers; nf != NULL; nf = nf->nxt)
+	if(sfl_notifier_get_sFlowEsReceiver(nf) == rcvIdx) sfl_notifier_set_sFlowEsReceiver(nf, 0);
 
       break;
     }

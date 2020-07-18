@@ -138,7 +138,7 @@ extern "C" {
     than one module in this process wants to bind a netlink socket
   */
 
-  static uint32_t UTNLGeneric_pid(uint32_t mod_id) {
+  uint32_t UTNLGeneric_pid(uint32_t mod_id) {
     return (mod_id << 16) | getpid();
   }
 

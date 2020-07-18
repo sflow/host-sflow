@@ -537,6 +537,10 @@ extern "C" {
       uint32_t ds_options;
     } psample;
     struct {
+      bool dropmon;
+      uint32_t group;
+    } dropmon;
+    struct {
       bool pcap;
       HSPPcap *pcaps;
       uint32_t numPcaps;

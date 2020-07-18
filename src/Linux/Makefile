@@ -28,7 +28,7 @@ endif
 INSTALL=install
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX SONIC DBUS SYSTEMD EAPI
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX SONIC DBUS SYSTEMD EAPI
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD
 FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
@@ -175,6 +175,9 @@ LIBS_NFLOG= -lnfnetlink
 CFLAGS_PSAMPLE=
 LIBS_PSAMPLE=
 
+CFLAGS_DROPMON=
+LIBS_DROPMON=
+
 CFLAGS_PCAP=
 LIBS_PCAP=-lpcap
 
@@ -259,6 +262,7 @@ OBJS_DOCKER=mod_docker.o
 OBJS_ULOG=mod_ulog.o
 OBJS_NFLOG=mod_nflog.o
 OBJS_PSAMPLE=mod_psample.o util_netlink.o
+OBJS_DROPMON=mod_dropmon.o util_netlink.o
 OBJS_PCAP=mod_pcap.o
 OBJS_TCP=mod_tcp.o util_netlink.o
 OBJS_NVML=mod_nvml.o
@@ -295,6 +299,8 @@ ULOG: mod_ulog.so
 NFLOG: mod_nflog.so
 
 PSAMPLE: mod_psample.so
+
+DROPMON: mod_dropmon.so
 
 PCAP: mod_pcap.so
 
@@ -378,6 +384,14 @@ mod_psample.so: $(OBJS_PSAMPLE)
 
 #----------------------------
 
+
+mod_dropmon.o: mod_dropmon.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c  $(CFLAGS_DROPMON)
+
+mod_dropmon.so: $(OBJS_DROPMON)
+	$(LD) -o $@ $(OBJS_DROPMON) $(LDFLAGS_SHARED) $(LIBS_DROPMON)
+
+#----------------------------
 
 mod_pcap.o: mod_pcap.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_PCAP)
@@ -559,6 +573,7 @@ mod_docker.o: mod_docker.c $(HEADERS)
 mod_ulog.o: mod_ulog.c $(HEADERS)
 mod_nflog.o: mod_nflog.c $(HEADERS)
 mod_psample.o: mod_psample.c $(HEADERS)
+mod_dropmon.o: mod_dropmon.c $(HEADERS)
 mod_pcap.o: mod_pcap.c $(HEADERS)
 mod_tcp.o: mod_tcp.c $(HEADERS)
 mod_nvml.o: mod_nvml.c $(HEADERS)

@@ -633,26 +633,19 @@ static void putSFP(SFLReceiver *receiver, SFLSFP_counters *sfp) {
 }
  
    
-/*_________________-----------------------------__________________
-  _________________      computeFlowSampleSize  __________________
-  -----------------_____________________________------------------
+/*_________________-------------------------------------__________________
+  _________________      computeFlowSampleElementsSize  __________________
+  -----------------_____________________________________------------------
 */
 
-static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs)
+static int computeFlowSampleElementsSize(SFLReceiver *receiver, SFLFlow_sample_element *elements, uint32_t *nFound)
 {
   SFLFlow_sample_element *elem;
   uint32_t elemSiz;
-#ifdef SFL_USE_32BIT_INDEX
-  uint siz = 52; /* tag, length, sequence_number, ds_class, ds_index, sampling_rate,
-		     sample_pool, drops, inputFormat, input, outputFormat, output, number of elements */
-#else
-  uint32_t siz = 40; /* tag, length, sequence_number, source_id, sampling_rate,
-		     sample_pool, drops, input, output, number of elements */
-#endif
-
-  fs->num_elements = 0; /* we're going to count them again even if this was set by the client */
-  for(elem = fs->elements; elem != NULL; elem = elem->nxt) {
-    fs->num_elements++;
+  uint siz = 4; /* num_elements */
+  uint32_t num_elements = 0;
+  for(elem = elements; elem != NULL; elem = elem->nxt) {
+    num_elements++;
     siz += 8; /* tag, length */
     elemSiz = 0;
     switch(elem->tag) {
@@ -702,72 +695,43 @@ static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     elem->length = elemSiz;
     siz += elemSiz;
   }
-
+  *nFound = num_elements;
   return siz;
 }
-
-/*_________________-------------------------------__________________
-  _________________ sfl_receiver_writeFlowSample  __________________
-  -----------------_______________________________------------------
+   
+/*_________________-----------------------------__________________
+  _________________      computeFlowSampleSize  __________________
+  -----------------_____________________________------------------
 */
 
-int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs)
+static int computeFlowSampleSize(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs)
 {
-  int packedSize;
-  SFLFlow_sample_element *elem;
+#ifdef SFL_USE_32BIT_INDEX
+  int siz = 48; /* tag, length, sequence_number, ds_class, ds_index, sampling_rate,
+		   sample_pool, drops, inputFormat, input, outputFormat, output */
+#else
+  int siz = 36; /* tag, length, sequence_number, source_id, sampling_rate,
+		   sample_pool, drops, input, output */
+#endif
 
-  if(fs == NULL) return -1;
-  if((packedSize = computeFlowSampleSize(receiver, fs)) == -1) return -1;
-
-  // check in case this one sample alone is too big for the datagram
-  // in fact - if it is even half as big then we should ditch it. Very
-  // important to avoid overruning the packet buffer.
-  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize)) {
-    sflError(receiver, "flow sample too big for datagram");
+  int elemListSiz = computeFlowSampleElementsSize(receiver, fs->elements, &fs->num_elements);
+  if(elemListSiz == -1)
     return -1;
-  }
+  return siz + elemListSiz;
+}
 
-  // if the sample pkt is full enough so that this sample might put
-  // it over the limit, then we should send it now before going on.
-  if((receiver->sampleCollector.pktlen + packedSize) >= receiver->sFlowRcvrMaximumDatagramSize)
-    sendSample(receiver);
-    
-  receiver->sampleCollector.numSamples++;
+/*_________________---------------------------------------__________________
+  _________________ sfl_receiver_writeFlowSampleElements  __________________
+  -----------------_______________________________________------------------
+*/
 
-#ifdef SFL_USE_32BIT_INDEX
-  putNet32(receiver, SFLFLOW_SAMPLE_EXPANDED);
-#else
-  putNet32(receiver, SFLFLOW_SAMPLE);
-#endif
-
-  putNet32(receiver, packedSize - 8); // don't include tag and len
-  putNet32(receiver, fs->sequence_number);
-
-#ifdef SFL_USE_32BIT_INDEX
-  putNet32(receiver, fs->ds_class);
-  putNet32(receiver, fs->ds_index);
-#else
-  putNet32(receiver, fs->source_id);
-#endif
-
-  putNet32(receiver, fs->sampling_rate);
-  putNet32(receiver, fs->sample_pool);
-  putNet32(receiver, fs->drops);
-
-#ifdef SFL_USE_32BIT_INDEX
-  putNet32(receiver, fs->inputFormat);
-  putNet32(receiver, fs->input);
-  putNet32(receiver, fs->outputFormat);
-  putNet32(receiver, fs->output);
-#else
-  putNet32(receiver, fs->input);
-  putNet32(receiver, fs->output);
-#endif
-
-  putNet32(receiver, fs->num_elements);
-
-  for(elem = fs->elements; elem != NULL; elem = elem->nxt) {
-
+static int sfl_receiver_writeFlowSampleElements(SFLReceiver *receiver, SFLFlow_sample_element *elements)
+{
+  SFLFlow_sample_element *elem;
+  int nFound = 0;
+  
+  for(elem = elements; elem != NULL; elem = elem->nxt) {
+    nFound++;
     putNet32(receiver, elem->tag);
     putNet32(receiver, elem->length); // length cached in computeFlowSampleSize()
 
@@ -833,6 +797,143 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
       break;
     }
   }
+  return nFound;
+}
+
+/*_________________-------------------------------__________________
+  _________________ sfl_receiver_writeFlowSample  __________________
+  -----------------_______________________________------------------
+*/
+
+int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs)
+{
+  int packedSize;
+
+  if(fs == NULL) return -1;
+  if((packedSize = computeFlowSampleSize(receiver, fs)) == -1) return -1;
+
+  // check in case this one sample alone is too big for the datagram
+  // in fact - if it is even half as big then we should ditch it. Very
+  // important to avoid overruning the packet buffer.
+  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize)) {
+    sflError(receiver, "flow sample too big for datagram");
+    return -1;
+  }
+
+  // if the sample pkt is full enough so that this sample might put
+  // it over the limit, then we should send it now before going on.
+  if((receiver->sampleCollector.pktlen + packedSize) >= receiver->sFlowRcvrMaximumDatagramSize)
+    sendSample(receiver);
+    
+  receiver->sampleCollector.numSamples++;
+
+#ifdef SFL_USE_32BIT_INDEX
+  putNet32(receiver, SFLFLOW_SAMPLE_EXPANDED);
+#else
+  putNet32(receiver, SFLFLOW_SAMPLE);
+#endif
+
+  putNet32(receiver, packedSize - 8); // don't include tag and len
+  putNet32(receiver, fs->sequence_number);
+
+#ifdef SFL_USE_32BIT_INDEX
+  putNet32(receiver, fs->ds_class);
+  putNet32(receiver, fs->ds_index);
+#else
+  putNet32(receiver, fs->source_id);
+#endif
+
+  putNet32(receiver, fs->sampling_rate);
+  putNet32(receiver, fs->sample_pool);
+  putNet32(receiver, fs->drops);
+
+#ifdef SFL_USE_32BIT_INDEX
+  putNet32(receiver, fs->inputFormat);
+  putNet32(receiver, fs->input);
+  putNet32(receiver, fs->outputFormat);
+  putNet32(receiver, fs->output);
+#else
+  putNet32(receiver, fs->input);
+  putNet32(receiver, fs->output);
+#endif
+
+  putNet32(receiver, fs->num_elements);
+  int nFound = sfl_receiver_writeFlowSampleElements(receiver, fs->elements);
+  assert(nFound == fs->num_elements);
+
+  // sanity check
+  assert(((u_char *)receiver->sampleCollector.datap
+	  - (u_char *)receiver->sampleCollector.data
+	  - receiver->sampleCollector.pktlen)  == (uint32_t)packedSize);
+
+  // update the pktlen
+  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+
+  // if the sample pkt is full enough so that another packet-sample the same size would
+  // put it over the size threshold, then just send it now.  After all,  if we waited and then
+  // reacted when the next sample came we would just be sending the same datagram... only delayed.
+  if((receiver->sampleCollector.pktlen + packedSize) >= receiver->sFlowRcvrMaximumDatagramSize)
+    sendSample(receiver);
+
+  return packedSize;
+}
+   
+/*_________________-----------------------------__________________
+  _________________      computeEventSampleSize  __________________
+  -----------------_____________________________------------------
+*/
+
+static int computeEventSampleSize(SFLReceiver *receiver, SFLEvent_discarded_packet *es)
+{
+  int siz = 36; /* tag, length, sequence_number, ds_class, ds_index,
+		   drops, input, output, reason */
+  int elemListSiz = computeFlowSampleElementsSize(receiver, es->elements, &es->num_elements);
+  if(elemListSiz == -1)
+    return -1;
+  return siz + elemListSiz;
+}
+
+/*_________________-------------------------------__________________
+  _________________ sfl_receiver_writeEventSample __________________
+  -----------------_______________________________------------------
+*/
+
+int sfl_receiver_writeEventSample(SFLReceiver *receiver, SFLEvent_discarded_packet *es)
+{
+  int packedSize;
+
+  if(es == NULL) return -1;
+  if((packedSize = computeEventSampleSize(receiver, es)) == -1) return -1;
+
+  // check in case this one sample alone is too big for the datagram
+  // in fact - if it is even half as big then we should ditch it. Very
+  // important to avoid overruning the packet buffer.
+  if(packedSize > (int)(receiver->sFlowRcvrMaximumDatagramSize)) {
+    sflError(receiver, "flow sample too big for datagram");
+    return -1;
+  }
+
+  // if the sample pkt is full enough so that this sample might put
+  // it over the limit, then we should send it now before going on.
+  if((receiver->sampleCollector.pktlen + packedSize) >= receiver->sFlowRcvrMaximumDatagramSize)
+    sendSample(receiver);
+    
+  receiver->sampleCollector.numSamples++;
+
+  putNet32(receiver, SFLEVENT_DISCARDED_PACKET);
+  putNet32(receiver, packedSize - 8); // don't include tag and len
+  putNet32(receiver, es->sequence_number);
+
+  putNet32(receiver, es->ds_class);
+  putNet32(receiver, es->ds_index);
+  putNet32(receiver, es->drops);
+  putNet32(receiver, es->input);
+  putNet32(receiver, es->output);
+  putNet32(receiver, es->reason);
+
+  putNet32(receiver, es->num_elements);
+  int nFound = sfl_receiver_writeFlowSampleElements(receiver, es->elements);
+  assert(nFound == es->num_elements);
 
   // sanity check
   assert(((u_char *)receiver->sampleCollector.datap
