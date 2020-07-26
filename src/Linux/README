@@ -5,17 +5,14 @@ Host sFlow Probe
 ================
 hsflowtokens.h	        - keywords for the config file
 hsflowconfig.c	        - parser for the config file
-hsflowd.h		- structure definitions
+hsflowd.[ch]		- the Host sFlow daemon (main() is here)
 read*.c 		- code to read OS-specific counters
-hsflowd.c		- the Host sFlow daemon (main() is here)
-scripts/hsflowd         - script used by init(1) for starting/stopping daemon
+evbus.[ch]		- miniature event-bus framework
+util*.[ch]		- useful data structures and utilities
+mod_*.c			- optional feature modules
+dropPoints_*.h		- mod_dropmon configuration
+scripts/hsflowd.service - script used by systemd for starting/stopping daemon
 scripts/hsflowd.conf    - seed configuration file. "make install" will copy
                           this to /etc/hsflowd.conf
 scripts/ulog_sampling   - example script to configure iptables(1) packet-sampling
-
-sFlow OVS daemon
-================
-sflowovsd.h		- structure definitions
-sflowovsd.c		- daemon to propagate sFlow config from hsflowd to Open VSwitch
-scripts/sflowovsd       - script used by init(1) for starting/stopping daemon
 
