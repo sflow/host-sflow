@@ -1272,6 +1272,7 @@ extern "C" {
 	  case HSPTOKEN_DROPMON:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->dropmon.dropmon = YES;
+	    sp->dropmon.group = 1;
 	    level[++depth] = HSPOBJ_DROPMON;
 	    break;
 	  case HSPTOKEN_PCAP:

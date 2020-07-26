@@ -1269,6 +1269,12 @@ typedef struct _SFLCounters_sample_expanded {
   SFLCounters_sample_element *elements;
 } SFLCounters_sample_expanded;
 
+#define SFL_DROP(name, code) SFLDrop_ ## name=code,
+typedef enum {
+#include "sflow_drop.h"
+} EnumSFLDropReason;
+#undef SFL_DROP
+
 typedef struct _SFLEvent_discarded_packet {
   uint32_t sequence_number;
   uint32_t ds_class; /* EXPANDED */
@@ -1276,7 +1282,7 @@ typedef struct _SFLEvent_discarded_packet {
   uint32_t drops;
   uint32_t input; /* ifIndex */
   uint32_t output; /* ifIndex */
-  uint32_t reason;
+  EnumSFLDropReason reason;
   uint32_t num_elements;
   SFLFlow_sample_element *elements;
 } SFLEvent_discarded_packet;

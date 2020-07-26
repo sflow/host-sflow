@@ -14,6 +14,8 @@ extern "C" {
 #include <linux/genetlink.h>
 #include <linux/net_dropmon.h>
 #include <net/if.h>
+#include <fnmatch.h>
+
 #include "util_netlink.h"
 
 #ifndef SOL_NETLINK
@@ -24,10 +26,6 @@ extern "C" {
   #define DROPMON_GENL_NAME "NET_DM"
 #endif
 
-  // these will go away - just to get things to compile:
-#define DROPMON_NL_MCGRP_SAMPLE_NAME "mcgrp"
-
-  
 #define HSP_DROPMON_READNL_RCV_BUF 8192
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000
@@ -38,8 +36,25 @@ extern "C" {
     HSP_DROPMON_STATE_WAIT,
     HSP_DROPMON_STATE_JOIN_GROUP,
     HSP_DROPMON_STATE_CONFIGURE,
+    HSP_DROPMON_STATE_START,
     HSP_DROPMON_STATE_RUN } EnumDropmonState;
+
+  static const char *HSPDropmonStateNames[] = {
+    "INIT",
+    "GET_FAMILY",
+    "WAIT",
+    "JOIN_GROUP",
+    "CONFIGURE",
+    "START",
+    "RUN"
+  };
   
+  typedef struct _HSPDropPoint {
+    char *dropPoint;
+    EnumSFLDropReason reason;
+    bool pattern;
+  } HSPDropPoint;
+    
   typedef struct _HSP_mod_DROPMON {
     EnumDropmonState state;
     EVBus *packetBus;
@@ -54,8 +69,186 @@ extern "C" {
     uint32_t headerSize;
     uint32_t maxAttr;
     uint32_t last_grp_seq;
+    UTHash *dropPoints_sw;
+    UTHash *dropPoints_hw;
+    UTArray *dropPatterns_sw;
+    UTArray *dropPatterns_hw;
+    UTHash *notifiers;
   } HSP_mod_DROPMON;
 
+
+  /*_________________---------------------------__________________
+    _________________     state change          __________________
+    -----------------___________________________------------------
+  */
+
+  static void setState(EVMod *mod, EnumDropmonState newState) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    if(newState != mdata->state) {
+      myDebug(1, "dropmon state %s -> %s",
+	      HSPDropmonStateNames[mdata->state],
+	      HSPDropmonStateNames[newState]);
+      mdata->state = newState;
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________      addDropPoint         __________________
+    -----------------___________________________------------------
+  */
+
+  static HSPDropPoint *newDropPoint(char *dropPointStr, bool pattern, EnumSFLDropReason reason) {
+    HSPDropPoint *dp = (HSPDropPoint *)my_calloc(sizeof(HSPDropPoint));
+    dp->dropPoint = my_strdup(dropPointStr);
+    dp->pattern = pattern;
+    dp->reason = reason;
+    return dp;
+  }
+
+  static void addDropPoint_sw(EVMod *mod, HSPDropPoint *dropPoint) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    if(dropPoint->pattern)
+      UTArrayAdd(mdata->dropPatterns_sw, dropPoint);
+    else
+      UTHashAdd(mdata->dropPoints_sw, dropPoint);
+  }
+
+  static void addDropPoint_hw(EVMod *mod, HSPDropPoint *dropPoint) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    if(dropPoint->pattern)
+      UTArrayAdd(mdata->dropPatterns_hw, dropPoint);
+    else
+      UTHashAdd(mdata->dropPoints_hw, dropPoint);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    getDropPoint           __________________
+    -----------------___________________________------------------
+  */
+
+  static HSPDropPoint *getDropPoint_sw(EVMod *mod, char *sw_symbol) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSPDropPoint search = { .dropPoint = sw_symbol };
+    HSPDropPoint *dp = UTHashGet(mdata->dropPoints_sw, &search);
+    if(!dp) {
+      // see if we can find it via a pattern
+      UTARRAY_WALK(mdata->dropPatterns_sw, dp) {
+	if(fnmatch(dp->dropPoint, sw_symbol, FNM_CASEFOLD) == 0) {
+	  // yes - add the direct lookup to the hash table for next time and return it
+	  myDebug(1, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
+	  addDropPoint_sw(mod, newDropPoint(sw_symbol, NO, dp->reason));
+	  break;
+	}
+      }
+    }
+    return dp;
+  }
+
+  static HSPDropPoint *getDropPoint_hw(EVMod *mod, char *group, char *dropPointStr) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSPDropPoint search = { .dropPoint = dropPointStr };
+    HSPDropPoint *dp = UTHashGet(mdata->dropPoints_hw, &search);
+    if(!dp && group) {
+      // see if we have an entry just for the group
+      search.dropPoint = group;
+      dp = UTHashGet(mdata->dropPoints_hw, &search);
+    }
+    if(!dp) {
+      // see if we can find it via a pattern
+      UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
+	if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
+	  // yes - add the direct lookup to the hash table for next time
+	  addDropPoint_hw(mod, newDropPoint(dropPointStr, NO, dp->reason));
+	  break;
+	}
+      }
+    }
+    return dp;
+  }
+
+  /*_________________---------------------------__________________
+    _________________   sFlow reason codes      __________________
+    -----------------___________________________------------------
+  */
+
+#define SFL_DROP(nm,cd) { .name=#nm, .code=cd },
+  static struct { char *name; int code; } sflow_codes[] = {
+#include "sflow_drop.h"
+  };
+#undef SFL_DROP
+
+  static int getReasonCode(char *reasonName) {
+    int entries = sizeof(sflow_codes) / sizeof(sflow_codes[0]);
+    for(int ii = 0; ii < entries; ii++) {
+      if(my_strequal(reasonName, sflow_codes[ii].name))
+	return sflow_codes[ii].code;
+    }
+    return -1;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    loadDropPoints         __________________
+    -----------------___________________________------------------
+  */
+
+  typedef struct {
+    char *op;
+    char *dp;
+    char *reason;
+  } HSPDropPointLoader;
+
+#define HSP_DROPPOINT(op,dp,reason) { #op, #dp, #reason },
+  static HSPDropPointLoader LoadDropPoints_sw[] = {
+#include "dropPoints_sw.h"
+  };
+  static HSPDropPointLoader LoadDropPoints_hw[] = {
+#include "dropPoints_hw.h"
+  };
+#undef HSP_DROPPOINT
+
+#define HSP_ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+
+  static HSPDropPoint *buildDropPoint(HSPDropPointLoader *loader) {
+    myDebug(1, "loading dropPoint %s %s: reason=\"%s\"",
+	    loader->op,
+	    loader->dp,
+	    loader->reason);
+
+    int reasonCode = -1;
+    // allow a blank reason to go through as reasonCode==-1,
+    // otherwise fail if the lookup fails.
+    if(loader->reason
+       && my_strlen(loader->reason) > 0) {
+      reasonCode = getReasonCode(loader->reason);
+      if(reasonCode < 0) {
+	myDebug(1, "skipping dropPoint: failed reason code lookup \"%s\"", loader->reason);
+	return NULL;
+      }
+    }
+ 
+    // check operator
+    bool eq = my_strequal(loader->op, "==");
+    bool isPattern = my_strequal(loader->op, "*=");
+    if(!eq && !isPattern) {
+      myDebug(1, "skipping dropPoint: bad operator \"%s\"", loader->op);
+      return NULL;
+    }
+    // All OK
+    return newDropPoint(loader->dp, isPattern, reasonCode);
+  }
+
+  static void loadDropPoints(EVMod *mod) {
+    for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_sw); ii++) {
+      HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_sw[ii]);
+      if(dp)
+	addDropPoint_sw(mod, dp);
+    }
+    for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_hw); ii++) {
+      HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_hw[ii]);
+      if(dp)
+	addDropPoint_hw(mod, dp);
+    }
+  }
 
   /*_________________---------------------------__________________
     _________________    getFamily_DROPMON      __________________
@@ -66,7 +259,7 @@ extern "C" {
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     myDebug(1, "dropmon: getFamily");
-    mdata->state = HSP_DROPMON_STATE_GET_FAMILY;
+    setState(mod, HSP_DROPMON_STATE_GET_FAMILY);
     UTNLGeneric_send(mdata->nl_sock,
 		     mod->id,
 		     GENL_ID_CTRL,
@@ -86,7 +279,7 @@ extern "C" {
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     myDebug(1, "dropmon: joinGroup");
-    mdata->state = HSP_DROPMON_STATE_JOIN_GROUP;
+    setState(mod, HSP_DROPMON_STATE_JOIN_GROUP);
     // register for the multicast group_id
     if(setsockopt(mdata->nl_sock,
 		  SOL_NETLINK,
@@ -113,8 +306,7 @@ So here we would just call something like:
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     myDebug(1, "dropmon: start");
-    // TODO: possibly add intermediate state:  HSPDROPMON_STATE_START
-    mdata->state = HSP_DROPMON_STATE_RUN;
+    setState(mod, HSP_DROPMON_STATE_START);
     
     struct nlmsghdr nlh = { };
     struct genlmsghdr ge = { };
@@ -156,11 +348,12 @@ So here we would just call something like:
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     myDebug(1, "dropmon: configure");
-    mdata->state = HSP_DROPMON_STATE_CONFIGURE;
+    setState(mod, HSP_DROPMON_STATE_CONFIGURE);
     uint8_t alertMode = NET_DM_ALERT_MODE_PACKET;
-    uint32_t truncLen = SFL_DEFAULT_HEADER_SIZE; // TODO: parameter?
+    uint32_t truncLen = SFL_DEFAULT_HEADER_SIZE; // TODO: parameter? Write to notifier too?
     uint32_t queueLen = 100; // TODO: parameter?
     // TODO: go back to previous state on failure? close socket?
+    // TODO: could these all be set in one message?
     UTNLGeneric_send(mdata->nl_sock,
 		     mod->id,
 		     mdata->family_id,
@@ -283,6 +476,20 @@ So here we would just call something like:
     }
   }
 
+  static SFLNotifier *getSFlowNotifier(EVMod *mod, uint32_t ifIndex) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    SFLNotifier search = { };
+    SFL_DS_SET(search.dsi, 0, ifIndex, 0);
+    SFLNotifier *notifier = UTHashGet(mdata->notifiers, &search);
+    if(!notifier) {
+      notifier = sfl_agent_addNotifier(sp->agent, &search.dsi);
+      sfl_notifier_set_sFlowEsReceiver(notifier, HSP_SFLOW_RECEIVER_INDEX);
+      UTHashAdd(mdata->notifiers, notifier);
+    }
+    return notifier;
+  }
+
   /*_________________---------------------------__________________
     _________________  processNetlink_DROPMON   __________________
     -----------------___________________________------------------
@@ -291,7 +498,6 @@ So here we would just call something like:
   static void processNetlink_DROPMON(EVMod *mod, struct nlmsghdr *nlh)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
 
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
@@ -299,12 +505,14 @@ So here we would just call something like:
     myDebug(1, "dropmon netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
     
     // sFlow strutures to fill in
-    SFLDataSource_instance dsi;
-    SFLEvent_discarded_packet discard = { };
+    SFLEvent_discarded_packet discard = { .reason = SFLDrop_unknown };
     SFLFlow_sample_element hdrElem = { .tag=SFLFLOW_HEADER };
     // and some parameters to pick up for cross-check below
     uint32_t trunc_len=0;
     uint32_t orig_len=0;
+    char *hw_group=NULL;
+    char *hw_name=NULL;
+    char *sw_symbol=NULL;
 
     struct nlattr *attr = (struct nlattr *)(msg + GENL_HDRLEN);
     int len = msglen - GENL_HDRLEN;
@@ -329,7 +537,7 @@ So here we would just call something like:
 	break;
       case NET_DM_ATTR_SYMBOL:
 	myDebug(3, "dropmon: string=ATTR_SYMBOL=%s", datap);
-	// TODO: parse or lookup this symbol to get the reason code?
+	sw_symbol = (char *)datap;
 	break;
       case NET_DM_ATTR_IN_PORT:
 	myDebug(3, "dropmon: nested=IN_PORT");
@@ -388,9 +596,11 @@ So here we would just call something like:
 	break;
       case NET_DM_ATTR_HW_TRAP_GROUP_NAME:
 	myDebug(3, "dropmon: string=TRAP_GROUP_NAME=%s", datap);
+	hw_group = (char *)datap;
 	break;
       case NET_DM_ATTR_HW_TRAP_NAME:
 	myDebug(3, "dropmon: string=TRAP_NAME=%s", datap);
+	hw_name = (char *)datap;
 	break;
       case NET_DM_ATTR_HW_ENTRIES:
 	myDebug(3, "dropmon: nested=HW_ENTRIES");
@@ -425,21 +635,41 @@ So here we would just call something like:
        && orig_len > hdrElem.flowType.header.frame_length)
       hdrElem.flowType.header.frame_length = orig_len;
 
-    // TODO: apply notifier->sFlowEsMaximumHeaderSize
-
     // cross check: protocol
     if(!hdrElem.flowType.header.header_protocol)
       hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+
+    // look up drop point
+    HSPDropPoint *dp = NULL;
+    if(hw_name)
+      dp = getDropPoint_hw(mod, hw_group, hw_name);
+    else if(sw_symbol)
+      dp = getDropPoint_sw(mod, sw_symbol);
+    if(dp == NULL
+       || dp->reason == -1) {
+      // this one not considered a packet-drop, so ignore it.
+      myDebug(1, "trap not considered a drop. Ignoring.");
+      return;
+    }
     
-    // TODO: add hash table to look up notifiers by ifIndex?
-    SFL_DS_SET(dsi, 0, discard.input, 0);
-    SFLNotifier *notifier = sfl_agent_addNotifier(sp->agent, &dsi);
-    sfl_notifier_set_sFlowEsReceiver(notifier, HSP_SFLOW_RECEIVER_INDEX);
+    myDebug(1, "found dropPoint %s reason_code=%u", dp->dropPoint, dp->reason);
+    
+    // fill in discard reason
+    discard.reason = dp->reason;
+
+    // look up notifier
+    SFLNotifier *notifier = getSFlowNotifier(mod, discard.input);
+
+    // enforce notifier limit on header size
+    if (hdrElem.flowType.header.header_length > notifier->sFlowEsMaximumHeaderSize)
+    hdrElem.flowType.header.header_length = notifier->sFlowEsMaximumHeaderSize;
+
     SFLADD_ELEMENT(&discard, &hdrElem);
     sfl_notifier_writeEventSample(notifier, &discard);
 
-    if(mdata->state == HSP_DROPMON_STATE_CONFIGURE)
-      mdata->state = HSP_DROPMON_STATE_RUN;
+    // first successful event confirms we are up and running
+    if(mdata->state == HSP_DROPMON_STATE_START)
+      setState(mod, HSP_DROPMON_STATE_RUN);
   }
 
   /*_________________---------------------------__________________
@@ -498,7 +728,7 @@ So here we would just call something like:
     // This should have advanced the state past GET_FAMILY
     if(mdata->state == HSP_DROPMON_STATE_GET_FAMILY) {
       myDebug(1, "dropmon: failed to get family details - wait before trying again");
-      mdata->state = HSP_DROPMON_STATE_WAIT;
+      setState(mod, HSP_DROPMON_STATE_WAIT);
       mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_S;
     }
   }
@@ -567,6 +797,9 @@ So here we would just call something like:
       // waiting for configure response
       start_DROPMON(mod);
       break;
+    case HSP_DROPMON_STATE_START:
+      // waiting for start response
+      break;
     case HSP_DROPMON_STATE_RUN:
       // got at least one sample
       break;
@@ -585,6 +818,12 @@ can be a little more indenpendent of the packet sampling?
     mod->data = my_calloc(sizeof(HSP_mod_DROPMON));
     // HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    mdata->dropPoints_hw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
+    mdata->dropPoints_sw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
+    mdata->dropPatterns_hw = UTArrayNew(UTARRAY_DFLT);
+    mdata->dropPatterns_sw = UTArrayNew(UTARRAY_DFLT);
+    mdata->notifiers = UTHASH_NEW(SFLNotifier, dsi, UTHASH_DFLT);
+    loadDropPoints(mod);
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);

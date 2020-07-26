@@ -859,7 +859,10 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
 
   putNet32(receiver, fs->num_elements);
   int nFound = sfl_receiver_writeFlowSampleElements(receiver, fs->elements);
-  assert(nFound == fs->num_elements);
+  if(nFound != fs->num_elements) {
+    sflError(receiver, "flow sample #elements error");
+    abort();
+  }
 
   // sanity check
   assert(((u_char *)receiver->sampleCollector.datap
@@ -933,7 +936,10 @@ int sfl_receiver_writeEventSample(SFLReceiver *receiver, SFLEvent_discarded_pack
 
   putNet32(receiver, es->num_elements);
   int nFound = sfl_receiver_writeFlowSampleElements(receiver, es->elements);
-  assert(nFound == es->num_elements);
+  if(nFound != es->num_elements) {
+    sflError(receiver, "event sample #elements error");
+    abort();
+  }
 
   // sanity check
   assert(((u_char *)receiver->sampleCollector.datap
