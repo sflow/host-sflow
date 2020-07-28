@@ -5,6 +5,7 @@ HSP_DROPPOINT(==,l2_drops,unknown_l2)
 HSP_DROPPOINT(==,l3_drops,unknown_l3)
 HSP_DROPPOINT(==,l3_exceptions,unknown_l3_exception)
 HSP_DROPPOINT(==,tunnel_drops,unknown_tunnel)
+
 /* Some groups are not considered drops. We
    can leave them out, or indicate they should
    be ignored by using a blank reason code name.*/
@@ -26,37 +27,39 @@ HSP_DROPPOINT(==,ptp_event,)
 HSP_DROPPOINT(==,ptp_general,)
 HSP_DROPPOINT(==,acl_sample,)
 HSP_DROPPOINT(==,acl_trap,)
-/* Assign sFlow drop-codes to specific drop points that we know of */
-/* TODO: fill these in - names are in src/sflow/sflow_drop.h */
-HSP_DROPPOINT(==,source_mac_is_multicast,) /* DROP: Traps incoming packets that the device decided to drop because of a multicast source MAC */
-HSP_DROPPOINT(==,vlan_tag_mismatch,) /* DROP: Traps incoming packets that the device decided to drop in case of VLAN tag mismatch: The ingress bridge port is not configured with a PVID and the packet is untagged or prio-tagged */
-HSP_DROPPOINT(==,ingress_vlan_filter,) /* DROP: Traps incoming packets that the device decided to drop in case they are tagged with a VLAN that is not configured on the ingress bridge port */
-HSP_DROPPOINT(==,ingress_spanning_tree_filter,) /* DROP: Traps incoming packets that the device decided to drop in case the STP state of the ingress bridge port is not “forwarding” */
-HSP_DROPPOINT(==,port_list_is_empty,) /* DROP: Traps packets that the device decided to drop in case they need to be flooded (e.g., unknown unicast, unregistered multicast) and there are no ports the packets should be flooded to */
-HSP_DROPPOINT(==,port_loopback_filter,) /* DROP: Traps packets that the device decided to drop in case after layer 2 forwarding the only port from which they should be transmitted through is the port from which they were received */
-HSP_DROPPOINT(==,blackhole_route,) /* DROP: Traps packets that the device decided to drop in case they hit a blackhole route */
-HSP_DROPPOINT(==,ttl_value_is_too_small,) /* EXCEPTION: Traps unicast packets that should be forwarded by the device whose TTL was decremented to 0 or less */
-HSP_DROPPOINT(==,tail_drop,) /* DROP: Traps packets that the device decided to drop because they could not be enqueued to a transmission queue which is full */
-HSP_DROPPOINT(==,non_ip,) /* DROP: Traps packets that the device decided to drop because they need to undergo a layer 3 lookup, but are not IP or MPLS packets */
-HSP_DROPPOINT(==,uc_dip_over_mc_dmac,) /* DROP: Traps packets that the device decided to drop because they need to be routed and they have a unicast destination IP and a multicast destination MAC */
-HSP_DROPPOINT(==,dip_is_loopback_address,) /* DROP: Traps packets that the device decided to drop because they need to be routed and their destination IP is the loopback address (i.e., 127.0.0.0/8 and ::1/128) */
-HSP_DROPPOINT(==,sip_is_mc,) /* DROP: Traps packets that the device decided to drop because they need to be routed and their source IP is multicast (i.e., 224.0.0.0/8 and ff::/8) */
-HSP_DROPPOINT(==,sip_is_loopback_address,) /* DROP: Traps packets that the device decided to drop because they need to be routed and their source IP is the loopback address (i.e., 127.0.0.0/8 and ::1/128) */
-HSP_DROPPOINT(==,ip_header_corrupted,) /* DROP: Traps packets that the device decided to drop because they need to be routed and their IP header is corrupted: wrong checksum, wrong IP version or too short Internet Header Length (IHL) */
-HSP_DROPPOINT(==,ipv4_sip_is_limited_bc,) /* DROP: Traps packets that the device decided to drop because they need to be routed and their source IP is limited broadcast (i.e., 255.255.255.255/32) */
-HSP_DROPPOINT(==,ipv6_mc_dip_reserved_scope,) /* DROP: Traps IPv6 packets that the device decided to drop because they need to be routed and their IPv6 multicast destination IP has a reserved scope (i.e., ffx0::/16) */
-HSP_DROPPOINT(==,ipv6_mc_dip_interface_local_scope,) /* DROP: Traps IPv6 packets that the device decided to drop because they need to be routed and their IPv6 multicast destination IP has an interface-local scope (i.e., ffx1::/16) */
-HSP_DROPPOINT(==,mtu_value_is_too_small,) /* EXCEPTION: Traps packets that should have been routed by the device, but were bigger than the MTU of the egress interface */
-HSP_DROPPOINT(==,unresolved_neigh,) /* EXCEPTION: Traps packets that did not have a matching IP neighbour after routing */
-HSP_DROPPOINT(==,mc_reverse_path_forwarding,) /* EXCEPTION: Traps multicast IP packets that failed reverse-path forwarding (RPF) check during multicast routing */
-HSP_DROPPOINT(==,reject_route,) /* EXCEPTION: Traps packets that hit reject routes (i.e., “unreachable”, “prohibit”) */
-HSP_DROPPOINT(==,ipv4_lpm_miss,) /* EXCEPTION: Traps unicast IPv4 packets that did not match any route */
-HSP_DROPPOINT(==,ipv6_lpm_miss,) /* EXCEPTION: Traps unicast IPv6 packets that did not match any route */
-HSP_DROPPOINT(==,non_routable_packet,) /* DROP: Traps packets that the device decided to drop because they are not supposed to be routed. For example, IGMP queries can be flooded by the device in layer 2 and reach the router. Such packets should not be routed and instead dropped */
-HSP_DROPPOINT(==,decap_error,) /* EXCEPTION: Traps NVE and IPinIP packets that the device decided to drop because of failure during decapsulation (e.g., packet being too short, reserved bits set in VXLAN header) */
-HSP_DROPPOINT(==,overlay_smac_is_mc,) /* DROP: Traps NVE packets that the device decided to drop because their overlay source MAC is multicast */
-HSP_DROPPOINT(==,ingress_flow_action_drop,) /* DROP: Traps packets dropped during processing of ingress flow action drop */
-HSP_DROPPOINT(==,egress_flow_action_drop,) /* DROP: Traps packets dropped during processing of egress flow action drop */
+
+/* Assign sFlow drop-codes (from sflow_drop.h)  to specific drop points that we know of */
+HSP_DROPPOINT(==,source_mac_is_multicast,src_mac_is_multicast) /* DROP: Traps incoming packets that the device decided to drop because of a multicast source MAC */
+HSP_DROPPOINT(==,vlan_tag_mismatch,vlan_tag_mismatch) /* DROP: Traps incoming packets that the device decided to drop in case of VLAN tag mismatch: The ingress bridge port is not configured with a PVID and the packet is untagged or prio-tagged */
+HSP_DROPPOINT(==,ingress_vlan_filter,ingress_vlan_filter) /* DROP: Traps incoming packets that the device decided to drop in case they are tagged with a VLAN that is not configured on the ingress bridge port */
+HSP_DROPPOINT(==,ingress_spanning_tree_filter,ingress_spanning_tree_filter) /* DROP: Traps incoming packets that the device decided to drop in case the STP state of the ingress bridge port is not “forwarding” */
+HSP_DROPPOINT(==,port_list_is_empty,port_list_is_empty) /* DROP: Traps packets that the device decided to drop in case they need to be flooded (e.g., unknown unicast, unregistered multicast) and there are no ports the packets should be flooded to */
+HSP_DROPPOINT(==,port_loopback_filter,port_loopback_filter) /* DROP: Traps packets that the device decided to drop in case after layer 2 forwarding the only port from which they should be transmitted through is the port from which they were received */
+HSP_DROPPOINT(==,blackhole_route,blackhole_route) /* DROP: Traps packets that the device decided to drop in case they hit a blackhole route */
+HSP_DROPPOINT(==,ttl_value_is_too_small,ttl_exceeded) /* EXCEPTION: Traps unicast packets that should be forwarded by the device whose TTL was decremented to 0 or less */
+HSP_DROPPOINT(==,tail_drop,no_buffer_space) /* DROP: Traps packets that the device decided to drop because they could not be enqueued to a transmission queue which is full */
+HSP_DROPPOINT(==,non_ip,non_ip) /* DROP: Traps packets that the device decided to drop because they need to undergo a layer 3 lookup, but are not IP or MPLS packets */
+HSP_DROPPOINT(==,uc_dip_over_mc_dmac,uc_dip_over_mc_mac) /* DROP: Traps packets that the device decided to drop because they need to be routed and they have a unicast destination IP and a multicast destination MAC */
+HSP_DROPPOINT(==,dip_is_loopback_address,dip_is_loopback_address) /* DROP: Traps packets that the device decided to drop because they need to be routed and their destination IP is the loopback address (i.e., 127.0.0.0/8 and ::1/128) */
+HSP_DROPPOINT(==,sip_is_mc,sip_is_mc) /* DROP: Traps packets that the device decided to drop because they need to be routed and their source IP is multicast (i.e., 224.0.0.0/8 and ff::/8) */
+HSP_DROPPOINT(==,sip_is_loopback_address,sip_is_loopback_address) /* DROP: Traps packets that the device decided to drop because they need to be routed and their source IP is the loopback address (i.e., 127.0.0.0/8 and ::1/128) */
+HSP_DROPPOINT(==,ip_header_corrupted,ip_header_corrupted) /* DROP: Traps packets that the device decided to drop because they need to be routed and their IP header is corrupted: wrong checksum, wrong IP version or too short Internet Header Length (IHL) */
+HSP_DROPPOINT(==,ipv4_sip_is_limited_bc,ipv4_sip_is_limited_bc) /* DROP: Traps packets that the device decided to drop because they need to be routed and their source IP is limited broadcast (i.e., 255.255.255.255/32) */
+HSP_DROPPOINT(==,ipv6_mc_dip_reserved_scope,ipv6_mc_dip_reserved_scope) /* DROP: Traps IPv6 packets that the device decided to drop because they need to be routed and their IPv6 multicast destination IP has a reserved scope (i.e., ffx0::/16) */
+HSP_DROPPOINT(==,ipv6_mc_dip_interface_local_scope,ipv6_mc_dip_interface_local_scope) /* DROP: Traps IPv6 packets that the device decided to drop because they need to be routed and their IPv6 multicast destination IP has an interface-local scope (i.e., ffx1::/16) */
+HSP_DROPPOINT(==,mtu_value_is_too_small,pkt_too_big) /* EXCEPTION: Traps packets that should have been routed by the device, but were bigger than the MTU of the egress interface */
+HSP_DROPPOINT(==,unresolved_neigh,unresolved_neigh) /* EXCEPTION: Traps packets that did not have a matching IP neighbour after routing */
+HSP_DROPPOINT(==,mc_reverse_path_forwarding,mc_reverse_path_forwarding) /* EXCEPTION: Traps multicast IP packets that failed reverse-path forwarding (RPF) check during multicast routing */
+HSP_DROPPOINT(==,reject_route,dst_net_prohibited) /* EXCEPTION: Traps packets that hit reject routes (i.e., “unreachable”, “prohibit”) */
+HSP_DROPPOINT(==,ipv4_lpm_miss,dst_net_unknown) /* EXCEPTION: Traps unicast IPv4 packets that did not match any route */
+HSP_DROPPOINT(==,ipv6_lpm_miss,dst_net_unknown) /* EXCEPTION: Traps unicast IPv6 packets that did not match any route */
+HSP_DROPPOINT(==,non_routable_packet,non_routable_packet) /* DROP: Traps packets that the device decided to drop because they are not supposed to be routed. For example, IGMP queries can be flooded by the device in layer 2 and reach the router. Such packets should not be routed and instead dropped */
+HSP_DROPPOINT(==,decap_error,decap_error) /* EXCEPTION: Traps NVE and IPinIP packets that the device decided to drop because of failure during decapsulation (e.g., packet being too short, reserved bits set in VXLAN header) */
+HSP_DROPPOINT(==,overlay_smac_is_mc,overlay_smac_is_mc) /* DROP: Traps NVE packets that the device decided to drop because their overlay source MAC is multicast */
+HSP_DROPPOINT(==,ingress_flow_action_drop,acl) /* DROP: Traps packets dropped during processing of ingress flow action drop */
+HSP_DROPPOINT(==,egress_flow_action_drop,acl) /* DROP: Traps packets dropped during processing of egress flow action drop */
+
+/* CONTROL traps are not considered drops */
 HSP_DROPPOINT(==,stp,) /* CONTROL: Traps STP packets */
 HSP_DROPPOINT(==,lacp,) /* CONTROL: Traps LACP packets */
 HSP_DROPPOINT(==,lldp,) /* CONTROL: Traps LLDP packets */
@@ -102,3 +105,9 @@ HSP_DROPPOINT(==,ptp_general,) /* CONTROL: Traps PTP general messages (Announce,
 HSP_DROPPOINT(==,flow_action_sample,) /* CONTROL: Traps packets sampled during processing of flow action sample (e.g., via tc’s sample action) */
 HSP_DROPPOINT(==,flow_action_trap,) /* CONTROL: Traps packets logged during processing of flow action trap (e.g., via tc’s trap action) */
 
+/* extras added (not in the devlink-trap document) */
+HSP_DROPPOINT(==,SXD_DISCARD_ING_PACKET_RSV_MAC,unknown_l2)  /* reserved MAC */
+HSP_DROPPOINT(==,SXD_DISCARD_ING_PACKET_SMAC_DMAC,unknown_l2) /* src MAC == dst MAC */
+
+/* report anything else with reason "unknown" */
+HSP_DROPPOINT(=*,*,unknown)

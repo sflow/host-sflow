@@ -123,7 +123,7 @@ endif
 
 #########  compilation flags  #########
 
-HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h Makefile
+HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h dropPoints_sw.h dropPoints_hw.h Makefile
 
 # compiler
 #CC= g++
