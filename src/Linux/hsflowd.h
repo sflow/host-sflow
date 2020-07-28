@@ -539,6 +539,7 @@ extern "C" {
     struct {
       bool dropmon;
       uint32_t group;
+      bool start;
     } dropmon;
     struct {
       bool pcap;

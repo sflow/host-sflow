@@ -1797,6 +1797,9 @@ extern "C" {
       | HSP_SAMPLEOPT_ASIC
       | HSP_SAMPLEOPT_INGRESS
       | HSP_SAMPLEOPT_CUMULUS;
+    // assume netlink drop-monitor is configured externally
+    sp->dropmon.group = 1;
+    sp->dropmon.start = NO;
 #endif /* HSP_LOAD_CUMULUS */
 
 #ifdef HSP_LOAD_OPX

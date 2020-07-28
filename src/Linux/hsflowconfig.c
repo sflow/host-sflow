@@ -1273,6 +1273,7 @@ extern "C" {
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->dropmon.dropmon = YES;
 	    sp->dropmon.group = 1;
+	    sp->dropmon.start = YES;
 	    level[++depth] = HSPOBJ_DROPMON;
 	    break;
 	  case HSPTOKEN_PCAP:
@@ -1585,6 +1586,9 @@ extern "C" {
 	    switch(tok->stok) {
 	    case HSPTOKEN_GROUP:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.group, 1, 32)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_START:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.start)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

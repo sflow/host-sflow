@@ -29,24 +29,30 @@ extern "C" {
 #define HSP_DROPMON_READNL_RCV_BUF 8192
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000
+#define HSP_DROPMON_QUEUE 100
 
   typedef enum {
     HSP_DROPMON_STATE_INIT=0,
     HSP_DROPMON_STATE_GET_FAMILY,
     HSP_DROPMON_STATE_WAIT,
+    HSP_DROPMON_STATE_GOT_GROUP,
     HSP_DROPMON_STATE_JOIN_GROUP,
     HSP_DROPMON_STATE_CONFIGURE,
     HSP_DROPMON_STATE_START,
-    HSP_DROPMON_STATE_RUN } EnumDropmonState;
+    HSP_DROPMON_STATE_RUN,
+    HSP_DROPMON_STATE_STOP
+  } EnumDropmonState;
 
   static const char *HSPDropmonStateNames[] = {
     "INIT",
     "GET_FAMILY",
     "WAIT",
+    "GOT_GROUP",
     "JOIN_GROUP",
     "CONFIGURE",
     "START",
-    "RUN"
+    "RUN",
+    "STOP"
   };
   
   typedef struct _HSPDropPoint {
@@ -74,6 +80,7 @@ extern "C" {
     UTArray *dropPatterns_sw;
     UTArray *dropPatterns_hw;
     UTHash *notifiers;
+    uint32_t feedControlErrors;
   } HSP_mod_DROPMON;
 
 
@@ -265,7 +272,6 @@ extern "C" {
   static void getFamily_DROPMON(EVMod *mod)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    myDebug(1, "dropmon: getFamily");
     setState(mod, HSP_DROPMON_STATE_GET_FAMILY);
     UTNLGeneric_send(mdata->nl_sock,
 		     mod->id,
@@ -282,10 +288,9 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void joinGroup_DROPMON(EVMod *mod)
+  static bool joinGroup_DROPMON(EVMod *mod)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    myDebug(1, "dropmon: joinGroup");
     setState(mod, HSP_DROPMON_STATE_JOIN_GROUP);
     // register for the multicast group_id
     if(setsockopt(mdata->nl_sock,
@@ -293,27 +298,30 @@ extern "C" {
 		  NETLINK_ADD_MEMBERSHIP,
 		  &mdata->group_id,
 		  sizeof(mdata->group_id)) == -1) {
-      // TODO: go back to previous state? close socket?
       myLog(LOG_ERR, "error joining DROPMON netlink group %u : %s",
 	    mdata->group_id,
 	    strerror(errno));
+      return NO;
     }
+    return YES;
   }
 
   /*_________________---------------------------__________________
     _________________    start_DROPMON          __________________
     -----------------___________________________------------------
-TODO: enhance util_netlink to offer this variant.  If it's common to
-set flags in one go then one with a vararg list of attr-types might be reuseable?
-So here we would just call something like:
+TODO: enhance util_netlink to offer this variant:
  UTNLGeneric_setFlags(sock, id, type, cmd, seqNo, NET_DM_ATTR_SW_DROPS, NET_DM_ATTR_HW_DROPS)
+Or we could call with a vararg list of strutures containing nlattr type,len,payload details.
+That would allow everything to stay on the stack as it does here, which has nice properties.
 */
 
-  int start_DROPMON(EVMod *mod)
+  static int start_DROPMON(EVMod *mod, bool startIt)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    myDebug(1, "dropmon: start");
-    setState(mod, HSP_DROPMON_STATE_START);
+    setState(mod,
+	     startIt
+	     ? HSP_DROPMON_STATE_START
+	     : HSP_DROPMON_STATE_STOP);
     
     struct nlmsghdr nlh = { };
     struct genlmsghdr ge = { };
@@ -322,15 +330,17 @@ So here we would just call something like:
 
     attr1.nla_len = sizeof(attr1);
     attr1.nla_type = NET_DM_ATTR_SW_DROPS;
-    attr2.nla_len = sizeof(attr1);
+    attr2.nla_len = sizeof(attr2);
     attr2.nla_type = NET_DM_ATTR_HW_DROPS;
 
-    ge.cmd = GENL_ID_CTRL;
+    ge.cmd = startIt
+      ? NET_DM_CMD_START
+      : NET_DM_CMD_STOP;
     ge.version = 1;
 
-    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(ge) + sizeof(attr1) + sizeof(attr2));
+    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(attr1) + sizeof(attr2));
     nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
-    nlh.nlmsg_type = NET_DM_CMD_START;
+    nlh.nlmsg_type = mdata->family_id;
     nlh.nlmsg_seq = ++mdata->nl_seq;
     nlh.nlmsg_pid = UTNLGeneric_pid(mod->id);
 
@@ -354,13 +364,12 @@ So here we would just call something like:
   static void configure_DROPMON(EVMod *mod)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    myDebug(1, "dropmon: configure");
     setState(mod, HSP_DROPMON_STATE_CONFIGURE);
     uint8_t alertMode = NET_DM_ALERT_MODE_PACKET;
     uint32_t truncLen = SFL_DEFAULT_HEADER_SIZE; // TODO: parameter? Write to notifier too?
-    uint32_t queueLen = 100; // TODO: parameter?
-    // TODO: go back to previous state on failure? close socket?
-    // TODO: could these all be set in one message?
+    uint32_t queueLen = HSP_DROPMON_QUEUE; // TODO: parameter?
+    // This control will fail if the feed has already been configured and started externally.
+    // TODO: set these in one message?
     UTNLGeneric_send(mdata->nl_sock,
 		     mod->id,
 		     mdata->family_id,
@@ -465,11 +474,11 @@ So here we would just call something like:
 	     && grp_id == NET_DM_GRP_ALERT) {
 	    myDebug(1, "dropmon found group %s=%u", grp_name, grp_id);
 	    mdata->group_id = grp_id;
-	    // TODO: if any of this fails,  should we close the socket and go all the way back to the start of the state machine?
-	    joinGroup_DROPMON(mod);
-	    configure_DROPMON(mod);
+	    // could go ahead and run configure_DROPMON, start_DROPMON
+	    // here, but want that logic to be down in evt_tick() so
+	    // just set the state and breathe for a moment:
+	    setState(mod, HSP_DROPMON_STATE_GOT_GROUP);
 	  }
-
 	  grp_offset += NLMSG_ALIGN(grp_attr->nla_len);
 	}
 	break;
@@ -537,7 +546,7 @@ So here we would just call something like:
       case NET_DM_ATTR_ALERT_MODE:
 	myDebug(3, "dropmon: u8=ALERT_MODE=%u", *(uint8_t *)datap);
 	// enum net_dm_alert_mode NET_DM_ALERT_MODE_PACKET == 1
-	// TODO: bail if not packet?
+	// TODO: what to do if not packet?
 	break;
       case NET_DM_ATTR_PC:
 	myDebug(3, "dropmon: u64=PC=0x%"PRIx64, *(uint64_t *)datap);
@@ -571,7 +580,7 @@ So here we would just call something like:
       case NET_DM_ATTR_PROTO:
 	myDebug(3, "dropmon: u16=PROTO=0x%04x", *(uint16_t *)datap);
 	// TODO: do we need to interpret protocol = 0x0800 as IPv4 and 0x86DD as IPv6?
-	// do we get MAC layer here at all?
+	// We seem to get MAC layer here, but will that always be the case?
 	break;
       case NET_DM_ATTR_PAYLOAD:
 	myDebug(3, "dropmon: PAYLOAD");
@@ -724,6 +733,9 @@ So here we would just call something like:
 		    mdata->state,
 		    err_msg->error,
 		    strerror(-err_msg->error));
+	    if(mdata->state == HSP_DROPMON_STATE_CONFIGURE
+	       || mdata->state == HSP_DROPMON_STATE_START)
+	      mdata->feedControlErrors++;
 	  }
 	  break;
 	}
@@ -784,6 +796,7 @@ So here we would just call something like:
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     
     switch(mdata->state) {
     case HSP_DROPMON_STATE_INIT:
@@ -797,12 +810,31 @@ So here we would just call something like:
       if(--mdata->retry_countdown <= 0)
 	getFamily_DROPMON(mod);
       break;
+    case HSP_DROPMON_STATE_GOT_GROUP:
+      // got group id, now join
+      // if dropmon.start is off we assume the feed is
+      // externally configured and go straight to waiting for data.
+      if(joinGroup_DROPMON(mod))
+	setState(mod,
+		 sp->dropmon.start
+		 ? HSP_DROPMON_STATE_JOIN_GROUP
+		 : HSP_DROPMON_STATE_RUN);
+      else {
+	myDebug(1, "dropmon: failed to join group - wait before trying again");
+	setState(mod, HSP_DROPMON_STATE_WAIT);
+	mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_S;
+      }
+      break;
     case HSP_DROPMON_STATE_JOIN_GROUP:
-      // joined group, waiting for first matching sample
+      // joined group, now configure
+      configure_DROPMON(mod);
       break;
     case HSP_DROPMON_STATE_CONFIGURE:
-      // waiting for configure response
-      start_DROPMON(mod);
+      // wating for configure response - which may be a
+      // failure if the channel was already configured externally.
+      // TODO: should probably wait for answer before ploughing
+      // ahead with this start_DROPMON call.
+      start_DROPMON(mod, YES);
       break;
     case HSP_DROPMON_STATE_START:
       // waiting for start response
@@ -812,19 +844,49 @@ So here we would just call something like:
       break;
     }
   }
+
+  /*_________________---------------------------__________________
+    _________________    evt_final              __________________
+    -----------------___________________________------------------
+    Graceful shutdown - turn off feed (if we turned it on)
+  */
+
+  static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->dropmon.start) {
+      // turn off the feed - but only if it looks like we were the ones
+      // that turned it on in the first place.
+      // TODO: may want to confirm that none of the parameters were
+      // changed under our feet too?
+      if(mdata->feedControlErrors > 0) {
+	myDebug(1, "dropmon: detected feed-control errors: %u", mdata->feedControlErrors);
+	myDebug(1, "dropmon: assume external control - not stopping feed");
+      }
+      else {
+	myDebug(1, "dropmon: graceful shutdown: turning off feed");
+	start_DROPMON(mod, NO);
+      }
+    }
+    if(mdata->nl_sock > 0) {
+      close(mdata->nl_sock);
+      mdata->nl_sock = 0;
+    }
+  }
   
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
-
-TODO: should we use a separate thread (bus) for this so that it
-can be a little more indenpendent of the packet sampling?
+    TODO: should we use a separate thread (bus) for this so that it
+    can be more indenpendent of the packet sampling?
   */
 
   void mod_dropmon(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     mod->data = my_calloc(sizeof(HSP_mod_DROPMON));
-    // HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    if(sp->dropmon.start)
+      retainRootRequest(mod, "needed to start drop-monitor netlink feed.");
     mdata->dropPoints_hw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_sw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPatterns_hw = UTArrayNew(UTARRAY_DFLT);
@@ -834,6 +896,7 @@ can be a little more indenpendent of the packet sampling?
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_FINAL), evt_final);
   }
 
 #if defined(__cplusplus)
