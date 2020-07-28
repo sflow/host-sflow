@@ -130,40 +130,47 @@ extern "C" {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSPDropPoint search = { .dropPoint = sw_symbol };
     HSPDropPoint *dp = UTHashGet(mdata->dropPoints_sw, &search);
-    if(!dp) {
-      // see if we can find it via a pattern
-      UTARRAY_WALK(mdata->dropPatterns_sw, dp) {
-	if(fnmatch(dp->dropPoint, sw_symbol, FNM_CASEFOLD) == 0) {
-	  // yes - add the direct lookup to the hash table for next time and return it
-	  myDebug(1, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
-	  addDropPoint_sw(mod, newDropPoint(sw_symbol, NO, dp->reason));
-	  break;
-	}
+    if(dp)
+      return dp;
+
+    // see if we can find it via a pattern
+    UTARRAY_WALK(mdata->dropPatterns_sw, dp) {
+      if(fnmatch(dp->dropPoint, sw_symbol, FNM_CASEFOLD) == 0) {
+	// yes - add the direct lookup to the hash table for next time and return it
+	myDebug(1, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
+	addDropPoint_sw(mod, newDropPoint(sw_symbol, NO, dp->reason));
+	return dp;
       }
     }
-    return dp;
+
+    return NULL;
   }
 
   static HSPDropPoint *getDropPoint_hw(EVMod *mod, char *group, char *dropPointStr) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSPDropPoint search = { .dropPoint = dropPointStr };
     HSPDropPoint *dp = UTHashGet(mdata->dropPoints_hw, &search);
-    if(!dp && group) {
+    if(dp)
+      return dp;
+
+    if(group) {
       // see if we have an entry just for the group
       search.dropPoint = group;
       dp = UTHashGet(mdata->dropPoints_hw, &search);
+      if(dp)
+	return dp;
     }
-    if(!dp) {
-      // see if we can find it via a pattern
-      UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
-	if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
-	  // yes - add the direct lookup to the hash table for next time
-	  addDropPoint_hw(mod, newDropPoint(dropPointStr, NO, dp->reason));
-	  break;
-	}
+    
+    // see if we can find it via a pattern
+    UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
+      if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
+	// yes - add the direct lookup to the hash table for next time
+	addDropPoint_hw(mod, newDropPoint(dropPointStr, NO, dp->reason));
+	return dp;
       }
     }
-    return dp;
+
+    return NULL;
   }
 
   /*_________________---------------------------__________________
