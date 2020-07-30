@@ -1765,7 +1765,7 @@ extern "C" {
     // explicitly in the config file - but do this before we read
     // the config so that overrides are possible.
 #ifdef HSP_LOAD_CUMULUS
-    myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG, PSAMPLE and SYSTEMD modules");
+    myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG, PSAMPLE, SYSTEMD and DROPMON modules");
     sp->cumulus.cumulus = YES;
     sp->systemd.systemd = YES;
     uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
@@ -1798,6 +1798,7 @@ extern "C" {
       | HSP_SAMPLEOPT_INGRESS
       | HSP_SAMPLEOPT_CUMULUS;
     // assume netlink drop-monitor is configured externally
+    sp->dropmon.dropmon = YES;
     sp->dropmon.group = 1;
     sp->dropmon.start = NO;
 #endif /* HSP_LOAD_CUMULUS */

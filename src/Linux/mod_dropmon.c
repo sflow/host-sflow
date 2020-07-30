@@ -31,7 +31,7 @@ extern "C" {
 #define HSP_DROPMON_RCVBUF 8000000
 #define HSP_DROPMON_QUEUE 100
 
-  // #define HSP_DROPMON_TEST 1
+#define HSP_DROPMON_TEST 1
   
   typedef enum {
     HSP_DROPMON_STATE_INIT=0,
@@ -516,6 +516,7 @@ That would allow everything to stay on the stack as it does here, which has nice
   static void processNetlink_DROPMON(EVMod *mod, struct nlmsghdr *nlh)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
 
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
@@ -592,6 +593,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 	myDebug(3, "dropmon: PAYLOAD");
 	hdrElem.flowType.header.header_length = datalen;
 	hdrElem.flowType.header.header_bytes = datap;
+	hdrElem.flowType.header.stripped = 4;
 	break;
       case NET_DM_ATTR_PAD:
 	myDebug(3, "dropmon: PAD");
@@ -687,7 +689,10 @@ That would allow everything to stay on the stack as it does here, which has nice
     hdrElem.flowType.header.header_length = notifier->sFlowEsMaximumHeaderSize;
 
     SFLADD_ELEMENT(&discard, &hdrElem);
-    sfl_notifier_writeEventSample(notifier, &discard);
+    SEMLOCK_DO(sp->sync_agent) {
+      sfl_notifier_writeEventSample(notifier, &discard);
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+    }
 
     // first successful event confirms we are up and running
     if(mdata->state == HSP_DROPMON_STATE_START)
@@ -724,6 +729,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       int numbytes = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
       if(numbytes <= 0)
 	break;
+      myDebug(1, "dropmon: readNetlink_DROPMON - msg = %d bytes", numbytes);
       struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
       while(NLMSG_OK(nlh, numbytes)){
 	if(nlh->nlmsg_type == NLMSG_DONE)
@@ -766,7 +772,9 @@ That would allow everything to stay on the stack as it does here, which has nice
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-  
+
+    myDebug(1, "dropmon: evt_config_changed configured=%s", mdata->dropmon_configured ? "YES" : "NO");
+    
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
   

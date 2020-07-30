@@ -863,14 +863,13 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
     sflError(receiver, "flow sample #elements error");
     abort();
   }
-
+  
   // sanity check
-  assert(((u_char *)receiver->sampleCollector.datap
-	  - (u_char *)receiver->sampleCollector.data
-	  - receiver->sampleCollector.pktlen)  == (uint32_t)packedSize);
+  int dgramSize = ((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  assert(dgramSize - receiver->sampleCollector.pktlen == packedSize);
 
   // update the pktlen
-  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  receiver->sampleCollector.pktlen = (uint32_t)dgramSize;
 
   // if the sample pkt is full enough so that another packet-sample the same size would
   // put it over the size threshold, then just send it now.  After all,  if we waited and then
@@ -904,7 +903,7 @@ static int computeEventSampleSize(SFLReceiver *receiver, SFLEvent_discarded_pack
 int sfl_receiver_writeEventSample(SFLReceiver *receiver, SFLEvent_discarded_packet *es)
 {
   int packedSize;
-
+  
   if(es == NULL) return -1;
   if((packedSize = computeEventSampleSize(receiver, es)) == -1) return -1;
 
@@ -942,12 +941,11 @@ int sfl_receiver_writeEventSample(SFLReceiver *receiver, SFLEvent_discarded_pack
   }
 
   // sanity check
-  assert(((u_char *)receiver->sampleCollector.datap
-	  - (u_char *)receiver->sampleCollector.data
-	  - receiver->sampleCollector.pktlen)  == (uint32_t)packedSize);
+  int dgramSize = ((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  assert(dgramSize - receiver->sampleCollector.pktlen == packedSize);
 
   // update the pktlen
-  receiver->sampleCollector.pktlen = (uint32_t)((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  receiver->sampleCollector.pktlen = (uint32_t)dgramSize;
 
   // if the sample pkt is full enough so that another packet-sample the same size would
   // put it over the size threshold, then just send it now.  After all,  if we waited and then

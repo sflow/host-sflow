@@ -128,7 +128,8 @@ HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsfl
 # compiler
 #CC= g++
 CC= gcc -std=gnu99
-LD=ld
+#LD=ld
+LD=gcc
 
 # optimization
 OPT_ALL= -O3 -DNDEBUG

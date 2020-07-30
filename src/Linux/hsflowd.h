@@ -408,6 +408,7 @@ extern "C" {
     HSP_TELEMETRY_DROPPED_SAMPLES,
     HSP_TELEMETRY_FLOW_SAMPLES_SUPPRESSED,
     HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED,
+    HSP_TELEMETRY_EVENT_SAMPLES,
     HSP_TELEMETRY_NUM_COUNTERS
   } EnumHSPTelemetry;
 
@@ -421,6 +422,7 @@ extern "C" {
     "dropped_samples",
     "flow_samples_suppressed",
     "counter_samples_suppressed"
+    "event_samples",
   };
 #endif
 
