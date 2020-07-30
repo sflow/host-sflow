@@ -501,8 +501,10 @@ That would allow everything to stay on the stack as it does here, which has nice
     SFL_DS_SET(search.dsi, 0, ifIndex, 0);
     SFLNotifier *notifier = UTHashGet(mdata->notifiers, &search);
     if(!notifier) {
-      notifier = sfl_agent_addNotifier(sp->agent, &search.dsi);
-      sfl_notifier_set_sFlowEsReceiver(notifier, HSP_SFLOW_RECEIVER_INDEX);
+      SEMLOCK_DO(sp->sync_agent) {
+	notifier = sfl_agent_addNotifier(sp->agent, &search.dsi);
+	sfl_notifier_set_sFlowEsReceiver(notifier, HSP_SFLOW_RECEIVER_INDEX);
+      }
       UTHashAdd(mdata->notifiers, notifier);
     }
     return notifier;
