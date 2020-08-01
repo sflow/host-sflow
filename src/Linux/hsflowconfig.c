@@ -10,6 +10,7 @@ extern "C" {
 
 #define HSP_MAX_SAMPLING_N 10000000
 #define HSP_MAX_POLLING_S 300
+#define HSP_MAX_NOTIFY_RATELIMIT 10000
 
 #define HSP_MAX_LINELEN 2048
 #define HSP_MAX_CONFIG_DEPTH 3
@@ -1274,6 +1275,7 @@ extern "C" {
 	    sp->dropmon.dropmon = YES;
 	    sp->dropmon.group = 1;
 	    sp->dropmon.start = YES;
+	    sp->dropmon.limit = 100;
 	    level[++depth] = HSPOBJ_DROPMON;
 	    break;
 	  case HSPTOKEN_PCAP:
@@ -1589,6 +1591,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_START:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.start)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_LIMIT:
+	      if((tok = expectInteger32(sp, tok, &sp->dropmon.limit, 1, HSP_MAX_NOTIFY_RATELIMIT)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

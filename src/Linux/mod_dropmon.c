@@ -83,6 +83,8 @@ extern "C" {
     UTArray *dropPatterns_hw;
     UTHash *notifiers;
     uint32_t feedControlErrors;
+    int quota;   // nofification rate-limit
+    uint32_t noQuota; // number of rate-limit drops
   } HSP_mod_DROPMON;
 
 
@@ -683,6 +685,15 @@ That would allow everything to stay on the stack as it does here, which has nice
     // fill in discard reason
     discard.reason = dp->reason;
 
+    // apply rate-limit
+    if(mdata->quota <= 0) {
+      myDebug(1, "dropmon: rate-limit (%u/sec) exceeded. Dropping drop", sp->dropmon.limit);
+      mdata->noQuota++;
+      return;
+    }
+    else
+      --mdata->quota;
+
     // look up notifier
     SFLNotifier *notifier = getSFlowNotifier(mod, discard.input);
 
@@ -851,6 +862,10 @@ That would allow everything to stay on the stack as it does here, which has nice
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    // when rate-limit is below 10 we refresh quota here
+    if(sp->dropmon.limit < 10)
+      mdata->quota = sp->dropmon.limit;
     
     switch(mdata->state) {
     case HSP_DROPMON_STATE_INIT:
@@ -905,6 +920,19 @@ That would allow everything to stay on the stack as it does here, which has nice
   }
 
   /*_________________---------------------------__________________
+    _________________    evt_deci               __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // when rate-limit is above 10 we refresh quota here
+    if(sp->dropmon.limit >= 10)
+      mdata->quota = sp->dropmon.limit / 10;
+  }
+
+  /*_________________---------------------------__________________
     _________________    evt_final              __________________
     -----------------___________________________------------------
     Graceful shutdown - turn off feed (if we turned it on)
@@ -955,6 +983,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_FINAL), evt_final);
   }
 

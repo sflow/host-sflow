@@ -1801,6 +1801,7 @@ extern "C" {
     sp->dropmon.dropmon = YES;
     sp->dropmon.group = 1;
     sp->dropmon.start = NO;
+    sp->dropmon.limit = 1000;
 #endif /* HSP_LOAD_CUMULUS */
 
 #ifdef HSP_LOAD_OPX
