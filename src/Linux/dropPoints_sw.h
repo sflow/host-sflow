@@ -28,4 +28,5 @@ HSP_DROPPOINT(*=,ip6_*,unknown_l3)
 HSP_DROPPOINT(*=,ipv6_*,unknown_l3)
 HSP_DROPPOINT(*=,br_*,unknown_l2)
 HSP_DROPPOINT(*=,__br_*,unknown_l2)
+HSP_DROPPOINT(*=,sk_stream_kill_queues*,) /* see https://patchwork.ozlabs.org/project/netdev/patch/20141120185829.986CB290095D@tardy/ */
 HSP_DROPPOINT(*=,*,unknown)
