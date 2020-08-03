@@ -686,6 +686,7 @@ static int computeFlowSampleElementsSize(SFLReceiver *receiver, SFLFlow_sample_e
     case SFLFLOW_EX_SOCKET6: elemSiz = XDRSIZ_SFLEXTENDED_SOCKET6;  break;
     case SFLFLOW_EX_TCP_INFO: elemSiz = XDRSIZ_SFLEXTENDED_TCP_INFO;  break;
     case SFLFLOW_EX_ENTITIES: elemSiz = XDRSIZ_SFLEXTENDED_ENTITIES; break;
+    case SFLFLOW_EX_FUNCTION:  elemSiz = stringEncodingLength(&elem->flowType.function.symbol); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -791,6 +792,7 @@ static int sfl_receiver_writeFlowSampleElements(SFLReceiver *receiver, SFLFlow_s
     case SFLFLOW_EX_SOCKET6: putSocket6(receiver, &elem->flowType.socket6); break;
     case SFLFLOW_EX_TCP_INFO: putTCPInfo(receiver, &elem->flowType.tcp_info); break;
     case SFLFLOW_EX_ENTITIES: putEntities(receiver, &elem->flowType.entities); break;
+    case SFLFLOW_EX_FUNCTION: putString(receiver, &elem->flowType.function.symbol); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;

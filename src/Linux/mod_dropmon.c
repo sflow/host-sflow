@@ -530,6 +530,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     // sFlow strutures to fill in
     SFLEvent_discarded_packet discard = { .reason = SFLDrop_unknown };
     SFLFlow_sample_element hdrElem = { .tag=SFLFLOW_HEADER };
+    SFLFlow_sample_element fnElem = { .tag=SFLFLOW_EX_FUNCTION };
     // and some parameters to pick up for cross-check below
     uint32_t trunc_len=0;
     uint32_t orig_len=0;
@@ -702,6 +703,12 @@ That would allow everything to stay on the stack as it does here, which has nice
     hdrElem.flowType.header.header_length = notifier->sFlowEsMaximumHeaderSize;
 
     SFLADD_ELEMENT(&discard, &hdrElem);
+
+    // include function struct (TODO: just for sw events)
+    fnElem.flowType.function.symbol.str = dp->dropPoint;
+    fnElem.flowType.function.symbol.len = my_strlen(dp->dropPoint);
+    SFLADD_ELEMENT(&discard, &fnElem);
+
     SEMLOCK_DO(sp->sync_agent) {
       sfl_notifier_writeEventSample(notifier, &discard);
       sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
