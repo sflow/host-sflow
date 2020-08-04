@@ -171,9 +171,5 @@ HSP_DROPPOINT(==,ptp_general,)                  /* CONTROL: Traps PTP general me
 HSP_DROPPOINT(==,flow_action_sample,)           /* CONTROL: Traps packets sampled during processing of flow action sample (e.g., via tc’s sample action) */
 HSP_DROPPOINT(==,flow_action_trap,)             /* CONTROL: Traps packets logged during processing of flow action trap (e.g., via tc’s trap action) */
 
-/* extras added (not in the devlink-trap document) */
-HSP_DROPPOINT(==,SXD_DISCARD_ING_PACKET_RSV_MAC,unknown_l2)   /* reserved MAC */
-HSP_DROPPOINT(==,SXD_DISCARD_ING_PACKET_SMAC_DMAC,unknown_l2) /* src MAC == dst MAC */
-
 /* report anything else with reason "unknown" */
 // HSP_DROPPOINT(*=,*,unknown)

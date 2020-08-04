@@ -31,8 +31,6 @@ extern "C" {
 #define HSP_DROPMON_RCVBUF 8000000
 #define HSP_DROPMON_QUEUE 100
 
-#define HSP_DROPMON_TEST 1
-  
   typedef enum {
     HSP_DROPMON_STATE_INIT=0,
     HSP_DROPMON_STATE_GET_FAMILY,
@@ -149,7 +147,8 @@ extern "C" {
       if(fnmatch(dp->dropPoint, sw_symbol, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time and return it
 	myDebug(1, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
-	addDropPoint_sw(mod, newDropPoint(sw_symbol, NO, dp->reason));
+	dp = newDropPoint(sw_symbol, NO, dp->reason);
+	addDropPoint_sw(mod, dp);
 	return dp;
       }
     }
@@ -176,7 +175,8 @@ extern "C" {
     UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
       if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time
-	addDropPoint_hw(mod, newDropPoint(dropPointStr, NO, dp->reason));
+	dp = newDropPoint(dropPointStr, NO, dp->reason);
+	addDropPoint_hw(mod, dp);
 	return dp;
       }
     }
@@ -823,44 +823,6 @@ That would allow everything to stay on the stack as it does here, which has nice
     mdata->dropmon_configured = YES;
   }
 
-#ifdef HSP_DROPMON_TEST
-  /*_________________---------------------------__________________
-    _________________    processTestPackets     __________________
-    -----------------___________________________------------------
-  */
-
-  static void processTestPackets(EVMod *mod) {
-    // TEST packet
-    char *hex = /* "0004033800000000000000000000"  "0010" skip cooked header */
-      "c8000000" /* len = 200 */
-      "1b00" /* family id == NET_DM */
-      "0000" /* flags = 0 */
-      "00000000" /* seq */
-      "00000000" /* port id */
-      "05" /* cmd */
-      "02" /* family version == 2 */
-      "0000" /* reserved */
-      "06000e000100000013000f00547261702047726f7570207878780000230010005358445f444953434152445f494e475f5041434b45545f5253565f4d414300001800040008000000050000000900010073777031000000000c0005000ebfc45c70fa251608000a003c0000000600060000000000400007000180c2000001ec0d9a4e567d0800cafebabecafebeba000000000000000000000000000000000000000000000000000000000000000000002970ee47";
-    u_char bin[1024];
-    int len = hexToBinary((u_char *)hex, bin, 1024);
-    myDebug(1, "dropmon: hexToBinary returned %d\n", len);
-    processNetlink(mod, (struct nlmsghdr *)bin);
-    
-    hex = "cc000000"
-      "1b00"
-      "0000"
-      "00000000"
-      "00000000"
-      "05"
-      "02"
-      "0000"
-      "06000e000100000013000f00547261702047726f7570207878780000250010005358445f444953434152445f494e475f5041434b45545f534d41435f444d4143000000001800040008000000050000000900010073777031000000000c00050048f48ee56ffa251608000a003c0000000600060000000000400007000002000000020002000000020800cafebabe0000000000000000000000000000000000000000000000000000000000000000000000000000d576c92e";
-    len = hexToBinary((u_char *)hex, bin, 1024);
-    myDebug(1, "dropmon: hexToBinary returned %d\n", len);
-    processNetlink(mod, (struct nlmsghdr *)bin);
-  }
-#endif /* HSP_DROPMON_TEST */
-
   /*_________________---------------------------__________________
     _________________    evt_tick               __________________
     -----------------___________________________------------------
@@ -917,9 +879,6 @@ That would allow everything to stay on the stack as it does here, which has nice
       break;
     case HSP_DROPMON_STATE_RUN:
       // got at least one sample
-#ifdef HSP_DROPMON_TEST
-      processTestPackets(mod);
-#endif /* HSP_DROPMON_TEST */
       break;
     case HSP_DROPMON_STATE_STOP:
       break;
