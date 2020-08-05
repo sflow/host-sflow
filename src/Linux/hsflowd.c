@@ -555,6 +555,8 @@ extern "C" {
       // sfl_agent_tick(sp->agent, clk);
       for(SFLPoller *pl = sp->agent->pollers; pl; pl = pl->nxt)
 	sfl_poller_tick(pl, clk);
+      for(SFLNotifier *nf = sp->agent->notifiers; nf; nf = nf->nxt)
+	sfl_notifier_tick(nf, clk);
     }
     // We can only get away with this scheme because the poller
     // objects are only ever removed and free by this thread.
