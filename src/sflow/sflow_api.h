@@ -203,11 +203,8 @@ typedef struct _SFLNotifier {
   /* private fields */
   SFLReceiver *myReceiver;
   uint32_t seqNo;
-  /* rate limiting */
-  uint32_t nThisTick;
   uint32_t nLastTick;
-  uint32_t rateLimit;
-  uint32_t rateQuota;
+  uint32_t nThisTick;
   /* optional alias datasource index */
   uint32_t ds_alias;
 } SFLNotifier;
@@ -324,9 +321,8 @@ uint32_t sfl_notifier_get_sFlowEsReceiver(SFLNotifier *notifier);
 void sfl_notifier_set_sFlowEsReceiver(SFLNotifier *notifier, uint32_t sFlowEsReceiver);
 uint32_t sfl_notifier_get_sFlowEsMaximumHeaderSize(SFLNotifier *notifier);
 void sfl_notifier_set_sFlowEsMaximumHeaderSize(SFLNotifier *notifier, uint32_t sFlowEsMaximumHeaderSize);
-void sfl_notifier_set_rateLimit(SFLNotifier *notifier, uint32_t nPerSecond);
-uint32_t sfl_notifier_get_rateLimit(SFLNotifier *notifier);
-  
+uint32_t sfl_notifier_get_nLastTick(SFLNotifier *notifier);
+
 /* call this to indicate a discontinuity with a counter like samplePool so that the
    sflow collector will ignore the next delta */
 void sfl_sampler_resetFlowSeqNo(SFLSampler *sampler);

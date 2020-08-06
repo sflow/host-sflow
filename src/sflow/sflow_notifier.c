@@ -29,7 +29,6 @@ void sfl_notifier_init(SFLNotifier *notifier, SFLAgent *agent, SFLDataSource_ins
   notifier->dsi = dsi;
   
   /* set defaults */
-  notifier->rateQuota = 100; // TOOD: define in sflow_api.h
   notifier->sFlowEsMaximumHeaderSize = SFL_DEFAULT_HEADER_SIZE;
 }
 
@@ -71,16 +70,6 @@ void sfl_notifier_set_sFlowEsMaximumHeaderSize(SFLNotifier *notifier, uint32_t s
   notifier->sFlowEsMaximumHeaderSize = sFlowEsMaximumHeaderSize;
 }
 
-/* call this to set a maximum notifications-per-second rate. */
-
-void sfl_notifier_set_rateLimit(SFLNotifier *notifier, uint32_t nPerSecond) {
-  notifier->rateLimit = nPerSecond;
-}
-
-uint32_t sfl_notifier_get_rateLimit(SFLNotifier *notifier) {
-  return notifier->rateLimit;
-}
-
 uint32_t sfl_notifier_get_nLastTick(SFLNotifier *notifier) {
   return notifier->nLastTick;
 }
@@ -107,7 +96,6 @@ void sfl_notifier_set_dsAlias(SFLNotifier *notifier, uint32_t ds_alias) { notifi
 
 void sfl_notifier_tick(SFLNotifier *notifier, time_t now)
 {
-  notifier->rateQuota = notifier->rateLimit ? notifier->rateLimit : (uint32_t)-1;
   notifier->nLastTick = notifier->nThisTick;
   notifier->nThisTick = 0;
 }
@@ -121,9 +109,6 @@ void sfl_notifier_writeEventSample(SFLNotifier *notifier, SFLEvent_discarded_pac
 {
   if(es == NULL) return;
   notifier->nThisTick++;
-  if(notifier->rateQuota == 0)
-    return; // no more this tick
-  --notifier->rateQuota;
   /* increment the sequence number */
   es->sequence_number = ++notifier->seqNo;
   /* copy the other header fields in - event samples always use expanded form */
