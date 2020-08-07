@@ -695,6 +695,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     else
       --mdata->quota;
 
+    // expose rate-limiting to collector
+    discard.drops = mdata->noQuota;
+
     // look up notifier
     SFLNotifier *notifier = getSFlowNotifier(mod, discard.input);
 
