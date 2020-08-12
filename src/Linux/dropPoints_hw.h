@@ -115,6 +115,19 @@ HSP_DROPPOINT(==,ingress_flow_action_drop,acl)                                  
 HSP_DROPPOINT(==,egress_flow_action_drop,acl)                                         /* DROP: Traps packets dropped during processing of egress flow action
 											 drop */
 
+HSP_DROPPOINT(==,sip_is_unspecified,sip_is_unspecified)          /* L3_DROPS: Source IP is unspecified */
+HSP_DROPPOINT(==,mlag_port_isolation,mlag_port_isolation)        /* L2_DROPS: MLAG port isolation */
+HSP_DROPPOINT(==,blackhole_arp_neigh,blackhole_arp_neigh)        /* L3_DROPS: Blackhole ARP/neighbor */
+HSP_DROPPOINT(==,src_mac_is_dmac,src_mac_is_dmac)                /* L2_DROPS: Source MAC equals Destination MAC */
+HSP_DROPPOINT(==,dmac_is_reserved,dmac_is_reserved)              /* L2_DROPS: Destination MAC is reserved (DNAC=01-80-C2-00-00-0x) */
+HSP_DROPPOINT(==,sip_is_class_e,sip_is_class_e)                  /* L3_DROPS: Source IP is in class E */
+HSP_DROPPOINT(==,sip_is_unspecified,sip_is_unspecified)          /* L3_DROPS: Source IP is unspecified */
+HSP_DROPPOINT(==,mc_dmac_mismatch,mc_dmac_mismatch)              /* L3_DROPS: Multicast MAC mismatch */
+HSP_DROPPOINT(==,sip_is_dip,sip_is_dip)                          /* L3_DROPS: Source IP equals Destination IP */
+HSP_DROPPOINT(==,dip_is_local_network,dip_is_local_network)      /* L3_DROPS: Destination IP is local network (destination=0.0.0.0/8) */
+HSP_DROPPOINT(==,dip_is_link_local,dip_is_link_local)            /* L3_DROPS: Destination IP is link local */
+HSP_DROPPOINT(==,overlay_smac_is_dmac,overlay_smac_is_dmac)      /* TUNNEL_DROPS: Overlay switch - Source MAC equals Destination MAC */
+
 /* CONTROL traps are not considered drops */
 HSP_DROPPOINT(==,stp,)                          /* CONTROL: Traps STP packets */
 HSP_DROPPOINT(==,lacp,)                         /* CONTROL: Traps LACP packets */
