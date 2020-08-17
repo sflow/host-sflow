@@ -7,7 +7,7 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
-  
+
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -20,7 +20,7 @@ extern "C" {
 #include <linux/inet_diag.h>
 #include <arpa/inet.h>
 #include <pwd.h>
-  
+
 #include "util_netlink.h"
 
   // mod_tcp developed with grateful reference to:
@@ -36,24 +36,24 @@ extern "C" {
     __u8	tcpi_backoff;
     __u8	tcpi_options;
     __u8	tcpi_snd_wscale : 4, tcpi_rcv_wscale : 4;
-    
+
     __u32	tcpi_rto;
     __u32	tcpi_ato;
     __u32	tcpi_snd_mss;
     __u32	tcpi_rcv_mss;
-    
+
     __u32	tcpi_unacked;
     __u32	tcpi_sacked;
     __u32	tcpi_lost;
     __u32	tcpi_retrans;
     __u32	tcpi_fackets;
-    
+
     /* Times. */
     __u32	tcpi_last_data_sent;
     __u32	tcpi_last_ack_sent;     /* Not remembered, sorry. */
     __u32	tcpi_last_data_recv;
     __u32	tcpi_last_ack_recv;
-    
+
     /* Metrics. */
     __u32	tcpi_pmtu;
     __u32	tcpi_rcv_ssthresh;
@@ -63,23 +63,43 @@ extern "C" {
     __u32	tcpi_snd_cwnd;
     __u32	tcpi_advmss;
     __u32	tcpi_reordering;
-    
+
     __u32	tcpi_rcv_rtt;
     __u32	tcpi_rcv_space;
-    
+
     __u32	tcpi_total_retrans;
-    
+
     __u64	tcpi_pacing_rate;
     __u64	tcpi_max_pacing_rate;
     __u64	tcpi_bytes_acked;    /* RFC4898 tcpEStatsAppHCThruOctetsAcked */
     __u64	tcpi_bytes_received; /* RFC4898 tcpEStatsAppHCThruOctetsReceived */
     __u32	tcpi_segs_out;	     /* RFC4898 tcpEStatsPerfSegsOut */
     __u32	tcpi_segs_in;	     /* RFC4898 tcpEStatsPerfSegsIn */
-    
+
     __u32	tcpi_notsent_bytes;
     __u32	tcpi_min_rtt;
     __u32	tcpi_data_segs_in;	/* RFC4898 tcpEStatsDataSegsIn */
     __u32	tcpi_data_segs_out;	/* RFC4898 tcpEStatsDataSegsOut */
+
+    __u64       tcpi_delivery_rate;
+
+    __u64	tcpi_busy_time;      /* Time (usec) busy sending data */
+    __u64	tcpi_rwnd_limited;   /* Time (usec) limited by receive window */
+    __u64	tcpi_sndbuf_limited; /* Time (usec) limited by send buffer */
+
+    __u32	tcpi_delivered;
+    __u32	tcpi_delivered_ce;
+
+    __u64	tcpi_bytes_sent;     /* RFC4898 tcpEStatsPerfHCDataOctetsOut */
+    __u64	tcpi_bytes_retrans;  /* RFC4898 tcpEStatsPerfOctetsRetrans */
+    __u32	tcpi_dsack_dups;     /* RFC4898 tcpEStatsStackDSACKDups */
+    __u32	tcpi_reord_seen;     /* reordering events seen */
+
+    __u32	tcpi_rcv_ooopack;    /* Out-of-order packets received */
+
+    __u32	tcpi_snd_wnd;	     /* peer's advertised receive window after
+				      * scaling (bytes)
+				      */
   };
 
 #define HSP_READNL_RCV_BUF 8192
@@ -98,10 +118,18 @@ extern "C" {
 #define HSP_TCP_TIMEOUT_MS 400
     EnumPktDirection pktdirn;
   } HSPTCPSample;
-    
+
   typedef struct _HSP_mod_TCP {
     EVBus *packetBus;
     int nl_sock;
+    uint32_t nl_seq_tx;
+    uint32_t nl_seq_rx;
+    uint32_t nl_seq_lost;
+    uint32_t diag_tx;
+    uint32_t diag_rx;
+    uint32_t samples_annotated;
+    uint32_t diag_timeouts;
+    uint32_t n_lastTick;
     UTHash *sampleHT;
     UTQ(HSPTCPSample) timeoutQ;
   } HSP_mod_TCP;
@@ -117,7 +145,7 @@ extern "C" {
     ts->samples = UTArrayNew(UTARRAY_DFLT);
     return ts;
   }
-  
+
   static void tcpSampleFree(HSPTCPSample *ts) {
     UTArrayFree(ts->samples);
     my_free(ts);
@@ -139,28 +167,44 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void parse_diag_msg(EVMod *mod, struct inet_diag_msg *diag_msg, int rtalen)
+  static void parse_diag_msg(EVMod *mod, struct inet_diag_msg *diag_msg, int rtalen, uint32_t seqNo)
   {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    mdata->diag_rx++;
 
     if(diag_msg == NULL)
       return;
     if(diag_msg->idiag_family != AF_INET
        && diag_msg->idiag_family != AF_INET6)
       return;
-    
-    // see if we can get back to the sample that triggered this lookup
+
+    // see if we can get back to the HSPTCPSample that triggered this lookup
     HSPTCPSample search = { .conn_req.id = diag_msg->id };
     HSPTCPSample *found = UTHashDelKey(mdata->sampleHT, &search);
 
+    if(found) {
+      // use this to confirm seqNo advance so we can report on
+      // the number of our requests that seem to be outstanding
+      // or lost (assumes requests answered in order)
+      uint32_t lost = seqNo - mdata->nl_seq_rx - 1;
+      mdata->nl_seq_lost += lost;
+      mdata->nl_seq_rx = seqNo;
+    }
+
     // user info.  Prefer getpwuid_r() if avaiable...
     struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
-    myDebug(1, "diag_msg: UDP=%s UID=%u(%s) inode=%u",
-	    found ? (found->udp ? "YES":"NO") : "<sample not found>",
+    myDebug(2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u)",
+	    found ? "YES" : "NO",
+	    found ? (found->udp ? "UDP":"TCP") : "",
 	    diag_msg->idiag_uid,
 	    uid_info ? uid_info->pw_name : "<user not found>",
-	    diag_msg->idiag_inode);
+	    diag_msg->idiag_inode,
+	    mdata->diag_tx,
+	    mdata->diag_rx,
+	    mdata->nl_seq_tx - mdata->nl_seq_rx,
+	    mdata->nl_seq_lost);
     // Theoretically we could follow the inode back to
     // the socket and get the application (command line)
     // but there does not seem to be a direct lookup
@@ -168,7 +212,7 @@ extern "C" {
 
     if(rtalen > 0) {
       struct rtattr *attr = (struct rtattr *)(diag_msg + 1);
-      
+
       while(RTA_OK(attr, rtalen)) {
 	// may also see INET_DIAG_MARK here
 	if(attr->rta_type == INET_DIAG_INFO) {
@@ -185,21 +229,29 @@ extern "C" {
 	  struct my_tcp_info tcpi = { 0 };
 	  int readLen = RTA_PAYLOAD(attr);
 	  if(readLen > sizeof(struct my_tcp_info)) {
-	    myDebug(2, "New kernel has new fields in struct tcp_info. Check it out!");
+	    myDebug(3, "New kernel has new fields in struct tcp_info. Check it out!");
 	    readLen = sizeof(struct my_tcp_info);
 	  }
 	  memcpy(&tcpi, RTA_DATA(attr), readLen);
-	  myDebug(1, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
+	  myDebug(2, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
 		  tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
 		  UTNLDiag_sockid_print(&diag_msg->id));
 	  if(found) {
-	    myDebug(1, "found TCPSample: %s RTT:%uuS", tcpSamplePrint(found), tcpi.tcpi_rtt);
+	    uint32_t nSamples = UTArrayN(found->samples);
+	    myDebug(2, "found TCPSample: %s RTT:%uuS, annotating %u packet samples",
+		    tcpSamplePrint(found),
+		    tcpi.tcpi_rtt,
+		    nSamples);
+	    mdata->samples_annotated += nSamples;
 	    HSPPendingSample *ps;
 	    UTARRAY_WALK(found->samples, ps) {
 	      // populate tcp_info structure
 	      SFLFlow_sample_element *tcpElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
 	      tcpElem->tag = SFLFLOW_EX_TCP_INFO;
-	      tcpElem->flowType.tcp_info.dirn = found->pktdirn;
+	      // both sent and received samples may be in this list, so we have
+	      // to look at the localSrc flag sample-by-sample to determine the direction
+	      // we should report:
+	      tcpElem->flowType.tcp_info.dirn = ps->localSrc ? PKTDIR_sent : PKTDIR_received;
 	      tcpElem->flowType.tcp_info.snd_mss = tcpi.tcpi_snd_mss;
 	      tcpElem->flowType.tcp_info.rcv_mss = tcpi.tcpi_rcv_mss;
 	      tcpElem->flowType.tcp_info.unacked = tcpi.tcpi_unacked;
@@ -218,7 +270,7 @@ extern "C" {
 	    }
 	  }
 	}
-	attr = RTA_NEXT(attr, rtalen); 
+	attr = RTA_NEXT(attr, rtalen);
       }
     }
 
@@ -236,17 +288,33 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-#define MAGIC_SEQ 0x50C00L
-
   static void diagCB(void *magic, int sockFd, uint32_t seqNo, struct inet_diag_msg *diag_msg, int rtalen) {
-    if(seqNo == MAGIC_SEQ)
-      parse_diag_msg((EVMod *)magic, diag_msg, rtalen);
+      parse_diag_msg((EVMod *)magic, diag_msg, rtalen, seqNo);
   }
 
   static void readNL(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     UTNLDiag_recv(mod, mdata->nl_sock, diagCB);
+  }
+
+  /*_________________---------------------------__________________
+    _________________       evt_tick            __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+    uint32_t n_thisTick = mdata->diag_tx + mdata->diag_rx + mdata->nl_seq_lost + mdata->diag_timeouts;
+    if(n_thisTick != mdata->n_lastTick) {
+      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u",
+	      mdata->diag_tx,
+	      mdata->diag_rx,
+	      mdata->nl_seq_lost,
+	      mdata->diag_timeouts,
+	      mdata->samples_annotated);
+     mdata->n_lastTick = n_thisTick;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -264,12 +332,14 @@ extern "C" {
 	break;
       }
       else {
-	myDebug(1, "removing timed-out request (%s)", tcpSamplePrint(ts));
+	myDebug(2, "removing timed-out request (%s)", tcpSamplePrint(ts));
 	HSPTCPSample *next_ts = ts->next;
 	// remove from Q
 	UTQ_REMOVE(mdata->timeoutQ, ts);
 	// remove from HT
 	UTHashDel(mdata->sampleHT, ts);
+	// count
+	mdata->diag_timeouts++;
 	// let the samples go
 	HSPPendingSample *ps;
 	UTARRAY_WALK(ts->samples, ps) {
@@ -296,9 +366,12 @@ extern "C" {
     if((ip_ver == 4 || ip_ver == 6)
        && (ps->ipproto == IPPROTO_TCP || ps->ipproto == IPPROTO_UDP)) {
       // was it to or from this host?
-      bool local_src = isLocalAddress(sp, &ps->src);
-      bool local_dst = isLocalAddress(sp, &ps->dst);
-      if(local_src != local_dst) {
+      if(!ps->localTest) {
+	ps->localSrc = isLocalAddress(sp, &ps->src);
+	ps->localDst = isLocalAddress(sp, &ps->dst);
+	ps->localTest = YES;
+      }
+      if(ps->localSrc != ps->localDst) {
 	// Yes. Get ports and form query
 	// src+dst tcp_ports are at start of TCP or UDP header
 	uint16_t tcp_ports[2];
@@ -306,10 +379,10 @@ extern "C" {
 
 	if(debug(2)) {
 	  char ipb1[51], ipb2[51];
-	  myDebug(2, "%s proto=%u ip_ver==%d local_src=%u local_dst=%u, src=%s dst=%s",
+	  myDebug(3, "%s proto=%u ip_ver==%d local_src=%u local_dst=%u, src=%s dst=%s",
 		  (ps->ipproto == IPPROTO_TCP) ? "TCP" : "UDP",
 		  ps->ipproto,
-		  ip_ver, local_src, local_dst,
+		  ip_ver, ps->localSrc, ps->localDst,
 		  SFLAddress_print(&ps->src,ipb1,50),
 		  SFLAddress_print(&ps->dst,ipb2,50));
 	}
@@ -317,7 +390,7 @@ extern "C" {
 	// OK,  we are going to look this one up
 	HSPTCPSample *tcpSample = tcpSampleNew();
 	tcpSample->qtime = mdata->packetBus->now;
-	tcpSample->pktdirn = local_src ? PKTDIR_sent : PKTDIR_received;
+	tcpSample->pktdirn = ps->localSrc ? PKTDIR_sent : PKTDIR_received;
 	// just the established TCP connections
 	tcpSample->conn_req.sdiag_protocol = ps->ipproto;
 	tcpSample->udp = (ps->ipproto == IPPROTO_UDP);
@@ -338,7 +411,7 @@ extern "C" {
 	tcpSample->dst = ps->dst;
 	if(ip_ver == 4) {
 	  tcpSample->conn_req.sdiag_family = AF_INET;
-	  if(local_src) {
+	  if(ps->localSrc) {
 	    memcpy(sockid->idiag_src, &ps->src.address.ip_v4, 4);
 #ifdef HSP_INET_DIAG_USE_DUMP_UDP
 	    memcpy(sockid->idiag_dst, &ps->dst.address.ip_v4, 4);
@@ -354,7 +427,7 @@ extern "C" {
 	}
 	else {
 	  tcpSample->conn_req.sdiag_family = AF_INET6;
-	  if(local_src) {
+	  if(ps->localSrc) {
 	    memcpy(sockid->idiag_src, &ps->src.address.ip_v6, 16);
 	    memcpy(sockid->idiag_dst, &ps->dst.address.ip_v6, 16);
 	  }
@@ -364,7 +437,7 @@ extern "C" {
 	  }
 	}
 	// tcp ports
-	if(local_src) {
+	if(ps->localSrc) {
 	  sockid->idiag_sport = tcp_ports[0];
 #ifdef HSP_INET_DIAG_USE_DUMP_UDP
 	  sockid->idiag_dport = tcp_ports[1];
@@ -386,12 +459,12 @@ extern "C" {
 	holdPendingSample(ps);
 	HSPTCPSample *tsInQ = UTHashGet(mdata->sampleHT, tcpSample);
 	if(tsInQ) {
-	  myDebug(1, "request already pending");
+	  myDebug(2, "request already pending");
 	  UTArrayAdd(tsInQ->samples, ps);
 	  tcpSampleFree(tcpSample);
 	}
 	else {
-	  myDebug(1, "new request: %s", tcpSamplePrint(tcpSample));
+	  myDebug(2, "new request: %s", tcpSamplePrint(tcpSample));
 	  UTArrayAdd(tcpSample->samples, ps);
 	  // add to HT and timeout queue
 	  UTHashAdd(mdata->sampleHT, tcpSample);
@@ -405,12 +478,13 @@ extern "C" {
 #else
 			NO,
 #endif
-			MAGIC_SEQ);
+			++mdata->nl_seq_tx);
+	  mdata->diag_tx++;
 	}
       }
     }
   }
-  
+
   /*_________________---------------------------__________________
     _________________    evt_config_first       __________________
     -----------------___________________________------------------
@@ -425,6 +499,7 @@ extern "C" {
       return;
     }
     EVBusAddSocket(mod, mdata->packetBus, mdata->nl_sock, readNL, NULL);
+    mdata->nl_seq_tx = mdata->nl_seq_rx = 0x50C00L;
   }
 
   /*_________________---------------------------__________________
@@ -442,6 +517,7 @@ extern "C" {
     // register call-backs
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
   }
