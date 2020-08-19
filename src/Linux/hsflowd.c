@@ -1770,6 +1770,12 @@ extern "C" {
     myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG, PSAMPLE, SYSTEMD and DROPMON modules");
     sp->cumulus.cumulus = YES;
     sp->systemd.systemd = YES;
+    // force the hardwareSampling flag on, to ensure that sampling-rate is handled correctly.
+    // We used to only set this if and when mod_cumulus was able to call out to the script
+    // to set the samplingRate, but that resulted in a race where software sampling was
+    // configured and not subsequently retracted.  Now that sampling on Cumulus is configured
+    // via tc(1) and handled via mod_psample the distinction is no longer needed anyway.
+    sp->hardwareSampling = YES;
     uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
       | HSP_SAMPLEOPT_IF_POLLER
       | HSP_SAMPLEOPT_ASIC
