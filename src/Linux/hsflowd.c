@@ -91,11 +91,12 @@ extern "C" {
     return adaptor;
   }
 
-  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad) {
+  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad, char *htname) {
     SFLAdaptor *replaced = UTHashAdd(ht, ad);
     if(replaced && replaced != ad) {
       char buf1[256], buf2[256];
-      myDebug(1, "adaptorAddOrReplace: replacing adaptor [%s] with [%s]",
+      myDebug(1, "adaptorAddOrReplace: %s: replacing adaptor [%s] with [%s]",
+	      htname,
 	      adaptorStr(replaced, buf1, 256),
 	      adaptorStr(ad, buf2, 256));
       // This can happen quite commonly when two interfaces share the

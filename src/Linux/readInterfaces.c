@@ -509,7 +509,7 @@ extern "C" {
 	      ifr->ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
 		adaptor->peer_ifIndex = et_stats->data[ii];
-		UTHashAdd(sp->adaptorsByPeerIndex, adaptor);
+		adaptorAddOrReplace(sp->adaptorsByPeerIndex, adaptor, "byPeerIndex");
 		myDebug(1, "Interface %s (ifIndex=%u) has peer_ifindex=%u",
 			adaptor->deviceName,
 			adaptor->ifIndex,
@@ -630,6 +630,7 @@ extern "C" {
   UTHash *newLocalIP = UTHASH_NEW(SFLAddress, address.ip_v4, UTHASH_DFLT);
   UTHash *newLocalIP6 = UTHASH_NEW(SFLAddress, address.ip_v6, UTHASH_DFLT);
 
+  // mark-and-sweep. Mark all existing adaptors
   { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
@@ -713,23 +714,34 @@ extern "C" {
 	ifIndex = ifr.ifr_ifindex;
       }
 
+      // find existing adaptor by name.  We use adaptorsByName as the primary lookup here
+      // assuming that every interface has a unique, non-empty name. We treat this as being
+      // the same interface if it appears with the same name, ifIndex and MAC as last time.
+      // Otherwise a new adaptor object is inserted. Any previous adaptor objects that are not
+      // found in this way are deleted (from all lookup tables) using the mark-and-sweep
+      // mechanism.
+
       // for now just assume that each interface has only one MAC.  It's not clear how we can
       // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
       // find or create a new "adaptor" entry
       SFLAdaptor *adaptor = nioAdaptorNew(devName, (gotMac ? macBytes : NULL), ifIndex);
 
       bool addAdaptorToHT = YES;
+
       SFLAdaptor *existing = adaptorByName(sp, devName);
       if(existing
 	 && adaptorEqual(adaptor, existing)) {
-	// no change - use existing object
+	// found by name, and no change to (name,ifIndex,MAC), so use existing object
+	// note that attributes such as peer_ifIndex may differ here, but they may not
+	// have been looked up yet.
 	adaptorFree(adaptor);
+	// this adaptor is going to survive
 	adaptor = existing;
+	// clear the mark so we don't free it below
+	adaptor->marked = NO;
+	// indicate that it is already in the lookup tables
 	addAdaptorToHT = NO;
       }
-
-      // clear the mark so we don't free it below
-      adaptor->marked = NO;
 
       // this flag might belong in the adaptorNIO struct
       adaptor->promiscuous = promisc;
@@ -792,19 +804,23 @@ extern "C" {
 	// (and influence ethtool data-gathering).  We broadcast this
 	// but it only really makes sense to receive it on the POLL_BUS
 	EVEventTxAll(sp->rootModule, HSPEVENT_INTF_READ, &adaptor, sizeof(adaptor));
-	// use ethtool to get info about direction/speed and more
+	// use ethtool to get info about direction/speed, peer_ifIndex and more
 	if(read_ethtool_info(sp, &ifr, fd, adaptor) == YES) {
 	  ad_changed++;
 	}
       }
 
       if(addAdaptorToHT) {
-	// it is a new adaptor name or the mac/ifindex changed
+	// it is a new adaptor name or the mac or ifindex appeared to change.
+	// That could mean it is a new interface, or it could mean something
+	// more subtle such as that the interface was renamed, or given a new
+	// ifIndex or MAC.  Either way, this is a newly allocated adaptor
+	// object that needs to be inserted into the lookup tables.
 	ad_added++;
-	adaptorAddOrReplace(sp->adaptorsByName, adaptor);
+	adaptorAddOrReplace(sp->adaptorsByName, adaptor, "byName");
 	// add to "all namespaces" collections too.
-	if(gotMac) adaptorAddOrReplace(sp->adaptorsByMac, adaptor);
-	if(ifIndex) adaptorAddOrReplace(sp->adaptorsByIndex, adaptor);
+	if(gotMac) adaptorAddOrReplace(sp->adaptorsByMac, adaptor, "byMac");
+	if(ifIndex) adaptorAddOrReplace(sp->adaptorsByIndex, adaptor, "byIndex");
       }
 
     }

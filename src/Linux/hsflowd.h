@@ -704,7 +704,7 @@ extern "C" {
   // adaptors
   SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)
-  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad);
+  void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad, char *htname);
   SFLAdaptor *adaptorByName(HSP *sp, char *dev);
   SFLAdaptor *adaptorByMac(HSP *sp, SFLMacAddress *mac);
   SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex);
