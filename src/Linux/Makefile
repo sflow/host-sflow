@@ -54,6 +54,8 @@ endif
 ifeq ("$(strip $(FEATURES))","CUMULUS")
   XTGTS += $(FEATURES_CUMULUS)
   CFLAGS_LOAD += -DHSP_LOAD_CUMULUS
+  HSFLOWD_CONF=scripts/hsflowd.conf.cumulus
+  HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.cumulus
 endif
 ifeq ("$(strip $(FEATURES))","EOS")
   XTGTS += $(FEATURES_EOS)

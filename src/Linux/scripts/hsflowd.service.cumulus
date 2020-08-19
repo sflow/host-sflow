@@ -1,0 +1,14 @@
+[Unit]
+Description=Host sFlow Daemon
+Requisite=switchd.service
+After=network-online.target switchd.service
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/hsflowd
+ExecStart=/usr/sbin/hsflowd -m %m -d
+ExecStopPost=/usr/lib/cumulus/portsamp swp* 0 0 0
+
+[Install]
+WantedBy=basic.target
+WantedBy=switchd.service
