@@ -1768,7 +1768,7 @@ extern "C" {
     // explicitly in the config file - but do this before we read
     // the config so that overrides are possible.
 #ifdef HSP_LOAD_CUMULUS
-    myLog(LOG_INFO, "autoload CUMULUS, ULOG/NFLOG, PSAMPLE, SYSTEMD and DROPMON modules");
+    myLog(LOG_INFO, "autoload CUMULUS, NFLOG, PSAMPLE, SYSTEMD and DROPMON modules");
     sp->cumulus.cumulus = YES;
     sp->systemd.systemd = YES;
     // force the hardwareSampling flag on, to ensure that sampling-rate is handled correctly.
@@ -1782,21 +1782,12 @@ extern "C" {
       | HSP_SAMPLEOPT_ASIC
       | HSP_SAMPLEOPT_DIRN_HOOK
       | HSP_SAMPLEOPT_CUMULUS;
-    // Cumulus Linux 2.5 or earlier uses ULOG group 1
-    // So it should be compiled with:
-    // make deb FEATURES="CUMULUS ULOG"
-    sp->ulog.ulog = YES;
-    sp->ulog.group = 1;
-    sp->ulog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_ULOG;
-    // Cumulus Linux 3.0 or later uses NFLOG group 1
-    // So it should be compiled with:
-    // make deb FEATURES="CUMULUS NFLOG"
+    // Cumulus Linux 2.5 or earlier used ULOG group 1
+    // Cumulus Linux 3.0 or later used NFLOG group 1
     sp->nflog.nflog = YES;
     sp->nflog.group = 1;
     sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
     // Cumulus Linux 4.0 or later uses PSAMPLE group 1
-    // So it should be compiled with:
-    // make deb FEATURES="CUMULUS PSAMPLE"
     sp->psample.psample = YES;
     sp->psample.group = 1;
     // Note that the DIRN_HOOK is no longer available
