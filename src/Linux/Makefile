@@ -167,7 +167,7 @@ CFLAGS_KVM= -I/usr/include/libvirt -I/usr/include/libxml2
 LIBS_KVM= -lvirt -lxml2
 
 CFLAGS_DOCKER=
-LIBS_DOCKER=
+LIBS_DOCKER= -lm
 
 CFLAGS_ULOG=
 LIBS_ULOG=
