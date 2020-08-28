@@ -197,22 +197,26 @@ extern "C" {
     // For these events, poller->userData points to
     // HSPVMState_DOCKER/SYSTEMD/KVM/XEN which
     // all start with the HSPVMState structure.
-    HSPVMState *vm = (HSPVMState *)ps->poller->userData;
-    if(vm->gpus) {
-      // VM was assigned one or more GPU devices
-      SFLHost_gpu_nvml *nvml = init_gpu_nvml(&mdata->nvmlElem);
-      char *uuid;
-      UTARRAY_WALK(vm->gpus, uuid) {
-	// look up from UUID to gpu_index
-	HSPGpuID search = {};
-	memcpy(search.uuid, uuid, 16);
-	HSPGpuID *id = UTHashGet(mdata->byUUID, &search);
-	if(id) {
-	  // accumuate this one
-	  accumulateGPUCounters(mod, nvml, id->index);
+    if(ps->poller
+       && ps->poller->userData) {
+      HSPVMState *vm = (HSPVMState *)ps->poller->userData;
+      if(vm
+	 && vm->gpus) {
+	// VM was assigned one or more GPU devices
+	SFLHost_gpu_nvml *nvml = init_gpu_nvml(&mdata->nvmlElem);
+	char *uuid;
+	UTARRAY_WALK(vm->gpus, uuid) {
+	  // look up from UUID to gpu_index
+	  HSPGpuID search = {};
+	  memcpy(search.uuid, uuid, 16);
+	  HSPGpuID *id = UTHashGet(mdata->byUUID, &search);
+	  if(id) {
+	    // accumuate this one
+	    accumulateGPUCounters(mod, nvml, id->index);
+	  }
 	}
+	SFLADD_ELEMENT(ps->cs, &mdata->nvmlElem);
       }
-      SFLADD_ELEMENT(ps->cs, &mdata->nvmlElem);
     }
   }
 
