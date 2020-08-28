@@ -206,7 +206,8 @@ extern "C" {
        && ps->poller->userData) {
       HSPVMState *vm = (HSPVMState *)ps->poller->userData;
       if(vm
-	 && vm->gpus) {
+	 && vm->gpus
+	 && UTArrayN(vm->gpus) > 0) {
 	myDebug(2, "nvml: evt_vm_cs() %u vm->gpus", UTArrayN(vm->gpus));
 	// VM was assigned one or more GPU devices
 	SFLHost_gpu_nvml *nvml = init_gpu_nvml(&mdata->nvmlElem);
