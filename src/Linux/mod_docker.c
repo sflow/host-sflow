@@ -194,6 +194,8 @@ extern "C" {
 #define HSP_DOCKER_WAIT_STATS 3
 #define HSP_DOCKER_REQ_TIMEOUT 10
 
+#define HSP_NVIDIA_VIS_DEV_ENV "NVIDIA_VISIBLE_DEVICES"
+
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
     UTHash *vmsByUUID;
@@ -574,10 +576,22 @@ extern "C" {
     adaptorsElem.tag = SFLCOUNTERS_ADAPTORS;
     adaptorsElem.counterBlock.adaptors = vm->interfaces;
     SFLADD_ELEMENT(&cs, &adaptorsElem);
-    SEMLOCK_DO(sp->sync_agent) {
-      sfl_poller_writeCountersSample(vm->poller, &cs);
-      sp->counterSampleQueued = YES;
-      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+
+    // circulate the cs to be annotated by other modules before it is sent out.
+    HSPPendingCSample ps = { .poller = vm->poller, .cs = &cs };
+    EVEvent *evt_vm_cs = EVGetEvent(sp->pollBus, HSPEVENT_VM_COUNTER_SAMPLE);
+    // TODO: can we specify pollBus only? Receiving this on another bus would
+    // be a disaster as we would not copy the whole structure here.
+    EVEventTx(sp->rootModule, evt_vm_cs, &ps, sizeof(ps));
+    if(ps.suppress) {
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED]++;
+    }
+    else {
+      SEMLOCK_DO(sp->sync_agent) {
+	sfl_poller_writeCountersSample(vm->poller, &cs);
+	sp->counterSampleQueued = YES;
+	sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+      }
     }
   }
 
@@ -879,6 +893,41 @@ extern "C" {
     }
   }
 
+  static void readContainerGPUs(EVMod *mod, HSPVMState_DOCKER *container, cJSON *jenv) {
+    // look through env vars for evidence of GPUs assigned to this container
+    int entries = cJSON_GetArraySize(jenv);
+    for(int ii = 0; ii < entries; ii++) {
+      cJSON *varval = cJSON_GetArrayItem(jenv, ii);
+      if(varval) {
+	char *vvstr = varval->valuestring;
+	int vlen = strlen(HSP_NVIDIA_VIS_DEV_ENV);
+	if(vvstr
+	   && my_strnequal(vvstr, HSP_NVIDIA_VIS_DEV_ENV, vlen)
+	   && vvstr[vlen] == '=') {
+	  char *gpu_uuids = vvstr + vlen + 1;
+	  UTArray *arr = container->vm.gpus;
+	  // clear out the list - we are single threaded on the
+	  // poll bus so there is no need for sync
+	  char *old_uuid;
+	  UTARRAY_WALK(arr, old_uuid)
+	    my_free(old_uuid);
+	  UTArrayReset(arr);
+	  // (re)populate
+	  char *str;
+	  char buf[128];
+	  while((str = parseNextTok(&gpu_uuids, ",", NO, 0, YES, buf, 128)) != NULL) {
+	    // expect GPU-<uuid>
+	    if(my_strnequal(str, "GPU-", 4)) {
+	      char *uuid = my_calloc(16);
+	      if(parseUUID(str + 4, uuid))
+		UTArrayAdd(arr, uuid);
+	    }
+	  }
+	}
+      }
+    }
+  }
+
   static void dockerAPI_inspect(EVMod *mod, UTStrBuf *buf, cJSON *jcont, HSPDockerRequest *req) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     myDebug(1, "dockerAPI_inspect");
@@ -931,6 +980,10 @@ extern "C" {
     cJSON *jnanocpus = cJSON_GetObjectItem(jhconfig, "NanoCpus");
     if(jnanocpus)
       container->cpu_count_dbl = jnanocpus->valuedouble / 1e9;
+
+    cJSON *jenv = cJSON_GetObjectItem(jconfig, "Env");
+    if(jenv)
+      readContainerGPUs(mod, container, jenv);
 
     container->inspect_rx = YES;
     // now that we have the pid,  we can probe for the MAC and peer-ifIndex

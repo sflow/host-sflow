@@ -231,6 +231,7 @@ extern "C" {
     SFLAdaptorList *interfaces;
     UTStringArray *volumes;
     UTStringArray *disks;
+    UTArray *gpus;
     SFLPoller *poller;
   } HSPVMState;
 
@@ -359,6 +360,7 @@ extern "C" {
 // The generic start,tick,tock,final,end events are defined in evbus.h
 #define HSPEVENT_HOST_COUNTER_SAMPLE "csample"   // (csample *) building counter-sample
 #define HSPEVENT_INTF_COUNTER_SAMPLE "icsample"  // (csample *) building intf counter-sample
+#define HSPEVENT_VM_COUNTER_SAMPLE "vcsample"    // (csample *) building vm counter-sample
 #define HSPEVENT_FLOW_SAMPLE "flow_sample"       // (HSPPendingSample *) building flow-sample
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
 #define HSPEVENT_CONFIG_LINE "config_line"       // (line)...next config line

@@ -423,6 +423,7 @@ extern "C" {
 	state->volumes = strArrayNew();
 	state->disks = strArrayNew();
 	state->interfaces = adaptorListNew();
+	state->gpus = UTArrayNew(UTARRAY_DFLT);
 	sp->refreshAdaptorList = YES;
 	SFLDataSource_instance dsi;
 	// ds_class = <virtualEntity>, ds_index = offset + <assigned>, ds_instance = 0
