@@ -917,7 +917,7 @@ extern "C" {
 	  char *str;
 	  char buf[128];
 	  while((str = parseNextTok(&gpu_uuids, ",", NO, 0, YES, buf, 128)) != NULL) {
-	    myDebug(2, "parsing GPU uuidstr: %s", vvstr);
+	    myDebug(2, "parsing GPU uuidstr: %s", str);
 	    // expect GPU-<uuid>
 	    if(my_strnequal(str, "GPU-", 4)) {
 	      char *uuid = my_calloc(16);

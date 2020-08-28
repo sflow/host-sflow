@@ -57,8 +57,12 @@ extern "C" {
 	char uuidstr[128];
 	if(NVML_SUCCESS == nvmlDeviceGetUUID(gpu, uuidstr, 128)) {
 	  myDebug(2, "nvml: deviceGetUUID(index=%u) returned %s", ii, uuidstr);
+	  // uuuidstr may have "GPU-" prefix
+	  char *uuidstr2 = uuidstr;
+	  if(my_strnequal("GPU-", uuidstr2, 4))
+	    uuidstr2 += 4;
 	  HSPGpuID *id = my_calloc(sizeof(HSPGpuID));
-	  if(parseUUID(uuidstr, id->uuid)) {
+	  if(parseUUID(uuidstr2, id->uuid)) {
 	    id->index = ii;
 	    UTHashAdd(mdata->byUUID, id);
 	    myDebug(1, "nvml: GPU uuid added to lookup table");
@@ -193,7 +197,7 @@ extern "C" {
   }
 
   static void evt_vm_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSPPendingCSample *ps = *(HSPPendingCSample **)data;
+    HSPPendingCSample *ps = (HSPPendingCSample *)data;
     HSP_mod_NVML *mdata = (HSP_mod_NVML *)mod->data;
     // For these events, poller->userData points to
     // HSPVMState_DOCKER/SYSTEMD/KVM/XEN which

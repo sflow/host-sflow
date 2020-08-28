@@ -329,6 +329,8 @@ extern "C" {
 
     // send the cs out to be annotated by other modules such as docker, xen, vrt and NVML
     EVEvent *evt_host_cs = EVGetEvent(sp->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE);
+    // TODO: use HSPPendingSample, and remove the extra later of & indirection here
+    // because it is not necessary.
     EVEventTx(sp->rootModule, evt_host_cs, &cs, sizeof(cs));
 
     SEMLOCK_DO(sp->sync_agent) {
