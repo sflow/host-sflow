@@ -56,14 +56,15 @@ extern "C" {
       if (NVML_SUCCESS == nvmlDeviceGetHandleByIndex(ii, &gpu)) {
 	char uuidstr[128];
 	if(NVML_SUCCESS == nvmlDeviceGetUUID(gpu, uuidstr, 128)) {
+	  myDebug(2, "nvml: deviceGetUUID(index=%u) returned %s", ii, uuidstr);
 	  HSPGpuID *id = my_calloc(sizeof(HSPGpuID));
 	  if(parseUUID(uuidstr, id->uuid)) {
 	    id->index = ii;
 	    UTHashAdd(mdata->byUUID, id);
-	    myDebug(1, "");
+	    myDebug(1, "nvml: GPU uuid added to lookup table");
 	  }
 	  else {
-	    myDebug(1, "failed to parse GPU uuid");
+	    myDebug(1, "nvml: failed to parse GPU uuid");
 	    my_free(id);
 	  }
 	}
@@ -202,6 +203,7 @@ extern "C" {
       HSPVMState *vm = (HSPVMState *)ps->poller->userData;
       if(vm
 	 && vm->gpus) {
+	myDebug(2, "nvml: evt_vm_cs() %u vm->gpus", UTArrayN(vm->gpus));
 	// VM was assigned one or more GPU devices
 	SFLHost_gpu_nvml *nvml = init_gpu_nvml(&mdata->nvmlElem);
 	char *uuid;
@@ -212,7 +214,11 @@ extern "C" {
 	  HSPGpuID *id = UTHashGet(mdata->byUUID, &search);
 	  if(id) {
 	    // accumuate this one
+	    myDebug(2, "nvml: evt_vm_cs() accumulate(idx=%u)", id->index);
 	    accumulateGPUCounters(mod, nvml, id->index);
+	  }
+	  else {
+	    myDebug(2, "nvml: evt_vm_cs() gpu uuid->id lookup failed");
 	  }
 	}
 	SFLADD_ELEMENT(ps->cs, &mdata->nvmlElem);

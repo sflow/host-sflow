@@ -904,6 +904,7 @@ extern "C" {
 	if(vvstr
 	   && my_strnequal(vvstr, HSP_NVIDIA_VIS_DEV_ENV, vlen)
 	   && vvstr[vlen] == '=') {
+	  myDebug(2, "parsing GPU env: %s", vvstr);
 	  char *gpu_uuids = vvstr + vlen + 1;
 	  UTArray *arr = container->vm.gpus;
 	  // clear out the list - we are single threaded on the
@@ -916,11 +917,14 @@ extern "C" {
 	  char *str;
 	  char buf[128];
 	  while((str = parseNextTok(&gpu_uuids, ",", NO, 0, YES, buf, 128)) != NULL) {
+	    myDebug(2, "parsing GPU uuidstr: %s", vvstr);
 	    // expect GPU-<uuid>
 	    if(my_strnequal(str, "GPU-", 4)) {
 	      char *uuid = my_calloc(16);
-	      if(parseUUID(str + 4, uuid))
+	      if(parseUUID(str + 4, uuid)) {
+		myDebug(2, "adding GPU uuid to container: %s", container->name);
 		UTArrayAdd(arr, uuid);
+	      }
 	    }
 	  }
 	}
