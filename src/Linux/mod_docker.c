@@ -1091,7 +1091,9 @@ extern "C" {
     if(container->last_vnic == 0
        || (now_mono - container->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
       container->last_vnic = now_mono;
-      updateContainerAdaptors(mod, container);
+      // skip kubnetes "POD" containers to prevent IP clash
+      if(!my_strnequal(container->name, "k8s_POD_", 8))
+	updateContainerAdaptors(mod, container);
     }
 
     // Could send initial counter-sample immediately... even before we get the first
