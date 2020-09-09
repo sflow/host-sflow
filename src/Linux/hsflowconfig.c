@@ -1523,6 +1523,9 @@ extern "C" {
 	    case HSPTOKEN_HOSTNAME:
 	      if((tok = expectONOFF(sp, tok, &sp->docker.hostname)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_CGROUP_TRAFFIC:
+	      if((tok = expectONOFF(sp, tok, &sp->docker.markTraffic)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

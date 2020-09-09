@@ -196,6 +196,12 @@ extern "C" {
 
 #define HSP_NVIDIA_VIS_DEV_ENV "NVIDIA_VISIBLE_DEVICES"
 
+  typedef struct _HSPVNIC {
+    SFLAddress ipAddr;
+    uint32_t dsIndex;
+    bool unique;
+  } HSPVNIC;
+
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
     UTHash *vmsByUUID;
@@ -226,6 +232,7 @@ extern "C" {
     UTHash *hostnameCount;
     uint32_t dup_names;
     uint32_t dup_hostnames;
+    UTHash *vnicByIP;
   } HSP_mod_DOCKER;
 
 #define HSP_DOCKER_MAX_STATS_LINELEN 512
@@ -276,12 +283,15 @@ extern "C" {
     VNIC: <ifindex> <device> <mac>
   */
 
-  static int containerLinkCB(HSP *sp, HSPVMState_DOCKER *container, char *line) {
+  static int containerLinkCB(EVMod *mod, HSPVMState_DOCKER *container, char *line) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     myDebug(1, "containerLinkCB: line=<%s>", line);
     char deviceName[HSP_DOCKER_MAX_LINELEN];
     char macStr[HSP_DOCKER_MAX_LINELEN];
+    char ipStr[HSP_DOCKER_MAX_LINELEN];
     uint32_t ifIndex;
-    if(sscanf(line, "VNIC: %u %s %s", &ifIndex, deviceName, macStr) == 3) {
+    if(sscanf(line, "VNIC: %u %s %s %s", &ifIndex, deviceName, macStr, ipStr) == 4) {
       u_char mac[6];
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
 	SFLAdaptor *adaptor = adaptorListGet(container->vm.interfaces, deviceName);
@@ -305,6 +315,36 @@ extern "C" {
 
 	  // mark it as a vm/container device
 	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
+
+	  // did we get an ip address too?
+	  SFLAddress ipAddr;
+	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)) {
+	    if(!SFLAddress_isZero(&ipAddr)
+	       && mdata->vnicByIP) {
+	      myDebug(1, "learned virtual ipAddr: %s", ipStr);
+	      // Can use this to associate traffic with this container
+	      // if this address appears in sampled packet header as
+	      // outer or inner IP
+	      ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
+	      HSPVNIC search = { .ipAddr = ipAddr };
+	      HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
+	      if(vnic) {
+		// found IP - check for non-unique mapping
+		if(vnic->dsIndex != container->vm.dsIndex)
+		  vnic->unique = NO;
+	      }
+	      else {
+		// add new VNIC entry
+		vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
+		vnic->ipAddr = ipAddr;
+		vnic->dsIndex = container->vm.dsIndex;
+		UTHashAdd(mdata->vnicByIP, vnic);
+		vnic->unique = YES;
+		// TODO: be sure to remove again when container is removed
+	      }
+	    }
+	  }
+
 	}
       }
     }
@@ -328,7 +368,6 @@ extern "C" {
 #endif
 
   int readContainerInterfaces(EVMod *mod, HSPVMState_DOCKER *container)  {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     pid_t nspid = container->pid;
     myDebug(2, "readContainerInterfaces: pid=%u", nspid);
     if(nspid == 0) return 0;
@@ -420,6 +459,23 @@ extern "C" {
 		}
 		else {
 		  int ifIndex = ifr.ifr_ifindex;
+		  SFLAddress ipAddr = {};
+
+		  // see if we can get an IP address
+		  if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
+		    // only complain about this if we are debugging
+		    myDebug(1, "device %s Get SIOCGIFADDR failed : %s",
+			    devName,
+			    strerror(errno));
+		  }
+		  else {
+		    if (ifr.ifr_addr.sa_family == AF_INET) {
+		      struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
+		      // IP addr is now s->sin_addr
+		      ipAddr.type = SFLADDRESSTYPE_IP_V4;
+		      ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+		    }
+		  }
 
 		  // Get the MAC Address for this interface
 		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
@@ -430,8 +486,10 @@ extern "C" {
 		  else {
 		    u_char macStr[13];
 		    printHex((u_char *)&ifr.ifr_hwaddr.sa_data, 6, macStr, 12, NO);
+		    char ipStr[64];
+		    SFLAddress_print(&ipAddr, ipStr, 64);
 		    // send this info back up the pipe to my my parent
-		    printf("VNIC: %u %s %s\n", ifIndex, devName, macStr);
+		    printf("VNIC: %u %s %s %s\n", ifIndex, devName, macStr, ipStr);
 		  }
 		}
 	      }
@@ -456,7 +514,7 @@ extern "C" {
       char line[MAX_PROC_LINE_CHARS];
       int truncated;
       while(my_readline(ovs, line, MAX_PROC_LINE_CHARS, &truncated) != EOF)
-	containerLinkCB(sp, container, line);
+	containerLinkCB(mod, container, line);
       fclose(ovs);
       wait(NULL); // block here until child is done
     }
@@ -608,11 +666,30 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  static void removeContainerVNICLookup(EVMod *mod, HSPVMState_DOCKER *container) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(container->vm.interfaces, ad) {
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(ad);
+      if(nio->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
+	HSPVNIC search = { };
+	search.ipAddr = nio->ipAddr;
+	UTHashDelKey(mdata->vnicByIP, &search);
+      }
+    }
+  }
+
   static void removeAndFreeVM_DOCKER(EVMod *mod, HSPVMState_DOCKER *container) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     if(getDebug()) {
       myLog(LOG_INFO, "removeAndFreeVM: removing container with dsIndex=%u", container->vm.dsIndex);
     }
+
+    
+    // remove any VNIC lookups by IP
+    // (the interfaces will be removed completely in removeAndFreeVM() below)
+    if(mdata->vnicByIP)
+      removeContainerVNICLookup(mod, container);
 
     // remove from pollActions if present (necessary if this happens in tick() and before tock()
     UTHashDel(mdata->pollActions, container);
@@ -2019,6 +2096,49 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    evt_flow_sample        __________________
+    -----------------___________________________------------------
+    Packet Bus
+  */
+
+  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    HSPPendingSample *ps = (HSPPendingSample *)data;
+    int ip_ver = decodePendingSample(ps);
+    if(ip_ver == 4
+       && ps->ipproto == 4 // IP-over-IP
+       && ps->l4_offset) {
+      uint32_t src_dsIndex=0, dst_dsIndex=0;
+      HSPVNIC search = { };
+      HSPVNIC *vnic;
+      search.ipAddr.type = SFLADDRESSTYPE_IP_V4;
+      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ps->l4_offset + 12, 4);
+      vnic = UTHashGet(mdata->vnicByIP, &search);
+      if(vnic
+	 && vnic->unique)
+	src_dsIndex = vnic->dsIndex;
+      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ps->l4_offset + 16, 4);
+      vnic = UTHashGet(mdata->vnicByIP, &search);
+      if(vnic
+	 && vnic->unique)
+	dst_dsIndex = vnic->dsIndex;
+      if(src_dsIndex || dst_dsIndex) {
+	SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
+	entElem->tag = SFLFLOW_EX_ENTITIES;
+	if(src_dsIndex) {
+	  entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
+	  entElem->flowType.entities.src_dsIndex = src_dsIndex;
+	}
+	if(dst_dsIndex) {
+	  entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
+	  entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
+	}
+	  SFLADD_ELEMENT(ps->fs, entElem);
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
   */
@@ -2026,6 +2146,7 @@ extern "C" {
   void mod_docker(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_DOCKER));
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
 
     // ask to retain root privileges
     retainRootRequest(mod, "needed to access docker.sock");
@@ -2049,6 +2170,12 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
+
+    if(sp->docker.markTraffic) {
+      EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+      EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
+      mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
+    }
   }
 
 #if defined(__cplusplus)

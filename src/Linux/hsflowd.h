@@ -496,6 +496,7 @@ extern "C" {
       uint32_t refreshVMListSecs;
       uint32_t forgetVMSecs;
       bool hostname;
+      bool markTraffic; // TODO: use enum here?
     } docker;
     struct {
       bool cumulus;
