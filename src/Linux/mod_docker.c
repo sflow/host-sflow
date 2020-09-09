@@ -121,6 +121,7 @@ extern "C" {
     uint32_t dup_name:1;
     uint32_t dup_hostname:1;
     uint64_t memoryLimit;
+    time_t last_vnic;
     // we now populate stats here too
     uint32_t cpu_count;
     double cpu_count_dbl;
@@ -199,8 +200,11 @@ extern "C" {
   typedef struct _HSPVNIC {
     SFLAddress ipAddr;
     uint32_t dsIndex;
+    char *c_name;
     bool unique;
   } HSPVNIC;
+
+#define HSP_VNIC_REFRESH_TIMEOUT 300
 
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
@@ -321,7 +325,7 @@ extern "C" {
 	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)) {
 	    if(!SFLAddress_isZero(&ipAddr)
 	       && mdata->vnicByIP) {
-	      myDebug(1, "learned virtual ipAddr: %s", ipStr);
+	      myDebug(1, "VNIC: learned virtual ipAddr: %s", ipStr);
 	      // Can use this to associate traffic with this container
 	      // if this address appears in sampled packet header as
 	      // outer or inner IP
@@ -330,17 +334,26 @@ extern "C" {
 	      HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
 	      if(vnic) {
 		// found IP - check for non-unique mapping
-		if(vnic->dsIndex != container->vm.dsIndex)
+		if(vnic->dsIndex != container->vm.dsIndex) {
+		  myDebug(1, "VNIC: clash between %s (ds=%u) and %s (ds=%u) -- setting unique=no",
+			  vnic->c_name,
+			  vnic->dsIndex,
+			  container->name,
+			  container->vm.dsIndex);
 		  vnic->unique = NO;
+		}
 	      }
 	      else {
 		// add new VNIC entry
 		vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
 		vnic->ipAddr = ipAddr;
 		vnic->dsIndex = container->vm.dsIndex;
+		vnic->c_name = my_strdup(container->name);
 		UTHashAdd(mdata->vnicByIP, vnic);
 		vnic->unique = YES;
-		// TODO: be sure to remove again when container is removed
+		myDebug(1, "VNIC: linked to %s (ds=%u)",
+			vnic->c_name,
+			vnic->dsIndex);
 	      }
 	    }
 	  }
@@ -674,7 +687,11 @@ extern "C" {
       if(nio->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
 	HSPVNIC search = { };
 	search.ipAddr = nio->ipAddr;
-	UTHashDelKey(mdata->vnicByIP, &search);
+	HSPVNIC *vnic = UTHashDelKey(mdata->vnicByIP, &search);
+	if(vnic) {
+	  my_free(vnic->c_name);
+	  my_free(vnic);
+	}
       }
     }
   }
@@ -1067,8 +1084,15 @@ extern "C" {
       readContainerGPUs(mod, container, jenv);
 
     container->inspect_rx = YES;
+
     // now that we have the pid,  we can probe for the MAC and peer-ifIndex
-    updateContainerAdaptors(mod, container);
+    // see if spacing the VNIC refresh reduces load
+    time_t now_mono = mdata->pollBus->now.tv_sec;
+    if(container->last_vnic == 0
+       || (now_mono - container->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
+      container->last_vnic = now_mono;
+      updateContainerAdaptors(mod, container);
+    }
 
     // Could send initial counter-sample immediately... even before we get the first
     // stats query. But this could result in spikes when we restart and discover
@@ -2113,15 +2137,29 @@ extern "C" {
       HSPVNIC *vnic;
       search.ipAddr.type = SFLADDRESSTYPE_IP_V4;
       memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ps->l4_offset + 12, 4);
+      if(getDebug() > 2) {
+	char ipStr[64];
+	SFLAddress_print(&search.ipAddr, ipStr, 64);
+	myDebug(1, "VNIC: test src IP %s\n", ipStr);
+      }
       vnic = UTHashGet(mdata->vnicByIP, &search);
       if(vnic
-	 && vnic->unique)
+	 && vnic->unique) {
 	src_dsIndex = vnic->dsIndex;
+	myDebug(1, "VNIC: got %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
+      }
       memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ps->l4_offset + 16, 4);
+      if(getDebug() > 2) {
+	char ipStr[64];
+	SFLAddress_print(&search.ipAddr, ipStr, 64);
+	myDebug(1, "VNIC: test dst IP %s\n", ipStr);
+      }
       vnic = UTHashGet(mdata->vnicByIP, &search);
       if(vnic
-	 && vnic->unique)
+	 && vnic->unique) {
 	dst_dsIndex = vnic->dsIndex;
+	myDebug(1, "VNIC: got %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
+      }
       if(src_dsIndex || dst_dsIndex) {
 	SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
 	entElem->tag = SFLFLOW_EX_ENTITIES;
