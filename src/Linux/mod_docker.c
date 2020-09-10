@@ -243,6 +243,7 @@ extern "C" {
     UTHash *hostnameCount;
     uint32_t dup_names;
     uint32_t dup_hostnames;
+    struct stat myNS;
     EnumHSPVNICLayer vnicLayer;
     UTHash *vnicByIP;
   } HSP_mod_DOCKER;
@@ -388,7 +389,9 @@ extern "C" {
 #define MY_SETNS(fd, nstype) setns(fd, nstype)
 #endif
 
+
   int readContainerInterfaces(EVMod *mod, HSPVMState_DOCKER *container)  {
+    HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     pid_t nspid = container->pid;
     myDebug(2, "readContainerInterfaces: pid=%u", nspid);
     if(nspid == 0) return 0;
@@ -421,6 +424,16 @@ extern "C" {
 	exit(EXIT_FAILURE);
       }
 
+      struct stat statBuf;
+      if(fstat(nsfd, &statBuf) == 0) {
+	myDebug(2, "container namespace dev.inode == %u.%u", statBuf.st_dev, statBuf.st_ino);
+	if(statBuf.st_dev == mdata->myNS.st_dev
+	   && statBuf.st_ino == mdata->myNS.st_ino) {
+	  myDebug(1, "skip my own namespace");
+	  exit(0);
+	}
+      }
+
       /* set network namespace
 	 CLONE_NEWNET means nsfd must refer to a network namespace
       */
@@ -442,7 +455,7 @@ extern "C" {
       int fd = socket(PF_INET, SOCK_DGRAM, 0);
       if(fd < 0) {
 	fprintf(stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
-	return 0;
+	exit(EXIT_FAILURE);
       }
 
       FILE *procFile = fopen(PROCFS_STR "/net/dev", "r");
@@ -2238,6 +2251,12 @@ extern "C" {
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
       mdata->vnicLayer = HSP_VNIC_LAYER_IPIP; // TODO: make config parameter
+
+      // learn my own namespace inode from /proc/self/ns/net
+      if(stat("/proc/self/ns/net", &mdata->myNS) == 0)
+	myDebug(1, "my namespace dev.inode == %u.%u",
+		mdata->myNS.st_dev,
+		mdata->myNS.st_ino);
     }
   }
 
