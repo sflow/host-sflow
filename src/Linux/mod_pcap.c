@@ -372,21 +372,23 @@ extern "C" {
 	}
 	SFLAdaptor *adaptor;
 	UTHASH_WALK(sp->adaptorsByName, adaptor) {
+ 	  myDebug(2, "PCAP: consider %s (speed=%"PRIu64")", adaptor->deviceName, adaptor->ifSpeed);
 	  if((adaptor->ifSpeed == pcap->speed_min && pcap->speed_max == 0)
 	     || (adaptor->ifSpeed >= pcap->speed_min
 		 && adaptor->ifSpeed <= pcap->speed_max)) {
+	    myDebug(2, "PCAP: %s speed OK", adaptor->deviceName);
 	    // passed the speed test,  but there may be other
 	    // reasons to reject this one:
 	    HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
 	    if(nio->bond_master) {
-	      myDebug(1, "not %s (bond_master)", adaptor->deviceName);
+	      myDebug(1, "PCAP: skip %s (bond_master)", adaptor->deviceName);
 	    }
 	    else if(nio->vlan != HSP_VLAN_ALL) {
-	      myDebug(1, "not %s (vlan=%u)", adaptor->deviceName, nio->vlan);
+	      myDebug(1, "PCAP: skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
 	    }
 	    else if(nio->devType != HSPDEV_PHYSICAL
 		    && nio->devType != HSPDEV_OTHER) {
-	      myDebug(1, "not %s (devType=%s)",
+	      myDebug(1, "PCAP: skip %s (devType=%s)",
 		      adaptor->deviceName,
 		      devTypeName(nio->devType));
 	    }
