@@ -206,6 +206,13 @@ extern "C" {
 
 #define HSP_VNIC_REFRESH_TIMEOUT 300
 
+  typedef enum {
+    HSP_VNIC_LAYER_NONE,
+    HSP_VNIC_LAYER_MAC,
+    HSP_VNIC_LAYER_IP,
+    HSP_VNIC_LAYER_IPIP
+  } EnumHSPVNICLayer;
+
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
     UTHash *vmsByUUID;
@@ -236,6 +243,7 @@ extern "C" {
     UTHash *hostnameCount;
     uint32_t dup_names;
     uint32_t dup_hostnames;
+    EnumHSPVNICLayer vnicLayer;
     UTHash *vnicByIP;
   } HSP_mod_DOCKER;
 
@@ -321,7 +329,7 @@ extern "C" {
 	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
 
 	  // did we get an ip address too?
-	  SFLAddress ipAddr;
+	  SFLAddress ipAddr = { };
 	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)) {
 	    if(!SFLAddress_isZero(&ipAddr)
 	       && mdata->vnicByIP) {
@@ -2131,14 +2139,28 @@ extern "C" {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     HSPPendingSample *ps = (HSPPendingSample *)data;
     int ip_ver = decodePendingSample(ps);
-    if(ip_ver == 4
-       && ps->ipproto == 4 // IP-over-IP
-       && ps->l4_offset) {
+    int ip_offset = 0;
+    switch(mdata->vnicLayer) {
+    case HSP_VNIC_LAYER_IP:
+      if(ip_ver == 4
+	 && ps->l3_offset)
+	ip_offset = ps->l3_offset;
+      break;
+    case HSP_VNIC_LAYER_IPIP:
+      if(ip_ver == 4
+	 && ps->ipproto == 4 // IP-over-IP
+	 && ps->l4_offset)
+	ip_offset = ps->l4_offset;
+      break;
+    default:
+      break;
+    }
+    if(ip_offset) {
       uint32_t src_dsIndex=0, dst_dsIndex=0;
       HSPVNIC search = { };
       HSPVNIC *vnic;
       search.ipAddr.type = SFLADDRESSTYPE_IP_V4;
-      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ps->l4_offset + 12, 4);
+      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ip_offset + 12, 4);
       if(getDebug() > 2) {
 	char ipStr[64];
 	SFLAddress_print(&search.ipAddr, ipStr, 64);
@@ -2150,7 +2172,7 @@ extern "C" {
 	src_dsIndex = vnic->dsIndex;
 	myDebug(1, "VNIC: got %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
       }
-      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ps->l4_offset + 16, 4);
+      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ip_offset + 16, 4);
       if(getDebug() > 2) {
 	char ipStr[64];
 	SFLAddress_print(&search.ipAddr, ipStr, 64);
@@ -2173,7 +2195,7 @@ extern "C" {
 	  entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
 	  entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
 	}
-	  SFLADD_ELEMENT(ps->fs, entElem);
+	SFLADD_ELEMENT(ps->fs, entElem);
       }
     }
   }
@@ -2215,6 +2237,7 @@ extern "C" {
       EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
+      mdata->vnicLayer = HSP_VNIC_LAYER_IPIP; // TODO: make config parameter
     }
   }
 
