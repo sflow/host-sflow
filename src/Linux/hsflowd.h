@@ -545,6 +545,8 @@ extern "C" {
       bool dropmon;
       uint32_t group;
       bool start;
+      bool sw;
+      bool hw;
       uint32_t limit;
     } dropmon;
     struct {

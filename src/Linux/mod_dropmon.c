@@ -83,6 +83,8 @@ extern "C" {
     uint32_t feedControlErrors;
     int quota;   // nofification rate-limit
     uint32_t noQuota; // number of rate-limit drops
+    uint32_t ignoredDrops_hw;
+    uint32_t ignoredDrops_sw;
   } HSP_mod_DROPMON;
 
 
@@ -137,6 +139,15 @@ extern "C" {
 
   static HSPDropPoint *getDropPoint_sw(EVMod *mod, char *sw_symbol) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+
+    // we may have been configured to ignore sw drops
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(!sp->dropmon.sw) {
+      mdata->ignoredDrops_sw++;
+      return NULL;
+    }
+
+    // direct lookup
     HSPDropPoint search = { .dropPoint = sw_symbol };
     HSPDropPoint *dp = UTHashGet(mdata->dropPoints_sw, &search);
     if(dp)
@@ -158,6 +169,15 @@ extern "C" {
 
   static HSPDropPoint *getDropPoint_hw(EVMod *mod, char *group, char *dropPointStr) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+
+    // we may have been configured to ignore hw drops
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(!sp->dropmon.hw) {
+      mdata->ignoredDrops_hw++;
+      return NULL;
+    }
+
+    // direct lookup
     HSPDropPoint search = { .dropPoint = dropPointStr };
     HSPDropPoint *dp = UTHashGet(mdata->dropPoints_hw, &search);
     if(dp)
@@ -256,15 +276,22 @@ extern "C" {
   }
 
   static void loadDropPoints(EVMod *mod) {
-    for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_sw); ii++) {
-      HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_sw[ii]);
-      if(dp)
-	addDropPoint_sw(mod, dp);
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(sp->dropmon.sw) {
+      for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_sw); ii++) {
+	HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_sw[ii]);
+	if(dp)
+	  addDropPoint_sw(mod, dp);
+      }
     }
-    for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_hw); ii++) {
-      HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_hw[ii]);
-      if(dp)
-	addDropPoint_hw(mod, dp);
+
+    if(sp->dropmon.hw) {
+      for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_hw); ii++) {
+	HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_hw[ii]);
+	if(dp)
+	  addDropPoint_hw(mod, dp);
+      }
     }
   }
 
@@ -677,7 +704,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(dp == NULL
        || dp->reason == -1) {
       // this one not considered a packet-drop, so ignore it.
-      myDebug(1, "trap not considered a drop. Ignoring.");
+      myDebug(3, "trap not considered a drop. Ignoring.");
       return;
     }
     
@@ -707,10 +734,12 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     SFLADD_ELEMENT(&discard, &hdrElem);
 
-    // include function struct (TODO: just for sw events)
-    fnElem.flowType.function.symbol.str = dp->dropPoint;
-    fnElem.flowType.function.symbol.len = my_strlen(dp->dropPoint);
-    SFLADD_ELEMENT(&discard, &fnElem);
+    // include function struct (only for sw events).
+    if(sw_symbol) {
+      fnElem.flowType.function.symbol.str = dp->dropPoint;
+      fnElem.flowType.function.symbol.len = my_strlen(dp->dropPoint);
+      SFLADD_ELEMENT(&discard, &fnElem);
+    }
 
     SEMLOCK_DO(sp->sync_agent) {
       sfl_notifier_writeEventSample(notifier, &discard);
