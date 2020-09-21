@@ -9,11 +9,6 @@ extern "C" {
 #include "hsflowd.h"
 #include <nvml.h>
 
-  typedef struct _HSPGpuID {
-    char uuid[16];
-    uint32_t index;
-  } HSPGpuID;
-
   typedef struct _HSP_mod_NVML {
     unsigned int gpu_count;
     uint32_t *gpu_time; // mS. accumulators
@@ -64,6 +59,8 @@ extern "C" {
 	  HSPGpuID *id = my_calloc(sizeof(HSPGpuID));
 	  if(parseUUID(uuidstr2, id->uuid)) {
 	    id->index = ii;
+	    id->has_uuid = YES;
+	    id->has_index = YES;
 	    UTHashAdd(mdata->byUUID, id);
 	    myDebug(1, "nvml: GPU uuid added to lookup table");
 	  }
@@ -211,16 +208,23 @@ extern "C" {
 	myDebug(2, "nvml: evt_vm_cs() %u vm->gpus", UTArrayN(vm->gpus));
 	// VM was assigned one or more GPU devices
 	SFLHost_gpu_nvml *nvml = init_gpu_nvml(&mdata->nvmlElem);
-	char *uuid;
-	UTARRAY_WALK(vm->gpus, uuid) {
-	  // look up from UUID to gpu_index
-	  HSPGpuID search = {};
-	  memcpy(search.uuid, uuid, 16);
-	  HSPGpuID *id = UTHashGet(mdata->byUUID, &search);
-	  if(id) {
-	    // accumuate this one
-	    myDebug(2, "nvml: evt_vm_cs() accumulate(idx=%u)", id->index);
-	    accumulateGPUCounters(mod, nvml, id->index);
+	HSPGpuID *vmgpu;
+	UTARRAY_WALK(vm->gpus, vmgpu) {
+
+	  if(vmgpu->has_uuid
+	     && !vmgpu->has_index) {
+	    // vm only knows it by UUID, so look up index...
+	    HSPGpuID *id = UTHashGet(mdata->byUUID, vmgpu);
+	    if(id) {
+	      // ...and fill it in
+	      vmgpu->index = id->index;
+	      vmgpu->has_index = YES;
+	    }
+	  }
+
+	  if(vmgpu->has_index) {
+	    myDebug(2, "nvml: evt_vm_cs() accumulate(idx=%u)", vmgpu->index);
+	    accumulateGPUCounters(mod, nvml, vmgpu->index);
 	  }
 	  else {
 	    myDebug(2, "nvml: evt_vm_cs() gpu uuid->id lookup failed");

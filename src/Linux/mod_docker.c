@@ -120,8 +120,12 @@ extern "C" {
     uint32_t stats_wait:1;
     uint32_t dup_name:1;
     uint32_t dup_hostname:1;
+    uint32_t gpu_dev:1;
+    uint32_t gpu_env:1;
     uint64_t memoryLimit;
     time_t last_vnic;
+    time_t last_cgroup;
+    char *cgroup_devices;
     // we now populate stats here too
     uint32_t cpu_count;
     double cpu_count_dbl;
@@ -196,6 +200,7 @@ extern "C" {
 #define HSP_DOCKER_REQ_TIMEOUT 10
 
 #define HSP_NVIDIA_VIS_DEV_ENV "NVIDIA_VISIBLE_DEVICES"
+#define HSP_MAJOR_NVIDIA 195
 
   typedef struct _HSPVNIC {
     SFLAddress ipAddr;
@@ -205,6 +210,7 @@ extern "C" {
   } HSPVNIC;
 
 #define HSP_VNIC_REFRESH_TIMEOUT 300
+#define HSP_CGROUP_REFRESH_TIMEOUT 600
 
   typedef enum {
     HSP_VNIC_LAYER_NONE,
@@ -814,6 +820,44 @@ extern "C" {
     }
   }
 
+  /*_________________-----------------------------__________________
+    _________________  updateContainerCgroupPaths __________________
+    -----------------_____________________________------------------
+  */
+
+  static void updateContainerCgroupPaths(EVMod *mod, HSPVMState_DOCKER *container) {
+    HSPVMState *vm = &container->vm;
+    if(vm) {
+      // open /proc/<pid>/cgroup
+      char cgpath[HSP_DOCKER_MAX_FNAME_LEN+1];
+      snprintf(cgpath, HSP_DOCKER_MAX_FNAME_LEN, PROCFS_STR "/%u/cgroup", container->pid);
+      FILE *procFile = fopen(cgpath, "r");
+      if(procFile) {
+	char line[MAX_PROC_LINE_CHARS];
+	int truncated;
+	while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
+	  if(!truncated) {
+	    // expect lines like 3:devices:<long_path>
+	    int entryNo;
+	    char type[MAX_PROC_LINE_CHARS];
+	    char path[MAX_PROC_LINE_CHARS];
+	    if(sscanf(line, "%d:%[^:]:%[^:]", &entryNo, type, path) == 3) {
+	      if(my_strequal(type, "devices")) {
+		if(!my_strequal(container->cgroup_devices, path)) {
+		  if(container->cgroup_devices)
+		    my_free(container->cgroup_devices);
+		  container->cgroup_devices = my_strdup(path);
+		  myDebug(1, "docker: container(%s)->cgroup_devices=%s", container->name, container->cgroup_devices);
+		}
+	      }
+	    }
+	  }
+	}
+	fclose(procFile);
+      }
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________   buildRegexPatterns      __________________
     -----------------___________________________------------------
@@ -1008,9 +1052,20 @@ extern "C" {
     }
   }
 
-  static void readContainerGPUs(EVMod *mod, HSPVMState_DOCKER *container, cJSON *jenv) {
+  static void clearContainerGPUs(EVMod *mod, HSPVMState_DOCKER *container) {
+    // clear out the list - we are single threaded on the
+    // poll bus so there is no need for sync
+    UTArray *arr = container->vm.gpus;
+    HSPGpuID *entry;
+    UTARRAY_WALK(arr, entry)
+      my_free(entry);
+    UTArrayReset(arr);
+  }
+
+  static void readContainerGPUsFromEnv(EVMod *mod, HSPVMState_DOCKER *container, cJSON *jenv) {
     // look through env vars for evidence of GPUs assigned to this container
     int entries = cJSON_GetArraySize(jenv);
+    UTArray *arr = container->vm.gpus;
     for(int ii = 0; ii < entries; ii++) {
       cJSON *varval = cJSON_GetArrayItem(jenv, ii);
       if(varval) {
@@ -1021,13 +1076,7 @@ extern "C" {
 	   && vvstr[vlen] == '=') {
 	  myDebug(2, "parsing GPU env: %s", vvstr);
 	  char *gpu_uuids = vvstr + vlen + 1;
-	  UTArray *arr = container->vm.gpus;
-	  // clear out the list - we are single threaded on the
-	  // poll bus so there is no need for sync
-	  char *old_uuid;
-	  UTARRAY_WALK(arr, old_uuid)
-	    my_free(old_uuid);
-	  UTArrayReset(arr);
+	  clearContainerGPUs(mod, container);
 	  // (re)populate
 	  char *str;
 	  char buf[128];
@@ -1035,15 +1084,72 @@ extern "C" {
 	    myDebug(2, "parsing GPU uuidstr: %s", str);
 	    // expect GPU-<uuid>
 	    if(my_strnequal(str, "GPU-", 4)) {
-	      char *uuid = my_calloc(16);
-	      if(parseUUID(str + 4, uuid)) {
+	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
+	      if(parseUUID(str + 4, gpu->uuid)) {
+		gpu->has_uuid = YES;
 		myDebug(2, "adding GPU uuid to container: %s", container->name);
-		UTArrayAdd(arr, uuid);
+		UTArrayAdd(arr, gpu);
+		container->gpu_env = YES;
+	      }
+	      else {
+		myDebug(2, "GPU uuid parse failed");
+		my_free(gpu);
 	      }
 	    }
 	  }
 	}
       }
+    }
+  }
+  
+
+  static void readContainerGPUsFromDev(EVMod *mod, HSPVMState_DOCKER *container) {
+    // look through devices to see if individial GPUs are exposed
+    char path[HSP_MAX_PATHLEN];
+    sprintf(path, SYSFS_STR "/fs/cgroup/devices/%s/devices.list", container->cgroup_devices);
+    FILE *procFile = fopen(path, "r");
+    if(procFile) {
+      UTArray *arr = container->vm.gpus;
+
+      // if we already know this is our source of truth
+      // for GPUs then clear the array now
+      if(container->gpu_dev)
+	clearContainerGPUs(mod, container);
+
+      char line[MAX_PROC_LINE_CHARS];
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
+	if(!truncated) {
+	  // expect lines like "c 195:1 rwm"
+	  // Note that if we don't have broad capabilities we
+	  // will only see "a *:* rwm" here and it won't mean anything. For
+	  // example, if hsflowd is running as a container/pod it will probably
+	  // need to be invoked with privileged:true for this to work.
+	  // TODO: figure out what capabilities are actually required.
+	  char chr_blk;
+	  int major,minor;
+	  char permissions[MAX_PROC_LINE_CHARS];
+	  if(sscanf(line, "%c %d:%d %s", &chr_blk, &major, &minor, permissions) == 4) {
+	    if(major == HSP_MAJOR_NVIDIA
+	       && minor < 255) {
+
+	      if(!container->gpu_dev) {
+		// Found one, so this is going to work. Establish
+		// this as our source of truth for GPUs and clear
+		// out any that might have been found another way.
+		container->gpu_dev = YES;
+		clearContainerGPUs(mod, container);
+	      }
+	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
+	      gpu->index = minor; // assume index == minor TODO: is this assumption valid?
+	      gpu->has_index = YES;
+	      myDebug(2, "adding GPU dev to container: %s", container->name);
+	      UTArrayAdd(arr, gpu);
+	    }
+	  }
+	}
+      }
+      fclose(procFile);
     }
   }
 
@@ -1101,8 +1207,9 @@ extern "C" {
       container->cpu_count_dbl = jnanocpus->valuedouble / 1e9;
 
     cJSON *jenv = cJSON_GetObjectItem(jconfig, "Env");
-    if(jenv)
-      readContainerGPUs(mod, container, jenv);
+    if(jenv
+       && container->gpu_dev == NO)
+      readContainerGPUsFromEnv(mod, container, jenv);
 
     container->inspect_rx = YES;
 
@@ -1116,6 +1223,17 @@ extern "C" {
       if(!my_strnequal(container->name, "k8s_POD_", 8))
 	updateContainerAdaptors(mod, container);
     }
+
+    if(container->last_cgroup == 0
+       || (now_mono - container->last_cgroup) > HSP_CGROUP_REFRESH_TIMEOUT) {
+      container->last_cgroup = now_mono;
+      // TODO: skip kubnetes "POD" containers, but we might want to reverse this
+      if(!my_strnequal(container->name, "k8s_POD_", 8))
+	updateContainerCgroupPaths(mod, container);
+    }
+
+    if(container->cgroup_devices)
+      readContainerGPUsFromDev(mod, container);
 
     // Could send initial counter-sample immediately... even before we get the first
     // stats query. But this could result in spikes when we restart and discover

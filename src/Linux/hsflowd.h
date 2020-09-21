@@ -109,6 +109,8 @@ extern "C" {
 #define HSP_REFRESH_ADAPTORS 180
 #define HSP_CHECK_ADAPTORS 10
 
+#define HSP_MAX_PATHLEN 256
+
 // set to 1 to allow agent.cidr setting in DNSSD TXT record.
 // This is currently considered out-of-scope for the DNSSD config,
 // so for now the agent.cidr setting is only allowed in hsflowd.conf.
@@ -221,6 +223,13 @@ extern "C" {
     VMTYPE_KVM,
     VMTYPE_DOCKER,
     VMTYPE_SYSTEMD } EnumVMType;
+
+  typedef struct _HSPGpuID {
+    char uuid[16];
+    uint32_t index;
+    uint8_t has_index:1;
+    uint8_t has_uuid:1;
+  } HSPGpuID;
 
   typedef struct _HSPVMState {
     char uuid[16];

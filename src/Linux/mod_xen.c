@@ -182,8 +182,6 @@ extern "C" {
     return myAdaptors;
   }
 
-#define HSP_MAX_PATHLEN 256
-
   static int64_t xen_vbd_counter(uint32_t dom_id, char *vbd_dev, char *vbd_path, char *counter, int usec) {
     int64_t ctr64 = 0;
     char ctrspec[HSP_MAX_PATHLEN];
