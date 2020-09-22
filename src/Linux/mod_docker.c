@@ -1141,8 +1141,8 @@ extern "C" {
 		clearContainerGPUs(mod, container);
 	      }
 	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
-	      gpu->index = minor; // assume index == minor TODO: is this assumption valid?
-	      gpu->has_index = YES;
+	      gpu->minor = minor;
+	      gpu->has_minor = YES;
 	      myDebug(2, "adding GPU dev to container: %s", container->name);
 	      UTArrayAdd(arr, gpu);
 	    }

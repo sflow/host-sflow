@@ -14,7 +14,8 @@ extern "C" {
     uint32_t *gpu_time; // mS. accumulators
     uint32_t *mem_time; // mS. accumulators
     uint32_t *energy;  // mJ. accumulators
-    UTHash *byUUID; // look up uuid -> index
+    UTHash *byUUID; // look up uuid -> gpu
+    UTHash *byMinor; // look up minor -> gpu
     SFLCounters_sample_element nvmlElem;
   } HSP_mod_NVML;
 
@@ -46,6 +47,7 @@ extern "C" {
     // ascii-hex string and we prefer to keep UUIDs as 16-byte
     // binary objects, so we make our own lookup here).
     mdata->byUUID = UTHASH_NEW(HSPGpuID, uuid, UTHASH_DFLT);
+    mdata->byMinor = UTHASH_NEW(HSPGpuID, minor, UTHASH_DFLT);
     for (int ii = 0; ii < mdata->gpu_count; ii++) {
       nvmlDevice_t gpu;
       if (NVML_SUCCESS == nvmlDeviceGetHandleByIndex(ii, &gpu)) {
@@ -57,16 +59,26 @@ extern "C" {
 	  if(my_strnequal("GPU-", uuidstr2, 4))
 	    uuidstr2 += 4;
 	  HSPGpuID *id = my_calloc(sizeof(HSPGpuID));
+	  id->index = ii;
+	  id->has_index = YES;
+
 	  if(parseUUID(uuidstr2, id->uuid)) {
-	    id->index = ii;
 	    id->has_uuid = YES;
-	    id->has_index = YES;
 	    UTHashAdd(mdata->byUUID, id);
 	    myDebug(1, "nvml: GPU uuid added to lookup table");
 	  }
 	  else {
 	    myDebug(1, "nvml: failed to parse GPU uuid");
-	    my_free(id);
+	  }
+
+	  unsigned int minor;
+	  if(NVML_SUCCESS == nvmlDeviceGetMinorNumber(gpu, &minor)) {
+	    id->minor = minor;
+	    id->has_minor = YES;
+	    UTHashAdd(mdata->byMinor, id);
+	  }
+	  else {
+	    myDebug(1, "nvml: failed to retrieve GPU minor number");
 	  }
 	}
       }
@@ -211,12 +223,16 @@ extern "C" {
 	HSPGpuID *vmgpu;
 	UTARRAY_WALK(vm->gpus, vmgpu) {
 
-	  if(vmgpu->has_uuid
-	     && !vmgpu->has_index) {
-	    // vm only knows it by UUID, so look up index...
-	    HSPGpuID *id = UTHashGet(mdata->byUUID, vmgpu);
-	    if(id) {
-	      // ...and fill it in
+	  if(!vmgpu->has_index) {
+	    // look up index by uuid or minor number
+	    HSPGpuID *id = NULL;
+	    if(vmgpu->has_minor)
+	      id = UTHashGet(mdata->byMinor, vmgpu);
+	    else if(vmgpu->has_uuid)
+	      id = UTHashGet(mdata->byUUID, vmgpu);
+	    if(id
+	       && id->has_index) {
+	      // and fill it in for next time
 	      vmgpu->index = id->index;
 	      vmgpu->has_index = YES;
 	    }

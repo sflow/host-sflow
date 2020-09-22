@@ -227,8 +227,10 @@ extern "C" {
   typedef struct _HSPGpuID {
     char uuid[16];
     uint32_t index;
+    uint32_t minor;
     uint8_t has_index:1;
     uint8_t has_uuid:1;
+    uint8_t has_minor:1;
   } HSPGpuID;
 
   typedef struct _HSPVMState {
