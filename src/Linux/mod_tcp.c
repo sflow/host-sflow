@@ -130,6 +130,7 @@ extern "C" {
     uint32_t samples_annotated;
     uint32_t diag_timeouts;
     uint32_t n_lastTick;
+    uint32_t ipip_tx;
     UTHash *sampleHT;
     UTQ(HSPTCPSample) timeoutQ;
   } HSP_mod_TCP;
@@ -307,12 +308,13 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     uint32_t n_thisTick = mdata->diag_tx + mdata->diag_rx + mdata->nl_seq_lost + mdata->diag_timeouts;
     if(n_thisTick != mdata->n_lastTick) {
-      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u",
+      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u",
 	      mdata->diag_tx,
 	      mdata->diag_rx,
 	      mdata->nl_seq_lost,
 	      mdata->diag_timeouts,
-	      mdata->samples_annotated);
+	      mdata->samples_annotated,
+	      mdata->ipip_tx);
      mdata->n_lastTick = n_thisTick;
     }
   }
@@ -476,7 +478,7 @@ extern "C" {
   */
 
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    // HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingSample *ps = (HSPPendingSample *)data;
     int ip_ver = decodePendingSample(ps);
@@ -522,6 +524,9 @@ extern "C" {
 		memcpy(macsrc.mac, ps->hdr + 6, 6);
 		ps->localSrc = (adaptorByMac(sp, &macsrc) != NULL);
 		ps->localDst = (adaptorByMac(sp, &macdst) != NULL);
+		myDebug(2, "tcp: IPIP localSrc=%s localDst=%s",
+			ps->localSrc ? "YES":"NO",
+			ps->localDst ? "YES":"NO");
 		if(ps->localSrc != ps->localDst) {
 		  // overwrite with the inner addresses
 		  ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V4;
@@ -529,6 +534,7 @@ extern "C" {
 		  memcpy(&ps->dst.address.ip_v4, ps->hdr + ps->l3_offset + 16, 4);
 		  // and do the lookup
 		  lookup_sample(mod, ps);
+		  mdata->ipip_tx++;
 		}
 	      }
 	    }
