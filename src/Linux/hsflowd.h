@@ -393,6 +393,8 @@ extern "C" {
     // header decode
     int ipversion;
     uint8_t *hdr;
+    int hdr_len;
+    enum SFLHeader_protocol hdr_protocol;    
     SFLAddress src;
     SFLAddress dst;
     int l3_offset;
@@ -567,6 +569,7 @@ extern "C" {
     } pcap;
     struct {
       bool tcp;
+      bool tunnel;
     } tcp;
     struct {
       bool dbus;

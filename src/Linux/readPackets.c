@@ -745,6 +745,8 @@ extern "C" {
 	if(elem->tag == SFLFLOW_HEADER) {
 	  SFLSampled_header *header = &elem->flowType.header;
 	  ps->hdr = header->header_bytes;
+	  ps->hdr_protocol = header->header_protocol;
+	  ps->hdr_len = header->header_length;
 	  ps->ipversion = decodePacketHeader(header, &ps->ipproto, &ps->l3_offset, &ps->l4_offset);
 	  // extract IP src/dst addresses too, since they are so likely to be used
 	  if(ps->ipversion == 4) {

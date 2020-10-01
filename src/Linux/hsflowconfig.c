@@ -1643,6 +1643,9 @@ extern "C" {
 	case HSPOBJ_TCP:
 	  {
 	    switch(tok->stok) {
+	    case HSPTOKEN_TUNNEL:
+	      if((tok = expectONOFF(sp, tok, &sp->tcp.tunnel)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

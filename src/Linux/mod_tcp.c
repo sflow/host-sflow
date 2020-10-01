@@ -354,132 +354,179 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________       lookup_sample       __________________
+    -----------------___________________________------------------
+  */
+
+  static void lookup_sample(EVMod *mod, HSPPendingSample *ps) {
+    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+    // src+dst tcp_ports are at start of TCP or UDP header
+    uint16_t tcp_ports[2];
+    memcpy(tcp_ports, ps->hdr + ps->l4_offset, 4);
+    
+    if(debug(2)) {
+      char ipb1[51], ipb2[51];
+      myDebug(3, "%s proto=%u ip_ver==%d local_src=%u local_dst=%u, src=%s dst=%s",
+	      (ps->ipproto == IPPROTO_TCP) ? "TCP" : "UDP",
+	      ps->ipproto,
+	      ps->ipversion, ps->localSrc, ps->localDst,
+	      SFLAddress_print(&ps->src,ipb1,50),
+	      SFLAddress_print(&ps->dst,ipb2,50));
+    }
+
+    // OK,  we are going to look this one up
+    HSPTCPSample *tcpSample = tcpSampleNew();
+    tcpSample->qtime = mdata->packetBus->now;
+    tcpSample->pktdirn = ps->localSrc ? PKTDIR_sent : PKTDIR_received;
+    // just the established TCP connections
+    tcpSample->conn_req.sdiag_protocol = ps->ipproto;
+    tcpSample->udp = (ps->ipproto == IPPROTO_UDP);
+    if(ps->ipproto == IPPROTO_TCP) {
+      tcpSample->conn_req.idiag_states = (1<<TCP_ESTABLISHED);
+      // just the tcp_info
+      tcpSample->conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
+    }
+    else {
+      // TODO: is this necessary?
+      tcpSample->conn_req.idiag_states = 0xFFFF;
+      tcpSample->conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
+    }
+    // copy into inet_diag_sockid, but flip if we are the destination
+    struct inet_diag_sockid *sockid = &tcpSample->conn_req.id;
+    // addresses
+    tcpSample->src = ps->src;
+    tcpSample->dst = ps->dst;
+    if(ps->ipversion == 4) {
+      tcpSample->conn_req.sdiag_family = AF_INET;
+      if(ps->localSrc) {
+	memcpy(sockid->idiag_src, &ps->src.address.ip_v4, 4);
+#ifdef HSP_INET_DIAG_USE_DUMP_UDP
+	memcpy(sockid->idiag_dst, &ps->dst.address.ip_v4, 4);
+#endif
+      }
+      else {
+	tcpSample->flipped = YES;
+#ifdef HSP_INET_DIAG_USE_DUMP_UDP
+	memcpy(sockid->idiag_src, &ps->dst.address.ip_v4, 4);
+#endif
+	memcpy(sockid->idiag_dst, &ps->src.address.ip_v4, 4);
+      }
+    }
+    else {
+      tcpSample->conn_req.sdiag_family = AF_INET6;
+      if(ps->localSrc) {
+	memcpy(sockid->idiag_src, &ps->src.address.ip_v6, 16);
+	memcpy(sockid->idiag_dst, &ps->dst.address.ip_v6, 16);
+      }
+      else {
+	memcpy(sockid->idiag_src, &ps->dst.address.ip_v6, 16);
+	memcpy(sockid->idiag_dst, &ps->src.address.ip_v6, 16);
+      }
+    }
+    // tcp ports
+    if(ps->localSrc) {
+      sockid->idiag_sport = tcp_ports[0];
+#ifdef HSP_INET_DIAG_USE_DUMP_UDP
+      sockid->idiag_dport = tcp_ports[1];
+#endif
+    }
+    else {
+#ifdef HSP_INET_DIAG_USE_DUMP_UDP
+      sockid->idiag_sport = tcp_ports[1];
+#endif
+      sockid->idiag_dport = tcp_ports[0];
+    }
+    // specify the ifIndex in case the socket is bound
+    // see INET_MATCH in net/ipv4/inet_hashtables.c
+    sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
+    // I have no cookie :(
+    sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
+    sockid->idiag_cookie[1] = INET_DIAG_NOCOOKIE;
+    // put a hold on this one while we look it up
+    holdPendingSample(ps);
+    HSPTCPSample *tsInQ = UTHashGet(mdata->sampleHT, tcpSample);
+    if(tsInQ) {
+      myDebug(2, "request already pending");
+      UTArrayAdd(tsInQ->samples, ps);
+      tcpSampleFree(tcpSample);
+    }
+    else {
+      myDebug(2, "new request: %s", tcpSamplePrint(tcpSample));
+      UTArrayAdd(tcpSample->samples, ps);
+      // add to HT and timeout queue
+      UTHashAdd(mdata->sampleHT, tcpSample);
+      UTQ_ADD_TAIL(mdata->timeoutQ, tcpSample);
+      // send the netlink request
+      UTNLDiag_send(mdata->nl_sock,
+		    &tcpSample->conn_req,
+		    sizeof(tcpSample->conn_req),
+#ifdef HSP_INET_DIAG_USE_DUMP_UDP
+		    tcpSample->udp, // DUMP flag!
+#else
+		    NO,
+#endif
+		    ++mdata->nl_seq_tx);
+      mdata->diag_tx++;
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________       evt_flow_sample     __________________
     -----------------___________________________------------------
   */
 
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+    // HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingSample *ps = (HSPPendingSample *)data;
     int ip_ver = decodePendingSample(ps);
-    if((ip_ver == 4 || ip_ver == 6)
-       && (ps->ipproto == IPPROTO_TCP || ps->ipproto == IPPROTO_UDP)) {
-      // was it to or from this host?
-      if(!ps->localTest) {
-	ps->localSrc = isLocalAddress(sp, &ps->src);
-	ps->localDst = isLocalAddress(sp, &ps->dst);
-	ps->localTest = YES;
+    if(ip_ver == 4
+       || ip_ver == 6) {
+      if (ps->ipproto == IPPROTO_TCP
+	  || ps->ipproto == IPPROTO_UDP) {
+	// was it to or from this host?
+	if(!ps->localTest) {
+	  ps->localSrc = isLocalAddress(sp, &ps->src);
+	  ps->localDst = isLocalAddress(sp, &ps->dst);
+	  ps->localTest = YES;
+	}
+	if(ps->localSrc != ps->localDst)
+	  lookup_sample(mod, ps);
       }
-      if(ps->localSrc != ps->localDst) {
-	// Yes. Get ports and form query
-	// src+dst tcp_ports are at start of TCP or UDP header
-	uint16_t tcp_ports[2];
-	memcpy(tcp_ports, ps->hdr + ps->l4_offset, 4);
-
-	if(debug(2)) {
-	  char ipb1[51], ipb2[51];
-	  myDebug(3, "%s proto=%u ip_ver==%d local_src=%u local_dst=%u, src=%s dst=%s",
-		  (ps->ipproto == IPPROTO_TCP) ? "TCP" : "UDP",
-		  ps->ipproto,
-		  ip_ver, ps->localSrc, ps->localDst,
-		  SFLAddress_print(&ps->src,ipb1,50),
-		  SFLAddress_print(&ps->dst,ipb2,50));
-	}
-
-	// OK,  we are going to look this one up
-	HSPTCPSample *tcpSample = tcpSampleNew();
-	tcpSample->qtime = mdata->packetBus->now;
-	tcpSample->pktdirn = ps->localSrc ? PKTDIR_sent : PKTDIR_received;
-	// just the established TCP connections
-	tcpSample->conn_req.sdiag_protocol = ps->ipproto;
-	tcpSample->udp = (ps->ipproto == IPPROTO_UDP);
-	if(ps->ipproto == IPPROTO_TCP) {
-	  tcpSample->conn_req.idiag_states = (1<<TCP_ESTABLISHED);
-	  // just the tcp_info
-	  tcpSample->conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
-	}
-	else {
-	  // TODO: is this necessary?
-	  tcpSample->conn_req.idiag_states = 0xFFFF;
-	  tcpSample->conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
-	}
-	// copy into inet_diag_sockid, but flip if we are the destination
-	struct inet_diag_sockid *sockid = &tcpSample->conn_req.id;
-	// addresses
-	tcpSample->src = ps->src;
-	tcpSample->dst = ps->dst;
-	if(ip_ver == 4) {
-	  tcpSample->conn_req.sdiag_family = AF_INET;
-	  if(ps->localSrc) {
-	    memcpy(sockid->idiag_src, &ps->src.address.ip_v4, 4);
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-	    memcpy(sockid->idiag_dst, &ps->dst.address.ip_v4, 4);
-#endif
+      else if (sp->tcp.tunnel
+	       && ps->ipproto == IPPROTO_IPIP) {
+	// look up using the inner IP addresses instead
+	// this behavior is only enabled with tcp {tunnel=on}.
+	// Setting tunnel=on should only ever be done when
+	// running on an end-host. If running on a router this
+	// might trigger a storm of pointless netlink lookups.
+	// TODO: should we try to pool all discovered physical
+	// and virtual IP addresses so we can always test for
+	// isLocalAddress at layer3? (e.g. the way mod_docker
+	// checks namespaces when docker{markTraffic=on} ?)
+	ps->l3_offset = ps->l4_offset;
+	uint8_t *ptr = ps->hdr + ps->l3_offset;
+	if((ps->hdr_len - ps->l3_offset) > sizeof(struct iphdr)) {
+	  // look at first byte of header.... 
+	  //  ___________________________ 
+	  // |   version   |    hdrlen   | 
+	  //  --------------------------- 
+	  if((*ptr >> 4) == 4) {
+	    if((*ptr & 15) >= 5) {
+	      ps->l4_offset += ((*ptr & 15) * 4);
+	      ps->ipproto = ptr[9];
+	      // to determine direction, use the MAC layer
+	      if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
+		SFLMacAddress macsrc,macdst;
+		memcpy(macdst.mac, ps->hdr, 6);
+		memcpy(macsrc.mac, ps->hdr + 6, 6);
+		ps->localSrc = (adaptorByMac(sp, &macsrc) != NULL);
+		ps->localDst = (adaptorByMac(sp, &macdst) != NULL);
+		if(ps->localSrc != ps->localDst)
+		  lookup_sample(mod, ps);
+	      }
+	    }
 	  }
-	  else {
-	    tcpSample->flipped = YES;
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-	    memcpy(sockid->idiag_src, &ps->dst.address.ip_v4, 4);
-#endif
-	    memcpy(sockid->idiag_dst, &ps->src.address.ip_v4, 4);
-	  }
-	}
-	else {
-	  tcpSample->conn_req.sdiag_family = AF_INET6;
-	  if(ps->localSrc) {
-	    memcpy(sockid->idiag_src, &ps->src.address.ip_v6, 16);
-	    memcpy(sockid->idiag_dst, &ps->dst.address.ip_v6, 16);
-	  }
-	  else {
-	    memcpy(sockid->idiag_src, &ps->dst.address.ip_v6, 16);
-	    memcpy(sockid->idiag_dst, &ps->src.address.ip_v6, 16);
-	  }
-	}
-	// tcp ports
-	if(ps->localSrc) {
-	  sockid->idiag_sport = tcp_ports[0];
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-	  sockid->idiag_dport = tcp_ports[1];
-#endif
-	}
-	else {
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-	  sockid->idiag_sport = tcp_ports[1];
-#endif
-	  sockid->idiag_dport = tcp_ports[0];
-	}
-	// specify the ifIndex in case the socket is bound
-	// see INET_MATCH in net/ipv4/inet_hashtables.c
-	sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
-	// I have no cookie :(
-	sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
-	sockid->idiag_cookie[1] = INET_DIAG_NOCOOKIE;
-	// put a hold on this one while we look it up
-	holdPendingSample(ps);
-	HSPTCPSample *tsInQ = UTHashGet(mdata->sampleHT, tcpSample);
-	if(tsInQ) {
-	  myDebug(2, "request already pending");
-	  UTArrayAdd(tsInQ->samples, ps);
-	  tcpSampleFree(tcpSample);
-	}
-	else {
-	  myDebug(2, "new request: %s", tcpSamplePrint(tcpSample));
-	  UTArrayAdd(tcpSample->samples, ps);
-	  // add to HT and timeout queue
-	  UTHashAdd(mdata->sampleHT, tcpSample);
-	  UTQ_ADD_TAIL(mdata->timeoutQ, tcpSample);
-	  // send the netlink request
-	  UTNLDiag_send(mdata->nl_sock,
-			&tcpSample->conn_req,
-			sizeof(tcpSample->conn_req),
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-			tcpSample->udp, // DUMP flag!
-#else
-			NO,
-#endif
-			++mdata->nl_seq_tx);
-	  mdata->diag_tx++;
 	}
       }
     }
