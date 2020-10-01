@@ -522,8 +522,14 @@ extern "C" {
 		memcpy(macsrc.mac, ps->hdr + 6, 6);
 		ps->localSrc = (adaptorByMac(sp, &macsrc) != NULL);
 		ps->localDst = (adaptorByMac(sp, &macdst) != NULL);
-		if(ps->localSrc != ps->localDst)
+		if(ps->localSrc != ps->localDst) {
+		  // overwrite with the inner addresses
+		  ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V4;
+		  memcpy(&ps->src.address.ip_v4, ps->hdr + ps->l3_offset + 12, 4);
+		  memcpy(&ps->dst.address.ip_v4, ps->hdr + ps->l3_offset + 16, 4);
+		  // and do the lookup
 		  lookup_sample(mod, ps);
+		}
 	      }
 	    }
 	  }
