@@ -66,6 +66,7 @@ extern "C" {
     EVBus *packetBus;
     bool dropmon_configured;
     int nl_sock;
+    EVSocket *nl_evsock;
     uint32_t nl_seq;
     int retry_countdown;
 #define HSP_DROPMON_WAIT_RETRY_S 15
@@ -85,6 +86,8 @@ extern "C" {
     uint32_t noQuota; // number of rate-limit drops
     uint32_t ignoredDrops_hw;
     uint32_t ignoredDrops_sw;
+    uint32_t totalDrops_thisTick; // for threshold
+    bool dropmon_disabled;
   } HSP_mod_DROPMON;
 
 
@@ -568,12 +571,17 @@ That would allow everything to stay on the stack as it does here, which has nice
     struct nlattr *attr = (struct nlattr *)(msg + GENL_HDRLEN);
     int len = msglen - GENL_HDRLEN;
     while(UTNLA_OK(attr, len)) {
+      // increment counter for threshold check
+      mdata->totalDrops_thisTick++;
+
       u_char *datap = UTNLA_DATA(attr);
       int datalen = UTNLA_PAYLOAD(attr);
       
-      u_char hex[1024];
-      printHex(datap, datalen, hex, 1023, YES);
-      myDebug(1, "nla_type=%u, datalen=%u, payload=%s", attr->nla_type, datalen, hex);
+      if(debug(1)) {
+	u_char hex[1024];
+	printHex(datap, datalen, hex, 1023, YES);
+	myDebug(1, "nla_type=%u, datalen=%u, payload=%s", attr->nla_type, datalen, hex);
+      }
 
       bool nested = attr->nla_type & NLA_F_NESTED;
       int attributeType = attr->nla_type & ~NLA_F_NESTED;
@@ -825,6 +833,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    if(mdata->dropmon_disabled)
+      return;
+
     myDebug(1, "dropmon: evt_config_changed configured=%s", mdata->dropmon_configured ? "YES" : "NO");
     
     if(sp->sFlowSettings == NULL)
@@ -842,17 +853,45 @@ That would allow everything to stay on the stack as it does here, which has nice
 	// increase socket receiver buffer size
 	UTSocketRcvbuf(mdata->nl_sock, HSP_DROPMON_RCVBUF);
 	// and submit for polling
-	EVBusAddSocket(mod,
-		       mdata->packetBus,
-		       mdata->nl_sock,
-		       readNetlink_DROPMON,
-		       NULL);
+	mdata->nl_evsock = EVBusAddSocket(mod,
+					  mdata->packetBus,
+					  mdata->nl_sock,
+					  readNetlink_DROPMON,
+					  NULL);
 	// kick off with the family lookup request
 	getFamily_DROPMON(mod);
       }
     }
 
     mdata->dropmon_configured = YES;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    stopMonitoring         __________________
+    -----------------___________________________------------------
+  */
+
+  static void stopMonitoring(EVMod *mod) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(sp->dropmon.start) {
+      // turn off the feed - but only if it looks like we were the ones
+      // that turned it on in the first place.
+      // TODO: may want to confirm that none of the parameters were
+      // changed under our feet too?
+      if(mdata->feedControlErrors > 0) {
+	myDebug(1, "dropmon: detected feed-control errors: %u", mdata->feedControlErrors);
+	myDebug(1, "dropmon: assume external control - not stopping feed");
+      }
+      else {
+	myDebug(1, "dropmon: graceful shutdown: turning off feed");
+	start_DROPMON(mod, NO);
+      }
+    }
+    if(mdata->nl_evsock) {
+      EVSocketClose(mod, mdata->nl_evsock, YES);
+      mdata->nl_evsock = NULL;
+    }
   }
 
   /*_________________---------------------------__________________
@@ -863,6 +902,21 @@ That would allow everything to stay on the stack as it does here, which has nice
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(mdata->dropmon_disabled)
+      return;
+
+    // check circuit-breaker threshold
+    if(sp->dropmon.max
+       && mdata->totalDrops_thisTick > sp->dropmon.max) {
+      myDebug(1, "dropmon: threshold exceeded (%u > %u): turning off feed",
+	      mdata->totalDrops_thisTick,
+	      sp->dropmon.max);
+      stopMonitoring(mod);
+      mdata->dropmon_disabled = YES;
+    }
+    // reset for next second
+    mdata->totalDrops_thisTick = 0;
 
     // when rate-limit is below 10 we refresh quota here
     if(sp->dropmon.limit < 10)
@@ -925,6 +979,10 @@ That would allow everything to stay on the stack as it does here, which has nice
   static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(mdata->dropmon_disabled)
+      return;
+
     // when rate-limit is above 10 we refresh quota here
     if(sp->dropmon.limit >= 10)
       mdata->quota = sp->dropmon.limit / 10;
@@ -933,30 +991,15 @@ That would allow everything to stay on the stack as it does here, which has nice
   /*_________________---------------------------__________________
     _________________    evt_final              __________________
     -----------------___________________________------------------
-    Graceful shutdown - turn off feed (if we turned it on)
   */
 
   static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(sp->dropmon.start) {
-      // turn off the feed - but only if it looks like we were the ones
-      // that turned it on in the first place.
-      // TODO: may want to confirm that none of the parameters were
-      // changed under our feet too?
-      if(mdata->feedControlErrors > 0) {
-	myDebug(1, "dropmon: detected feed-control errors: %u", mdata->feedControlErrors);
-	myDebug(1, "dropmon: assume external control - not stopping feed");
-      }
-      else {
-	myDebug(1, "dropmon: graceful shutdown: turning off feed");
-	start_DROPMON(mod, NO);
-      }
-    }
-    if(mdata->nl_sock > 0) {
-      close(mdata->nl_sock);
-      mdata->nl_sock = 0;
-    }
+
+    if(mdata->dropmon_disabled)
+      return;
+
+    stopMonitoring(mod);
   }
   
   /*_________________---------------------------__________________

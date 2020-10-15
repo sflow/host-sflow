@@ -1276,6 +1276,7 @@ extern "C" {
 	    sp->dropmon.group = 1;
 	    sp->dropmon.start = YES;
 	    sp->dropmon.limit = 100;
+	    sp->dropmon.max = 100000;
 	    sp->dropmon.sw = YES;
 	    sp->dropmon.hw = YES;
 	    level[++depth] = HSPOBJ_DROPMON;
@@ -1605,6 +1606,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_LIMIT:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.limit, 1, HSP_MAX_NOTIFY_RATELIMIT)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_MAX:
+	      if((tok = expectInteger32(sp, tok, &sp->dropmon.max, 1, 0xFFFFFFFF)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
