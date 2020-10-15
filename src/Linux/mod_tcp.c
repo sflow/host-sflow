@@ -478,7 +478,7 @@ extern "C" {
   */
 
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+    // HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingSample *ps = (HSPPendingSample *)data;
     int ip_ver = decodePendingSample(ps);
@@ -495,6 +495,7 @@ extern "C" {
 	if(ps->localSrc != ps->localDst)
 	  lookup_sample(mod, ps);
       }
+#if 0
       else if (sp->tcp.tunnel
 	       && ps->ipproto == IPPROTO_IPIP) {
 	// look up using the inner IP addresses instead
@@ -541,6 +542,7 @@ extern "C" {
 	  }
 	}
       }
+#endif
     }
   }
 
