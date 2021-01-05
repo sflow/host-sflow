@@ -1,0 +1,41 @@
+# hsflowd configuration file
+# http://sflow.net/host-sflow-linux-config.php
+
+sflow {
+  # ====== loaded automatically ======
+  # dent { sw=off }
+  # psample { group=1 }
+
+  # ====== Sampling/Polling/Collectors ======
+  # EITHER: automatic (DNS SRV+TXT from _sflow._udp):
+  #   DNS-SD { domain=.mycompany.com }
+  # OR: manual:
+  #   Counter Polling:
+  #     polling = 30
+  #   default sampling N:
+  #     sampling = 400
+  #   sampling N on interfaces with ifSpeed:
+  #     sampling.100M = 100
+  #     sampling.1G = 1000
+  #     sampling.10G = 10000
+  #     sampling.40G = 40000
+  #   sampling N for apache, nginx:
+  #     sampling.http = 50
+  #   sampling N for application (requires json):
+  #     sampling.app.myapp = 100
+  #   collectors:
+  collector { ip=127.0.0.1 udpport=6343 }
+  # collector { ip=10.1.2.3 udpport=6343 dev=eth0 }
+  #   add additional collectors here
+
+  # ====== Local configuration ======
+  # listen for JSON-encoded input:
+  #   json { UDPport = 36343 }
+  #
+  # monitor linux services:
+  # systemd {}
+  #
+  # monitor dropped packets:
+  # dropmon { group=1 start=off limit=1000 }
+}
+

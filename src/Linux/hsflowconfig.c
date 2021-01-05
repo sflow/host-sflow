@@ -66,6 +66,7 @@ extern "C" {
     HSPOBJ_PCAP,
     HSPOBJ_TCP,
     HSPOBJ_CUMULUS,
+    HSPOBJ_DENT,
     HSPOBJ_NVML,
     HSPOBJ_OVS,
     HSPOBJ_OS10,
@@ -91,6 +92,7 @@ extern "C" {
     "pcap",
     "tcp",
     "cumulus",
+    "dent",
     "nvml",
     "ovs",
     "os10",
@@ -1297,6 +1299,11 @@ extern "C" {
 	    sp->cumulus.cumulus = YES;
 	    level[++depth] = HSPOBJ_CUMULUS;
 	    break;
+	  case HSPTOKEN_DENT:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->dent.dent = YES;
+	    level[++depth] = HSPOBJ_DENT;
+	    break;
 	  case HSPTOKEN_OVS:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->ovs.ovs = YES;
@@ -1664,6 +1671,24 @@ extern "C" {
 	    case HSPTOKEN_SWITCHPORT:
 	      if((tok = expectRegex(sp, tok, &sp->cumulus.swp_regex)) == NULL) return NO;
 	      sp->cumulus.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_DENT:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_SWITCHPORT:
+	      if((tok = expectRegex(sp, tok, &sp->dent.swp_regex)) == NULL) return NO;
+	      sp->dent.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    case HSPTOKEN_SW:
+	      if((tok = expectONOFF(sp, tok, &sp->dent.sw)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

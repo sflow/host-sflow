@@ -1809,6 +1809,21 @@ extern "C" {
     sp->dropmon.hw = YES;
 #endif /* HSP_LOAD_CUMULUS */
 
+#ifdef HSP_LOAD_DENT
+    myLog(LOG_INFO, "autoload DENT, PSAMPLE modules");
+    sp->dent.dent = YES;
+    // force the hardwareSampling flag on, to ensure that sampling-rate is handled correctly.
+    sp->hardwareSampling = YES;
+    // default to PSAMPLE group 1
+    sp->psample.psample = YES;
+    sp->psample.group = 1;
+    // TODO: should we assume ingress-only sampling here?
+    sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
+      | HSP_SAMPLEOPT_IF_POLLER
+      | HSP_SAMPLEOPT_ASIC
+      | HSP_SAMPLEOPT_INGRESS;
+#endif /* HSP_LOAD_DENT */
+
 #ifdef HSP_LOAD_OPX
     // OPX should be compiled with "make deb FEATURES="OPX DBUS"
     myLog(LOG_INFO, "autoload OPX and DBUS modules");

@@ -1,0 +1,11 @@
+[Unit]
+Description=sFlow Agent
+After=network.target remote-fs.target nss-lookup.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/hsflowd -m %m -d
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

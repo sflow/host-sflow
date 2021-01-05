@@ -28,8 +28,9 @@ endif
 INSTALL=install
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS OS10 OPX SONIC DBUS SYSTEMD EAPI
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
+FEATURES_DENT= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
@@ -56,6 +57,12 @@ ifeq ("$(strip $(FEATURES))","CUMULUS")
   CFLAGS_LOAD += -DHSP_LOAD_CUMULUS
   HSFLOWD_CONF=scripts/hsflowd.conf.cumulus
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.cumulus
+endif
+ifeq ("$(strip $(FEATURES))","DENT")
+  XTGTS += $(FEATURES_DENT)
+  CFLAGS_LOAD += -DHSP_LOAD_DENT
+  HSFLOWD_CONF=scripts/hsflowd.conf.dent
+  HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.dent
 endif
 ifeq ("$(strip $(FEATURES))","EOS")
   XTGTS += $(FEATURES_EOS)
@@ -194,6 +201,9 @@ LIBS_NVML= -L$(LIBDIR_NVML) -lnvidia-ml
 CFLAGS_CUMULUS=
 LIBS_CUMULUS=
 
+CFLAGS_DENT=
+LIBS_DENT=
+
 CFLAGS_OVS=
 LIBS_OVS=
 
@@ -271,6 +281,7 @@ OBJS_TCP=mod_tcp.o util_netlink.o
 OBJS_NVML=mod_nvml.o
 OBJS_OVS=mod_ovs.o
 OBJS_CUMULUS=mod_cumulus.o
+OBJS_DENT=mod_dent.o
 OBJS_OPX=mod_opx.o
 OBJS_SONIC=mod_sonic.o
 OBJS_DBUS=mod_dbus.o util_dbus.o
@@ -314,6 +325,8 @@ NVML: mod_nvml.so
 OVS: mod_ovs.so
 
 CUMULUS: mod_cumulus.so
+
+DENT: mod_dent.so
 
 OS10: mod_opx.so
 
@@ -466,6 +479,14 @@ mod_cumulus.so: $(OBJS_CUMULUS)
 
 #----------------------------
 
+mod_dent.o: mod_dent.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_DENT)
+
+mod_dent.so: $(OBJS_DENT)
+	$(LD) -o $@ $(OBJS_DENT) $(LDFLAGS_SHARED) $(LIBS_DENT)
+
+#----------------------------
+
 mod_opx.o: mod_opx.c $(HEADERS)
 	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_OPX)
 
@@ -581,6 +602,7 @@ mod_pcap.o: mod_pcap.c $(HEADERS)
 mod_tcp.o: mod_tcp.c $(HEADERS)
 mod_nvml.o: mod_nvml.c $(HEADERS)
 mod_cumulus.o: mod_cumulus.c $(HEADERS)
+mod_dent.o: mod_dent.c $(HEADERS)
 mod_ovs.o: mod_ovs.c $(HEADERS)
 mod_opx.o: mod_opx.c $(HEADERS)
 mod_dbus.o: mod_dbus.c $(HEADERS)

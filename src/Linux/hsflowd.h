@@ -517,6 +517,12 @@ extern "C" {
       regex_t *swp_regex;
     } cumulus;
     struct {
+      bool dent;
+      char *swp_regex_str;
+      regex_t *swp_regex;
+      bool sw;
+    } dent;
+    struct {
       bool ovs;
     } ovs;
     struct {
