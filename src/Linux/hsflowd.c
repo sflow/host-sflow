@@ -298,7 +298,8 @@ extern "C" {
     // host TCP/IP counters
     SFLCounters_sample_element ipElem = { 0 }, icmpElem = { 0 }, tcpElem = { 0 }, udpElem = { 0 };
     if(!sp->cumulus.cumulus
-       && !sp->opx.opx) {
+       && !sp->opx.opx
+       && !sp->dent.dent) {
       ipElem.tag = SFLCOUNTERS_HOST_IP;
       icmpElem.tag = SFLCOUNTERS_HOST_ICMP;
       tcpElem.tag = SFLCOUNTERS_HOST_TCP;
@@ -1970,6 +1971,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_ovs", sp->modulesPath);
     if(sp->cumulus.cumulus)
       EVLoadModule(sp->rootModule, "mod_cumulus", sp->modulesPath);
+    if(sp->dent.dent)
+      EVLoadModule(sp->rootModule, "mod_dent", sp->modulesPath);
     if(sp->opx.opx)
       EVLoadModule(sp->rootModule, "mod_opx", sp->modulesPath);
     if(sp->sonic.sonic)
