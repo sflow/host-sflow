@@ -12,6 +12,7 @@ extern "C" {
 #define HSP_DEFAULT_SWITCHPORT_REGEX "^swp[0-9s]+$"
 #define HSP_DENT_TC_PROG  "/sbin/tc"
 #define HSP_DENT_TC_QDISC_REGEX "qdisc clsact"
+#define HSP_MAX_EXEC_LINELEN 1024
 
   typedef struct _HSP_mod_DENT {
     EVBus *pollBus;
@@ -43,7 +44,7 @@ extern "C" {
     strArrayAdd(cmdline, "show");
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
-#define HSP_MAX_EXEC_LINELEN 1024
+
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     bool missing = myExec(mod, strArray(cmdline), execOutputNoQDisc, outputLine, HSP_MAX_EXEC_LINELEN, &status);
@@ -77,7 +78,7 @@ extern "C" {
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
     strArrayAdd(cmdline, "clsact");
-#define HSP_MAX_EXEC_LINELEN 1024
+
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputAddQDisc, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
@@ -123,7 +124,9 @@ extern "C" {
     strArrayAdd(cmdline, adaptor->deviceName);
     if(sampling_dirn == HSP_DIRN_IN)
       strArrayAdd(cmdline, "ingress");
-#define HSP_MAX_EXEC_LINELEN 1024
+    else if(sampling_dirn == HSP_DIRN_OUT)
+      strArrayAdd(cmdline, "egress");
+
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputDeleteFilter, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
@@ -170,10 +173,11 @@ extern "C" {
     strArrayAdd(cmdline, "add");
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
-    // there doesn't seem to be an "egress" option, so its
-    // either "ingress" or we get both.
     if(sampling_dirn == HSP_DIRN_IN)
       strArrayAdd(cmdline, "ingress");
+    else if(sampling_dirn == HSP_DIRN_OUT)
+      strArrayAdd(cmdline, "egress");
+    // TODO: what if bidirectional? As it is we will leave the term out.  Not sure if that is right.
     strArrayAdd(cmdline, "matchall");
     if(sp->dent.sw == NO)
       strArrayAdd(cmdline, "skip_sw");
@@ -188,7 +192,12 @@ extern "C" {
     char loggrp[HSP_MAX_TOK_LEN];
     snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", sp->psample.group);
     strArrayAdd(cmdline, loggrp);
-#define HSP_MAX_EXEC_LINELEN 1024
+    strArrayAdd(cmdline, "trunc");
+    char hdrBytes[HSP_MAX_TOK_LEN];
+    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", sp->sFlowSettings_file->headerBytes);
+    strArrayAdd(cmdline, hdrBytes);
+    // TODO: not sure what the optional "index" option does here
+
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputSetRate, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
