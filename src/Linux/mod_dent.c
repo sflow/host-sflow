@@ -194,7 +194,7 @@ extern "C" {
     strArrayAdd(cmdline, loggrp);
     strArrayAdd(cmdline, "trunc");
     char hdrBytes[HSP_MAX_TOK_LEN];
-    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", sp->sFlowSettings_file->headerBytes);
+    snprintf(hdrBytes, HSP_MAX_TOK_LEN, "%u", sp->sFlowSettings_file->headerBytes);
     strArrayAdd(cmdline, hdrBytes);
     // TODO: not sure what the optional "index" option does here
 
