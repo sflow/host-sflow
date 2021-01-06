@@ -8,93 +8,242 @@ extern "C" {
 
 #include "hsflowd.h"
 
-#include "regex.h" // for switchport detection
+#include "regex.h"
 #define HSP_DEFAULT_SWITCHPORT_REGEX "^swp[0-9s]+$"
 #define HSP_DENT_TC_PROG  "/sbin/tc"
+#define HSP_DENT_TC_QDISC_REGEX "qdisc clsact"
 
   typedef struct _HSP_mod_DENT {
     EVBus *pollBus;
+    regex_t *qdisc_regex;
   } HSP_mod_DENT;
 
   /*_________________-------------------------------__________________
-    _________________   setSwitchPortSamplingRates  __________________
+    _________________       noQDdisc                __________________
+    -----------------_______________________________------------------
+  */
+
+  static int execOutputNoQDisc(void *magic, char *line) {
+    EVMod *mod = (EVMod *)magic;
+    HSP_mod_DENT *mdata = (HSP_mod_DENT *)mod->data;
+    myDebug(1, "dent: execOutputNoQDisc: %s", line);
+    if(regexec(mdata->qdisc_regex, line, 0, NULL, 0) == 0) {
+      myDebug(1, "dent: qdisc detected: %s", line);
+      return NO; // stop reading (signal that we found it)
+    }
+    return YES; // keep looking
+  }
+
+  static bool noQDisc(EVMod *mod, SFLAdaptor *adaptor) {
+    // examples:
+    // tc qdisc show dev eth0
+    UTStringArray *cmdline = strArrayNew();
+    strArrayAdd(cmdline, HSP_DENT_TC_PROG);
+    strArrayAdd(cmdline, "qdisc");
+    strArrayAdd(cmdline, "show");
+    strArrayAdd(cmdline, "dev");
+    strArrayAdd(cmdline, adaptor->deviceName);
+#define HSP_MAX_EXEC_LINELEN 1024
+    char outputLine[HSP_MAX_EXEC_LINELEN];
+    int status=0;
+    bool missing = myExec(mod, strArray(cmdline), execOutputNoQDisc, outputLine, HSP_MAX_EXEC_LINELEN, &status);
+    if(WEXITSTATUS(status) != 0) {
+      myLog(LOG_ERR, "noQDisc(%s) exitStatus=%d",
+	    HSP_DENT_TC_PROG,
+	    WEXITSTATUS(status));
+    }
+    strArrayFree(cmdline);
+    return missing;
+  }
+
+  /*_________________-------------------------------__________________
+    _________________       addQDdisc               __________________
+    -----------------_______________________________------------------
+  */
+
+  static int execOutputAddQDisc(void *magic, char *line) {
+    myDebug(1, "dent: execOutputAddQDisc: %s", line);
+    return YES;
+  }
+
+  static bool addQDisc(EVMod *mod, SFLAdaptor *adaptor) {
+    // examples:
+    // tc qdisc add dev eth0 clsact
+    bool added_ok = NO;
+    UTStringArray *cmdline = strArrayNew();
+    strArrayAdd(cmdline, HSP_DENT_TC_PROG);
+    strArrayAdd(cmdline, "qdisc");
+    strArrayAdd(cmdline, "add");
+    strArrayAdd(cmdline, "dev");
+    strArrayAdd(cmdline, adaptor->deviceName);
+    strArrayAdd(cmdline, "clsact");
+#define HSP_MAX_EXEC_LINELEN 1024
+    char outputLine[HSP_MAX_EXEC_LINELEN];
+    int status=0;
+    if(myExec(mod, strArray(cmdline), execOutputAddQDisc, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+      if(WEXITSTATUS(status) != 0) {
+	myLog(LOG_ERR, "addQDisc(%s) exitStatus=%d",
+	      HSP_DENT_TC_PROG,
+	      WEXITSTATUS(status));
+      }
+      else {
+	myDebug(1, "dent: addQDisc(%s) succeeded", adaptor->deviceName);
+	added_ok = YES;
+      }
+    }
+    else {
+      myLog(LOG_ERR, "addQDisc() calling %s failed (adaptor=%s)",
+	    strArrayAt(cmdline, 0),
+	    adaptor->deviceName);
+    }
+    strArrayFree(cmdline);
+    return added_ok;
+  }
+
+
+  /*_________________-------------------------------__________________
+    _________________      deleteFilter             __________________
+    -----------------_______________________________------------------
+  */
+
+  static int execOutputDeleteFilter(void *magic, char *line) {
+    myDebug(1, "dent: execOutputDeleteFilter: %s", line);
+    return YES;
+  }
+
+  static bool deleteFilter(EVMod *mod, SFLAdaptor *adaptor, int sampling_dirn) {
+    // examples:
+    // tc filter del dev eth0 ingress
+    bool deleted_ok = NO;
+    UTStringArray *cmdline = strArrayNew();
+    strArrayAdd(cmdline, HSP_DENT_TC_PROG);
+    strArrayAdd(cmdline, "filter");
+    strArrayAdd(cmdline, "delete");
+    strArrayAdd(cmdline, "dev");
+    strArrayAdd(cmdline, adaptor->deviceName);
+    if(sampling_dirn == HSP_DIRN_IN)
+      strArrayAdd(cmdline, "ingress");
+#define HSP_MAX_EXEC_LINELEN 1024
+    char outputLine[HSP_MAX_EXEC_LINELEN];
+    int status=0;
+    if(myExec(mod, strArray(cmdline), execOutputDeleteFilter, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+      if(WEXITSTATUS(status) != 0) {
+	myLog(LOG_ERR, "deleteFilter(%s) exitStatus=%d",
+	      HSP_DENT_TC_PROG,
+	      WEXITSTATUS(status));
+      }
+      else {
+	myDebug(1, "dent: deleteFilter(%s) succeeded", adaptor->deviceName);
+	deleted_ok = YES;
+      }
+    }
+    else {
+      myLog(LOG_ERR, "deleteFilter() calling %s failed (adaptor=%s)",
+	    strArrayAt(cmdline, 0),
+	    adaptor->deviceName);
+    }
+    strArrayFree(cmdline);
+    return deleted_ok;
+  }
+
+
+  /*_________________-------------------------------__________________
+    _________________          setRate              __________________
     -----------------_______________________________------------------
     return YES = hardware/kernel sampling configured OK
   */
 
-  static int execOutputLine(void *magic, char *line) {
-    myDebug(1, "execOutputLine: %s", line);
+  static int execOutputSetRate(void *magic, char *line) {
+    myDebug(1, "dent: execOutputSetRate: %s", line);
     return YES;
   }
 
-  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
+  static bool setRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
     // examples:
+    // tc qdisc add dev eth0 clsact
     // tc filter add dev eth0 ingress matchall skip_sw action sample rate 1000 group 1
-    // tc filter del dev eth0 ingress
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    bool sampling_ok = NO;
+    UTStringArray *cmdline = strArrayNew();
+    strArrayAdd(cmdline, HSP_DENT_TC_PROG);
+    strArrayAdd(cmdline, "filter");
+    strArrayAdd(cmdline, "add");
+    strArrayAdd(cmdline, "dev");
+    strArrayAdd(cmdline, adaptor->deviceName);
+    // there doesn't seem to be an "egress" option, so its
+    // either "ingress" or we get both.
+    if(sampling_dirn == HSP_DIRN_IN)
+      strArrayAdd(cmdline, "ingress");
+    strArrayAdd(cmdline, "matchall");
+    if(sp->dent.sw == NO)
+      strArrayAdd(cmdline, "skip_sw");
+    strArrayAdd(cmdline, "action");
+    strArrayAdd(cmdline, "sample");
+    strArrayAdd(cmdline, "rate");
+#define HSP_MAX_TOK_LEN 16
+    char srate[HSP_MAX_TOK_LEN];
+    snprintf(srate, HSP_MAX_TOK_LEN, "%u", sampling_n);
+    strArrayAdd(cmdline, srate);
+    strArrayAdd(cmdline, "group");
+    char loggrp[HSP_MAX_TOK_LEN];
+    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", sp->psample.group);
+    strArrayAdd(cmdline, loggrp);
+#define HSP_MAX_EXEC_LINELEN 1024
+    char outputLine[HSP_MAX_EXEC_LINELEN];
+    int status=0;
+    if(myExec(mod, strArray(cmdline), execOutputSetRate, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+      if(WEXITSTATUS(status) != 0) {
+	myLog(LOG_ERR, "setRate(%s) exitStatus=%d",
+	      HSP_DENT_TC_PROG,
+	      WEXITSTATUS(status));
+      }
+      else {
+	myDebug(1, "dent: setRate(%s) succeeded", adaptor->deviceName);
+	// hardware or kernel sampling was successfully configured
+	sampling_ok = YES;
+      }
+    }
+    else {
+      myLog(LOG_ERR, "setRate() calling %s failed (adaptor=%s)",
+	    strArrayAt(cmdline, 0),
+	    adaptor->deviceName);
+    }
+    strArrayFree(cmdline);
+    return sampling_ok;
+  }
+
+  /*_________________-------------------------------__________________
+    _________________       setSamplingRate         __________________
+    -----------------_______________________________------------------
+    return YES = hardware/kernel sampling configured OK
+  */
+
+  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
     if(niostate->switchPort == NO
        || niostate->loopback
        || niostate->bond_master)
       return NO;
-
+    
     bool sampling_ok = NO;
     niostate->sampling_n = sampling_n;
     if(sampling_n != niostate->sampling_n_set) {
-      UTStringArray *cmdline = strArrayNew();
-      strArrayAdd(cmdline, HSP_DENT_TC_PROG);
-#define HSP_MAX_TOK_LEN 16
-      strArrayAdd(cmdline, "filter");
-      strArrayAdd(cmdline, sampling_n == 0 ? "del" : "add");
-      strArrayAdd(cmdline, "dev");
-      strArrayAdd(cmdline, adaptor->deviceName);
-      // there doesn't seem to be an "egress" option, so its
-      // either "ingress" or we get both.
-      if(sampling_dirn == HSP_DIRN_IN)
-	strArrayAdd(cmdline, "ingress");
-      if(sampling_n > 0) {
-	strArrayAdd(cmdline, "matchall");
-	if(sp->dent.sw == NO)
-	  strArrayAdd(cmdline, "skip_sw");
-	strArrayAdd(cmdline, "action");
-	strArrayAdd(cmdline, "sample");
-	strArrayAdd(cmdline, "rate");
-	char srate[HSP_MAX_TOK_LEN];
-	snprintf(srate, HSP_MAX_TOK_LEN, "%u", sampling_n);
-	strArrayAdd(cmdline, srate);
-	strArrayAdd(cmdline, "group");
-	char loggrp[HSP_MAX_TOK_LEN];
-	snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", sp->psample.group);
-	strArrayAdd(cmdline, loggrp);
-      }
-      myDebug(1, "setSamplingRate(%s) %u -> %u",
-	      adaptor->deviceName,
-	      niostate->sampling_n_set,
-	      sampling_n);
-#define HSP_MAX_EXEC_LINELEN 1024
-      char outputLine[HSP_MAX_EXEC_LINELEN];
-      int status;
-      if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
-	if(WEXITSTATUS(status) != 0) {
-	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d",
-		HSP_DENT_TC_PROG,
-		WEXITSTATUS(status));
-	}
-	else {
-	  myDebug(1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
-	  // hardware or kernel sampling was successfully configured (or cleared)
+      if(sampling_n == 0)
+	deleteFilter(mod, adaptor, sampling_dirn);
+      else {
+	// make sure the parent qdisc is available - creating if necessary
+	myDebug(1, "dent: setSamplingRate(%s) %u -> %u",
+		adaptor->deviceName,
+		niostate->sampling_n_set,
+		sampling_n);
+	if(noQDisc(mod, adaptor))
+	  addQDisc(mod, adaptor);
+	if(setRate(mod, adaptor, logGroup, sampling_n, sampling_dirn)) {
 	  niostate->sampling_n_set = sampling_n;
 	  sampling_ok = YES;
 	}
       }
-      else {
-	myLog(LOG_ERR, "myExec() calling %s failed (adaptor=%s)",
-	      strArrayAt(cmdline, 0),
-	      adaptor->deviceName);
-      }
-      strArrayFree(cmdline);
     }
-
     return sampling_ok;
   }
 
@@ -124,7 +273,7 @@ extern "C" {
       HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(!niostate->switchPort) {
 	if(regexec(sp->dent.swp_regex, adaptor->deviceName, 0, NULL, 0) == 0) {
-	  myDebug(1, "new switchport detected: %s", adaptor->deviceName);
+	  myDebug(1, "dent: new switchport detected: %s", adaptor->deviceName);
 	  niostate->switchPort = YES;
 	}
       }
@@ -202,6 +351,8 @@ extern "C" {
 
     // TODO: should we try to cluster the counters a little?
     // sp->syncPollingInterval = 5;
+
+    mdata->qdisc_regex = UTRegexCompile(HSP_DENT_TC_QDISC_REGEX);
 
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed); 
