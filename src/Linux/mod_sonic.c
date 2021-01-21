@@ -550,7 +550,7 @@ extern "C" {
 	}
       }
       // clean up
-      cJSON_free(dbconfig);
+      cJSON_Delete(dbconfig);
       UTStrBuf_free(sbuf);
       fclose(fjson);
     }
