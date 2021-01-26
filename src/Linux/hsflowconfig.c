@@ -994,6 +994,9 @@ extern "C" {
       else if(vlan != HSP_VLAN_ALL) {
 	ipPriority = IPSP_VLAN4;
       }
+      else if(SFLAddress_isRFC1918(addr)) {
+	ipPriority = IPSP_IP4_RFC1918;
+      }
       break;
 
     case SFLADDRESSTYPE_IP_V6:
@@ -1053,6 +1056,28 @@ extern "C" {
     return boosted_priority;
   }
 
+
+  static bool priorityHigher(HSP *sp, HSPLocalIP *localIP, HSPLocalIP *challenger) {
+    if(localIP == NULL)
+      return YES;
+    if(challenger->ipPriority < localIP->ipPriority)
+      return NO;
+    if(challenger->ipPriority > localIP->ipPriority)
+      return YES;
+    SFLAdaptor *adaptor1 = adaptorByName(sp, localIP->dev);
+    if(adaptor1 == NULL)
+      return YES;
+    SFLAdaptor *adaptor2 = adaptorByName(sp, challenger->dev);
+    if(adaptor2 == NULL)
+      return NO;
+    // if it's the same interface, take the one we found first
+    if(adaptor1->ifIndex == adaptor2->ifIndex)
+      return (challenger->discoveryIndex < localIP->discoveryIndex);
+    // otherwise take the one whose interface has the lower ifIndex
+    return (adaptor2->ifIndex > 0
+	    && adaptor2->ifIndex < adaptor1->ifIndex);
+  }
+
   /*_________________---------------------------__________________
     _________________     selectAgentAddress    __________________
     -----------------___________________________------------------
@@ -1095,42 +1120,28 @@ extern "C" {
     }
     else {
       // try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
-      // We already used this ranking to prioritize L3 addresses per adaptor (in the case where
-      // there are more than one) so now we are applying the same ranking globally to pick
-      // the best candidate to represent the whole agent:
-      
-      SFLAdaptor *adaptor;
-      UTHASH_WALK(sp->adaptorsByName, adaptor) {
-	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-	// must have an IP
-	if(!SFLAddress_isZero(&adaptorNIO->ipAddr)) {
-	  if(selectedAdaptor == NULL) {
-	    selectedAdaptor = adaptor;
-	  }
-	  else {
-	    uint32_t ifi = selectedAdaptor->ifIndex;
-	    uint32_t pri = ADAPTOR_NIO(selectedAdaptor)->ipPriority;
-	    // take the highest priority one,  but if we have more than one with the same
-	    // priority then choose the one with the lowest (non-zero) ifIndex number:
-	    if((adaptorNIO->ipPriority > pri)
-	       || (adaptorNIO->ipPriority == pri
-		   && adaptor->ifIndex
-		   && (ifi == 0 || adaptor->ifIndex < ifi))) {
-	      selectedAdaptor = adaptor;
-	    }
-	  }
-	}
+      HSPLocalIP *selectedLocalIP = NULL;
+      HSPLocalIP *lip;
+      UTHASH_WALK(sp->localIP, lip) {
+	if(priorityHigher(sp, selectedLocalIP, lip))
+	  selectedLocalIP = lip;
+      }
+      UTHASH_WALK(sp->localIP6, lip) {
+	if(priorityHigher(sp, selectedLocalIP, lip))
+	  selectedLocalIP = lip;
+      }
+      if(selectedLocalIP) {
+	ip = &selectedLocalIP->ipAddr;
+	selectedAdaptor = adaptorByName(sp, selectedLocalIP->dev);
       }
     }
-    
+
+    // record the agentDevice
     if(sp->agentDevice) {
       my_free(sp->agentDevice);
       sp->agentDevice = NULL;
     }
-    
     if(selectedAdaptor) {
-      // crown the winner
-      ip = &(ADAPTOR_NIO(selectedAdaptor)->ipAddr);
       // keep the device name too
       sp->agentDevice = my_strdup(selectedAdaptor->deviceName);
     }

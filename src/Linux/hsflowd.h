@@ -255,9 +255,17 @@ extern "C" {
 		 IPSP_VLAN4,
 		 IPSP_IP6_SCOPE_UNIQUE,
 		 IPSP_IP6_SCOPE_GLOBAL,
+		 IPSP_IP4_RFC1918,
 		 IPSP_IP4,
 		 IPSP_NUM_PRIORITIES,
   } EnumIPSelectionPriority;
+
+  typedef struct _HSPLocalIP {
+    SFLAddress ipAddr;
+    char *dev;
+    EnumIPSelectionPriority ipPriority;
+    uint32_t discoveryIndex;
+  } HSPLocalIP;
 
   typedef struct _HSP_ethtool_counters {
     uint64_t mcasts_in;
@@ -288,7 +296,8 @@ extern "C" {
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
-    uint32_t /*EnumIPSelectionPriority*/ ipPriority;
+    UTHash *ip4Addrs;
+    UTHash *ip6Addrs;
     EnumHSPDevType devType;
     bool up:1;
     bool loopback:1;
@@ -742,6 +751,10 @@ extern "C" {
   char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen);
   void adaptorHTPrint(UTHash *ht, char *prefix);
   void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
+
+  // local IPs
+  HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev);
+  void localIPFree(HSPLocalIP *lip);
 
   // readPackets.c
 #define HSP_SAMPLEOPT_BRIDGE      0x0001

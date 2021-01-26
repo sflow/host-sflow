@@ -255,6 +255,7 @@ extern "C" {
   int SFLAddress_isLoopback(SFLAddress *addr);
   int SFLAddress_isZero(SFLAddress *addr);
   int SFLAddress_isSelfAssigned(SFLAddress *addr);
+  int SFLAddress_isRFC1918(SFLAddress *addr);
   int SFLAddress_isLinkLocal(SFLAddress *addr);
   int SFLAddress_isUniqueLocal(SFLAddress *addr);
   int SFLAddress_isMulticast(SFLAddress *addr);

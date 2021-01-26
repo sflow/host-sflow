@@ -238,6 +238,23 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________        local IPs          __________________
+    -----------------___________________________------------------
+  */
+
+  HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev) {
+    HSPLocalIP *lip = my_calloc(sizeof(HSPLocalIP));
+    lip->ipAddr = *ipAddr;
+    lip->dev = my_strdup(dev);
+    return lip;
+  }
+
+  void localIPFree(HSPLocalIP *lip) {
+    my_free(lip->dev);
+    my_free(lip);
+  }
+
+  /*_________________---------------------------__________________
     _________________   agentCB_getCounters     __________________
     -----------------___________________________------------------
   */

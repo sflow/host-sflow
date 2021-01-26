@@ -1431,6 +1431,17 @@ extern "C" {
     return NO;
   }
 
+  int SFLAddress_isRFC1918(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V4) {
+      u_char *a = (u_char *)&(addr->address.ip_v4.addr);
+      if(a[0] == 10 // 10.0.0.0/8
+	 || (a[0] == 192 && a[1] == 168) // 192.168.0.0/16
+	 || (a[0] == 172 && (a[1] & 0xF0) == 16)) // 172.16.0.0/12
+	return YES;
+    }
+    return NO;
+  }
+
   int SFLAddress_isLinkLocal(SFLAddress *addr) {
     if(addr->type == SFLADDRESSTYPE_IP_V6) {
       // FE80::/10

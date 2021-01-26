@@ -17,6 +17,10 @@ extern "C" {
 #include <linux/sockios.h>
 #include <linux/if_vlan.h>
 
+#if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 3)
+#include <ifaddrs.h> // for getifaddrs(3)
+#endif
+
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
   // (there can be more than this - my_readline will chop for us)
@@ -58,6 +62,30 @@ extern "C" {
     }
   }
 
+  /*________________---------------------------__________________
+    ________________       local IPs           __________________
+    ----------------___________________________------------------
+  */
+
+  static bool addLocalIP(UTHash *ht, SFLAddress *addr, char *dev) {
+    HSPLocalIP searchIP = { .ipAddr = *addr };
+    if(UTHashGet(ht, &searchIP) == NULL) {
+      HSPLocalIP *lip = localIPNew(addr, dev);
+      UTHashAdd(ht, lip);
+      lip->discoveryIndex = UTHashN(ht);
+      return YES;
+    }
+    return NO;
+  }
+
+  static void freeLocalIPs(UTHash *ht) {
+    HSPLocalIP *lip;
+    UTHASH_WALK(ht, lip)
+      localIPFree(lip);
+    UTHashFree(ht);
+  }
+
+
 /*________________---------------------------__________________
   ________________  setAddressPriorities     __________________
   ----------------___________________________------------------
@@ -65,17 +93,114 @@ extern "C" {
   info is spliced in separately we have to wait for that and
   then set the priorities for the whole list.
 */
-  void setAddressPriorities(HSP *sp)
+  static void setAddressPriorities(HSP *sp, UTHash *addrHT)
   {
     myDebug(1, "setAddressPriorities");
-    SFLAdaptor *adaptor;
-    UTHASH_WALK(sp->adaptorsByName, adaptor) {
-      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-      adaptorNIO->ipPriority = agentAddressPriority(sp,
-						    &adaptorNIO->ipAddr,
-						    adaptorNIO->vlan,
-						    adaptorNIO->loopback);
+    if(addrHT) {
+      HSPLocalIP *lip;
+      UTHASH_WALK(addrHT, lip) {
+	SFLAdaptor *adaptor = adaptorByName(sp, lip->dev);
+	if(adaptor) {
+	  HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+	  if(adaptorNIO) {
+	    lip->ipPriority = agentAddressPriority(sp,
+						   &lip->ipAddr,
+						   adaptorNIO->vlan,
+						   adaptorNIO->loopback);
+	  }
+	}
+      }
     }
+  }
+
+  /*________________---------------------------__________________
+    ________________     readL3Addresses       __________________
+    ----------------___________________________------------------
+  */
+
+    
+  static int readL3Addresses(HSP *sp, UTHash *localIP, UTHash *localIP6)
+  {
+    int addresses_added = 0;
+    // getifaddrs(3) first appeared in glibc 2.3
+    // and first included v6 addresses in 2.3.3
+#if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 3)
+    struct ifaddrs *ifap = NULL;
+
+    
+    if(getifaddrs(&ifap) != 0) {
+      myDebug(1, "readL3Addresses: getifaddrs() failed : %s", strerror(errno));
+      return 0;
+    }
+    for(struct ifaddrs *ifa = ifap; ifa; ifa = ifa->ifa_next) {
+      bool up = (ifa->ifa_flags & IFF_UP) ? YES : NO;
+      bool loopback = (ifa->ifa_flags & IFF_LOOPBACK) ? YES: NO;
+      bool promisc = (ifa->ifa_flags & IFF_PROMISC) ? YES : NO;
+      bool bond_master = (ifa->ifa_flags & IFF_MASTER) ? YES : NO;
+      bool bond_slave = (ifa->ifa_flags & IFF_SLAVE) ? YES : NO;
+
+      myDebug(1, "readL3Addresses: ifa_name=%s up=%d loopback=%d promisc=%d bond(master=%u,slave=%u)",
+	      ifa->ifa_name,
+	      up,
+	      loopback,
+	      promisc,
+	      bond_master,
+	      bond_slave);
+	
+      if(up == 0)
+	continue;
+      if(ifa->ifa_addr == NULL)
+	continue;
+
+      SFLAdaptor *adaptor = adaptorByName(sp, ifa->ifa_name);
+      if(adaptor == NULL) {
+	myDebug(1, "readL3Addreses: ignoring IP address for unknown device: %s", ifa->ifa_name);
+	continue;
+      }
+      
+      SFLAddress addr = { 0 };
+      UTHash *addrHT = NULL;
+      switch(ifa->ifa_addr->sa_family) {
+      case AF_INET:
+	{
+	  struct sockaddr_in *s = (struct sockaddr_in *)ifa->ifa_addr;
+	  addr.type = SFLADDRESSTYPE_IP_V4;
+	  addr.address.ip_v4.addr = s->sin_addr.s_addr;
+	  addrHT = localIP;
+	}
+	break;
+      case AF_INET6:
+	{
+	  struct sockaddr_in6 *s = (struct sockaddr_in6 *)ifa->ifa_addr;
+	  addr.type = SFLADDRESSTYPE_IP_V6;
+	  memcpy(&addr.address.ip_v6.addr, &s->sin6_addr, 16);
+	  addrHT = localIP6;
+	}
+	break;
+      case AF_PACKET:
+	// counters accessible under here (see linux/if_link.h), but it seems
+	// better to read them from /proc, ethtool or Netlink.
+	break;
+      default:
+	myDebug(1, "readL3Addresses: unexpected family = %u", ifa->ifa_addr->sa_family);
+	break;
+      }
+      
+      if(addrHT) {
+	char ipbuf[51];
+	myDebug(1, "readL3Addresses: found=%s\n", SFLAddress_print(&addr, ipbuf, 50));
+	if(addLocalIP(addrHT, &addr, ifa->ifa_name))
+	  addresses_added++;
+      }
+    }
+
+    // clean up
+    freeifaddrs(ifap);
+
+    myDebug(1, "readL3Addresses: found %u extra L3 addresses", addresses_added);
+
+#endif
+    return addresses_added;
   }
 
 /*________________---------------------------__________________
@@ -83,30 +208,9 @@ extern "C" {
   ----------------___________________________------------------
 */
 
-#if 0
-  static u_int remap_proc_net_if_inet6_scope(u_int scope)
+  static int readIPv6Addresses(HSP *sp, UTHash *addrHT)
   {
-    // for reasons not yet understood, the scope field in /proc/net/if_inet6
-    // does not correspond to the values we expected to see.  (I think it
-    // might actually be the sin6_scope that you would write into a v6 socket
-    // to talk to that address,  but I don't know for sure,  or why that
-    // would need to be different anyway).
-    // This function tries to map the scope field back into familiar
-    // territory again.
-    switch(scope) {
-    case 0x40: return 0x5; // site
-    case 0x20: return 0x2; // link
-    case 0x10: return 0x1; // interface
-    case 0x00: return 0xe; // global
-    }
-    // if it's something else,  then just leave it unchanged.  Not sure
-    // what you get here for scope = admin or org.
-    return scope;
-  }
-#endif
-
-  void readIPv6Addresses(HSP *sp, UTHash *addrHT)
-  {
+    int addresses_added = 0;
     FILE *procFile = fopen(PROCFS_STR "/net/if_inet6", "r");
     if(procFile) {
       char line[MAX_PROC_LINE_CHARS];
@@ -137,29 +241,11 @@ extern "C" {
 	  if(trimmed) {
 	    SFLAdaptor *adaptor = adaptorByName(sp, trimmed);
 	    if(adaptor) {
-	      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
 	      SFLAddress v6addr;
 	      v6addr.type = SFLADDRESSTYPE_IP_V6;
 	      if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
-		if(addrHT) {
-		  // add to localIP6 lookup
-		  if(UTHashGet(addrHT, &v6addr) == NULL) {
-		    SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
-		    *addrCopy = v6addr;
-		    UTHashAdd(addrHT, addrCopy);
-		  }
-		}
-		// we interpret the scope from the address now
-		// scope = remap_proc_net_if_inet6_scope(scope);
-		EnumIPSelectionPriority ipPriority = agentAddressPriority(sp,
-									  &v6addr,
-									  niostate->vlan,
-									  niostate->loopback);
-		if(ipPriority > niostate->ipPriority) {
-		  // write this in as the preferred sflow-agent-address for this adaptor
-		  niostate->ipAddr = v6addr;
-		  niostate->ipPriority = ipPriority;
-		}
+		if(addLocalIP(addrHT, &v6addr, adaptor->deviceName))
+		  addresses_added++;
 	      }
 	    }
 	  }
@@ -167,6 +253,7 @@ extern "C" {
       }
       fclose(procFile);
     }
+    return addresses_added;
   }
 
 /*________________---------------------------__________________
@@ -627,8 +714,9 @@ extern "C" {
   {
   uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
 
-  UTHash *newLocalIP = UTHASH_NEW(SFLAddress, address.ip_v4, UTHASH_DFLT);
-  UTHash *newLocalIP6 = UTHASH_NEW(SFLAddress, address.ip_v6, UTHASH_DFLT);
+  // keep v4 and v6 separate to simplify HT logic
+  UTHash *newLocalIP = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v4, UTHASH_DFLT);
+  UTHash *newLocalIP6 = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v6, UTHASH_DFLT);
 
   // mark-and-sweep. Mark all existing adaptors
   { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
@@ -785,11 +873,7 @@ extern "C" {
 	  adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
 	  adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
 	  // add to localIP hash too
-	  if(UTHashGet(newLocalIP, &adaptorNIO->ipAddr) == NULL) {
-	    SFLAddress *addrCopy = my_calloc(sizeof(SFLAddress));
-	    *addrCopy = adaptorNIO->ipAddr;
-	    UTHashAdd(newLocalIP, addrCopy);
-	  }
+	  addLocalIP(newLocalIP, &adaptorNIO->ipAddr, adaptor->deviceName);
 	}
 	//else if (ifr.ifr_addr.sa_family == AF_INET6) {
 	// not sure this ever happens - on a linux system IPv6 addresses
@@ -836,16 +920,15 @@ extern "C" {
   // to a particular VLAN
   readVLANs(sp);
 
+  // sweep for additional layer3 addresses
+  readL3Addresses(sp, newLocalIP, newLocalIP6);
+  readIPv6Addresses(sp, newLocalIP6);
+
   // now that we have the evidence gathered together, we can
   // set the L3 address priorities (used for auto-selecting
   // the sFlow-agent-address if requrired to by the config.
-  setAddressPriorities(sp);
-
-  // now we can read IPv6 addresses too - they come from a
-  // different place. Depending on the address priorities this
-  // may cause the adaptor's best-choice ipAddress to be
-  // overwritten.
-  readIPv6Addresses(sp, newLocalIP6);
+  setAddressPriorities(sp, newLocalIP);
+  setAddressPriorities(sp, newLocalIP6);
 
   if(p_added) *p_added = ad_added;
   if(p_removed) *p_removed = ad_removed;
@@ -858,18 +941,10 @@ extern "C" {
   UTHash *oldLocalIP6 = sp->localIP6;
   sp->localIP = newLocalIP;
   sp->localIP6 = newLocalIP6;
-  if(oldLocalIP) {
-    SFLAddress *ad;
-    UTHASH_WALK(oldLocalIP, ad)
-      my_free(ad);
-    UTHashFree(oldLocalIP);
-  }
-  if(oldLocalIP6) {
-    SFLAddress *ad;
-    UTHASH_WALK(oldLocalIP6, ad)
-      my_free(ad);
-    UTHashFree(oldLocalIP6);
-  }
+  if(oldLocalIP)
+    freeLocalIPs(oldLocalIP);
+  if(oldLocalIP6)
+    freeLocalIPs(oldLocalIP6);
 
   return sp->adaptorsByName->entries;
 }
@@ -882,7 +957,8 @@ extern "C" {
     UTHash *localHT = (addr->type == SFLADDRESSTYPE_IP_V6)
       ? sp->localIP6
       : sp->localIP;
-    return (UTHashGet(localHT, addr) != NULL);
+    HSPLocalIP search = { .ipAddr = *addr };
+    return (UTHashGet(localHT, &search) != NULL);
   }
   
 
