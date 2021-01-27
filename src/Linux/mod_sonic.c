@@ -95,8 +95,11 @@ extern "C" {
     int dbNo;
     EVMod *mod;
     char *dbInstance;
+    // connect via TCP
     char *hostname;
     int port;
+    // or via unix domain socket
+    char *unixSocketPath;
     EVSocket *sock;
     bool connected;
     uint32_t reads;
@@ -431,9 +434,9 @@ extern "C" {
     return UTHashGet(mdata->dbInstances, &search);
   }
 
-  static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port) {
+  static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port, char *unixSocketPath) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "addDB: %s hostname=%s, port=%d", dbInstance, hostname, port);
+    myDebug(1, "addDB: %s hostname=%s, port=%d, unixSocketPath=%s", dbInstance, hostname, port, unixSocketPath);
     HSPSonicDBClient *db = getDB(mod, dbInstance);
     if(db == NULL) {
       db = (HSPSonicDBClient *)my_calloc(sizeof(HSPSonicDBClient));
@@ -442,6 +445,7 @@ extern "C" {
       db->mod = mod;
       db->hostname = my_strdup(hostname);
       db->port = port;
+      db->unixSocketPath = my_strdup(unixSocketPath);
       UTHashAdd(mdata->dbInstances, db);
       // the socket will be opened later
     }
@@ -453,6 +457,7 @@ extern "C" {
     my_free(db->dbInstance);
     UTStrBuf_free(db->replyBuf);
     my_free(db->hostname);
+    my_free(db->unixSocketPath);
     my_free(db);
   }
 #endif
@@ -536,9 +541,9 @@ extern "C" {
 	for(cJSON *inst = instances->child; inst; inst = inst->next) {
 	  cJSON *hostname = cJSON_GetObjectItem(inst, "hostname");
 	  cJSON *port = cJSON_GetObjectItem(inst, "port");
-	  // cJSON *unixSockPath = cJSON_GetObjectItem(inst, "unix_socket_path");
+	  cJSON *unixSock = cJSON_GetObjectItem(inst, "unix_socket_path");
 	  // cJSON *persist = cJSON_GetObjectItem(inst, "persistence_for_warm_boot");
-	  addDB(mod, inst->string, hostname->valuestring, port->valueint);
+	  addDB(mod, inst->string, hostname->valuestring, port->valueint, unixSock->valuestring);
 	}
 	for(cJSON *dbTab = databases->child; dbTab; dbTab = dbTab->next) {
 	  cJSON *id = cJSON_GetObjectItem(dbTab, "id");
@@ -569,7 +574,8 @@ extern "C" {
        && configTab->dbClient) {
       configTab->evtClient = addDB(mod, HSP_SONIC_DB_CONFIG_NAME HSP_SONIC_DB_EVENT_SUFFIX,
 				   configTab->dbClient->hostname,
-				   configTab->dbClient->port);
+				   configTab->dbClient->port,
+				   configTab->dbClient->unixSocketPath);
     }
   }
 
@@ -649,15 +655,24 @@ extern "C" {
   }
 
   static bool db_connectClient(EVMod *mod, HSPSonicDBClient *db) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "sonic db_connectClient %s = %s:%d", db->dbInstance, db->hostname, db->port);
-    redisAsyncContext *ctx = db->ctx = redisAsyncConnect(db->hostname, db->port);
+    redisAsyncContext *ctx = NULL;
+    if(sp->sonic.unixsock
+       && db->unixSocketPath) {
+      myDebug(1, "sonic db_connectClient %s = %s", db->dbInstance, db->unixSocketPath);
+      ctx = db->ctx = redisAsyncConnectUnix(db->unixSocketPath);
+    }
+    else {
+      myDebug(1, "sonic db_connectClient %s = %s:%d", db->dbInstance, db->hostname, db->port);
+      ctx = db->ctx = redisAsyncConnect(db->hostname, db->port);
+    }
     if(ctx) {
       redisAsyncSetConnectCallback(ctx, db_connectCB);
       redisAsyncSetDisconnectCallback(ctx, db_disconnectCB);
       int fd = ctx->c.fd;
+      myDebug(1, "sonic redis fd == %d", fd);
       if(fd > 0) {
-	myDebug(1, "sonic redis fd == %d", fd);
 	db->sock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, db /* magic */);
 	// db->ev.addRead = db_addReadCB; // EVBus always ready to read
 	// db->ev.delRead = db_delReadCB; // no-op

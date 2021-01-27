@@ -546,6 +546,7 @@ extern "C" {
       bool sonic;
       char *swp_regex_str;
       regex_t *swp_regex;
+      bool unixsock;
     } sonic;
     struct {
       bool nvml;

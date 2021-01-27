@@ -1332,7 +1332,7 @@ extern "C" {
 	    break;
 	  case HSPTOKEN_OS10:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
-	    sp->opx.opx = YES;
+	    sp->opx.opx = YES; // os10 now maps to opx internally
 	    level[++depth] = HSPOBJ_OS10;
 	    break;
 	  case HSPTOKEN_OPX:
@@ -1769,8 +1769,11 @@ extern "C" {
 	  {
 	    switch(tok->stok) {
 	    case HSPTOKEN_SWITCHPORT:
-	      if((tok = expectRegex(sp, tok, &sp->opx.swp_regex)) == NULL) return NO;
-	      sp->opx.swp_regex_str = my_strdup(tok->str);
+	      if((tok = expectRegex(sp, tok, &sp->sonic.swp_regex)) == NULL) return NO;
+	      sp->sonic.swp_regex_str = my_strdup(tok->str);
+	      break;
+	    case HSPTOKEN_UNIXSOCK:
+	      if((tok = expectONOFF(sp, tok, &sp->sonic.unixsock)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
