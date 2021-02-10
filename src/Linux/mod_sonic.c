@@ -100,6 +100,7 @@ extern "C" {
     int port;
     // or via unix domain socket
     char *unixSocketPath;
+    char *passPath;
     EVSocket *sock;
     bool connected;
     uint32_t reads;
@@ -139,6 +140,7 @@ extern "C" {
   } HSP_mod_SONIC;
 
   static void db_ping(EVMod *mod, HSPSonicDBClient *db);
+  static bool db_auth(EVMod *mod, HSPSonicDBClient *db);
   static bool mapPorts(EVMod *mod);
   static bool discoverNewPorts(EVMod *mod);
   static void signalCounterDiscontinuity(EVMod *mod, HSPSonicPort *prt);
@@ -434,7 +436,7 @@ extern "C" {
     return UTHashGet(mdata->dbInstances, &search);
   }
 
-  static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port, char *unixSocketPath) {
+  static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port, char *unixSocketPath, char *passPath) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "addDB: %s hostname=%s, port=%d, unixSocketPath=%s", dbInstance, hostname, port, unixSocketPath);
     HSPSonicDBClient *db = getDB(mod, dbInstance);
@@ -446,6 +448,7 @@ extern "C" {
       db->hostname = my_strdup(hostname);
       db->port = port;
       db->unixSocketPath = my_strdup(unixSocketPath);
+      db->passPath = my_strdup(passPath);
       UTHashAdd(mdata->dbInstances, db);
       // the socket will be opened later
     }
@@ -541,9 +544,15 @@ extern "C" {
 	for(cJSON *inst = instances->child; inst; inst = inst->next) {
 	  cJSON *hostname = cJSON_GetObjectItem(inst, "hostname");
 	  cJSON *port = cJSON_GetObjectItem(inst, "port");
+	  cJSON *passPath = cJSON_GetObjectItem(inst, "password_path");
 	  cJSON *unixSock = cJSON_GetObjectItem(inst, "unix_socket_path");
 	  // cJSON *persist = cJSON_GetObjectItem(inst, "persistence_for_warm_boot");
-	  addDB(mod, inst->string, hostname->valuestring, port->valueint, unixSock->valuestring);
+	  addDB(mod,
+		inst->string,
+		hostname ? hostname->valuestring : NULL,
+		port ? port->valueint : 0,
+		unixSock ? unixSock->valuestring : NULL,
+		passPath ? passPath->valuestring : NULL);
 	}
 	for(cJSON *dbTab = databases->child; dbTab; dbTab = dbTab->next) {
 	  cJSON *id = cJSON_GetObjectItem(dbTab, "id");
@@ -575,7 +584,8 @@ extern "C" {
       configTab->evtClient = addDB(mod, HSP_SONIC_DB_CONFIG_NAME HSP_SONIC_DB_EVENT_SUFFIX,
 				   configTab->dbClient->hostname,
 				   configTab->dbClient->port,
-				   configTab->dbClient->unixSocketPath);
+				   configTab->dbClient->unixSocketPath,
+				   configTab->dbClient->passPath);
     }
   }
 
@@ -663,9 +673,13 @@ extern "C" {
       myDebug(1, "sonic db_connectClient %s = %s", db->dbInstance, db->unixSocketPath);
       ctx = db->ctx = redisAsyncConnectUnix(db->unixSocketPath);
     }
-    else {
+    else if(db->hostname
+	    && db->port) {
       myDebug(1, "sonic db_connectClient %s = %s:%d", db->dbInstance, db->hostname, db->port);
       ctx = db->ctx = redisAsyncConnect(db->hostname, db->port);
+    }
+    else {
+      myDebug(1, "sonic db_connectClient: missing unixsock or host:port");
     }
     if(ctx) {
       redisAsyncSetConnectCallback(ctx, db_connectCB);
@@ -697,7 +711,14 @@ extern "C" {
 	// so go ahead and issue the first query.  Use a neutral "no-op"
 	// and save the actual discovery queries for the next step once
 	// everything is connected.
-	db_ping(mod, db);
+	if(db->passPath
+	   && db_auth(mod, db)) {
+	  myDebug(1, "sonic db_connect(%s): auth sent", db->dbInstance);
+	}
+	else {
+	  db_ping(mod, db);
+	  myDebug(1, "sonic db_connect(%s): ping sent", db->dbInstance);
+	}
       }
     }
   }
@@ -741,6 +762,34 @@ extern "C" {
     return db_selectTab(dbTab) ? dbTab->dbClient : NULL;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________         db_auth           __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_authCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    redisReply *reply = (redisReply *)magic;
+    myDebug(1, "sonic db_authCB: %s reply=%s",
+	    db->dbInstance,
+	    db_replyStr(reply, db->replyBuf, YES));
+  }
+
+  static bool db_auth(EVMod *mod, HSPSonicDBClient *db) {
+    myDebug(1, "sonic db_auth: %s", db->dbInstance);
+    char dbPasswd[256];
+    FILE *fp = fopen(db->passPath, "r");
+    if(fp) {
+      fgets(dbPasswd, 256, fp);
+      fclose(fp);
+      int status = redisAsyncCommand(db->ctx, db_authCB, NULL /*privData*/, "AUTH %s", dbPasswd);
+      myDebug(1, "sonic db_auth returned %d", status);
+      return YES;
+    }
+    return NO;
+  }
 
   /*_________________---------------------------__________________
     _________________         db_ping           __________________

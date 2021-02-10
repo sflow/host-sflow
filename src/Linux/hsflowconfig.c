@@ -1343,6 +1343,7 @@ extern "C" {
 	  case HSPTOKEN_SONIC:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->sonic.sonic = YES;
+	    sp->sonic.unixsock = YES;
 	    level[++depth] = HSPOBJ_SONIC;
 	    break;
 	  case HSPTOKEN_DBUS:

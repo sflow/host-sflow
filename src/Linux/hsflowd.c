@@ -1853,6 +1853,7 @@ extern "C" {
     // SONIC should be compiled with "make deb FEATURES="SONIC"
     myLog(LOG_INFO, "autoload SONIC and PSAMPLE modules");
     sp->sonic.sonic = YES;
+    sp->sonic.unixsock = YES;
     sp->psample.psample = YES;
     sp->psample.group = 1;
     sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
