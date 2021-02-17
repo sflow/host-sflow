@@ -24,6 +24,33 @@ extern "C" {
 #define HSP_PSAMPLE_READNL_RCV_BUF 8192
 #define HSP_PSAMPLE_READNL_BATCH 100
 #define HSP_PSAMPLE_RCVBUF 8000000
+
+  // Shadow the attributes in linux/psample.h so
+  // we can easily compile/test fields that are not
+  // defined on the kernel we are compiling on.
+  typedef enum {
+    /* sampled packet metadata */
+    HSP_PSAMPLE_ATTR_IIFINDEX,
+    HSP_PSAMPLE_ATTR_OIFINDEX,
+    HSP_PSAMPLE_ATTR_ORIGSIZE,
+    HSP_PSAMPLE_ATTR_SAMPLE_GROUP,
+    HSP_PSAMPLE_ATTR_GROUP_SEQ,
+    HSP_PSAMPLE_ATTR_SAMPLE_RATE,
+    HSP_PSAMPLE_ATTR_DATA,
+    HSP_PSAMPLE_ATTR_TUNNEL,
+
+    /* commands attributes */
+    HSP_PSAMPLE_ATTR_GROUP_REFCOUNT,
+
+    HSP_PSAMPLE_ATTR_PAD,
+    HSP_PSAMPLE_ATTR_OUT_TC,/* u16 */
+    HSP_PSAMPLE_ATTR_OUT_TC_OCC,/* u64, bytes */
+    HSP_PSAMPLE_ATTR_LATENCY,/* u64, nanoseconds */
+    HSP_PSAMPLE_ATTR_TIMESTAMP,/* u64, nanoseconds */
+    HSP_PSAMPLE_ATTR_PROTO,/* u16 */
+
+    __HSP_PSAMPLE_ATTR_MAX
+  } EnumHSPPsampleAttributes;
   
   typedef enum {
     HSP_PSAMPLE_STATE_INIT=0,
@@ -31,7 +58,7 @@ extern "C" {
     HSP_PSAMPLE_STATE_WAIT,
     HSP_PSAMPLE_STATE_JOIN_GROUP,
     HSP_PSAMPLE_STATE_RUN } EnumPsampleState;
-  
+
   typedef struct _HSP_mod_PSAMPLE {
     EnumPsampleState state;
     EVBus *packetBus;
@@ -45,7 +72,6 @@ extern "C" {
     uint32_t group_id;
     uint32_t last_grp_seq;
   } HSP_mod_PSAMPLE;
-
 
   /*_________________---------------------------__________________
     _________________    getFamily_PSAMPLE      __________________
@@ -221,9 +247,7 @@ extern "C" {
       case PSAMPLE_ATTR_GROUP_SEQ: grp_seq = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_SAMPLE_RATE: sample_n = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_DATA: pkt = datap; break;
-
-#ifdef PSAMPLE_ATTR_OUT_TC
-      case PSAMPLE_ATTR_OUT_TC:
+      case HSP_PSAMPLE_ATTR_OUT_TC:
 	{
 	  // queue id
 	  SFLFlow_sample_element *egress_Q = my_calloc(sizeof(SFLFlow_sample_element));
@@ -232,10 +256,7 @@ extern "C" {
 	  ADD_TO_LIST(ext_elems, egress_Q);
 	}
 	break;
-#endif
-
-#ifdef PSAMPLE_ATTR_OUT_TC_OCC
-      case PSAMPLE_ATTR_OUT_TC_OCC:
+      case HSP_PSAMPLE_ATTR_OUT_TC_OCC:
 	{
 	  // queue occupancy (bytes)
 	  SFLFlow_sample_element *Q_depth = my_calloc(sizeof(SFLFlow_sample_element));
@@ -244,10 +265,7 @@ extern "C" {
 	  ADD_TO_LIST(ext_elems, Q_depth);
 	}
 	break;
-#endif
-
-#ifdef PSAMPLE_ATTR_LATENCY
-      case PSAMPLE_ATTR_LATENCY:
+      case HSP_PSAMPLE_ATTR_LATENCY:
 	{
 	  // transit latency (nS)
 	  SFLFlow_sample_element *transit = my_calloc(sizeof(SFLFlow_sample_element));
@@ -256,13 +274,11 @@ extern "C" {
 	  ADD_TO_LIST(ext_elems, transit);
 	}
 	break;
-#endif
-
       }
       offset += NLMSG_ALIGN(ps_attr->nla_len);
     }
 
-
+//#define TEST_PSAMPLE_EXTENSIONS 1
 #ifdef TEST_PSAMPLE_EXTENSIONS
     {
       uint16_t queueIdx = 7;
