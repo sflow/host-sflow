@@ -126,7 +126,8 @@ extern "C" {
 			 pkt->data_len, /* length of captured payload */
 			 pkt->data_len, /* length of packet (pdu) */
 			 droppedSamples,
-			 mdata->actualSamplingRate);
+			 mdata->actualSamplingRate,
+			 NULL);
 	    }
 	  }
 	}

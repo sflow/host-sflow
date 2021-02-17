@@ -167,7 +167,8 @@ extern "C" {
 			 cap_len, /* length of captured payload */
 			 cap_len, /* length of packet (pdu) */
 			 droppedSamples,
-			 mdata->actualSamplingRate);
+			 mdata->actualSamplingRate,
+			 NULL);
 	    }
 	  }
 	}

@@ -121,7 +121,8 @@ extern "C" {
 		 hdr->caplen - 14, /* length of captured payload */
 		 hdr->len - 14, /* length of packet (pdu) */
 		 bpfs->drops, /* droppedSamples */
-		 bpfs->samplingRate);
+		 bpfs->samplingRate,
+		 NULL);
     }
   }
 

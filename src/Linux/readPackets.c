@@ -257,9 +257,13 @@ extern "C" {
     return ps;
   }
 
+  static void pendingSample_addHeapPtr(HSPPendingSample *ps, void *ptr) {
+    UTArrayAdd(ps->ptrsToFree, ptr);
+  }
+
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len) {
     void *ptr = my_calloc(len);
-    UTArrayAdd(ps->ptrsToFree, ptr);
+    pendingSample_addHeapPtr(ps, ptr);
     return ptr;
   }
 
@@ -293,9 +297,15 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________    takeSample             __________________
     -----------------___________________________------------------
+    TODO: if we split takeSample() into buildSample()
+    and submitSample() then we could attach extensions
+    more naturally in between, and make their lifecycle
+    more explicit.  Could probably also streamline the
+    more common paths (from mod_psample and mod_pcap) and
+    corral legacy features like mod_ulog's disjoint mac-header.
   */
 
-  void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n)
+  void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n, SFLFlow_sample_element *extended_elements)
   {
 
     if(getDebug() > 1) {
@@ -526,6 +536,18 @@ extern "C" {
     samplerNIO->netlink_drops += drops;
     fs->drops = samplerNIO->netlink_drops;
 
+    // Attach linked list of extension structures if supplied, and
+    // take over responsibility for freeing them when the sample is
+    // released (it might get queued and released later if
+    // another module wants to annotate it further after looking
+    // something up).
+    for(SFLFlow_sample_element *elem = extended_elements; elem; ) {
+      SFLFlow_sample_element *next_elem = elem->nxt;
+      SFLADD_ELEMENT(fs, elem);
+      pendingSample_addHeapPtr(ps, elem);
+      elem = next_elem;
+    }
+      
     // wrap it and send it out in case someone else wants to annotate it
     if(sp->evt_flow_sample == NULL)
       sp->evt_flow_sample = EVGetEvent(EVCurrentBus(), HSPEVENT_FLOW_SAMPLE);

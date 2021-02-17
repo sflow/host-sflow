@@ -205,7 +205,8 @@ extern "C" {
 		 headerLen - 14 - fcsBytes, /* length of captured payload */
 		 packetLen - 14 - 4, /* length of packet (pdu) */
 		 droppedSamples,
-		 sp->sFlowSettings->samplingRate);
+		 sp->sFlowSettings->samplingRate,
+		 NULL);
     }
   }
 

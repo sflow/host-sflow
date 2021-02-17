@@ -24,6 +24,32 @@ extern "C" {
 #define HSP_PSAMPLE_READNL_RCV_BUF 8192
 #define HSP_PSAMPLE_READNL_BATCH 100
 #define HSP_PSAMPLE_RCVBUF 8000000
+
+/* #ifndef PSAMPLE_ATTR_TUNNEL */
+/* #define PSAMPLE_ATTR_TUNNEL (PSAMPLE_ATTR_DATA + 1) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_GROUP_REFCOUNT */
+/* #define PSAMPLE_ATTR_GROUP_REFCOUNT (PSAMPLE_ATTR_DATA + 2) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_PAD */
+/* #define PSAMPLE_ATTR_PAD (PSAMPLE_ATTR_DATA + 3) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_OUT_TC */
+/* #define PSAMPLE_ATTR_OUT_TC (PSAMPLE_ATTR_DATA + 4) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_OUT_TC_OCC */
+/* #define PSAMPLE_ATTR_OUT_TC_OCC (PSAMPLE_ATTR_DATA + 5) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_LATENCY */
+/* #define PSAMPLE_ATTR_LATENCY (PSAMPLE_ATTR_DATA + 6) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_TIMESTAMP */
+/* #define PSAMPLE_ATTR_TIMESTAMP (PSAMPLE_ATTR_DATA + 7) */
+/* #endif */
+/* #ifndef PSAMPLE_ATTR_PROTO */
+/* #define PSAMPLE_ATTR_PROTO (PSAMPLE_ATTR_DATA + 8) */
+/* #endif */
+
   
   typedef enum {
     HSP_PSAMPLE_STATE_INIT=0,
@@ -179,6 +205,14 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  static void freeExtendedElements(SFLFlow_sample_element *elements) {
+    for(SFLFlow_sample_element *elem = elements; elem; ) {
+      SFLFlow_sample_element *next_elem = elem->nxt;
+      my_free(elem);
+      elem = next_elem;
+    }
+  }
+
   static void processNetlink_PSAMPLE(EVMod *mod, struct nlmsghdr *nlh)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
@@ -194,7 +228,9 @@ extern "C" {
     uint32_t grp_seq=0;
     uint32_t sample_n=0;
     u_char *pkt=NULL;
-  
+    SFLFlow_sample_element *ext_elems = NULL;
+    // TODO: tunnel encap/decap may be avaiable too
+
     for(int offset = GENL_HDRLEN; offset < msglen; ) {
       struct nlattr *ps_attr = (struct nlattr *)(msg + offset);
       if(ps_attr->nla_len == 0 ||
@@ -211,9 +247,69 @@ extern "C" {
       case PSAMPLE_ATTR_GROUP_SEQ: grp_seq = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_SAMPLE_RATE: sample_n = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_DATA: pkt = datap; break;
+
+#ifdef PSAMPLE_ATTR_OUT_TC
+      case PSAMPLE_ATTR_OUT_TC:
+	{
+	  // queue id
+	  SFLFlow_sample_element *egress_Q = my_calloc(sizeof(SFLFlow_sample_element));
+	  egress_Q->tag = SFLFLOW_EX_EGRESS_Q;
+	  egress_Q->flowType.egress_queue.queue = *(uint16_t *)datap;
+	  ADD_TO_LIST(ext_elems, egress_Q);
+	}
+	break;
+#endif
+
+#ifdef PSAMPLE_ATTR_OUT_TC_OCC
+      case PSAMPLE_ATTR_OUT_TC_OCC:
+	{
+	  // queue occupancy (bytes)
+	  SFLFlow_sample_element *Q_depth = my_calloc(sizeof(SFLFlow_sample_element));
+	  Q_depth->tag = SFLFLOW_EX_Q_DEPTH;
+	  Q_depth->flowType.queue_depth.depth = *(uint64_t *)datap; // Will take lo 32-bits
+	  ADD_TO_LIST(ext_elems, Q_depth);
+	}
+	break;
+#endif
+
+#ifdef PSAMPLE_ATTR_LATENCY
+      case PSAMPLE_ATTR_LATENCY:
+	{
+	  // transit latency (nS)
+	  SFLFlow_sample_element *transit = my_calloc(sizeof(SFLFlow_sample_element));
+	  transit->tag = SFLFLOW_EX_TRANSIT;
+	  transit->flowType.transit_delay.delay = *(uint64_t *)datap; // Will take lo 32-bits
+	  ADD_TO_LIST(ext_elems, transit);
+	}
+	break;
+#endif
+
       }
       offset += NLMSG_ALIGN(ps_attr->nla_len);
     }
+
+
+#ifdef TEST_PSAMPLE_EXTENSIONS
+    {
+      uint16_t queueIdx = 7;
+      uint64_t queueDepth = 712222;
+      uint64_t transitDelay = 100000713333L;
+      SFLFlow_sample_element *egress_Q = my_calloc(sizeof(SFLFlow_sample_element));
+      egress_Q->tag = SFLFLOW_EX_EGRESS_Q;
+      egress_Q->flowType.egress_queue.queue = *(uint16_t *)(&queueIdx);
+      ADD_TO_LIST(ext_elems, egress_Q);
+      // queue occupancy (bytes)
+      SFLFlow_sample_element *Q_depth = my_calloc(sizeof(SFLFlow_sample_element));
+      Q_depth->tag = SFLFLOW_EX_Q_DEPTH;
+      Q_depth->flowType.queue_depth.depth = *(uint64_t *)(&queueDepth); // Will take lo 32-bits
+      ADD_TO_LIST(ext_elems, Q_depth);
+      // transit latency (nS)
+      SFLFlow_sample_element *transit = my_calloc(sizeof(SFLFlow_sample_element));
+      transit->tag = SFLFLOW_EX_TRANSIT;
+      transit->flowType.transit_delay.delay = *(uint64_t *)(&transitDelay); // Will take lo 32-bits
+      ADD_TO_LIST(ext_elems, transit);
+    }
+#endif
 
     myDebug(3, "psample: grp=%u", grp_no);
 
@@ -255,6 +351,7 @@ extern "C" {
       if(!samplerDev) {
         // handle startup race-condition where interface has not been discovered yet
         myDebug(2, "psample: unknown ifindex %u (startup race-condition?)", ifin);
+	freeExtendedElements(ext_elems);
         return;
       }
 
@@ -281,7 +378,10 @@ extern "C" {
 	}
       }
 
-      if(takeIt)
+      if(takeIt) {
+	// take the sample - will take over responsibility for
+	// freeing the extended elements when the sample has
+	// been fully processed.
 	takeSample(sp,
 		   inDev,
 		   outDev,
@@ -294,7 +394,13 @@ extern "C" {
 		   pkt_len - 14, // captured payload len
 		   pkt_len - 14, // whole pdu len
 		   drops,
-		   this_sample_n);
+		   this_sample_n,
+		   ext_elems);
+      }
+      else {
+	// clean up
+	freeExtendedElements(ext_elems);
+      }
     }
   }
 
