@@ -24,32 +24,6 @@ extern "C" {
 #define HSP_PSAMPLE_READNL_RCV_BUF 8192
 #define HSP_PSAMPLE_READNL_BATCH 100
 #define HSP_PSAMPLE_RCVBUF 8000000
-
-/* #ifndef PSAMPLE_ATTR_TUNNEL */
-/* #define PSAMPLE_ATTR_TUNNEL (PSAMPLE_ATTR_DATA + 1) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_GROUP_REFCOUNT */
-/* #define PSAMPLE_ATTR_GROUP_REFCOUNT (PSAMPLE_ATTR_DATA + 2) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_PAD */
-/* #define PSAMPLE_ATTR_PAD (PSAMPLE_ATTR_DATA + 3) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_OUT_TC */
-/* #define PSAMPLE_ATTR_OUT_TC (PSAMPLE_ATTR_DATA + 4) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_OUT_TC_OCC */
-/* #define PSAMPLE_ATTR_OUT_TC_OCC (PSAMPLE_ATTR_DATA + 5) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_LATENCY */
-/* #define PSAMPLE_ATTR_LATENCY (PSAMPLE_ATTR_DATA + 6) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_TIMESTAMP */
-/* #define PSAMPLE_ATTR_TIMESTAMP (PSAMPLE_ATTR_DATA + 7) */
-/* #endif */
-/* #ifndef PSAMPLE_ATTR_PROTO */
-/* #define PSAMPLE_ATTR_PROTO (PSAMPLE_ATTR_DATA + 8) */
-/* #endif */
-
   
   typedef enum {
     HSP_PSAMPLE_STATE_INIT=0,
@@ -292,8 +266,8 @@ extern "C" {
 #ifdef TEST_PSAMPLE_EXTENSIONS
     {
       uint16_t queueIdx = 7;
-      uint64_t queueDepth = 712222;
-      uint64_t transitDelay = 100000713333L;
+      uint64_t queueDepth = 22222;
+      uint64_t transitDelay = 33333L;
       SFLFlow_sample_element *egress_Q = my_calloc(sizeof(SFLFlow_sample_element));
       egress_Q->tag = SFLFLOW_EX_EGRESS_Q;
       egress_Q->flowType.egress_queue.queue = *(uint16_t *)(&queueIdx);
