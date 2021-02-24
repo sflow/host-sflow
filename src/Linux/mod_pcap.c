@@ -300,7 +300,8 @@ extern "C" {
     int fd = pcap_fileno(bpfs->pcap);
 
     // configure BPF sampling
-    setKernelSampling(sp, bpfs, fd);
+    if(bpfs->samplingRate > 1)
+      setKernelSampling(sp, bpfs, fd);
 
     // register
     bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
