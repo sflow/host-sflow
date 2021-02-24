@@ -1281,6 +1281,9 @@ extern "C" {
 	  case HSPTOKEN_PSAMPLE:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->psample.psample = YES;
+	    sp->psample.group = 1;
+	    sp->psample.ingress = YES;
+	    sp->psample.egress = NO;
 	    level[++depth] = HSPOBJ_PSAMPLE;
 	    break;
 	  case HSPTOKEN_DROPMON:
@@ -1599,6 +1602,12 @@ extern "C" {
 	    switch(tok->stok) {
 	    case HSPTOKEN_GROUP:
 	      if((tok = expectInteger32(sp, tok, &sp->psample.group, 1, 32)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_INGRESS:
+	      if((tok = expectONOFF(sp, tok, &sp->psample.ingress)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_EGRESS:
+	      if((tok = expectONOFF(sp, tok, &sp->psample.egress)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

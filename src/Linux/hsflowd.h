@@ -569,6 +569,8 @@ extern "C" {
       bool psample;
       uint32_t group;
       uint32_t ds_options;
+      bool ingress;
+      bool egress;
     } psample;
     struct {
       bool dropmon;
@@ -770,7 +772,7 @@ extern "C" {
 #define HSP_SAMPLEOPT_INGRESS     0x0400
 #define HSP_SAMPLEOPT_EGRESS      0x0800
 #define HSP_SAMPLEOPT_DIRN_HOOK   0x1000
-#define HSP_SAMPLEOPT_ASIC        0x2000
+  //#define HSP_SAMPLEOPT_ASIC        0x2000
 #define HSP_SAMPLEOPT_OPX         0x4000
 #define HSP_SAMPLEOPT_PSAMPLE     0x8000
 

@@ -190,7 +190,7 @@ extern "C" {
       int fcsBytes = (chopped < 4) ?  4 - chopped : 0;
       uint32_t dsopts = (HSP_SAMPLEOPT_IF_SAMPLER
 			 | HSP_SAMPLEOPT_IF_POLLER
-			 | HSP_SAMPLEOPT_ASIC
+			 | HSP_SAMPLEOPT_BRIDGE
 			 | HSP_SAMPLEOPT_OPX
 			 | HSP_SAMPLEOPT_INGRESS);
       takeSample(sp,

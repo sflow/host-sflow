@@ -17,6 +17,8 @@ extern "C" {
   typedef struct _HSP_mod_DENT {
     EVBus *pollBus;
     regex_t *qdisc_regex;
+    uint32_t ingress_grp;
+    uint32_t egress_grp;
   } HSP_mod_DENT;
 
   /*_________________-------------------------------__________________
@@ -112,7 +114,7 @@ extern "C" {
     return YES;
   }
 
-  static bool deleteFilter(EVMod *mod, SFLAdaptor *adaptor, int sampling_dirn) {
+  static bool deleteFilter(EVMod *mod, SFLAdaptor *adaptor, bool egress) {
     // examples:
     // tc filter del dev eth0 ingress
     bool deleted_ok = NO;
@@ -122,11 +124,7 @@ extern "C" {
     strArrayAdd(cmdline, "delete");
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
-    if(sampling_dirn == HSP_DIRN_IN)
-      strArrayAdd(cmdline, "ingress");
-    else if(sampling_dirn == HSP_DIRN_OUT)
-      strArrayAdd(cmdline, "egress");
-
+    strArrayAdd(cmdline, egress ? "egress" : "ingress");
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputDeleteFilter, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
@@ -161,7 +159,7 @@ extern "C" {
     return YES;
   }
 
-  static bool setRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
+  static bool setRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, bool egress) {
     // examples:
     // tc qdisc add dev eth0 clsact
     // tc filter add dev eth0 ingress matchall skip_sw action sample rate 1000 group 1
@@ -173,11 +171,7 @@ extern "C" {
     strArrayAdd(cmdline, "add");
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
-    if(sampling_dirn == HSP_DIRN_IN)
-      strArrayAdd(cmdline, "ingress");
-    else if(sampling_dirn == HSP_DIRN_OUT)
-      strArrayAdd(cmdline, "egress");
-    // TODO: what if bidirectional? As it is we will leave the term out.  Not sure if that is right.
+    strArrayAdd(cmdline, egress ? "egress" : "ingress");
     strArrayAdd(cmdline, "matchall");
     if(sp->dent.sw == NO)
       strArrayAdd(cmdline, "skip_sw");
@@ -190,32 +184,37 @@ extern "C" {
     strArrayAdd(cmdline, srate);
     strArrayAdd(cmdline, "group");
     char loggrp[HSP_MAX_TOK_LEN];
-    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", sp->psample.group);
+    snprintf(loggrp, HSP_MAX_TOK_LEN, "%u", logGroup);
     strArrayAdd(cmdline, loggrp);
     strArrayAdd(cmdline, "trunc");
     char hdrBytes[HSP_MAX_TOK_LEN];
     snprintf(hdrBytes, HSP_MAX_TOK_LEN, "%u", sp->sFlowSettings_file->headerBytes);
     strArrayAdd(cmdline, hdrBytes);
     // TODO: not sure what the optional "index" option does here
-
+    if(debug(1)) {
+      char *cmd = strArrayStr(cmdline, "<", NULL, " ", ">");
+      myDebug(1, "dent: setRate(%s) cmdLine: %s", adaptor->deviceName, cmd);
+      my_free(cmd);
+    }
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputSetRate, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
       if(WEXITSTATUS(status) != 0) {
-	myLog(LOG_ERR, "setRate(%s) exitStatus=%d",
+	myLog(LOG_ERR, "setRate(%s) prog=%s exitStatus=%d",
+	      adaptor->deviceName,
 	      HSP_DENT_TC_PROG,
 	      WEXITSTATUS(status));
       }
       else {
 	myDebug(1, "dent: setRate(%s) succeeded", adaptor->deviceName);
-	// hardware or kernel sampling was successfully configured
+	// hardware/kernel sampling was successfully configured
 	sampling_ok = YES;
       }
     }
     else {
-      myLog(LOG_ERR, "setRate() calling %s failed (adaptor=%s)",
-	    strArrayAt(cmdline, 0),
-	    adaptor->deviceName);
+      myLog(LOG_ERR, "setRate(%s) myExec %s failed",
+	    adaptor->deviceName,
+	    HSP_DENT_TC_PROG);
     }
     strArrayFree(cmdline);
     return sampling_ok;
@@ -227,30 +226,29 @@ extern "C" {
     return YES = hardware/kernel sampling configured OK
   */
 
-  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
+  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, bool egress) {
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
     if(niostate->switchPort == NO
        || niostate->loopback
        || niostate->bond_master)
       return NO;
-    
+
     bool sampling_ok = NO;
     niostate->sampling_n = sampling_n;
-    if(sampling_n != niostate->sampling_n_set) {
-      if(sampling_n == 0)
-	deleteFilter(mod, adaptor, sampling_dirn);
-      else {
-	// make sure the parent qdisc is available - creating if necessary
-	myDebug(1, "dent: setSamplingRate(%s) %u -> %u",
-		adaptor->deviceName,
-		niostate->sampling_n_set,
-		sampling_n);
-	if(noQDisc(mod, adaptor))
-	  addQDisc(mod, adaptor);
-	if(setRate(mod, adaptor, logGroup, sampling_n, sampling_dirn)) {
-	  niostate->sampling_n_set = sampling_n;
-	  sampling_ok = YES;
-	}
+    if(sampling_n == 0)
+      deleteFilter(mod, adaptor, egress);
+    else {
+      // make sure the parent qdisc is available - creating if necessary
+      myDebug(1, "dent: setSamplingRate(%s %s) %u -> %u",
+	      adaptor->deviceName,
+	      egress ? "egress" : "ingress",
+	      niostate->sampling_n_set,
+	      sampling_n);
+      if(noQDisc(mod, adaptor))
+	addQDisc(mod, adaptor);
+      if(setRate(mod, adaptor, logGroup, sampling_n, egress)) {
+	niostate->sampling_n_set = sampling_n;
+	sampling_ok = YES;
       }
     }
     return sampling_ok;
@@ -288,27 +286,42 @@ extern "C" {
       }
     }
   }
-
+    
   /*_________________---------------------------__________________
     _________________    evt_config_changed     __________________
     -----------------___________________________------------------
   */
 
   static void evt_config_changed(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DENT *mdata = (HSP_mod_DENT *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
     markSwitchPorts(mod);
-    uint32_t channel = sp->psample.group;
-    int sampling_dirn = sp->sFlowSettings->samplingDirection;
+
+    // if egress sampling is enabled, mod_psample expects it to be
+    // on the next group channel up.  Capture that convention here
+    // and remember the group numbers so we can back out the settings
+    // on graceful exit.
+    if(sp->psample.ingress)
+      mdata->ingress_grp = sp->psample.group;
+    if(sp->psample.egress)
+      mdata->egress_grp = sp->psample.group + 1;
 
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
+      HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
-      if(setSamplingRate(mod, adaptor, channel, sampling_n, sampling_dirn))
-	sp->hardwareSampling = YES;
+      if(sampling_n != niostate->sampling_n_set) {
+	if(mdata->ingress_grp
+	   && setSamplingRate(mod, adaptor, mdata->ingress_grp, sampling_n, NO))
+	  sp->hardwareSampling = YES;
+	if(mdata->egress_grp
+	   && setSamplingRate(mod, adaptor, mdata->egress_grp, sampling_n, YES))
+	  sp->hardwareSampling = YES;
+      }
     }
   }
 
@@ -327,18 +340,21 @@ extern "C" {
   */
 
   static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_DENT *mdata = (HSP_mod_DENT *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     if(sp->sFlowSettings == NULL)
       return;
     // turn off any hardware sampling that we enabled
-    uint32_t channel = sp->psample.group;
-    int sampling_dirn = sp->sFlowSettings->samplingDirection;
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(niostate->switchPort
-	 && niostate->sampling_n_set != 0)
-	setSamplingRate(mod, adaptor, channel, 0, sampling_dirn);
+	 && niostate->sampling_n_set != 0) {
+	if(mdata->ingress_grp)
+	  setSamplingRate(mod, adaptor, mdata->ingress_grp, 0, NO);
+	if(mdata->egress_grp)
+	  setSamplingRate(mod, adaptor, mdata->egress_grp, 0, YES);
+      }
     }
   }
 

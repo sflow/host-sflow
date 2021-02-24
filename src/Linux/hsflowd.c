@@ -1798,26 +1798,22 @@ extern "C" {
     // configured and not subsequently retracted.  Now that sampling on Cumulus is configured
     // via tc(1) and handled via mod_psample the distinction is no longer needed anyway.
     sp->hardwareSampling = YES;
-    uint32_t dsopts_cumulus = HSP_SAMPLEOPT_IF_SAMPLER
-      | HSP_SAMPLEOPT_IF_POLLER
-      | HSP_SAMPLEOPT_ASIC
-      | HSP_SAMPLEOPT_DIRN_HOOK
-      | HSP_SAMPLEOPT_CUMULUS;
     // Cumulus Linux 2.5 or earlier used ULOG group 1
     // Cumulus Linux 3.0 or later used NFLOG group 1
     sp->nflog.nflog = YES;
     sp->nflog.group = 1;
-    sp->nflog.ds_options = dsopts_cumulus | HSP_SAMPLEOPT_NFLOG;
+    sp->nflog.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
+      | HSP_SAMPLEOPT_IF_POLLER
+      | HSP_SAMPLEOPT_BRIDGE
+      | HSP_SAMPLEOPT_DIRN_HOOK
+      | HSP_SAMPLEOPT_NFLOG;
     // Cumulus Linux 4.0 or later uses PSAMPLE group 1
-    sp->psample.psample = YES;
-    sp->psample.group = 1;
     // Note that the DIRN_HOOK is no longer available
     // and we assume ingress-only sampling
-    sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
-      | HSP_SAMPLEOPT_IF_POLLER
-      | HSP_SAMPLEOPT_ASIC
-      | HSP_SAMPLEOPT_INGRESS
-      | HSP_SAMPLEOPT_CUMULUS;
+    sp->psample.psample = YES;
+    sp->psample.ingress = YES;
+    sp->psample.egress = NO;
+    sp->psample.group = 1;
     // assume netlink drop-monitor is configured externally
     sp->dropmon.dropmon = YES;
     sp->dropmon.group = 1;
@@ -1832,14 +1828,11 @@ extern "C" {
     sp->dent.dent = YES;
     // force the hardwareSampling flag on, to ensure that sampling-rate is handled correctly.
     sp->hardwareSampling = YES;
-    // default to PSAMPLE group 1
+    // default to PSAMPLE group 1, ingress only
     sp->psample.psample = YES;
+    sp->psample.ingress = YES;
+    sp->psample.egress = NO;
     sp->psample.group = 1;
-    // TODO: should we assume ingress-only sampling here?
-    sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
-      | HSP_SAMPLEOPT_IF_POLLER
-      | HSP_SAMPLEOPT_ASIC
-      | HSP_SAMPLEOPT_INGRESS;
 #endif /* HSP_LOAD_DENT */
 
 #ifdef HSP_LOAD_OPX
@@ -1855,11 +1848,9 @@ extern "C" {
     sp->sonic.sonic = YES;
     sp->sonic.unixsock = YES;
     sp->psample.psample = YES;
+    sp->psample.ingress = YES;
+    sp->psample.egress = NO;
     sp->psample.group = 1;
-    sp->psample.ds_options = HSP_SAMPLEOPT_IF_SAMPLER
-      | HSP_SAMPLEOPT_IF_POLLER
-      | HSP_SAMPLEOPT_ASIC
-      | HSP_SAMPLEOPT_INGRESS;
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN

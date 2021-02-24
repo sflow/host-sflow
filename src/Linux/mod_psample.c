@@ -70,7 +70,10 @@ extern "C" {
     uint32_t genetlink_version;
     uint16_t family_id;
     uint32_t group_id;
-    uint32_t last_grp_seq;
+    // psample channel groups
+    uint32_t grp_ingress;
+    uint32_t grp_egress;
+    uint32_t last_grp_seq[2];
   } HSP_mod_PSAMPLE;
 
   /*_________________---------------------------__________________
@@ -278,7 +281,7 @@ extern "C" {
       offset += NLMSG_ALIGN(ps_attr->nla_len);
     }
 
-//#define TEST_PSAMPLE_EXTENSIONS 1
+    //#define TEST_PSAMPLE_EXTENSIONS 1
 #ifdef TEST_PSAMPLE_EXTENSIONS
     {
       uint16_t queueIdx = 7;
@@ -306,24 +309,30 @@ extern "C" {
     // TODO: this filter can be pushed into kernel with BPF expression on socket
     // but that might affect control messages?  For now it seems unlikely that
     // doing the fitering here will be catastophic, but we can always revisit.
-    if(grp_no == sp->psample.group
+    if(grp_no
+       && (grp_no == mdata->grp_ingress
+	   || grp_no == mdata->grp_egress)
        && pkt
        && pkt_len
        && sample_n) {
+      
+      // index for grp data
+      int egress = (grp_no == mdata->grp_egress) ? 1 : 0;
 
       // confirmation that we have moved to state==run
       if(mdata->state == HSP_PSAMPLE_STATE_JOIN_GROUP)
 	mdata->state = HSP_PSAMPLE_STATE_RUN;
 
       uint32_t drops = 0;
-      if(mdata->last_grp_seq) {
-	drops = grp_seq - mdata->last_grp_seq - 1;
+      if(mdata->last_grp_seq[egress]) {
+	drops = grp_seq - mdata->last_grp_seq[egress] - 1;
 	if(drops > 0x7FFFFFFF)
 	  drops = 1;
       }
-      mdata->last_grp_seq = grp_seq;
+      mdata->last_grp_seq[egress] = grp_seq;
 
-      myDebug(2, "psample: in=%u out=%u n=%u seq=%u drops=%u pktlen=%u",
+      myDebug(2, "psample: grp=%u in=%u out=%u n=%u seq=%u drops=%u pktlen=%u",
+	      grp_no,
 	      ifin,
 	      ifout,
 	      sample_n,
@@ -333,11 +342,7 @@ extern "C" {
 
       SFLAdaptor *inDev = adaptorByIndex(sp, ifin);
       SFLAdaptor *outDev = adaptorByIndex(sp, ifout);
-
-      // TODO: may need to encode datasource ifindex in PSAMPLE_ATTR_SAMPLE_GROUP
-      // so we can know for sure if this was ingress or egress sampled.
-      // Assume ingress-sampling for now.
-      SFLAdaptor *samplerDev = inDev;
+      SFLAdaptor *samplerDev = egress ? outDev : inDev;
       if(!samplerDev) {
         // handle startup race-condition where interface has not been discovered yet
         myDebug(2, "psample: unknown ifindex %u (startup race-condition?)", ifin);
@@ -369,7 +374,7 @@ extern "C" {
       }
 
       if(takeIt) {
-	// take the sample - will take over responsibility for
+	// take the sample - this will take over responsibility for
 	// freeing the extended elements when the sample has
 	// been fully processed.
 	takeSample(sp,
@@ -473,7 +478,13 @@ extern "C" {
     }
 
     if(sp->psample.group != 0) {
-      // PSAMPLE group is set, so open the netfilter socket while we are still root
+      // PSAMPLE group is set, This is always the ingress sampling channel,
+      // with the next one up being for egress samples. Capture that here.
+      if(sp->psample.ingress)
+	mdata->grp_ingress = sp->psample.group;
+      if(sp->psample.egress)
+	mdata->grp_egress = sp->psample.group + 1;
+      // Open the netfilter socket while we are still root
       mdata->nl_sock = UTNLGeneric_open(mod->id);
       if(mdata->nl_sock > 0) {
 	// increase socket receiver buffer size
@@ -535,13 +546,16 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
 
 
-    // if ds_options not set, apply defaults for kernel-sampling
+    // if ds_options not set, apply defaults for kernel/asic sampling where
+    // we know the interface index of the sampling datasource because
+    // we know if the sample was taken on ingress or egress (indicated
+    // by psample group channel number) and we know the in/out ifindex
+    // numbers for the packet.
     if(sp->psample.ds_options == 0)
-      sp->psample.ds_options = (HSP_SAMPLEOPT_IF_SAMPLER
-				| HSP_SAMPLEOPT_IF_POLLER
+      sp->psample.ds_options = (HSP_SAMPLEOPT_DEV_SAMPLER
+				| HSP_SAMPLEOPT_DEV_POLLER
 				| HSP_SAMPLEOPT_BRIDGE
-				| HSP_SAMPLEOPT_PSAMPLE
-				| HSP_SAMPLEOPT_INGRESS);
+				| HSP_SAMPLEOPT_PSAMPLE);
     
   }
 

@@ -342,8 +342,7 @@ extern "C" {
       else dsopts |= HSP_SAMPLEOPT_INGRESS;
     }
       
-    bool bridgeModel = (dsopts & (HSP_SAMPLEOPT_BRIDGE
-				  | HSP_SAMPLEOPT_ASIC)) ? YES : NO;
+    bool bridgeModel = (dsopts & HSP_SAMPLEOPT_BRIDGE) ? YES : NO;
 
     // If it is the container-end of a veth pair, then we want to
     // map it back to the other end that is in the global-namespace,
