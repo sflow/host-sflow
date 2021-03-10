@@ -1078,6 +1078,36 @@ extern "C" {
 	    && adaptor2->ifIndex < adaptor1->ifIndex);
   }
 
+  // to walk across the all local IPs, leave agentDev argument as NULL
+  static bool findIpByPriority(HSP *sp, char *agentDev, SFLAddress **ip, SFLAdaptor **selectedAdaptor) {
+    HSPLocalIP *selectedLocalIP = NULL;
+    HSPLocalIP *lip;
+
+    myDebug(1, "findIpByPriority");
+
+    UTHASH_WALK(sp->localIP, lip) {
+      if(agentDev == NULL || strcmp(lip->dev, agentDev) == 0) {
+	if(priorityHigher(sp, selectedLocalIP, lip))
+	  selectedLocalIP = lip;
+      }
+    }
+    UTHASH_WALK(sp->localIP6, lip) {
+      if(agentDev == NULL || strcmp(lip->dev, agentDev) == 0) {
+	if(priorityHigher(sp, selectedLocalIP, lip))
+	  selectedLocalIP = lip;
+      }
+    }
+    if(selectedLocalIP) {
+      *ip = &selectedLocalIP->ipAddr;
+      *selectedAdaptor = adaptorByName(sp, selectedLocalIP->dev);
+      char ipbuf[51];
+      myDebug(1, "findIpByPriority: select adaptor %s with address %s", (*selectedAdaptor)->deviceName, SFLAddress_print(*ip, ipbuf, 50));
+      return YES;
+    }
+    myDebug(1, "findIpByPriority: no suitable configuration found", agentDev);
+    return NO;
+  }
+
   /*_________________---------------------------__________________
     _________________     selectAgentAddress    __________________
     -----------------___________________________------------------
@@ -1106,34 +1136,19 @@ extern "C" {
     }
     else if(st
 	    && st->agentDevice
-	    && adaptorByName(sp, st->agentDevice)) {
+	    && adaptorByName(sp, st->agentDevice)
+	    && findIpByPriority(sp, st->agentDevice, &ip, &selectedAdaptor)) {
       myDebug(1, "selectAgentAddress pegged to device in current settings");
-      selectedAdaptor = adaptorByName(sp, st->agentDevice);
-      ip = &(ADAPTOR_NIO(selectedAdaptor)->ipAddr);
     }
     else if(st_file
 	    && st_file->agentDevice
-	    && adaptorByName(sp, st_file->agentDevice)) {
+	    && adaptorByName(sp, st_file->agentDevice)
+	    && findIpByPriority(sp, st_file->agentDevice, &ip, &selectedAdaptor)) {
       myDebug(1, "selectAgentAddress pegged to device in config file");
-      selectedAdaptor = adaptorByName(sp, st_file->agentDevice);
-      ip = &(ADAPTOR_NIO(selectedAdaptor)->ipAddr);
     }
     else {
-      // try to automatically choose an IP (or IPv6) address,  based on the priority ranking.
-      HSPLocalIP *selectedLocalIP = NULL;
-      HSPLocalIP *lip;
-      UTHASH_WALK(sp->localIP, lip) {
-	if(priorityHigher(sp, selectedLocalIP, lip))
-	  selectedLocalIP = lip;
-      }
-      UTHASH_WALK(sp->localIP6, lip) {
-	if(priorityHigher(sp, selectedLocalIP, lip))
-	  selectedLocalIP = lip;
-      }
-      if(selectedLocalIP) {
-	ip = &selectedLocalIP->ipAddr;
-	selectedAdaptor = adaptorByName(sp, selectedLocalIP->dev);
-      }
+      // try to automatically choose an IP (or IPv6) address, based on the priority ranking.
+      findIpByPriority(sp, NULL, &ip, &selectedAdaptor);
     }
 
     // record the agentDevice

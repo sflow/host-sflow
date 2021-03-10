@@ -870,10 +870,11 @@ extern "C" {
 	if (ifr.ifr_addr.sa_family == AF_INET) {
 	  struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
 	  // IP addr is now s->sin_addr
-	  adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
-	  adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
-	  // add to localIP hash too
-	  addLocalIP(newLocalIP, &adaptorNIO->ipAddr, adaptor->deviceName);
+	  SFLAddress ipAddr;
+	  ipAddr.type = SFLADDRESSTYPE_IP_V4;
+	  ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
+	  // add to localIP hash
+	  addLocalIP(newLocalIP, &ipAddr, adaptor->deviceName);
 	}
 	//else if (ifr.ifr_addr.sa_family == AF_INET6) {
 	// not sure this ever happens - on a linux system IPv6 addresses
