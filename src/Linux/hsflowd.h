@@ -108,6 +108,7 @@ extern "C" {
 #define HSP_FORGET_VMS 180
 #define HSP_REFRESH_ADAPTORS 180
 #define HSP_CHECK_ADAPTORS 10
+#define HSP_RETRY_COLLECTOR_SOCKET 7
 
 #define HSP_MAX_PATHLEN 256
 
@@ -476,6 +477,9 @@ extern "C" {
     HSPSFlowSettings *sFlowSettings_dyn;
     HSPSFlowSettings *sFlowSettings;
     char *sFlowSettings_str;
+
+    // collector socket failure recovery
+    uint32_t reopenCollectorSocketCountdown;
 
     // resolve actual polling interval
     uint32_t syncPollingInterval;

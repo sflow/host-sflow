@@ -15,6 +15,7 @@ extern "C" {
   int exitStatus = EXIT_SUCCESS;
   FILE *f_crash = NULL;
 
+  static void openCollectorSockets(HSP *sp, HSPSFlowSettings *settings);
   static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
   static bool updatePollingInterval(HSP *sp);
   
@@ -65,6 +66,12 @@ extern "C" {
 			    coll->socklen);
 	if(result == -1 && errno != EINTR) {
 	  EVLog(60, LOG_ERR, "socket sendto error: %s", strerror(errno));
+	  // We have the agent semaphore lock here, so it's safe
+	  // to close and clear the socket, then set a countdown
+	  // to try opening it again.
+	  close(coll->socket);
+	  coll->socket = 0;
+	  sp->reopenCollectorSocketCountdown = HSP_RETRY_COLLECTOR_SOCKET;
 	}
 	else if(result == 0) {
 	  EVLog(60, LOG_ERR, "socket sendto returned 0: %s", strerror(errno));
@@ -579,6 +586,24 @@ extern "C" {
 	sfl_poller_tick(pl, clk);
       for(SFLNotifier *nf = sp->agent->notifiers; nf; nf = nf->nxt)
 	sfl_notifier_tick(nf, clk);
+
+      // If a collector socket failed, we will attempt to reopen it
+      // here after a suitable cooling off period. One scenario for
+      // this is if the interface VRF is changed under our feet. That
+      // results in the sentto() failing with "No Such Device".
+      // Reopening here while we have the agent semaphore means that
+      // another thread will not try to send something while the
+      // socket is half opened. For consistency we could choose to
+      // hold the same semaphore in the more common "installSFlowSettings"
+      // path, but there the collector sockets are deliberately opened
+      // before the settings "go live" so it is not necessary.
+      if(sp->reopenCollectorSocketCountdown) {
+	if(--sp->reopenCollectorSocketCountdown == 0) {
+	  myDebug(1, "Reopening collector socket(s) after error");
+	  openCollectorSockets(sp, sp->sFlowSettings);
+	}
+      }
+
     }
     // We can only get away with this scheme because the poller
     // objects are only ever removed and free by this thread.
@@ -1085,6 +1110,7 @@ extern "C" {
 	  }
 	  else {
 	    pthread_join(*thread, NULL);
+	    my_free(thread);
 	  }
 	}
 	else {
