@@ -162,7 +162,7 @@ extern "C" {
   static bool setRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, bool egress) {
     // examples:
     // tc qdisc add dev eth0 clsact
-    // tc filter add dev eth0 ingress matchall skip_sw action sample rate 1000 group 1
+    // tc filter add dev eth0 ingress pref 1 matchall skip_sw action sample rate 1000 group 1 trunc 128
     HSP *sp = (HSP *)EVROOTDATA(mod);
     bool sampling_ok = NO;
     UTStringArray *cmdline = strArrayNew();
@@ -172,6 +172,11 @@ extern "C" {
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
     strArrayAdd(cmdline, egress ? "egress" : "ingress");
+    // Sampling should happen before ingress ACLs, so ask for preference/priority 1.
+    // For egress the ACLs have already been applied, but it still seems more stable
+    // and consistent to request pref 1.
+    strArrayAdd(cmdline, "pref");
+    strArrayAdd(cmdline, "1");
     strArrayAdd(cmdline, "matchall");
     if(sp->dent.sw == NO)
       strArrayAdd(cmdline, "skip_sw");
