@@ -172,11 +172,13 @@ extern "C" {
     strArrayAdd(cmdline, "dev");
     strArrayAdd(cmdline, adaptor->deviceName);
     strArrayAdd(cmdline, egress ? "egress" : "ingress");
-    // Sampling should happen before ingress ACLs, so ask for preference/priority 1.
-    // For egress the ACLs have already been applied, but it still seems more stable
-    // and consistent to request pref 1.
-    strArrayAdd(cmdline, "pref");
-    strArrayAdd(cmdline, "1");
+    if(!egress) {
+      // On ingress, sampling should happen before ACLs, so ask for preference/priority 1.
+      // (On egress any ACLs should apply first, so allow the sampling step to be added
+      // in the default manner at the end of the chain).
+      strArrayAdd(cmdline, "pref");
+      strArrayAdd(cmdline, "1");
+    }
     strArrayAdd(cmdline, "matchall");
     if(sp->dent.sw == NO)
       strArrayAdd(cmdline, "skip_sw");
