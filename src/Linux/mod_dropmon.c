@@ -372,7 +372,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       : NET_DM_CMD_STOP;
     ge.version = 1;
 
-    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(attr1) + sizeof(attr2));
+    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(ge) + sizeof(attr1) + sizeof(attr2));
     nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
     nlh.nlmsg_type = mdata->family_id;
     nlh.nlmsg_seq = ++mdata->nl_seq;
