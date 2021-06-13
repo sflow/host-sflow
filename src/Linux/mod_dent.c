@@ -203,6 +203,7 @@ extern "C" {
       myDebug(1, "dent: setRate(%s) cmdLine: %s", adaptor->deviceName, cmd);
       my_free(cmd);
     }
+    strArrayAdd(cmdline, "continue");
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputSetRate, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
