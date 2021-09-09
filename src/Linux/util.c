@@ -939,7 +939,8 @@ extern "C" {
 	  memset(addr, 0, sizeof(*addr)); // avoid artifacts in unused bytes
 	  addr->type = SFLADDRESSTYPE_IP_V4;
 	  addr->address.ip_v4.addr = ipsoc->sin_addr.s_addr;
-	  if(sa) memcpy(sa, info->ai_addr, info->ai_addrlen);
+	  if(sa)
+	    memcpy(sa, info->ai_addr, info->ai_addrlen);
 	}
 	break;
       case PF_INET6:
@@ -948,7 +949,8 @@ extern "C" {
 	  memset(addr, 0, sizeof(*addr)); // avoid artifacts in unused bytes
 	  addr->type = SFLADDRESSTYPE_IP_V6;
 	  memcpy(&addr->address.ip_v6, &ip6soc->sin6_addr, 16);
-	  if(sa) memcpy(sa, info->ai_addr, info->ai_addrlen);
+	  if(sa)
+	    memcpy(sa, info->ai_addr, info->ai_addrlen);
 	}
 	break;
       default:

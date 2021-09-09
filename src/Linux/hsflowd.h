@@ -181,6 +181,7 @@ extern "C" {
     SFLAddress ipAddr;
     SFLAddress mask;
     uint32_t maskBits;
+    bool notFlag;
   } HSPCIDR;
 
 #define SFL_UNDEF_COUNTER(c) c=(typeof(c))-1

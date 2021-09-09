@@ -308,7 +308,18 @@ extern "C" {
   {
     HSPToken *t = tok;
     t = t->nxt;
-    if(t == NULL || SFLAddress_parseCIDR(t->str, &cidr->ipAddr, &cidr->mask, &cidr->maskBits) == NO) {
+    if(t == NULL
+       || t->str == NULL) {
+      parseError(sp, tok, "expected IP CIDR", "");
+      return NULL;
+    }
+    char *cidrStr = t->str;
+    cidr->notFlag = NO;
+    if(cidrStr[0] == '!') {
+      cidr->notFlag = YES;
+      cidrStr++;
+    }
+    if(SFLAddress_parseCIDR(cidrStr, &cidr->ipAddr, &cidr->mask, &cidr->maskBits) == NO) {
       parseError(sp, tok, "expected IP CIDR", "");
       return NULL;
     }
@@ -1048,8 +1059,11 @@ extern "C" {
       }
       
       if(cidr) {
-	myDebug(1, "CIDR at index %d matched: boosting priority", cidrIndex);
-	boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES);
+	myDebug(1, "CIDR at index %d matched: adjusting priority", cidrIndex);
+	if(cidr->notFlag)
+	  boosted_priority = IPSP_NONE; // not exactly a boost
+	else
+	  boosted_priority += (cidrIndex * IPSP_NUM_PRIORITIES);
       }
     }
 
