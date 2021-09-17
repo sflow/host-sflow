@@ -89,6 +89,8 @@ extern "C" {
     "docker",
     "ulog",
     "nflog",
+    "psample",
+    "dropmon",
     "pcap",
     "tcp",
     "cumulus",
@@ -97,6 +99,9 @@ extern "C" {
     "ovs",
     "os10",
     "opx",
+    "sonic",
+    "dbus",
+    "systemd",
     "eapi",
     "port"
   };
