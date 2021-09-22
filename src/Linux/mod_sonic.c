@@ -69,6 +69,7 @@ extern "C" {
     char *collectorName;
     bool mark:1;
     bool parseOK:1;
+    bool newCollector:1;
     char *ipStr;
     uint32_t port;
     char *deviceName;
@@ -80,6 +81,8 @@ extern "C" {
     bool mark:1;
     bool operUp:1;
     bool adminUp:1;
+    bool newPort:1;
+    bool unmappedPort:1;
     uint32_t ifIndex;
     uint32_t osIndex;
     uint32_t osIndex_expected;
@@ -365,6 +368,8 @@ extern "C" {
       if(prt->mark) {
 	myDebug(1, "sonic port removed %s", prt->portName);
 	UTHashDel(mdata->portsByName, prt);
+	UTArrayDel(mdata->newPorts, prt);
+	UTArrayDel(mdata->unmappedPorts, prt);
 	if(prt->portName)
 	  my_free(prt->portName);
 	if(prt->oid)
@@ -412,7 +417,8 @@ extern "C" {
       if(coll->mark) {
 	myDebug(1, "sonic collector removed %s", coll->collectorName);
 	UTHashDel(mdata->collectors, coll);
-	if(coll->collectorName)
+	UTArrayDel(mdata->newCollectors, coll);
+        if(coll->collectorName)
 	  my_free(coll->collectorName);
 	if(coll->ipStr)
 	  my_free(coll->ipStr);
@@ -944,6 +950,7 @@ extern "C" {
     // Gets the ifIndex and Linux (OS) ifIndex
     HSPSonicPort *prt = UTArrayPop(mdata->unmappedPorts);
     if(prt) {
+      prt->unmappedPort = NO;
       db_getIfIndexMap(mod, prt);
       return YES;
     }
@@ -989,7 +996,10 @@ extern "C" {
 	    // add with OID and queue for discovery
 	    prt = getPort(mod, p_name->str, YES);
 	    prt->oid = my_strdup(p_oid->str);
-	    UTArrayPush(mdata->newPorts, prt);
+	    if(prt->newPort == NO) {
+	      UTArrayPush(mdata->newPorts, prt);
+	      prt->newPort = YES;
+	    }
 	    myDebug(1, "sonic db_portNamesCB: new port %s -> %s", prt->portName, prt->oid);
 	  }
 	  else if(!my_strequal(prt->oid, p_oid->str)) {
@@ -998,8 +1008,11 @@ extern "C" {
 	    signalCounterDiscontinuity(mod, prt);
 	  }
 	  if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
-	    // queue it for ifIndex discovery
-	    UTArrayPush(mdata->unmappedPorts, prt);
+            if(prt->unmappedPort == NO) {
+	      // queue it for ifIndex discovery
+	      UTArrayPush(mdata->unmappedPorts, prt);
+	      prt->unmappedPort = YES;
+	    }
 	  }
 	  prt->mark = NO;
 	}
@@ -1108,6 +1121,7 @@ extern "C" {
     // Gets the state (index, speed etc.) so we can add it as an adaptor.
     HSPSonicPort *prt = UTArrayPop(mdata->newPorts);
     if(prt) {
+      prt->newPort = NO;
       db_getPortState(mod, prt);
       return YES;
     }
@@ -1415,6 +1429,7 @@ extern "C" {
     // kick off just one - starts a chain reaction if there are more.
     HSPSonicCollector *coll = UTArrayPop(mdata->newCollectors);
     if(coll) {
+      coll->newCollector = NO;
       db_getCollectorInfo(mod, coll);
       return YES;
     }
@@ -1452,7 +1467,10 @@ extern "C" {
 	    if(collectorName) {
 	      HSPSonicCollector *coll = getCollector(mod, collectorName, YES);
 	      coll->mark = NO;
-	      UTArrayPush(mdata->newCollectors, coll);
+	      if(coll->newCollector == NO) {
+	        UTArrayPush(mdata->newCollectors, coll);
+	        coll->newCollector = YES;
+	      }
 	    }
 	  }
 	}
