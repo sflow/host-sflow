@@ -27,6 +27,14 @@ endif
 
 INSTALL=install
 
+# gcov support
+CFLAGS_GCOV=
+LDFLAGS_GCOV=
+ifeq ($(GCOV),yes)
+  CFLAGS_GCOV=-fprofile-arcs -ftest-coverage
+  LDFLAGS_GCOV=-fprofile-arcs -ftest-coverage -lgcov
+endif
+
 #########  object files  #########
 FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
@@ -157,7 +165,7 @@ CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
 LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl -lrt
 
 CFLAGS_SHARED= -fPIC
-LDFLAGS_SHARED= -shared
+LDFLAGS_SHARED= -shared $(LDFLAGS_GCOV)
 # LDFLAGS_SHARED += --build-id
 
 # CFLAGS and LIBS - modules
@@ -241,6 +249,7 @@ CFLAGS += -DHSP_OPTICAL_STATS
 CFLAGS += -DHSP_MOD_DIR=$(MODDIR)
 CFLAGS += -Wall -Wstrict-prototypes -Wunused-value
 CFLAGS += -Wunused-function
+CFLAGS += $(CFLAGS_GCOV)
 LIBS=
 
 # xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
