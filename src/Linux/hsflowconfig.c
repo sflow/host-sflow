@@ -1077,14 +1077,19 @@ extern "C" {
 
 
   static bool priorityHigher(HSP *sp, HSPLocalIP *localIP, HSPLocalIP *challenger, char *dev) {
-    if(dev
-       && !my_strequal(dev, challenger->dev))
-      return NO;
     if(localIP == NULL)
       return YES;
-    if(challenger->ipPriority < localIP->ipPriority)
+    int pri_local = localIP->ipPriority;
+    int pri_challenge = challenger->ipPriority;
+    if(dev) {
+      if(my_strequal(dev, challenger->dev))
+	pri_challenge += IPSP_NUM_PRIORITIES;
+      if(my_strequal(dev, localIP->dev))
+	pri_local += IPSP_NUM_PRIORITIES;
+    }
+    if(pri_challenge < pri_local)
       return NO;
-    if(challenger->ipPriority > localIP->ipPriority)
+    if(pri_challenge > pri_local)
       return YES;
     SFLAdaptor *adaptor1 = adaptorByName(sp, localIP->dev);
     if(adaptor1 == NULL)
