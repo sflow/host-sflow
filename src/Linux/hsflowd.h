@@ -224,7 +224,8 @@ extern "C" {
     VMTYPE_XEN,
     VMTYPE_KVM,
     VMTYPE_DOCKER,
-    VMTYPE_SYSTEMD } EnumVMType;
+    VMTYPE_SYSTEMD,
+    VMTYPE_CONTAINERD } EnumVMType;
 
   typedef struct _HSPGpuID {
     char uuid[16];
@@ -455,6 +456,7 @@ extern "C" {
   typedef enum {
     HSP_VNODE_PRIORITY_SYSTEMD=1,
     HSP_VNODE_PRIORITY_DOCKER,
+    HSP_VNODE_PRIORITY_CONTAINERD,
     HSP_VNODE_PRIORITY_KVM,
     HSP_VNODE_PRIORITY_XEN
   } EnumVNodePriority;
@@ -525,6 +527,12 @@ extern "C" {
       bool hostname;
       bool markTraffic; // TODO: use enum here?
     } docker;
+    struct {
+      bool containerd;
+      uint32_t forgetVMSecs;
+      bool hostname;
+      bool markTraffic;
+    } containerd;
     struct {
       bool cumulus;
       char *swp_regex_str;

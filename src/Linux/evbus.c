@@ -547,7 +547,7 @@ extern "C" {
     return NO; // line-end not found
   }
 
-  void EVSocketReadLines(EVMod *mod, EVSocket *sock, EVSocketReadLineCB lineCB, void *magic) {
+  void EVSocketReadLines(EVMod *mod, EVSocket *sock, EVSocketReadLineCB lineCB, bool tail, void *magic) {
     // When reading lines, use a per-line callback so we can easily handle the case where
     // a single read() call resulted in 0, 1 or >1 lines found,  or hit EOF with a trailing
     // line in the buffer.
@@ -577,7 +577,8 @@ extern "C" {
     }
     else if(cc == 0) {
       // EOF
-      EVSocketClose(mod, sock, YES);
+      if(!tail)
+	EVSocketClose(mod, sock, YES);
       // may have trailing line
       if(UTSTRBUF_LEN(sock->iobuf)) {
 	UTStrBuf_append_n(sock->ioline, UTSTRBUF_STR(sock->iobuf), UTSTRBUF_LEN(sock->iobuf));

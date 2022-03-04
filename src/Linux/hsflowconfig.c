@@ -59,6 +59,7 @@ extern "C" {
     HSPOBJ_XEN,
     HSPOBJ_KVM,
     HSPOBJ_DOCKER,
+    HSPOBJ_CONTAINERD,
     HSPOBJ_ULOG,
     HSPOBJ_NFLOG,
     HSPOBJ_PSAMPLE,
@@ -87,6 +88,7 @@ extern "C" {
     "xen",
     "kvm",
     "docker",
+    "containerd",
     "ulog",
     "nflog",
     "psample",
@@ -1299,6 +1301,11 @@ extern "C" {
 	    sp->docker.docker = YES;
 	    level[++depth] = HSPOBJ_DOCKER;
 	    break;
+	  case HSPTOKEN_CONTAINERD:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->containerd.containerd = YES;
+	    level[++depth] = HSPOBJ_CONTAINERD;
+	    break;
 	  case HSPTOKEN_ULOG:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->ulog.ulog = YES;
@@ -1581,6 +1588,26 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_CGROUP_TRAFFIC:
 	      if((tok = expectONOFF(sp, tok, &sp->docker.markTraffic)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_CONTAINERD:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_FORGET_VMS:
+	      if((tok = expectInteger32(sp, tok, &sp->containerd.forgetVMSecs, 60, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_HOSTNAME:
+	      if((tok = expectONOFF(sp, tok, &sp->containerd.hostname)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_CGROUP_TRAFFIC:
+	      if((tok = expectONOFF(sp, tok, &sp->containerd.markTraffic)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

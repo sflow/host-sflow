@@ -36,7 +36,7 @@ ifeq ($(GCOV),yes)
 endif
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
 FEATURES_DENT= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
@@ -241,6 +241,9 @@ LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
 CFLAGS_EAPI=
 LIBS_EAPI=
 
+CFLAGS_CONTAINERD=
+LIBS_CONTAINERD= -lm -lcrypto
+
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += $(CFLAGS_MOUNTPOINTS)
@@ -296,6 +299,7 @@ OBJS_SONIC=mod_sonic.o
 OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o util_netlink.o
 OBJS_EAPI=mod_eapi.o
+OBJS_CONTAINERD=mod_containerd.o
 
 BUILDTGTS= mod_json.so \
            mod_dnssd.so \
@@ -348,6 +352,8 @@ DBUS: mod_dbus.so
 SYSTEMD: mod_systemd.so
 
 EAPI: mod_eapi.so
+
+CONTAINERD: mod_containerd.so
 
 #########  hsflowd  #########
 
@@ -536,6 +542,14 @@ mod_eapi.o: mod_eapi.c $(HEADERS)
 mod_eapi.so: $(OBJS_EAPI)
 	$(LD) -o $@ $(OBJS_EAPI) $(LDFLAGS_SHARED) $(LIBS_EAPI)
 
+#----------------------------
+
+mod_containerd.o: mod_containerd.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_CONTAINERD)
+
+mod_containerd.so: $(OBJS_CONTAINERD)
+	$(LD) -o $@ $(OBJS_CONTAINERD) $(LDFLAGS_SHARED) $(LIBS_CONTAINERD)
+
 
 #########  install  #########
 
@@ -617,3 +631,4 @@ mod_opx.o: mod_opx.c $(HEADERS)
 mod_dbus.o: mod_dbus.c $(HEADERS)
 mod_systemd.o: mod_systemd.c $(HEADERS)
 mod_eapi.o: mod_eapi.c $(HEADERS)
+mod_containerd.o: mod_containerd.c $(HEADERS)

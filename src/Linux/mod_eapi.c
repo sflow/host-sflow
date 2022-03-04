@@ -328,7 +328,7 @@ Expecting something like:
   }
 
   static void readEapi(EVMod *mod, EVSocket *sock, void *magic) {
-    EVSocketReadLines(mod, sock, readEapiCB, magic);
+    EVSocketReadLines(mod, sock, readEapiCB, NO, magic);
   }
 
   static void eapiRequest(EVMod *mod, HSPEapiRequest *req) {

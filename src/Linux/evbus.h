@@ -158,7 +158,7 @@ extern "C" {
 
   typedef void (*EVSocketReadLineCB)(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic);
 
-  void EVSocketReadLines(EVMod *mod, EVSocket *sock, EVSocketReadLineCB lineCB, void *magic);
+  void EVSocketReadLines(EVMod *mod, EVSocket *sock, EVSocketReadLineCB lineCB, bool tail, void *magic);
   pid_t EVBusExec(EVMod *mod, EVBus *bus, void *magic, char **cmd, EVReadCB readCB);
 
   // Use a more conservative stacksize here - partly because

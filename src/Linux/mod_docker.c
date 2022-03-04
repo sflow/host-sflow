@@ -2131,7 +2131,7 @@ extern "C" {
   }
     
   static void readDockerAPI(EVMod *mod, EVSocket *sock, void *magic) {
-    EVSocketReadLines(mod, sock, readDockerCB, magic);
+    EVSocketReadLines(mod, sock, readDockerCB, NO, magic);
   }
 
   static void dockerAPIRequest(EVMod *mod, HSPDockerRequest *req) {

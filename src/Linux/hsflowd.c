@@ -1988,6 +1988,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_xen", sp->modulesPath);
     if(sp->docker.docker)
       EVLoadModule(sp->rootModule, "mod_docker", sp->modulesPath);
+    if(sp->containerd.containerd)
+      EVLoadModule(sp->rootModule, "mod_containerd", sp->modulesPath);
     if(sp->pcap.pcap)
       EVLoadModule(sp->rootModule, "mod_pcap", sp->modulesPath);
     if(sp->tcp.tcp)
