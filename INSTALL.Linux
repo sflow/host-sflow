@@ -26,6 +26,7 @@ will typically be required for compilation:
  SYSTEMD: dbus-dev(el) or libdbus-1-dev, openssl-dev(el), libssl-dev(el)
  DBUS: dbus-dev(el) or libdbus-1-dev
  OPX: libsystemd-daemon-dev
+ CONTAINERD: golang
 
 To start the daemon, run:
 

@@ -53,40 +53,50 @@ MODDIR     ?= /etc/hsflowd/modules
 SYSTEMDDIR ?= /lib/systemd/system
 DBUSDIR    ?= /etc/dbus-1/system.d
 
+FEATURES2=" $(FEATURES) "
 $(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
+$(info $$FEATURES2 is [$(FEATURES2)] from $(origin FEATURES))
 
 XTGTS= $(FEATURES)
 CFLAGS_LOAD=
-ifeq ("$(strip $(FEATURES))","ALL")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " ALL "),0)
   XTGTS += $(FEATURES_ALL)
 endif
-ifeq ("$(strip $(FEATURES))","CUMULUS")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " CUMULUS "),0)
   XTGTS += $(FEATURES_CUMULUS)
   CFLAGS_LOAD += -DHSP_LOAD_CUMULUS
   HSFLOWD_CONF=scripts/hsflowd.conf.cumulus
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.cumulus
 endif
-ifeq ("$(strip $(FEATURES))","DENT")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " DENT "),0)
   XTGTS += $(FEATURES_DENT)
   CFLAGS_LOAD += -DHSP_LOAD_DENT
   HSFLOWD_CONF=scripts/hsflowd.conf.dent
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.dent
 endif
-ifeq ("$(strip $(FEATURES))","EOS")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " EOS "),0)
   XTGTS += $(FEATURES_EOS)
   CFLAGS_LOAD += -DHSP_LOAD_EOS
 endif
-ifeq ("$(strip $(FEATURES))","OS10")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " OS10 "),0)
+  # almost the same as OPX...
   XTGTS += $(FEATURES_OS10)
   CFLAGS_LOAD += -DHSP_LOAD_OPX
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.os10
 endif
-ifeq ("$(strip $(FEATURES))","OPX")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " OPX "),0)
   XTGTS += $(FEATURES_OPX)
   CFLAGS_LOAD += -DHSP_LOAD_OPX
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.opx
 endif
-ifeq ("$(strip $(FEATURES))","SONIC")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " SONIC "),0)
   XTGTS += $(FEATURES_SONIC)
   CFLAGS_LOAD += -DHSP_LOAD_SONIC
   HSFLOWD_CONF=scripts/hsflowd.conf.sonic
@@ -94,11 +104,13 @@ ifeq ("$(strip $(FEATURES))","SONIC")
   # make deb FEATURES=SONIC PROCFS=/rootfs/proc SYSFS=/rootfs/sys VARFS=/rootfs/var ETCFS=/tmp/etc
   # so that docker run command can expose host directories selectively
 endif
-ifeq ("$(strip $(FEATURES))","XEN")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " XEN "),0)
   XTGTS += $(FEATURES_XEN)
   CFLAGS_LOAD += -DHSP_LOAD_XEN
 endif
-ifeq ("$(strip $(FEATURES))","HOST")
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " HOST "),0)
   XTGTS += $(FEATURES_HOST)
 endif
 
@@ -218,7 +230,7 @@ LIBS_OVS=
 CFLAGS_OPX= -I/usr/include/opx
 LIBS_OPX= -lsystemd -lopx_cps_api_common -lopx_cps_class_map
 # For OS10 the same libraries are under different names:
-ifeq ("$(strip $(FEATURES))","OS10")
+ifneq ($(shell echo $(FEATURES2)|grep -c " OS10 "),0)
   CFLAGS_OPX= -I/usr/include/ngos
   LIBS_OPX= -lsystemd -lcps-api-common -lcps-class-map-util
 endif
@@ -353,12 +365,23 @@ SYSTEMD: mod_systemd.so
 
 EAPI: mod_eapi.so
 
-CONTAINERD: mod_containerd.so
+CONTAINERD: mod_containerd.so hsflowd_containerd
 
 #########  hsflowd  #########
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
 	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
+
+#########  hsflowd_containerd  #########
+
+hsflowd_containerd:
+	cd containerd; \
+	go mod init hsflowd_containerd; \
+	go mod tidy; \
+	go get github.com/containerd/containerd@v1.6.1; \
+	go get -d .; \
+	go build hsflowd_containerd; \
+	echo "compiled hsflowd_containerd"
 
 ######## DBUS utils ##########
 
@@ -567,6 +590,9 @@ install: all
 ifneq ($(strip $(HSFLOWD_DBUS_CONF)),)
 	$(INSTALL) -d $(DBUS_D)
 	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
+endif
+ifneq ($(shell echo $(FEATURES)|grep -c CONTAINERD),0)
+	$(INSTALL) -m 700 containerd/hsflowd_containerd $(BIN_D)
 endif
 
 #########  schedule  #########

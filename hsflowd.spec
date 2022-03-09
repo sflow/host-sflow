@@ -34,7 +34,7 @@ make FEATURES=%{_FEATURES}
 
 %install
 rm -rf %{buildroot}
-make INSTROOT=%{buildroot} install
+make INSTROOT=%{buildroot} FEATURES=%{_FEATURES} install
 
 %clean
 rm -rf %{buildroot}
@@ -42,7 +42,7 @@ make clean
 
 %files
 %defattr(-,root,root,-)
-/usr/sbin/hsflowd
+/usr/sbin/hsflowd*
 %config(noreplace) /etc/hsflowd.conf
 %config(noreplace) /etc/dbus-1/system.d/net.sflow.hsflowd.conf
 /etc/init.d/hsflowd

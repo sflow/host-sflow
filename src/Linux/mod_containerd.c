@@ -26,92 +26,13 @@ extern "C" {
 
 #include "cJSON.h"
 
-  typedef enum {
-    HSP_EV_UNKNOWN=0,
-    HSP_EV_create,
-    HSP_EV_start,
-    HSP_EV_stop,
-    HSP_EV_restart,
-    HSP_EV_pause,
-    HSP_EV_unpause,
-    HSP_EV_kill,
-    HSP_EV_die,
-    HSP_EV_destroy,
-    HSP_EV_oom,
-    HSP_EV_rm,
-    HSP_EV_attach,
-    HSP_EV_commit,
-    HSP_EV_copy,
-    HSP_EV_detach,
-    HSP_EV_exec_create,
-    HSP_EV_exec_detach,
-    HSP_EV_exec_start,
-    HSP_EV_export,
-    HSP_EV_health_status,
-    HSP_EV_rename,
-    HSP_EV_resize,
-    HSP_EV_top,
-    HSP_EV_update,
-    HSP_EV_NUM_CODES
-  } EnumHSPContainerEvent;
-
-  static const char *HSP_EV_names[] = {
-    "unknown",
-    "create",
-    "start",
-    "stop",
-    "restart",
-    "pause",
-    "unpause",
-    "kill",
-    "die",
-    "destroy",
-    "oom",
-    "rm", // taken out
-    "attach", // added for 1.24 vvv
-    "commit",
-    "copy",
-    "detach",
-    "exec_create",
-    "exec_detach",
-    "exec_start",
-    "export",
-    "health_status",
-    "rename",
-    "resize",
-    "top",
-    "update"
-  };
-
-  typedef enum {
-    HSP_CS_UNKNOWN=0,
-    HSP_CS_created,
-    HSP_CS_running,
-    HSP_CS_paused,
-    HSP_CS_stopped,
-    HSP_CS_deleted,
-    HSP_CS_exited,
-    HSP_CS_NUM_CODES
-  } EnumHSPContainerState;
-
-  static const char *HSP_CS_names[] = {
-    "unknown",
-    "created",
-    "running",
-    "paused",
-    "stopped",
-    "deleted",
-    "exited",
-  };
-
   typedef struct _HSPVMState_CONTAINERD {
     HSPVMState vm; // superclass: must come first
     char *id;
     char *name;
     char *hostname;
     pid_t pid;
-    EnumHSPContainerEvent lastEvent;
-    EnumHSPContainerState state;
+    uint32_t state; // SFLVirDomainState
     uint32_t dup_name:1;
     uint32_t dup_hostname:1;
     uint32_t gpu_dev:1;
@@ -188,7 +109,6 @@ extern "C" {
 
 #define HSP_CONTAINERD_MAX_STATS_LINELEN 512
 
-  static const char *containerStateName(EnumHSPContainerState st);
 
   /*_________________---------------------------__________________
     _________________    utils to help debug    __________________
@@ -497,29 +417,9 @@ extern "C" {
     }
 
     // host ID
-    char nameBuf[SFL_MAX_HOSTNAME_CHARS+1];
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = NULL;
-    bool duplicate = NO;
-    if(sp->containerd.hostname) {
-      hname = container->hostname;
-      duplicate = container->dup_hostname;
-    }
-    else {
-      hname = container->name;
-      duplicate = container->dup_name;
-    }
-    if(duplicate) {
-      // not unique - use <hname>.<short-id> instead
-      snprintf(nameBuf, SFL_MAX_HOSTNAME_CHARS, "%s.%s", hname, container->id);
-      // chop after short-id chars
-      int len2 = strlen(hname) + 1 + HSP_CONTAINERD_SHORTID_LEN;
-      if(len2 > SFL_MAX_HOSTNAME_CHARS)
-	len2 = SFL_MAX_HOSTNAME_CHARS;
-      nameBuf[len2] = '\0';
-      hname = nameBuf;
-    }
+    char *hname = container->hostname ?: container->id; // TODO: consider config setting sp->containerd.hostname
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, vm->uuid, 16);
@@ -547,30 +447,7 @@ extern "C" {
     // VM cpu counters [ref xenstat.c]
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-    // map container->state into SFLVirDomainState
-    enum SFLVirDomainState virState = SFL_VIR_DOMAIN_NOSTATE;
-    switch(container->state) {
-    case HSP_CS_running:
-      virState = SFL_VIR_DOMAIN_RUNNING;
-      break;
-    case HSP_CS_created:
-      virState = SFL_VIR_DOMAIN_NOSTATE;
-      break;
-    case HSP_CS_paused:
-      virState = SFL_VIR_DOMAIN_PAUSED;
-      break;
-    case HSP_CS_stopped:
-      virState = SFL_VIR_DOMAIN_SHUTOFF;
-      break;
-    case HSP_CS_deleted:
-    case HSP_CS_exited:
-      virState = SFL_VIR_DOMAIN_SHUTDOWN;
-      break;
-    case HSP_EV_UNKNOWN:
-    default:
-      break;
-    }
-    cpuElem.counterBlock.host_vrt_cpu.state = virState;
+    cpuElem.counterBlock.host_vrt_cpu.state = container->state;
     cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = container->cpu_count ?: (uint32_t)round(container->cpu_count_dbl);
     cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(container->cpu_total / 1000000); // convert to mS
     SFLADD_ELEMENT(&cs, &cpuElem);
@@ -711,8 +588,10 @@ extern "C" {
       // decNameCount(mdata->hostnameCount, container->hostname);
       my_free(container->hostname);
     }
-    if(container->dup_name) mdata->dup_names--;
-    if(container->dup_hostname) mdata->dup_hostnames--;
+    if(container->dup_name)
+      mdata->dup_names--;
+    if(container->dup_hostname)
+      mdata->dup_hostnames--;
     removeAndFreeVM(mod, &container->vm);
   }
 
@@ -749,8 +628,7 @@ extern "C" {
 
   static bool containerDone(EVMod *mod, HSPVMState_CONTAINERD *container) {
     return (container
-	    && container->lastEvent
-	    && container->state != HSP_CS_running);
+	    && container->state != SFL_VIR_DOMAIN_RUNNING);
   }
 
   /*_________________---------------------------__________________
@@ -841,25 +719,6 @@ extern "C" {
     SFLADD_ELEMENT(cs, &mdata->vnodeElem);
   }
 
-
-  /*_________________---------------------------__________________
-    _________________     container state       __________________
-    -----------------___________________________------------------
-  */
-  static EnumHSPContainerState containerState(char *str) {
-    for(int ii = 0; ii<HSP_CS_NUM_CODES; ii++) {
-      if(str && !strcasecmp(str, HSP_CS_names[ii]))
-	return ii;
-    }
-    return HSP_CS_UNKNOWN;
-  }
-
-  static const char *containerStateName(EnumHSPContainerState st) {
-    return (st < HSP_CS_NUM_CODES)
-      ? HSP_CS_names[st]
-      : "<bad state code>";
-  }
-
   /*_________________---------------------------__________________
     _________________     container names       __________________
     -----------------___________________________------------------
@@ -888,6 +747,7 @@ extern "C" {
 	//decNameCount(mdata->hostnameCount, container->hostname);
 	my_free(container->hostname);
       }
+      myDebug(1, "setContainerHostname assigning hostname=%s", hostname);
       container->hostname = my_strdup(hostname);
       //if(incNameCount(mdata->hostnameCount, hostname) > 1) {
       //	duplicateHostname(mod, container);
@@ -1086,7 +946,7 @@ extern "C" {
       char *jhn_s = jhn ? jhn->valuestring : NULL;
       char *jsn_s = jsn ? jsn->valuestring : NULL;
       char *jsns_s = jsns ? jsns->valuestring : NULL;
-      snprintf(compoundName, 255, "k8s_%s_%s_%s_<uid>_<attempt>",
+      snprintf(compoundName, 255, "k8s_%s_%s_%s_uid_attempt",
 	       jhn_s ?: (jid_s ?: ""),
 	       jsn_s ?: "",
 	       jsns_s ?: "");
@@ -1095,13 +955,13 @@ extern "C" {
     
     cJSON *jcpu = cJSON_GetObjectItem(jmetrics, "Cpu");
     if(jcpu) {
-      // TODO: get status from data
-      container->state = HSP_CS_running;
+      // TODO: get status from data.  With containerd it is the Process Status string
+      container->state = SFL_VIR_DOMAIN_RUNNING;
       
       cJSON *jcputime = cJSON_GetObjectItem(jcpu, "CpuTime");
       if(jcputime) {
 	myDebug(1, "cputime=%.0f\n", jcputime->valuedouble);
-	container->cpu_total = jcputime->valuedouble; // TODO: units? And  is this an integer?
+	container->cpu_total = jcputime->valuedouble; // TODO: is this an integer?
       }
       cJSON *jcpucount = cJSON_GetObjectItem(jcpu, "CpuCount");
       if(jcpucount)
@@ -1156,7 +1016,6 @@ extern "C" {
 	updateContainerCgroupPaths(mod, container);
     }
 
-    // TODO: go helper to supply Env if possible?
     cJSON *jenv = cJSON_GetObjectItem(jmetrics, "Env");
     if(jenv
        && container->gpu_dev == NO)
