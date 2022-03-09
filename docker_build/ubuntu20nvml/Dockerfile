@@ -3,7 +3,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN echo "UPDATE" && apt-get update && apt-get install -y --no-install-recommends \
     git \
     gcc \
-    make
+    make \
+    golang-go
 RUN echo "EXTRAS" && apt-get install -y --no-install-recommends \
     libpcap-dev \
     libnfnetlink-dev \
