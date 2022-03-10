@@ -36,9 +36,9 @@ ifeq ($(GCOV),yes)
 endif
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
-FEATURES_DENT= DENT PSAMPLE SYSTEMD DROPMON
+FEATURES_DENTOS= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
@@ -71,7 +71,7 @@ ifneq ($(shell echo $(FEATURES2)|grep -c " CUMULUS "),0)
   HSFLOWD_SYSTEMD_SERVICE=scripts/hsflowd.service.cumulus
 endif
 
-ifneq ($(shell echo $(FEATURES2)|grep -c " DENT "),0)
+ifneq ($(shell echo $(FEATURES2)|grep -c " DENTOS "),0)
   XTGTS += $(FEATURES_DENT)
   CFLAGS_LOAD += -DHSP_LOAD_DENT
   HSFLOWD_CONF=scripts/hsflowd.conf.dent
@@ -365,7 +365,9 @@ SYSTEMD: mod_systemd.so
 
 EAPI: mod_eapi.so
 
-CONTAINERD: mod_containerd.so hsflowd_containerd
+CONTAINERD: mod_containerd.so
+
+CONTAINERDGO: hsflowd_containerd
 
 #########  hsflowd  #########
 
@@ -376,17 +378,13 @@ hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
 
 hsflowd_containerd:
 	cd containerd; \
-	echo "go mod init hsflowd_containerd"; \
+	echo "=== go mod init hsflowd_containerd ==="; \
 	go mod init hsflowd_containerd; \
-	echo "go mod tidy"; \
-	go mod tidy; \
-	echo "go get github.com/containerd/containerd@v1.6.1" \
+	echo "=== go get github.com/containerd/containerd@v1.6.1 ==="; \
 	go get github.com/containerd/containerd@v1.6.1; \
-	echo "go get -d ."; \
-	go get -d .; \
-	echo "go build hsflowd_containerd"; \
+	echo "=== go build hsflowd_containerd ==="; \
 	go build hsflowd_containerd; \
-	echo "compile of hsflowd_containerd done"
+	echo "=== compile hsflowd_containerd done ==="
 
 ######## DBUS utils ##########
 
@@ -596,7 +594,7 @@ ifneq ($(strip $(HSFLOWD_DBUS_CONF)),)
 	$(INSTALL) -d $(DBUS_D)
 	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
 endif
-ifneq ($(shell echo $(FEATURES)|grep -c CONTAINERD),0)
+ifneq ($(shell echo $(FEATURES)|grep -c " CONTAINERDGO "),0)
 	$(INSTALL) -m 700 containerd/hsflowd_containerd $(BIN_D)
 endif
 
