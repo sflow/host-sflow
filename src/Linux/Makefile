@@ -594,7 +594,7 @@ ifneq ($(strip $(HSFLOWD_DBUS_CONF)),)
 	$(INSTALL) -d $(DBUS_D)
 	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
 endif
-ifneq ($(shell echo $(FEATURES)|grep -c " CONTAINERDGO "),0)
+ifneq ($(shell echo $(FEATURES2)|grep -c " CONTAINERDGO "),0)
 	$(INSTALL) -m 700 containerd/hsflowd_containerd $(BIN_D)
 endif
 
