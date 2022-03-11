@@ -947,9 +947,9 @@ extern "C" {
       if(jid)
 	strncpy(jid_s, jid->valuestring, 16);
       // pull out hostname, sandboxname and sandboxnamespace
-      char *jhn_s = jhn ? jhn->valuestring : NULL;
-      char *jsn_s = jsn ? jsn->valuestring : NULL;
-      char *jsns_s = jsns ? jsns->valuestring : NULL;
+      char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
+      char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
+      char *jsns_s = (jsns && strlen(jsns->valuestring)) ? jsns->valuestring : NULL;
       // assemble,  with fake 'uid' and 'attempt' fields,  but trying not to use up all the quota
       // for the sFlow string.
       char compoundName[SFL_MAX_HOSTNAME_CHARS+1];
