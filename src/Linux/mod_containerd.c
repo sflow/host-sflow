@@ -944,8 +944,10 @@ extern "C" {
       // extract first 16 characters of container ID
       char jid_s[9];
       jid_s[0] = '\0';
-      if(jid)
+      if(jid) {
 	strncpy(jid_s, jid->valuestring, 8);
+	jid_s[8] = '\0';
+      }
       // pull out hostname, sandboxname and sandboxnamespace
       char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
       char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
