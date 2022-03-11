@@ -952,11 +952,16 @@ extern "C" {
       char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
       char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
       char *jsns_s = (jsns && strlen(jsns->valuestring)) ? jsns->valuestring : NULL;
+      // container name will be container->hostname if set,  otherwise beginning if container-id.
+      // However if it ends up being the same as the sandbox name then we leave it out to save space.
+      char *c_name = jhn_s ?: jid_s;
+      if(my_strequal(c_name, jsn_s))
+	c_name = "";
       // assemble,  with fake 'uid' and 'attempt' fields,  but trying not to use up all the quota
       // for the sFlow string.
       char compoundName[SFL_MAX_HOSTNAME_CHARS+1];
       snprintf(compoundName, SFL_MAX_HOSTNAME_CHARS, "k8s_%s_%s_%s_u_a",
-	       jhn_s ?: jid_s,
+	       c_name,
 	       jsn_s ?: "",
 	       jsns_s ?: "");
       // and assign to hostname
