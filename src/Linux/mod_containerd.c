@@ -941,15 +941,23 @@ extern "C" {
       // the form k8s_<containername>_<sandboxname>_<sandboxnamespace>_<sandboxuser>_<c.attempt>
       // TODO: need a better way to do this. Send an app_resources
       // structure so we can fill in the app_name?
-      char compoundName[256];
-      char *jid_s = jid ? jid->valuestring : NULL;
+      // extract first 16 characters of container ID
+      char jid_s[17];
+      jid_s[0] = '\0';
+      if(jid)
+	strncpy(jid_s, jid->valuestring, 16);
+      // pull out hostname, sandboxname and sandboxnamespace
       char *jhn_s = jhn ? jhn->valuestring : NULL;
       char *jsn_s = jsn ? jsn->valuestring : NULL;
       char *jsns_s = jsns ? jsns->valuestring : NULL;
-      snprintf(compoundName, 255, "k8s_%s_%s_%s_uid_attempt",
-	       jhn_s ?: (jid_s ?: ""),
+      // assemble,  with fake 'uid' and 'attempt' fields,  but trying not to use up all the quota
+      // for the sFlow string.
+      char compoundName[SFL_MAX_HOSTNAME_CHARS+1];
+      snprintf(compoundName, SFL_MAX_HOSTNAME_CHARS, "k8s_%s_%s_%s_u_a",
+	       jhn_s ?: jid_s,
 	       jsn_s ?: "",
 	       jsns_s ?: "");
+      // and assign to hostname
       setContainerHostname(mod, container, compoundName);
     }
     
