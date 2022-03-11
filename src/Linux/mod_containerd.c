@@ -942,10 +942,10 @@ extern "C" {
       // TODO: need a better way to do this. Send an app_resources
       // structure so we can fill in the app_name?
       // extract first 16 characters of container ID
-      char jid_s[17];
+      char jid_s[9];
       jid_s[0] = '\0';
       if(jid)
-	strncpy(jid_s, jid->valuestring, 16);
+	strncpy(jid_s, jid->valuestring, 8);
       // pull out hostname, sandboxname and sandboxnamespace
       char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
       char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
