@@ -927,6 +927,7 @@ extern "C" {
 
     setContainerName(mod, container, jid->valuestring);
     
+    cJSON *jn = cJSON_GetObjectItem(jnames, "ContainerName");
     cJSON *jhn = cJSON_GetObjectItem(jnames, "Hostname");
     cJSON *jsn = cJSON_GetObjectItem(jnames, "SandboxName");
     cJSON *jsns = cJSON_GetObjectItem(jnames, "SandboxNamespace");
@@ -939,30 +940,25 @@ extern "C" {
 
       // Match the Kubernetes docker_inspect output by combining these strings into
       // the form k8s_<containername>_<sandboxname>_<sandboxnamespace>_<sandboxuser>_<c.attempt>
-      // TODO: need a better way to do this. Send an app_resources
-      // structure so we can fill in the app_name?
-      // extract first 16 characters of container ID
-      char jid_s[9];
-      jid_s[0] = '\0';
-      if(jid) {
-	strncpy(jid_s, jid->valuestring, 8);
-	jid_s[8] = '\0';
-      }
-      // pull out hostname, sandboxname and sandboxnamespace
+      // pull out name, hostname, sandboxname and sandboxnamespace
+      char *jn_s = (jn && strlen(jn->valuestring)) ? jn->valuestring : NULL;
       char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
       char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
       char *jsns_s = (jsns && strlen(jsns->valuestring)) ? jsns->valuestring : NULL;
-      // container name will be container->hostname if set,  otherwise beginning if container-id.
-      // However if it ends up being the same as the sandbox name then we leave it out to save space.
-      char *c_name = jhn_s ?: jid_s;
-      if(my_strequal(c_name, jsn_s))
-	c_name = "";
-      // assemble,  with fake 'uid' and 'attempt' fields,  but trying not to use up all the quota
-      // for the sFlow string.
-      char compoundName[SFL_MAX_HOSTNAME_CHARS+1];
-      snprintf(compoundName, SFL_MAX_HOSTNAME_CHARS, "k8s_%s_%s_%s_u_a",
-	       c_name,
-	       jsn_s ?: "",
+      // container name can be empty, so if it ends up being the
+      // same as the sandbox name or hostname then we leave it out to save space (and to
+      // prevent the combination of namespace.containername from exploding unexpectedly)
+      if(my_strequal(jn_s, jsn_s))
+	jn_s = NULL;
+      if(my_strequal(jn_s, jhn_s))
+	jn_s = NULL;
+      // assemble,  with fake 'uid' and 'attempt' fields since we don't know them,
+      // but trying not to use up all the quota for the sFlow string.
+#define MY_MAX_HOSTNAME_CHARS 255 // override sFlow standard of SFL_MAX_HOSTNAME_CHARS (64)
+      char compoundName[MY_MAX_HOSTNAME_CHARS+1];
+      snprintf(compoundName, MY_MAX_HOSTNAME_CHARS, "k8s_%s_%s_%s_u_a",
+	       jn_s ?: "",
+	       jsn_s ?: (jhn_s ?: ""),
 	       jsns_s ?: "");
       // and assign to hostname
       setContainerHostname(mod, container, compoundName);
