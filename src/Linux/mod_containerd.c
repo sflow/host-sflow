@@ -1194,6 +1194,13 @@ extern "C" {
     HSP_mod_CONTAINERD *mdata = (HSP_mod_CONTAINERD *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    struct stat statBuf;
+    if(sp->docker.docker == YES
+       && stat("/var/run/docker.sock", &statBuf) == 0) {
+      myDebug(1, "not enabling mod_containerd because mod_docker is running and docker.sock is present");
+      return;
+    }
+
     // ask to retain root privileges
     retainRootRequest(mod, "needed to access containerd.sock");
     retainRootRequest(mod, "needed by mod_containerd to probe for adaptors in other namespaces");
