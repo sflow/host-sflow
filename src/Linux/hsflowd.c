@@ -1842,7 +1842,6 @@ extern "C" {
     sp->psample.group = 1;
     // assume netlink drop-monitor is configured externally
     sp->dropmon.dropmon = YES;
-    sp->dropmon.group = 1;
     sp->dropmon.start = NO;
     sp->dropmon.limit = 1000;
     sp->dropmon.sw = NO;
