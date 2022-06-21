@@ -846,21 +846,19 @@ That would allow everything to stay on the stack as it does here, which has nice
       return;
     }
 
-    if(sp->dropmon.group != 0) {
-      // DROPMON group is set, so open the netfilter socket while we are still root
-      mdata->nl_sock = UTNLGeneric_open(mod->id);
-      if(mdata->nl_sock > 0) {
-	// increase socket receiver buffer size
-	UTSocketRcvbuf(mdata->nl_sock, HSP_DROPMON_RCVBUF);
-	// and submit for polling
-	mdata->nl_evsock = EVBusAddSocket(mod,
-					  mdata->packetBus,
-					  mdata->nl_sock,
-					  readNetlink_DROPMON,
-					  NULL);
-	// kick off with the family lookup request
-	getFamily_DROPMON(mod);
-      }
+    // DROPMON group is set, so open the netfilter socket while we are still root
+    mdata->nl_sock = UTNLGeneric_open(mod->id);
+    if(mdata->nl_sock > 0) {
+      // increase socket receiver buffer size
+      UTSocketRcvbuf(mdata->nl_sock, HSP_DROPMON_RCVBUF);
+      // and submit for polling
+      mdata->nl_evsock = EVBusAddSocket(mod,
+					mdata->packetBus,
+					mdata->nl_sock,
+					readNetlink_DROPMON,
+					NULL);
+      // kick off with the family lookup request
+      getFamily_DROPMON(mod);
     }
 
     mdata->dropmon_configured = YES;

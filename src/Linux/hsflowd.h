@@ -587,7 +587,6 @@ extern "C" {
     } psample;
     struct {
       bool dropmon;
-      uint32_t group;
       bool start;
       bool sw;
       bool hw;

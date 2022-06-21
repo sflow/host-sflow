@@ -1,3 +1,7 @@
+/* This software is distributed under the following license:
+ * http://sflow.net/license.html
+ */
+
 package main
 
 import (
