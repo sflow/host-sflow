@@ -448,7 +448,7 @@ extern "C" {
     "datagrams",
     "dropped_samples",
     "flow_samples_suppressed",
-    "counter_samples_suppressed"
+    "counter_samples_suppressed",
     "event_samples",
   };
 #endif
