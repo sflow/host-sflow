@@ -34,6 +34,9 @@ extern "C" {
     bool vport_set:1;
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
+    int n_dlts;
+    int *dlts;
+    int dlt;
   } BPFSoc;
 
   typedef struct _HSP_mod_PCAP {
@@ -68,31 +71,40 @@ extern "C" {
       EVMod *mod = bpfs->module;
       HSP *sp = (HSP *)EVROOTDATA(mod);
 
-      // global MAC -> adaptor
-      SFLMacAddress macdst, macsrc;
-      memset(&macdst, 0, sizeof(macdst));
-      memset(&macsrc, 0, sizeof(macsrc));
-      memcpy(macdst.mac, buf, 6);
-      memcpy(macsrc.mac, buf+6, 6);
-      SFLAdaptor *srcdev = adaptorByMac(sp, &macsrc);
-      SFLAdaptor *dstdev = adaptorByMac(sp, &macdst);
+      const u_char *mac_hdr=NULL;
+      uint32_t mac_len=0;
+      SFLAdaptor *srcdev = NULL;
+      SFLAdaptor *dstdev = NULL;
 
-      if(getDebug() > 2) {
-	u_char mac_s[13], mac_d[13];
-	printHex(macsrc.mac, 6, mac_s, 13, NO);
-	printHex(macdst.mac, 6, mac_d, 13, NO);
-	myLog(LOG_INFO, "PCAP: macsrc=%s, macdst=%s", mac_s, mac_d);
-	if(srcdev) {
-	  myLog(LOG_INFO, "PCAP: srcdev=%s(%u)(peer=%u)",
-		srcdev->deviceName,
-		srcdev->ifIndex,
-		srcdev->peer_ifIndex);
-	}
-	if(dstdev) {
-	  myLog(LOG_INFO, "PCAP: dstdev=%s(%u)(peer=%u)",
-		dstdev->deviceName,
-		dstdev->ifIndex,
-		dstdev->peer_ifIndex);
+      if(bpfs->dlt == DLT_EN10MB) {
+	mac_hdr = buf;
+	mac_len = 14;
+	// global MAC -> adaptor
+	SFLMacAddress macdst, macsrc;
+	memset(&macdst, 0, sizeof(macdst));
+	memset(&macsrc, 0, sizeof(macsrc));
+	memcpy(macdst.mac, buf, 6);
+	memcpy(macsrc.mac, buf+6, 6);
+	srcdev = adaptorByMac(sp, &macsrc);
+	dstdev = adaptorByMac(sp, &macdst);
+	
+	if(getDebug() > 2) {
+	  u_char mac_s[13], mac_d[13];
+	  printHex(macsrc.mac, 6, mac_s, 13, NO);
+	  printHex(macdst.mac, 6, mac_d, 13, NO);
+	  myLog(LOG_INFO, "PCAP: macsrc=%s, macdst=%s", mac_s, mac_d);
+	  if(srcdev) {
+	    myLog(LOG_INFO, "PCAP: srcdev=%s(%u)(peer=%u)",
+		  srcdev->deviceName,
+		  srcdev->ifIndex,
+		  srcdev->peer_ifIndex);
+	  }
+	  if(dstdev) {
+	    myLog(LOG_INFO, "PCAP: dstdev=%s(%u)(peer=%u)",
+		  dstdev->deviceName,
+		  dstdev->ifIndex,
+		  dstdev->peer_ifIndex);
+	  }
 	}
       }
 
@@ -115,11 +127,11 @@ extern "C" {
 		 bpfs->adaptor,
 		 ds_options,
 		 0 /*hook*/,
-		 buf /* mac hdr*/,
-		 14 /* mac len */,
-		 buf + 14 /* payload */,
-		 hdr->caplen - 14, /* length of captured payload */
-		 hdr->len - 14, /* length of packet (pdu) */
+		 mac_hdr /* mac hdr*/,
+		 mac_len /* mac len */,
+		 buf + mac_len /* payload */,
+		 hdr->caplen - mac_len, /* length of captured payload */
+		 hdr->len - mac_len, /* length of packet (pdu) */
 		 bpfs->drops, /* droppedSamples */
 		 bpfs->samplingRate,
 		 NULL);
@@ -293,8 +305,48 @@ extern "C" {
     else if(status > 0) {
       myLog(LOG_INFO, "PCAP: activate(%s) warning: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
     }
-    
+
     myDebug(1, "PCAP: device %s opened OK", bpfs->deviceName);
+
+    // get list of possible datalink types
+    bpfs->n_dlts = pcap_list_datalinks(bpfs->pcap, &bpfs->dlts);
+    // note: bpfs->dlts should only be freed with pcap_free_datalinks()
+    if(bpfs->n_dlts > 0 && bpfs->dlts) {
+      for(int ii=0; ii < bpfs->n_dlts; ii++) {
+	int dlt = bpfs->dlts[ii]; 
+	myDebug(1, "PCAP: device %s offers DLT=%u (%s)",
+		bpfs->deviceName,
+		dlt,
+		pcap_datalink_val_to_name(dlt));
+      }
+      // if we find one we like, set it with pcap_set_datalink()
+      bpfs->dlt = -1;
+      // TODO: add support for 802.11 frames -- will require indicating protocol to
+      // takeSample() call more explicitly. (SFLHEADER_IEEE80211MAC or
+      // SFLHEADER_IEEE80211_AMPUD or SFLHEADER_IEEE80211_AMSDU_SUBFRAME)
+      // TODO: add support for MPLS encapsulation (SFLHEADER_MPLS)
+      for(int ii=0; ii < bpfs->n_dlts; ii++) {
+	int dlt = bpfs->dlts[ii]; 
+	if(dlt == DLT_EN10MB
+	   || dlt == DLT_RAW
+	   // || dlt == DLT_IEEE802_11
+	   ) {
+	  bpfs->dlt = dlt;
+	  break;
+	}
+      }
+      if(bpfs->dlt == -1) {
+	myLog(LOG_ERR, "PCAP: %s has no supported datalink encapsulaton", bpfs->deviceName);
+	tap_close(mod, bpfs);
+      }
+      else {
+	myDebug(1, "PCAP: device %s selecting encapsulation=%u (%s)",
+		bpfs->deviceName,
+		bpfs->dlt,
+		pcap_datalink_val_to_name(bpfs->dlt));
+	pcap_set_datalink(bpfs->pcap, bpfs->dlt); 
+      }		
+    }
 
     // get file descriptor
     int fd = pcap_fileno(bpfs->pcap);
@@ -324,8 +376,10 @@ extern "C" {
       pcap_close(bpfs->pcap);
       bpfs->pcap = NULL;
     }
-    EVSocketClose(mod, bpfs->sock, YES);
-    bpfs->sock = NULL;
+    if(bpfs->sock) {
+      EVSocketClose(mod, bpfs->sock, YES);
+      bpfs->sock = NULL;
+    }
   }
 
   /*_________________---------------------------__________________
