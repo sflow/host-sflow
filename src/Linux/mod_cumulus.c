@@ -142,7 +142,8 @@ extern "C" {
     return YES;
   }
 
-  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n, int sampling_dirn) {
+  static bool setSamplingRate(EVMod *mod, SFLAdaptor *adaptor, uint32_t logGroup, uint32_t sampling_n) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
     if(niostate->switchPort == NO
        || niostate->loopback
@@ -171,9 +172,9 @@ extern "C" {
       strArrayInsert(cmdline, 1, adaptor->deviceName);
       char srate[HSP_MAX_TOK_LEN];
       snprintf(srate, HSP_MAX_TOK_LEN, "%u", niostate->sampling_n);
-      if(sampling_dirn & HSP_DIRN_IN)
+      if(sp->psample.ingress)
 	strArrayInsert(cmdline, 2, srate); // ingress
-      if(sampling_dirn & HSP_DIRN_OUT)
+      if(sp->psample.egress)
 	strArrayInsert(cmdline, 3, srate); // egress
       int status;
       if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
@@ -254,12 +255,11 @@ extern "C" {
 
     markSwitchPorts(mod);
     uint32_t channel = sampling_channel(mod);
-    int sampling_dirn = sp->sFlowSettings->samplingDirection;
 
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       uint32_t sampling_n = lookupPacketSamplingRate(adaptor, sp->sFlowSettings);
-      if(setSamplingRate(mod, adaptor, channel, sampling_n, sampling_dirn))
+      if(setSamplingRate(mod, adaptor, channel, sampling_n))
 	sp->hardwareSampling = YES;
     }
   }
@@ -284,13 +284,12 @@ extern "C" {
       return;
     // turn off any hardware sampling that we enabled
     uint32_t channel = sampling_channel(mod);
-    int sampling_dirn = sp->sFlowSettings->samplingDirection;
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(niostate->switchPort
 	 && niostate->sampling_n_set != 0)
-	setSamplingRate(mod, adaptor, channel, 0, sampling_dirn);
+	setSamplingRate(mod, adaptor, channel, 0);
     }
   }
 

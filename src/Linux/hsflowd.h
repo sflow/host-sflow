@@ -205,6 +205,8 @@ extern "C" {
     uint32_t datagramBytes;
 
     // option to control switch-port sampling direction
+    // No longer used (v2.0.38).
+    // Expect "psample { ingress=[on|off] egress=[on|off] }"
     int samplingDirection;
 #define HSP_DIRN_UNDEFINED 0
 #define HSP_DIRN_IN 1

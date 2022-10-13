@@ -1218,7 +1218,7 @@ extern "C" {
 
       if(tok->stok
 	 && HSPSpecialTokens[tok->stok].deprecated)
-	myDebug(1, "line %u: %s now deprecated. prefer: \"%s\"",
+	myDebug(1, "line %u: %s setting is now deprecated and may be ignored. Prefer: \"%s\"",
 		tok->lineNo,
 		tok->str,
 		HSPSpecialTokens[tok->stok].deprecated);
@@ -1460,6 +1460,7 @@ extern "C" {
 	    if((tok = expectFile(sp, tok, &sp->json.FIFO)) == NULL) return NO;
 	    break;
 	  case HSPTOKEN_SAMPLINGDIRECTION:
+	    // deprecated, will be ignored. But still parse to consume without error.
 	    if((tok = expectDirection(sp, tok, &sp->sFlowSettings_file->samplingDirection)) == NULL) return NO;
 	    break;
 	  default:

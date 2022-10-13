@@ -243,6 +243,7 @@ extern "C" {
       }
       u_char *datap = msg + offset + NLA_HDRLEN;
       switch(ps_attr->nla_type) {
+	// TODO: interpret PSAMPLE_ATTR_PROTO
       case PSAMPLE_ATTR_IIFINDEX: ifin = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_OIFINDEX: ifout = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_ORIGSIZE: pkt_len = *(uint32_t *)datap; break;
