@@ -143,6 +143,16 @@ extern "C" {
     return NULL;
   }
 
+  SFLAdaptor *adaptorByAlias(HSP *sp, char *alias) {
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      if(my_strequal(alias, adaptorNIO->deviceAlias))
+	return adaptor;
+    }
+    return NULL;
+  }
+
   static void deleteAdaptorFromHT(UTHash *ht, SFLAdaptor *ad, char *htname) {
     char buf[256];
     if(UTHashDel(ht, ad) != ad) {
@@ -227,7 +237,7 @@ extern "C" {
     return myAdaptors;
   }
 
-  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method)
+  bool setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method)
   {
     bool changed = (speed != adaptor->ifSpeed);
     adaptor->ifSpeed = speed;
@@ -242,6 +252,21 @@ extern "C" {
        && sp->rootModule) {
       EVEventTxAll(sp->rootModule, HSPEVENT_INTF_SPEED, &adaptor, sizeof(adaptor));
     }
+    return changed;
+  }
+
+  bool setAdaptorAlias(HSP *sp, SFLAdaptor *adaptor, char *alias, char *method)
+  {
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    bool changed = !my_strequal(nio->deviceAlias, alias);
+    myDebug(1, "setAdaptorAlias(%s): %s alias == %s (changed=%s)",
+	    method,
+	    nio->deviceAlias ?: "NULL",
+	    alias ?: "NULL",
+	    changed ? "YES":"NO");
+    if(changed)
+      setStr(&nio->deviceAlias, alias);
+    return changed;
   }
 
   /*_________________---------------------------__________________
@@ -1872,6 +1897,8 @@ extern "C" {
     myLog(LOG_INFO, "autoload SONIC and PSAMPLE modules");
     sp->sonic.sonic = YES;
     sp->sonic.unixsock = YES;
+    sp->sonic.setIfAlias = YES;
+    sp->sonic.setIfName = YES;
     sp->psample.psample = YES;
     sp->psample.ingress = YES;
     sp->psample.egress = NO;

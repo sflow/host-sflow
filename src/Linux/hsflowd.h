@@ -369,6 +369,9 @@ extern "C" {
     int xen_netid;
     // allow mod_opx to write CPS entry ids here
     int opx_id;
+    // mod_sonic may write this, or in future it
+    // may come from reading netlink IFLA_IFALIAS
+    char *deviceAlias;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -562,6 +565,8 @@ extern "C" {
       char *swp_regex_str;
       regex_t *swp_regex;
       bool unixsock;
+      bool setIfAlias;
+      bool setIfName;
     } sonic;
     struct {
       bool nvml;
@@ -762,12 +767,14 @@ extern "C" {
   SFLAdaptor *adaptorByIndex(HSP *sp, uint32_t ifIndex);
   SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex);
   SFLAdaptor *adaptorByIP(HSP *sp, SFLAddress *ip);
+  SFLAdaptor *adaptorByAlias(HSP *sp, char *alias);
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
   int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
   char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen);
   void adaptorHTPrint(UTHash *ht, char *prefix);
-  void setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
+  bool setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
+  bool setAdaptorAlias(HSP *sp, SFLAdaptor *adaptor, char *alias, char *method);
 
   // local IPs
   HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev);

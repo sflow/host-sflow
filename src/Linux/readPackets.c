@@ -132,8 +132,18 @@ extern "C" {
 	// add optional interface name struct
 	SFLCounters_sample_element pn_elem = { 0 };
 	pn_elem.tag = SFLCOUNTERS_PORTNAME;
-	pn_elem.counterBlock.portName.portName.len = my_strlen(devName);
-	pn_elem.counterBlock.portName.portName.str = devName;
+	char *sFlowPortName = devName;
+	// It might be more elegant to splice in an alternative PORTNAME element
+	// later in mod_sonic evt_cntr_sample() but there is an IFLA_IFALIAS
+	// that we might someday discover via netlink and want to export as
+	// the portName even on other platforms, so allow the policy to to be
+	// a global flag that we test here.  For now the flag is
+	// sp->sonic.setIfName but it could end up as something like "sp->portNameUseAlias".
+	if(sp->sonic.setIfName
+	   && adaptorNIO->deviceAlias)
+	  sFlowPortName = adaptorNIO->deviceAlias;
+	pn_elem.counterBlock.portName.portName.len = my_strlen(sFlowPortName);
+	pn_elem.counterBlock.portName.portName.str = sFlowPortName;
 	SFLADD_ELEMENT(cs, &pn_elem);
 
 	// possibly include LACP struct for bond slave

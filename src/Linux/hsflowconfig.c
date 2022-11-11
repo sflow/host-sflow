@@ -1138,11 +1138,15 @@ extern "C" {
 	    && st->agentDevice) {
       myDebug(1, "selectAgentAddress pegged to device in current settings");
       selectedAdaptor = adaptorByName(sp, st->agentDevice);
+      if(selectedAdaptor == NULL)
+	selectedAdaptor = adaptorByAlias(sp, st->agentDevice);
     }
     else if(st_file
 	    && st_file->agentDevice) {
       myDebug(1, "selectAgentAddress pegged to device in config file");
       selectedAdaptor = adaptorByName(sp, st_file->agentDevice);
+      if(selectedAdaptor == NULL)
+	selectedAdaptor = adaptorByAlias(sp, st_file->agentDevice);
     }
     
     if(ip == NULL) {
