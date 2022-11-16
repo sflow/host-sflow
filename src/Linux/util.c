@@ -1474,6 +1474,21 @@ extern "C" {
     return NO;
   }
 
+  int SFLAddress_isClassE(SFLAddress *addr) {
+    if(addr->type == SFLADDRESSTYPE_IP_V6) {
+      // TODO: is there a 'do not use' block in IPv6?
+      // If changes are made here be sure to apply
+      // in agentAddressPriority() fn.
+      return NO;
+    }
+    else {
+      // 240.0.0.0/4
+      u_char *a = (u_char *)&(addr->address.ip_v4.addr);
+      return ((a[0] & 0xF0) == 240);
+    }
+    return NO;
+  }
+
   void SFLAddress_mask(SFLAddress *addr, SFLAddress *mask) {
     if((mask->type = addr->type) == SFLADDRESSTYPE_IP_V6) {
       for(int ii = 0; ii < 16; ii++) {

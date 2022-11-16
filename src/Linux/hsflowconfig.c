@@ -1015,6 +1015,9 @@ extern "C" {
       else if(SFLAddress_isRFC1918(addr)) {
 	ipPriority = IPSP_IP4_RFC1918;
       }
+      else if(SFLAddress_isClassE(addr)) {
+	ipPriority = IPSP_CLASS_E;
+      }
       break;
 
     case SFLADDRESSTYPE_IP_V6:

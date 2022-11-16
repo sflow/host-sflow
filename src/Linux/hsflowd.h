@@ -262,6 +262,8 @@ extern "C" {
 		 IPSP_IP6_SCOPE_GLOBAL,
 		 IPSP_IP4_RFC1918,
 		 IPSP_IP4,
+		 IPSP_CLASS_E,
+		 IPSP_MULTICAST,
 		 IPSP_NUM_PRIORITIES,
   } EnumIPSelectionPriority;
 
