@@ -1018,6 +1018,9 @@ extern "C" {
       else if(SFLAddress_isClassE(addr)) {
 	ipPriority = IPSP_CLASS_E;
       }
+      else if(SFLAddress_isMulticast(addr)) {
+	ipPriority = IPSP_MULTICAST;
+      }
       break;
 
     case SFLADDRESSTYPE_IP_V6:
@@ -1037,6 +1040,9 @@ extern "C" {
       }
       else if(vlan != HSP_VLAN_ALL) {
 	ipPriority = IPSP_VLAN6;
+      }
+      else if(SFLAddress_isMulticast(addr)) {
+	ipPriority = IPSP_MULTICAST;
       }
       break;
     default:

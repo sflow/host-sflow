@@ -252,6 +252,8 @@ extern "C" {
   } HSPVMState;
 
   typedef enum { IPSP_NONE=0,
+		 IPSP_CLASS_E,
+		 IPSP_MULTICAST,
 		 IPSP_LOOPBACK6,
 		 IPSP_LOOPBACK4,
 		 IPSP_SELFASSIGNED4,
@@ -262,8 +264,6 @@ extern "C" {
 		 IPSP_IP6_SCOPE_GLOBAL,
 		 IPSP_IP4_RFC1918,
 		 IPSP_IP4,
-		 IPSP_CLASS_E,
-		 IPSP_MULTICAST,
 		 IPSP_NUM_PRIORITIES,
   } EnumIPSelectionPriority;
 
