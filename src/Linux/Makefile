@@ -15,7 +15,7 @@ endif
 
 # learn kernel version
 KVER=$(shell ./kernelVersion.sh)
-KERNEL5PLUS=$(shell if test $(KVER) -gt 5000000; then echo "yes"; else echo "no"; fi)
+KERNEL54PLUS=$(shell if test $(KVER) -ge 5004000; then echo "yes"; else echo "no"; fi)
 
 HSFLOWD_CONF=scripts/hsflowd.conf
 HSFLOWD_INITSCRIPT=scripts/hsflowd
@@ -47,7 +47,7 @@ FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
 FEATURES_SONIC= SONIC PSAMPLE DOCKER
-ifeq ($(KERNEL5PLUS),yes)
+ifeq ($(KERNEL54PLUS),yes)
   FEATURES_SONIC += DROPMON
 endif
 FEATURES_XEN= XEN OVS
