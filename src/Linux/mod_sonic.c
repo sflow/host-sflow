@@ -1619,6 +1619,9 @@ extern "C" {
       if(mdata->sflow_agent) {
 	snprintf(cfgLine, EV_MAX_EVT_DATALEN, "agent=%s", mdata->sflow_agent);
 	EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+      } else {
+	snprintf(cfgLine, EV_MAX_EVT_DATALEN, "agent=%s", "");
+	EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
       }
       snprintf(cfgLine, EV_MAX_EVT_DATALEN, "polling=%u", mdata->sflow_polling);
       EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
