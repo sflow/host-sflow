@@ -588,7 +588,7 @@ extern "C" {
     _________________   sFlowSettingsString     __________________
     -----------------___________________________------------------
    Only print the config fields that can be overridden dynamically
-   (e.g. via DNS-SD)
+   (e.g. via DNS-SD or from mod_sonic)
   */
 
   char *sFlowSettingsString(HSP *sp, HSPSFlowSettings *settings)
@@ -596,6 +596,7 @@ extern "C" {
     UTStrBuf *buf = UTStrBuf_new();
 
     if(settings) {
+      char ipbuf[51];
       UTStrBuf_printf(buf, "hostname=%s\n", sp->hostname);
       UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
       UTStrBuf_printf(buf, "header=%u\n", settings->headerBytes);
@@ -610,29 +611,14 @@ extern "C" {
 	  UTStrBuf_printf(buf, "polling.%s=%u\n", appSettings->application, appSettings->polling_secs);
 	}
       }
-      // agentIP can override the config file here if set,  but otherwise print the address we selected
-      // TODO: should avoid writing in previously set agentIP or agentDevice. Should only write that in
-      // if it was an override. In installSFlowSettings we have to be careful to detect that a new config
-      // was submitted but still print the agentIP and agent lines to /etc/hsflowd.auto.  Before doing that
-      // however, we have to check for any change to agentIP, agent or agentCIDR,  and if so run the
-      // selectAgentAddress election again to pick an agentIP.
-      SFLAddress agIP = settings->agentIP.type ? settings->agentIP : sp->agentIP;
-      char ipbuf[51];
-      UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&agIP, ipbuf, 50));
-      
-      // agentDevice can be overridden too,  otherwise print the one we selected
-      char *agDev = settings->agentDevice ?: sp->agentDevice;
-      if(agDev) {
-	UTStrBuf_printf(buf, "agent=%s\n", agDev);
-      }
 
-      UTStrBuf_printf(buf, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
-
-      // jsonPort always comes from local config file, but include it here so that
-      // others know where to send their JSON application/rtmetric/rtflow messages
-      if(sp->json.port) {
-	UTStrBuf_printf(buf, "jsonPort=%u\n", sp->json.port);
-      }
+      // agentIP and/or agentDevice can override the config file (and auto-selection) if set.
+      // If these overrides are removed again in another dynamic update then we simply leave them
+      // out here and it should trigger a return to the previous behavior.
+      if(settings->agentIP.type)
+	UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&settings->agentIP, ipbuf, 50));
+      if(settings->agentDevice)
+	UTStrBuf_printf(buf, "agent=%s\n", settings->agentDevice);
 
       // the DNS-SD responses seem to be reordering the collectors every time, so we have to take
       // another step here to make sure they are sorted.  Otherwise we think the config has changed
