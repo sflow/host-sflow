@@ -374,6 +374,10 @@ extern "C" {
     // mod_sonic may write this, or in future it
     // may come from reading netlink IFLA_IFALIAS
     char *deviceAlias;
+    // mod_sonic, or other NOS with it's own ifIndex
+    // numbering may write a priority number here to
+    // stabilize the agent address selection.
+    uint32_t selectionPriority;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -777,6 +781,7 @@ extern "C" {
   void adaptorHTPrint(UTHash *ht, char *prefix);
   bool setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
   bool setAdaptorAlias(HSP *sp, SFLAdaptor *adaptor, char *alias, char *method);
+  bool setAdaptorSelectionPriority(HSP *sp, SFLAdaptor *adaptor, uint32_t priority, char *method);
 
   // local IPs
   HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev);

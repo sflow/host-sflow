@@ -368,6 +368,7 @@ extern "C" {
       if(prt->mark) {
 	myDebug(1, "sonic port removed %s", prt->portName);
 	UTHashDel(mdata->portsByName, prt);
+	UTHashDel(mdata->portsByOsIndex, prt);
 	UTArrayDel(mdata->newPorts, prt);
 	UTArrayDel(mdata->unmappedPorts, prt);
 	if(prt->portName)
@@ -885,6 +886,29 @@ extern "C" {
     return NO;
   }
 
+  /*_________________-------------------------------__________________
+    _________________    setPortSelectionPriority   __________________
+    -----------------_______________________________------------------
+
+    Set selection priority to influence the automatic agent-address selection so that
+    the last tiebreaker is driven by the SONiC ifIndex rather than the Linux ifIndex (osIndex).
+    This should stabilize the selection across a warm boot, where the Linux ifIndex numbers
+    can end up in a different order.  This will not override other settings based on
+    IP address class etc. -- just puts a thumb on the scale for the case where two
+    candidates are otherwise tied.
+  */
+
+  static bool setPortSelectionPriority(EVMod *mod, HSPSonicPort *prt, bool setIt) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    SFLAdaptor *adaptor = adaptorByIndex(sp, prt->osIndex);
+    if(adaptor)
+      return setAdaptorSelectionPriority(sp,
+				adaptor,
+				setIt ? prt->ifIndex : 0,
+				"MOD_SONIC");
+    return NO;
+  }
+
   /*_________________---------------------------__________________
     _________________      db_getifIndexMap     __________________
     -----------------___________________________------------------
@@ -931,13 +955,15 @@ extern "C" {
 			idx);
 		signalCounterDiscontinuity(mod, prt);
 		UTHashDel(mdata->portsByOsIndex, prt);
-		// clear alias from previous adaptor
+		// clear alias and SelectionPriority from previous adaptor
 		setPortAlias(mod, prt, NO);
+		setPortSelectionPriority(mod, prt, NO);
 	      }
 	      prt->osIndex = idx;
 	      UTHashAdd(mdata->portsByOsIndex, prt);
-	      // set alias for this adaptor
+	      // set alias and SelectionPriority for this adaptor
 	      setPortAlias(mod, prt, YES);
+	      setPortSelectionPriority(mod, prt, YES);
 	    }
 	  }
 	}

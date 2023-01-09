@@ -269,6 +269,20 @@ extern "C" {
     return changed;
   }
 
+  bool setAdaptorSelectionPriority(HSP *sp, SFLAdaptor *adaptor, uint32_t priority, char *method)
+  {
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    bool changed = nio->selectionPriority != priority;
+    myDebug(1, "setAdaptorSelectionPriority(%s): %s %u -> %u (changed=%s)",
+	    method,
+	    adaptor->deviceName,
+	    nio->selectionPriority,
+	    priority,
+	    changed ? "YES":"NO");
+    nio->selectionPriority = priority;
+    return changed;
+  }
+
   /*_________________---------------------------__________________
     _________________        local IPs          __________________
     -----------------___________________________------------------

@@ -1094,9 +1094,24 @@ extern "C" {
     SFLAdaptor *adaptor2 = adaptorByName(sp, challenger->dev);
     if(adaptor2 == NULL)
       return NO;
-    // if it's the same interface, take the one we found first
+    // if these addresses are on the same interface, take the one we found first
     if(adaptor1->ifIndex == adaptor2->ifIndex)
       return (challenger->discoveryIndex < localIP->discoveryIndex);
+    // do we have selection priority numbers? (e.g. in SONiC the Linux
+    // ifIndex numbers can reorder on a warm boot, so priority numbers
+    // are supplied to adaptors to help stabilize this selection).
+    HSPAdaptorNIO *adaptorNIO1 = ADAPTOR_NIO(adaptor1);
+    HSPAdaptorNIO *adaptorNIO2 = ADAPTOR_NIO(adaptor2);
+    uint32_t priority1 = 0xFFFFFFFF;
+    uint32_t priority2 = 0xFFFFFFFF;
+    if(adaptorNIO1)
+      priority1 = adaptorNIO1->selectionPriority;
+    if(adaptorNIO2)
+      priority2 = adaptorNIO2->selectionPriority;
+    if(priority1 != priority2) {
+      // At least one of these was given a selectionPriority
+      return (priority2 < priority1); // lower number wins
+    }
     // otherwise take the one whose interface has the lower ifIndex
     return (adaptor2->ifIndex > 0
 	    && adaptor2->ifIndex < adaptor1->ifIndex);
