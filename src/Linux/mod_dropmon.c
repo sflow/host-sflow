@@ -26,6 +26,50 @@ extern "C" {
   #define DROPMON_GENL_NAME "NET_DM"
 #endif
 
+#define HSP_REPLICATE_DROPMON_DEFS 1
+#ifdef  HSP_REPLICATE_DROPMON_DEFS
+  /* Replicate the definitions we need from net_dropmon.h here,
+     so we can compile on an older OS if necessary. This assumes
+     that the kernel will only ever add to these, and never
+     change them.
+  */
+  
+  /* net_dm_addr */
+#define NET_DM_ATTR_UNSPEC 0
+#define NET_DM_ATTR_ALERT_MODE 1                 /* u8 */
+#define NET_DM_ATTR_PC 2                         /* u64 */
+#define NET_DM_ATTR_SYMBOL 3                     /* string */
+#define NET_DM_ATTR_IN_PORT 4                    /* nested */
+#define NET_DM_ATTR_TIMESTAMP 5                  /* u64 */
+#define NET_DM_ATTR_PROTO 6                      /* u16 */
+#define NET_DM_ATTR_PAYLOAD 7                    /* binary */
+#define NET_DM_ATTR_PAD 8
+#define NET_DM_ATTR_TRUNC_LEN 9                  /* u32 */
+#define NET_DM_ATTR_ORIG_LEN 10                  /* u32 */
+#define NET_DM_ATTR_QUEUE_LEN 11                 /* u32 */
+#define NET_DM_ATTR_STATS 12                     /* nested */
+#define NET_DM_ATTR_HW_STATS 13                  /* nested */
+#define NET_DM_ATTR_ORIGIN 14                    /* u16 */
+#define NET_DM_ATTR_HW_TRAP_GROUP_NAME 15        /* string */
+#define NET_DM_ATTR_HW_TRAP_NAME 16              /* string */
+#define NET_DM_ATTR_HW_ENTRIES 17                /* nested */
+#define NET_DM_ATTR_HW_ENTRY 18                  /* nested */
+#define NET_DM_ATTR_HW_TRAP_COUNT 19             /* u32 */
+#define NET_DM_ATTR_SW_DROPS 20                  /* flag */
+#define NET_DM_ATTR_HW_DROPS 21                  /* flag */
+#define NET_DM_ATTR_MAX NET_DM_ATTR_HW_DROPS
+
+/* net_dm_alert_mode */
+#define NET_DM_ALERT_MODE_SUMMARY 0
+#define NET_DM_ALERT_MODE_PACKET 1
+
+/* net_dm_attr_port */
+#define NET_DM_ATTR_PORT_NETDEV_IFINDEX 0        /* u32 */
+#define NET_DM_ATTR_PORT_NETDEV_NAME 1           /* string */
+#define NET_DM_ATTR_PORT_MAX NET_DM_ATTR_PORT_NETDEV_NAME
+  
+#endif /* HSP_REPLICATE_DROPMON_DEFS */		      
+  
 #define HSP_DROPMON_READNL_RCV_BUF 8192
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000

@@ -14,8 +14,8 @@ ifndef REDHAT
 endif
 
 # learn kernel version
-KVER=$(shell ./kernelVersion.sh)
-KERNEL54PLUS=$(shell if test $(KVER) -ge 5004000; then echo "yes"; else echo "no"; fi)
+# KVER=$(shell ./kernelVersion.sh)
+# KERNEL54PLUS=$(shell if test $(KVER) -ge 5004000; then echo "yes"; else echo "no"; fi)
 
 HSFLOWD_CONF=scripts/hsflowd.conf
 HSFLOWD_INITSCRIPT=scripts/hsflowd
@@ -46,10 +46,7 @@ FEATURES_DENTOS= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
 FEATURES_OS10= OS10 DBUS SYSTEMD
 FEATURES_OPX= OPX DBUS SYSTEMD
-FEATURES_SONIC= SONIC PSAMPLE DOCKER
-ifeq ($(KERNEL54PLUS),yes)
-  FEATURES_SONIC += DROPMON
-endif
+FEATURES_SONIC= SONIC PSAMPLE DOCKER DROPMON
 FEATURES_XEN= XEN OVS
 FEATURES_HOST= NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD PSAMPLE DENT DROPMON
 
