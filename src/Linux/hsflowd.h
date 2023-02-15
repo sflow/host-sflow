@@ -605,6 +605,8 @@ extern "C" {
       bool hw;
       uint32_t limit;
       uint32_t max;
+      bool hw_unknown;
+      bool hw_function;
     } dropmon;
     struct {
       bool pcap;

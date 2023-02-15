@@ -628,7 +628,7 @@ clean:
 
 #########  dependencies  #########
 
-.c.o: $(HEADERS)
+.c.o:
 	$(CC) $(CFLAGS) -c $*.c
 
 util.o: util.c $(HEADERS)

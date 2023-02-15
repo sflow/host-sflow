@@ -242,6 +242,7 @@ extern "C" {
     UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
       if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time
+	myDebug(1, "dropPoint pattern %s matched grp=%s str=%s", dp->dropPoint, group, dropPointStr);
 	dp = newDropPoint(dropPointStr, NO, dp->reason);
 	addDropPoint_hw(mod, dp);
 	return dp;
@@ -336,6 +337,15 @@ extern "C" {
     if(sp->dropmon.hw) {
       for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_hw); ii++) {
 	HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_hw[ii]);
+	if(dp)
+	  addDropPoint_hw(mod, dp);
+      }
+      if(sp->dropmon.hw_unknown) {
+	// Option to match everything that falls through the classifier. This
+	// is the same as including "HSP_DROPPOINT(*=,*,unknown)" in dropPoints_hw.h
+	// except that we can turn it on/off in the config.
+	HSPDropPointLoader dplAll = { "*=", "*", "unknown" };
+	HSPDropPoint *dp = buildDropPoint(&dplAll);
 	if(dp)
 	  addDropPoint_hw(mod, dp);
       }
@@ -611,7 +621,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     char *hw_group=NULL;
     char *hw_name=NULL;
     char *sw_symbol=NULL;
-
+    // space to assemble hw_function if included
+    char hwFnBuf[SFL_MAX_FUNCTION_SYMBOL_LEN+1];
+    
     struct nlattr *attr = (struct nlattr *)(msg + GENL_HDRLEN);
     int len = msglen - GENL_HDRLEN;
     while(UTNLA_OK(attr, len)) {
@@ -790,6 +802,16 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(sw_symbol) {
       fnElem.flowType.function.symbol.str = dp->dropPoint;
       fnElem.flowType.function.symbol.len = my_strlen(dp->dropPoint);
+      SFLADD_ELEMENT(&discard, &fnElem);
+    }
+    else if(sp->dropmon.hw_function) {
+      // This option (off by default) is to help with discovering (not missing)
+      // new codes that do not map to defined drop reason codes.
+      // This formatting assumes there is no space in the hw_name but it's not serious
+      // if there is because the string, if used, will likely be taken as a whole.
+      snprintf(hwFnBuf, SFL_MAX_FUNCTION_SYMBOL_LEN, "%s %s", hw_name ?: "-", hw_group ?: "-"); 
+      fnElem.flowType.function.symbol.str = hwFnBuf;
+      fnElem.flowType.function.symbol.len = my_strlen(hwFnBuf);
       SFLADD_ELEMENT(&discard, &fnElem);
     }
 

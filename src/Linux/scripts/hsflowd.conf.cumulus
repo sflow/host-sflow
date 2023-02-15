@@ -7,7 +7,7 @@ sflow {
   # psample { group=1 }
   # systemd {}
   # nflog { group=1 }
-  # dropmon { group=1 start=off limit=1000 }
+  # dropmon { start=off limit=1000 }
 
   # ====== Sampling/Polling/Collectors ======
   # EITHER: automatic (DNS SRV+TXT from _sflow._udp):

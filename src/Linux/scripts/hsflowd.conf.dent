@@ -36,6 +36,6 @@ sflow {
   # systemd {}
   #
   # monitor dropped packets:
-  # dropmon { group=1 start=off limit=1000 }
+  # dropmon { start=off limit=1000 }
 }
 

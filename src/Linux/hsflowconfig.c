@@ -1346,6 +1346,8 @@ extern "C" {
 	    sp->dropmon.max = 100000;
 	    sp->dropmon.sw = YES;
 	    sp->dropmon.hw = YES;
+	    sp->dropmon.hw_unknown = NO;
+	    sp->dropmon.hw_function = NO;
 	    level[++depth] = HSPOBJ_DROPMON;
 	    break;
 	  case HSPTOKEN_PCAP:
@@ -1693,7 +1695,12 @@ extern "C" {
 	  {
 	    switch(tok->stok) {
 	    case HSPTOKEN_GROUP:
-	      // deprecated, ignored
+	      // deprecated, ignore as long as it is well-formed. Must still
+	      // parse to consume the arg.
+	      {
+		uint32_t ignore;
+		if((tok = expectInteger32(sp, tok, &ignore, 1, 0xFFFFFFFF)) == NULL) return NO;
+	      }
 	      break;
 	    case HSPTOKEN_START:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.start)) == NULL) return NO;
@@ -1703,6 +1710,12 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_HW:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_HW_UNKNOWN:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_unknown)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_HW_FUNCTION:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_function)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_LIMIT:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.limit, 1, HSP_MAX_NOTIFY_RATELIMIT)) == NULL) return NO;
