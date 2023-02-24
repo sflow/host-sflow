@@ -1406,8 +1406,9 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
     HSPSonicCollector *coll = (HSPSonicCollector *)req_magic;
-    myDebug(1, "sonic getCollectorInfoCB(%s): reply=%s",
+    myDebug(1, "sonic getCollectorInfoCB(%s): newCollectors=%u reply=%s",
 	    coll->collectorName,
+	    UTArrayN(mdata->newCollectors),
 	    db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return;
@@ -1453,6 +1454,7 @@ extern "C" {
     }
     if(UTArrayN(mdata->newCollectors) == 0) {
       // got them all, now sync
+      myDebug(1, "sonic : no more newCollectors - syncConfig");
       syncConfig(mod);
     }
     else {
@@ -1472,6 +1474,7 @@ extern "C" {
 
   static bool discoverNewCollectors(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    myDebug(1, "sonic discoverNewCollectors() newCollectors=%u", UTArrayN(mdata->newCollectors));
     // kick off just one - starts a chain reaction if there are more.
     HSPSonicCollector *coll = UTArrayPop(mdata->newCollectors);
     if(coll) {
