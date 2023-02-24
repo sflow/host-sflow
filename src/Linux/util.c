@@ -781,8 +781,13 @@ extern "C" {
   static void arrayDeleteCheck(UTArray *ar) {
     ar->dbins++;
     if(ar->options & UTARRAY_PACK
-       && ar->n > 8
-       && ar->dbins > (ar->n >> 1))
+       // used to have more efficient "lazy" pack like this:
+       // && ar->n > 8
+       // && ar->dbins > (ar->n >> 1)
+       // but it's easier if UTARRAY_PACK means "always packed"
+       // because less likely to be thrown off by "holes" in
+       // the array.  Can revist if efficiency is neeeded.
+       )
       UTArrayPack(ar);
   }
     

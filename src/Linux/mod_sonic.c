@@ -923,7 +923,7 @@ extern "C" {
     HSPSonicPort *prt = (HSPSonicPort *)req_magic;
     myDebug(1, "sonic db_ifIndexMapCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
-      return;
+      return; // stay in the same state - will retry
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -1088,7 +1088,7 @@ extern "C" {
     HSPSonicPort *prt = (HSPSonicPort *)req_magic;
     myDebug(1, "sonic db_portStateCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
-      return; // has the effect of skipping this port and going to the next
+      return; // will skip this port and go to the next
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -1187,7 +1187,7 @@ extern "C" {
 
     myDebug(1, "sonic portCounters: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
-      return; // will just skip this poll
+      return; // will skip this poll
     memset(&prt->ctrs, 0, sizeof(prt->ctrs));
     memset(&prt->et_ctrs, 0, sizeof(prt->et_ctrs));
     if(reply->type == REDIS_REPLY_ARRAY
@@ -1411,7 +1411,7 @@ extern "C" {
 	    UTArrayN(mdata->newCollectors),
 	    db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
-      return;
+      goto COLLECTOR_INFO_DONE; // will skip this one and try next
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -1452,14 +1452,11 @@ extern "C" {
 	}
       }
     }
-    if(UTArrayN(mdata->newCollectors) == 0) {
+  COLLECTOR_INFO_DONE:
+    if(discoverNewCollectors(mod) == NO) {
       // got them all, now sync
       myDebug(1, "sonic : no more newCollectors - syncConfig");
       syncConfig(mod);
-    }
-    else {
-      // we still have more to discover
-      discoverNewCollectors(mod);
     }
   }
 
@@ -1500,7 +1497,7 @@ extern "C" {
 
     myDebug(1, "sonic getCollectorNamesCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
-      return;
+      return; // stay in same state - may try again next tick
     markCollectors(mod);
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0) {
@@ -1944,9 +1941,9 @@ extern "C" {
     mdata->portsByName = UTHASH_NEW(HSPSonicPort, portName, UTHASH_SKEY);
     mdata->portsByOsIndex = UTHASH_NEW(HSPSonicPort, osIndex, UTHASH_DFLT);
     mdata->collectors = UTHASH_NEW(HSPSonicCollector, collectorName, UTHASH_SKEY);
-    mdata->newPorts = UTArrayNew(UTARRAY_DFLT);
-    mdata->unmappedPorts = UTArrayNew(UTARRAY_DFLT);
-    mdata->newCollectors = UTArrayNew(UTARRAY_DFLT);
+    mdata->newPorts = UTArrayNew(UTARRAY_PACK);
+    mdata->unmappedPorts = UTArrayNew(UTARRAY_PACK);
+    mdata->newCollectors = UTArrayNew(UTARRAY_PACK);
     // retainRootRequest(mod, "Needed to call out to OPX scripts (PYTHONPATH)");
 
 #ifdef HSP_SONIC_TEST_REDISONLY
