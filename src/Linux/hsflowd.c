@@ -1920,8 +1920,8 @@ extern "C" {
     sp->sonic.setIfName = YES;
     sp->psample.psample = YES;
     sp->psample.ingress = YES;
-    sp->psample.egress = NO;
-    sp->psample.group = 1;
+    sp->psample.egress = YES;
+    sp->psample.group = 1; // Ingress PSAMPLE group number. Expects egress on (group+1).
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN
