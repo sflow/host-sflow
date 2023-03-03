@@ -27,12 +27,6 @@ extern "C" {
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h> // for PRIu64 etc.
 
-#ifdef __GLIBC__
-#include "malloc.h" // for malloc_stats()
-#else
-#define malloc_stats() {}
-#endif
-
 #include <sys/wait.h>
 #include <ctype.h> // for isspace() etc.
 #include "pthread.h"
@@ -73,6 +67,8 @@ extern "C" {
   void myLog(int syslogType, char *fmt, ...);
   void setDebug(int level);
   int getDebug(void);
+  void setDebugOut(FILE *out);
+  FILE *getDebugOut(void);
   int debug(int level);
   void myDebug(int level, char *fmt, ...);
   void setDaemon(bool yesno);

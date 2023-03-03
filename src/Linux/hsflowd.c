@@ -10,6 +10,10 @@ extern "C" {
 #include "cpu_utils.h"
 #include "cJSON.h"
 
+#if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 13)
+#include "malloc.h" // for malloc_info()
+#endif
+
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
@@ -18,6 +22,7 @@ extern "C" {
   static void openCollectorSockets(HSP *sp, HSPSFlowSettings *settings);
   static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
   static bool updatePollingInterval(HSP *sp);
+  static void openLogFile(HSP *sp);
   
   /*_________________---------------------------__________________
     _________________     agent callbacks       __________________
@@ -841,9 +846,10 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile] [-l MODULESDir]\n", command);
+    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile] [-l MODULESDir] [-D LOGFile]\n", command);
     fprintf(stderr,"\n\
-             -d:  do not daemonize, and log to stdout/stderr (repeat for more debug details)\n\
+             -d:  do not daemonize, and log to stdout/LOGFile (repeat for more debug details)\n\
+     -D LOGFile:  debug logging goes to this file\n\
              -v:  print version number and exit\n\
              -P:  do not drop privileges (run as root)\n\
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
@@ -867,7 +873,7 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dDvPp:f:l:o:u:m:?hc:")) != -1) {
+    while ((in = getopt(argc, argv, "dvPp:f:l:o:u:m:?hc:D:")) != -1) {
       switch(in) {
       case 'v':
 	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
@@ -885,6 +891,7 @@ extern "C" {
       case 'l': sp->modulesPath = my_strlen(optarg) ? optarg : NULL; break;
       case 'o': sp->outputFile = optarg; break;
       case 'c': sp->crashFile = optarg; break;
+      case 'D': sp->logFile = optarg; break;
       case 'u':
 	if(parseUUID(optarg, sp->uuid) == NO) {
 	  fprintf(stderr, "bad UUID format: %s\n", optarg);
@@ -909,7 +916,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  void log_backtrace(int sig, siginfo_t *info) {
+  void log_backtrace(int sig, siginfo_t *info, FILE *out) {
 #ifdef HAVE_BACKTRACE
 #define HSP_NUM_BACKTRACE_PTRS 50
     static void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
@@ -917,20 +924,19 @@ extern "C" {
     // ask for the backtrace pointers
     size_t siz = backtrace(backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
 
-    if(f_crash == NULL)
-      f_crash = stderr;
+    FILE *outFile = out ?: stderr;
 
     // do this first in case everything else is compromised
-    backtrace_symbols_fd(backtracePtrs, siz, fileno(f_crash));
-    fflush(f_crash);
+    backtrace_symbols_fd(backtracePtrs, siz, fileno(outFile));
+    fflush(outFile);
 
     // Do something useful with siginfo_t
     if (sig == SIGSEGV)
-      fprintf(f_crash, "SIGSEGV, faulty address is %p\n", info->si_addr);
+      fprintf(out, "SIGSEGV, faulty address is %p\n", info->si_addr);
 
     // thread info
     EVBus *bus = EVCurrentBus();
-    fprintf(f_crash, "current bus: %s\n", (bus ? bus->name : "<none>"));
+    fprintf(outFile, "current bus: %s\n", (bus ? bus->name : "<none>"));
 #endif
   }
 
@@ -948,6 +954,11 @@ extern "C" {
       // graceful
       EVStop(sp->rootModule);
       break;
+    case SIGHUP:
+      myLog(LOG_INFO,"Received SIGHUP");
+      // reopen log files (this signal may have been from logrotate)
+      openLogFile(sp);
+      break;
     case SIGINT:
       myLog(LOG_INFO,"Received SIGINT");
       // abrupt
@@ -955,24 +966,31 @@ extern "C" {
       break;
     case SIGUSR1:
       myLog(LOG_INFO,"Received SIGUSR1");
-      // backtrace only - then keep going
-      log_backtrace(sig, info);
+      // backtrace and memory stats only - then keep going
+      log_backtrace(sig, info, getDebugOut());
+#if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 13)
+      malloc_info(0, getDebugOut());
+#endif
       break;
     case SIGUSR2:
       myLog(LOG_INFO,"Received SIGUSR2");
-      // memory only - then keep going
-      malloc_stats();
+      // increase debug log level
+      setDebug(getDebug() + 1);
+      myLog(LOG_INFO,"increased debug log level to %u", getDebug());
       break;
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
-      // first make sure we can't go in a loop
+      // first try to make sure we can't go in a loop
       signal(SIGSEGV, SIG_DFL);
       signal(SIGFPE, SIG_DFL);
       signal(SIGILL, SIG_DFL);
       signal(SIGBUS, SIG_DFL);
       signal(SIGXFSZ, SIG_DFL);
-      // backtrace and bail
-      log_backtrace(sig, info);
+      // backtrace to stderr
+      log_backtrace(sig, info, stderr);
+      // backtrace to debug too
+      log_backtrace(sig, info, getDebugOut());
+      // and bail out
       exit(sig);
       break;
     }
@@ -991,10 +1009,6 @@ extern "C" {
     // so that modules can weigh in if required,  and, for example, sampling-rates can be set
     // correctly.
     readInterfaces(sp, YES, NULL, NULL, NULL, NULL, NULL);
-
-    // print some stats to help us size HSP_RLIMIT_MEMLOCK etc.
-    if(debug(1))
-      malloc_stats();
 
     // add a <physicalEntity> poller to represent the whole physical host
     SFLDataSource_instance dsi;
@@ -1681,6 +1695,32 @@ extern "C" {
     sp->uuid[8] |= 0x80;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________      openLogFile          __________________
+    -----------------___________________________------------------
+  */
+
+  static void openLogFile(HSP *sp) {
+    FILE *f_dbg = getDebugOut();
+    if(f_dbg) {
+      // this may be a SIGHUP log rotation
+      setDebugOut(NULL);
+      fclose(f_dbg);
+    }
+    if(sp->logFile) {
+      // logFile specified. Open it for logging.  May want to add, e.g. -ddd to increase
+      // debug level,  or use "kill -USR2" to increase debug for already-running process.
+      if((f_dbg = fopen(sp->logFile, "a")) == NULL) {
+	myLog(LOG_ERR, "Failed to open debugLog %s : %s", sp->logFile, strerror(errno));
+      }
+      else {
+	setlinebuf(f_dbg);
+	setDebugOut(f_dbg);
+      }
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________         main              __________________
     -----------------___________________________------------------
@@ -1712,6 +1752,7 @@ extern "C" {
     sigaction(SIGABRT, &sa, NULL);
     sigaction(SIGUSR1, &sa, NULL);
     sigaction(SIGUSR2, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
     // TODO: SIGPIPE? SIGCHLD?
 
     // init
@@ -1720,6 +1761,9 @@ extern "C" {
     // read the command line
     processCommandLine(sp, argc, argv);
 
+    // log file may have been specified
+    openLogFile(sp);
+    
     // try to get the UUID from the BIOS because it is usually the most persistent,
     // and because hypervisors seem to set it up with the UUID that they know the VM by.
     // Used to do this as part of the startup script,  but moved it here so it would

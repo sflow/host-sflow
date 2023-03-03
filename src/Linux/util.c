@@ -6,10 +6,12 @@
 extern "C" {
 #endif
 
+#include <stdio.h>
 #include "util.h"
 
   static int debugLevel = 0;
   static bool daemonFlag = YES;
+  static FILE *debugOut = NULL;
 
   /*________________---------------------------__________________
     ________________       UTStrBuf            __________________
@@ -129,12 +131,20 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  void setDebugOut(FILE *out) {
+    debugOut = out;
+  }
+
+  FILE *getDebugOut(void) {
+    return debugOut ?: stdout;
+  }
+  
   void myLogv(int syslogType, char *fmt, va_list args)
   {
     if(debugLevel
        || daemonFlag==NO) {
-      vfprintf(stdout, fmt, args);
-      fprintf(stdout, "\n");
+      vfprintf(getDebugOut(), fmt, args);
+      fprintf(getDebugOut(), "\n");
     }
     else
       vsyslog(syslogType, fmt, args);
@@ -164,9 +174,9 @@ extern "C" {
     if(debug(level)) {
       va_list args;
       va_start(args, fmt);
-      fprintf(stdout, "dbg%d: ", level);
-      vfprintf(stdout, fmt, args);
-      fprintf(stdout, "\n");
+      fprintf(getDebugOut(), "dbg%d: ", level);
+      vfprintf(getDebugOut(), fmt, args);
+      fprintf(getDebugOut(), "\n");
     }
   }
 
@@ -192,7 +202,6 @@ extern "C" {
     void *mem = SYS_CALLOC(1, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "calloc() failed : %s", strerror(errno));
-      if(debug(1)) malloc_stats();
       exit(EXIT_FAILURE);
     }
     return mem;
@@ -206,7 +215,6 @@ extern "C" {
     void *mem = SYS_REALLOC(ptr, bytes);
     if(mem == NULL) {
       myLog(LOG_ERR, "realloc() failed : %s", strerror(errno));
-      if(debug(1)) malloc_stats();
       exit(EXIT_FAILURE);
     }
     return mem;

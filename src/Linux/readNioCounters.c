@@ -783,7 +783,7 @@ extern "C" {
 		  ctrs->pkts_in,
 		  ctrs->pkts_out);
 	  myDebug(1, "logging backtrace...");
-	  log_backtrace(0, NULL);
+	  log_backtrace(0, NULL, getDebugOut());
 	}
 
 	accumulate = NO;

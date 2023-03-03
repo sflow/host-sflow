@@ -644,6 +644,7 @@ extern "C" {
     uint32_t outputRevisionNo;
     FILE *f_out;
     char *crashFile;
+    char *logFile;
     UTStringArray *retainRootReasons;
 
     // Identity
@@ -818,7 +819,7 @@ extern "C" {
   void removeAndFreeVM(EVMod *mod, HSPVMState *state);
 
   // logging support
-  void log_backtrace(int sig, siginfo_t *info);
+  void log_backtrace(int sig, siginfo_t *info, FILE *out);
 
 #if defined(__cplusplus)
 } /* extern "C" */
