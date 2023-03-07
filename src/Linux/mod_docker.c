@@ -212,13 +212,6 @@ extern "C" {
 #define HSP_VNIC_REFRESH_TIMEOUT 300
 #define HSP_CGROUP_REFRESH_TIMEOUT 600
 
-  typedef enum {
-    HSP_VNIC_LAYER_NONE,
-    HSP_VNIC_LAYER_MAC,
-    HSP_VNIC_LAYER_IP,
-    HSP_VNIC_LAYER_IPIP
-  } EnumHSPVNICLayer;
-
   typedef struct _HSP_mod_DOCKER {
     EVBus *pollBus;
     UTHash *vmsByUUID;
@@ -250,7 +243,6 @@ extern "C" {
     uint32_t dup_names;
     uint32_t dup_hostnames;
     struct stat myNS;
-    EnumHSPVNICLayer vnicLayer;
     UTHash *vnicByIP;
   } HSP_mod_DOCKER;
 
@@ -333,7 +325,20 @@ extern "C" {
 	      myDebug(1, "Warning: container adaptor overwriting adaptorsByIndex");
 
 	  // mark it as a vm/container device
-	  ADAPTOR_NIO(adaptor)->vm_or_container = YES;
+	  // and record the dsIndex there for easy mapping later
+	  // provided it is unique.  Otherwise set it to all-ones
+	  // to indicate that it should not be used to map to container.
+	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+	  nio->vm_or_container = YES;
+	  if(nio->container_dsIndex != container->vm.dsIndex) {
+	    if(nio->container_dsIndex == 0)
+	      nio->container_dsIndex = container->vm.dsIndex;
+	    else {
+	      myDebug(1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
+	      // mark is as not a unique mapping
+	      nio->container_dsIndex = 0xFFFFFFFF;
+	    }
+	  }
 
 	  // did we get an ip address too?
 	  SFLAddress ipAddr = { };
@@ -2266,63 +2271,59 @@ extern "C" {
     Packet Bus
   */
 
-  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+  static bool containerDSByIP(EVMod *mod, SFLAddress *ipAddr) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
-    HSPPendingSample *ps = (HSPPendingSample *)data;
-    int ip_ver = decodePendingSample(ps);
-    int ip_offset = 0;
-    switch(mdata->vnicLayer) {
-    case HSP_VNIC_LAYER_IP:
-      if(ip_ver == 4
-	 && ps->l3_offset)
-	ip_offset = ps->l3_offset;
-      break;
-    case HSP_VNIC_LAYER_IPIP:
-      if(ip_ver == 4
-	 && ps->ipproto == 4 // IP-over-IP
-	 && ps->l4_offset)
-	ip_offset = ps->l4_offset;
-      break;
-    default:
-      break;
+    HSPVNIC search = { };
+    search.ipAddr = *ipAddr;
+    HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
+    if(vnic
+       && vnic->unique) {
+      myDebug(1, "VNIC: got src %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
+      return vnic->dsIndex;
     }
-    if(ip_offset) {
-      uint32_t src_dsIndex=0, dst_dsIndex=0;
-      HSPVNIC search = { };
-      HSPVNIC *vnic;
-      search.ipAddr.type = SFLADDRESSTYPE_IP_V4;
-      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ip_offset + 12, 4);
-      if(getDebug() > 2) {
-	char ipStr[64];
-	SFLAddress_print(&search.ipAddr, ipStr, 64);
-	myDebug(1, "VNIC: test src IP %s\n", ipStr);
-      }
-      vnic = UTHashGet(mdata->vnicByIP, &search);
-      if(vnic
-	 && vnic->unique) {
-	src_dsIndex = vnic->dsIndex;
-	myDebug(1, "VNIC: got %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
-      }
-      memcpy(&search.ipAddr.address.ip_v4.addr, ps->hdr + ip_offset + 16, 4);
-      if(getDebug() > 2) {
-	char ipStr[64];
-	SFLAddress_print(&search.ipAddr, ipStr, 64);
-	myDebug(1, "VNIC: test dst IP %s\n", ipStr);
-      }
-      vnic = UTHashGet(mdata->vnicByIP, &search);
-      if(vnic
-	 && vnic->unique) {
-	dst_dsIndex = vnic->dsIndex;
-	myDebug(1, "VNIC: got %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
-      }
+    return 0;
+  }
+  
+  static bool lookupContainerDS(EVMod *mod, HSPPendingSample *ps, uint32_t *p_src_dsIndex, uint32_t *p_dst_dsIndex) {
+    if(ps->gotInnerMAC) {
+      HSP *sp = (HSP *)EVROOTDATA(mod);
+      SFLAdaptor *src_vnic = adaptorByMac(sp, &ps->macsrc_1);
+      SFLAdaptor *dst_vnic = adaptorByMac(sp, &ps->macdst_1);
+      if(src_vnic)
+	*p_src_dsIndex = ADAPTOR_NIO(src_vnic)->container_dsIndex;
+      if(dst_vnic)
+	*p_dst_dsIndex = ADAPTOR_NIO(dst_vnic)->container_dsIndex;
+      return YES;
+    }
+    else if(ps->gotInnerIP) {
+      *p_src_dsIndex = containerDSByIP(mod, &ps->src_1);
+      *p_dst_dsIndex = containerDSByIP(mod, &ps->dst_1);
+      return YES;
+    }
+    else if(ps->l3_offset) {
+      *p_src_dsIndex = containerDSByIP(mod, &ps->src);
+      *p_dst_dsIndex = containerDSByIP(mod, &ps->dst);
+      return YES;
+    }
+    return NO;
+  }
+  
+  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    // HSP_mod_CONTAINERD *mdata = (HSP_mod_CONTAINERD *)mod->data;
+    HSPPendingSample *ps = (HSPPendingSample *)data;
+    decodePendingSample(ps);
+    uint32_t src_dsIndex=0, dst_dsIndex=0;
+    if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
       if(src_dsIndex || dst_dsIndex) {
 	SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
 	entElem->tag = SFLFLOW_EX_ENTITIES;
-	if(src_dsIndex) {
+	if(src_dsIndex
+	   && src_dsIndex != 0xFFFFFFFF) {
 	  entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
 	  entElem->flowType.entities.src_dsIndex = src_dsIndex;
 	}
-	if(dst_dsIndex) {
+	if(dst_dsIndex
+	   && dst_dsIndex != 0xFFFFFFFF) {
 	  entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
 	  entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
 	}
@@ -2368,7 +2369,6 @@ extern "C" {
       EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
-      mdata->vnicLayer = HSP_VNIC_LAYER_IPIP; // TODO: make config parameter
 
       // learn my own namespace inode from /proc/self/ns/net
       if(stat("/proc/self/ns/net", &mdata->myNS) == 0)

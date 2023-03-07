@@ -378,6 +378,9 @@ extern "C" {
     // numbering may write a priority number here to
     // stabilize the agent address selection.
     uint32_t selectionPriority;
+    // Container dsIndex number - for case where vnic
+    // belongs to container:
+    uint32_t container_dsIndex;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -418,10 +421,19 @@ extern "C" {
     uint8_t *hdr;
     int hdr_len;
     enum SFLHeader_protocol hdr_protocol;    
-    SFLAddress src;
-    SFLAddress dst;
     int l3_offset;
     int l4_offset;
+    SFLMacAddress macsrc;
+    SFLMacAddress macdst;
+    SFLAddress src;
+    SFLAddress dst;
+    SFLMacAddress macsrc_1; // inner MAC src (over tunnel)
+    SFLMacAddress macdst_1; // inner MAC dst (over tunnel)
+    SFLAddress src_1;
+    SFLAddress dst_1;
+    //uint16_t l4_sport;
+    //uint16_t l4_dport;
+    uint32_t vxlan_vni;
     uint8_t ipproto;
     bool decoded:1;
     // local address test
@@ -429,6 +441,9 @@ extern "C" {
     bool localSrc:1;
     bool localDst:1;
     bool suppress:1;
+    // inner addresses
+    bool gotInnerMAC:1;
+    bool gotInnerIP:1;
   } HSPPendingSample;
 
   typedef struct _HSPPendingCSample {

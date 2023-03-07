@@ -478,7 +478,6 @@ extern "C" {
   */
 
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    // HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingSample *ps = (HSPPendingSample *)data;
     int ip_ver = decodePendingSample(ps);
@@ -497,16 +496,12 @@ extern "C" {
       }
 #if 0
       else if (sp->tcp.tunnel
-	       && ps->ipproto == IPPROTO_IPIP) {
+	       && ps->gotInnerIP) {
 	// look up using the inner IP addresses instead
 	// this behavior is only enabled with tcp {tunnel=on}.
 	// Setting tunnel=on should only ever be done when
 	// running on an end-host. If running on a router this
 	// might trigger a storm of pointless netlink lookups.
-	// TODO: should we try to pool all discovered physical
-	// and virtual IP addresses so we can always test for
-	// isLocalAddress at layer3? (e.g. the way mod_docker
-	// checks namespaces when docker{markTraffic=on} ?)
 	ps->l3_offset = ps->l4_offset;
 	uint8_t *ptr = ps->hdr + ps->l3_offset;
 	if((ps->hdr_len - ps->l3_offset) > sizeof(struct iphdr)) {
@@ -520,19 +515,16 @@ extern "C" {
 	      ps->ipproto = ptr[9];
 	      // to determine direction, use the MAC layer
 	      if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
-		SFLMacAddress macsrc,macdst;
-		memcpy(macdst.mac, ps->hdr, 6);
-		memcpy(macsrc.mac, ps->hdr + 6, 6);
-		ps->localSrc = (adaptorByMac(sp, &macsrc) != NULL);
-		ps->localDst = (adaptorByMac(sp, &macdst) != NULL);
+		ps->localSrc = (adaptorByMac(sp, &ps->macsrc) != NULL);
+		ps->localDst = (adaptorByMac(sp, &ps->macdst) != NULL);
 		myDebug(2, "tcp: IPIP localSrc=%s localDst=%s",
 			ps->localSrc ? "YES":"NO",
 			ps->localDst ? "YES":"NO");
 		if(ps->localSrc != ps->localDst) {
+		  HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
 		  // overwrite with the inner addresses
-		  ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V4;
-		  memcpy(&ps->src.address.ip_v4, ps->hdr + ps->l3_offset + 12, 4);
-		  memcpy(&ps->dst.address.ip_v4, ps->hdr + ps->l3_offset + 16, 4);
+		  ps->src = ps->src_1;
+		  ps->dst = ps->dst_1;
 		  // and do the lookup
 		  lookup_sample(mod, ps);
 		  mdata->ipip_tx++;

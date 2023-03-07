@@ -770,6 +770,64 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  static void decodePendingSample_ipip(HSPPendingSample *ps) {
+    if(ps->ipproto == IPPROTO_IPIP
+       && ps->hdr_len >= (ps->l4_offset + 20 /* IPv4 */)) {
+      u_char *innerIP = ps->hdr + ps->l4_offset;
+      if(innerIP[0] == 0x45 /* version 4, header-length 20 */) {
+	ps->src_1.type = SFLADDRESSTYPE_IP_V4;
+	memcpy(&ps->src_1.address.ip_v4.addr, innerIP + 12, 4);
+	ps->dst_1.type = SFLADDRESSTYPE_IP_V4;
+	memcpy(&ps->dst_1.address.ip_v4.addr, innerIP + 16, 4);
+	ps->gotInnerIP = YES;
+      }
+    }
+  }
+  
+  static void decodePendingSample_vxlan(HSPPendingSample *ps) {
+    if(ps->ipproto == IPPROTO_UDP
+       && ps->hdr_len >= (ps->l4_offset + 8 /* udp */ + 8 /* vxlan */ + 12 /* inner MAC */)) {
+      // Check for VXLAN(4789|8472) header at l4_offset,
+      // and if found, populate inner MAC addrs.
+      // Perhaps also for Geneve(6801) and teredo(3544)?
+      // UDP Header: [sPort][dPort][pduLen][csum]
+      uint16_t dPort = ps->hdr[ps->l4_offset + 3];
+      dPort = (dPort << 8) + ps->hdr[ps->l4_offset + 4];
+      if(dPort == 4789
+	 || dPort == 8472) {
+	/* VXLAN Header: 
+	   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
+	   |R|R|R|R|I|R|R|R|            Reserved                           | 
+	   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
+	   |                VXLAN Network Identifier (VNI) |   Reserved    | 
+	   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
+	*/
+	u_char *vxlan = ps->hdr + ps->l4_offset + 8;
+	if((vxlan[0] != 0x08)
+	   || (vxlan[1] != 0)
+	   || (vxlan[2] != 0)
+	   || (vxlan[3] != 0)
+	   || (vxlan[7] != 0)) {
+	  // only the "I" bit must be set - rest are reserved and should be zero
+	  return;
+	}
+	uint32_t vni = vxlan[4];
+	vni <<= 8;
+	vni += vxlan[5];
+	vni <<= 8;
+	vni += vxlan[6];
+	// assume not VXLAN if vni == 0
+	if(vni != 0) {
+	  ps->vxlan_vni = vni;
+	  // copy MAC addresses (or maybe we should just record offset to inner L2)?
+	  memcpy(ps->macdst_1.mac, vxlan + 8, 6);
+	  memcpy(ps->macsrc_1.mac, vxlan + 14, 6);
+	  ps->gotInnerMAC = YES;
+	}
+      }
+    }
+  } 
+	     
   int decodePendingSample(HSPPendingSample *ps) {
     if(!ps->decoded) {
       for(SFLFlow_sample_element *elem = ps->fs->elements; elem != NULL; elem = elem->nxt) {
@@ -779,7 +837,14 @@ extern "C" {
 	  ps->hdr_protocol = header->header_protocol;
 	  ps->hdr_len = header->header_length;
 	  ps->ipversion = decodePacketHeader(header, &ps->ipproto, &ps->l3_offset, &ps->l4_offset);
-	  // extract IP src/dst addresses too, since they are so likely to be used
+	  // The above just captures the main encapsulation offsets, but we also want
+	  // to pull out some of the fields that are most likely to be used for lookups.
+	  if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
+	    // extract outer MAC addresses
+	    memcpy(ps->macdst.mac, ps->hdr, 6);
+	    memcpy(ps->macsrc.mac, ps->hdr + 6, 6);
+	  }
+	  // extract IP src/dst addresses
 	  if(ps->ipversion == 4) {
 	    ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V4;
 	    memcpy(&ps->src.address.ip_v4, ps->hdr + ps->l3_offset + 12, 4);
@@ -789,6 +854,13 @@ extern "C" {
 	    ps->src.type = ps->dst.type = SFLADDRESSTYPE_IP_V6;
 	    memcpy(&ps->src.address.ip_v6, ps->hdr + ps->l3_offset + 8, 16);
 	    memcpy(&ps->dst.address.ip_v6, ps->hdr + ps->l3_offset + 24, 16);
+	  }
+	  // extract tunneled addresses
+	  if(ps->l4_offset) {
+	    if(ps->ipproto == IPPROTO_IPIP)
+	      decodePendingSample_ipip(ps);
+	    if(ps->ipproto == IPPROTO_UDP)
+	      decodePendingSample_vxlan(ps);
 	  }
 	  break;
 	}
