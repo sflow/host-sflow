@@ -788,7 +788,7 @@ extern "C" {
     if(ps->ipproto == IPPROTO_UDP
        && ps->hdr_len >= (ps->l4_offset + 8 /* udp */ + 8 /* vxlan */ + 12 /* inner MAC */)) {
       // Check for VXLAN(4789|8472) header at l4_offset,
-      // and if found, populate inner MAC addrs.
+      // and if found, populate inner MAC and IP addrs.
       // Perhaps also for Geneve(6801) and teredo(3544)?
       // UDP Header: [sPort][dPort][pduLen][csum]
       uint16_t dPort = ps->hdr[ps->l4_offset + 3];
@@ -819,10 +819,25 @@ extern "C" {
 	// assume not VXLAN if vni == 0
 	if(vni != 0) {
 	  ps->vxlan_vni = vni;
+	  u_char *mac_1 = vxlan + 8;
 	  // copy MAC addresses (or maybe we should just record offset to inner L2)?
-	  memcpy(ps->macdst_1.mac, vxlan + 8, 6);
-	  memcpy(ps->macsrc_1.mac, vxlan + 14, 6);
+	  memcpy(ps->macdst_1.mac, mac_1, 6);
+	  memcpy(ps->macsrc_1.mac, mac_1 + 6, 6);
 	  ps->gotInnerMAC = YES;
+	  // check only for simplest IP encapsulation
+	  if(mac_1[12] == 0x08
+	     && mac_1[13] == 0x00) {
+	    u_char *innerIP = mac_1 + 14;
+	    if(innerIP[0] == 0x45 /* version 4, header-length 20 */) {
+	      ps->src_1.type = SFLADDRESSTYPE_IP_V4;
+	      memcpy(&ps->src_1.address.ip_v4.addr, innerIP + 12, 4);
+	      ps->dst_1.type = SFLADDRESSTYPE_IP_V4;
+	      memcpy(&ps->dst_1.address.ip_v4.addr, innerIP + 16, 4);
+	      ps->gotInnerIP = YES;
+	    }
+	  }
+	  // TODO: handle other L2 encapsulations
+	  // TODO: handle inner IPv6
 	}
       }
     }
