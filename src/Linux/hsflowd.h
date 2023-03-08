@@ -95,7 +95,7 @@ extern "C" {
   // are always installed at this path
 #define HSP_MOD_DIR /etc/hsflowd/modules
 #endif
-#define HSP_DEFAULT_LOGBYTES "1e9"
+#define HSP_DEFAULT_LOGBYTES "10000000" // 10MB
 
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
