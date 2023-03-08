@@ -69,6 +69,8 @@ extern "C" {
   int getDebug(void);
   void setDebugOut(FILE *out);
   FILE *getDebugOut(void);
+  void setDebugLimit(long byteLimit);
+  long getDebugLimit(void);
   int debug(int level);
   void myDebug(int level, char *fmt, ...);
   void setDaemon(bool yesno);

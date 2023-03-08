@@ -837,6 +837,7 @@ extern "C" {
     sp->refreshVMListSecs = HSP_REFRESH_VMS;
     sp->forgetVMSecs = HSP_FORGET_VMS;
     sp->modulesPath = STRINGIFY_DEF(HSP_MOD_DIR);
+    sp->logBytes = HSP_DEFAULT_LOGBYTES;
   }
 
   /*_________________---------------------------__________________
@@ -846,10 +847,11 @@ extern "C" {
 
   static void instructions(char *command)
   {
-    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile] [-l MODULESDir] [-D LOGFile]\n", command);
+    fprintf(stderr,"Usage: %s [-dvP] [-p PIDFile] [-u UUID] [-m machine_id] [-f CONFIGFile] [-l MODULESDir] [-D LOGFile] [-L LOGBytes]\n", command);
     fprintf(stderr,"\n\
              -d:  do not daemonize, and log to stdout/LOGFile (repeat for more debug details)\n\
      -D LOGFile:  debug logging goes to this file\n\
+    -L LOGBytes:  max bytes in LOGFile (default is " HSP_DEFAULT_LOGBYTES ")\n\
              -v:  print version number and exit\n\
              -P:  do not drop privileges (run as root)\n\
      -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
@@ -873,7 +875,7 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dvPp:f:l:o:u:m:?hc:D:")) != -1) {
+    while ((in = getopt(argc, argv, "dvPp:f:l:o:u:m:?hc:D:L:")) != -1) {
       switch(in) {
       case 'v':
 	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
@@ -892,6 +894,7 @@ extern "C" {
       case 'o': sp->outputFile = optarg; break;
       case 'c': sp->crashFile = optarg; break;
       case 'D': sp->logFile = optarg; break;
+      case 'L': sp->logBytes = optarg; break;
       case 'u':
 	if(parseUUID(optarg, sp->uuid) == NO) {
 	  fprintf(stderr, "bad UUID format: %s\n", optarg);
@@ -976,7 +979,10 @@ extern "C" {
       myLog(LOG_INFO,"Received SIGUSR2");
       // increase debug log level
       setDebug(getDebug() + 1);
-      myLog(LOG_INFO,"increased debug log level to %u", getDebug());
+      fprintf(getDebugOut(),"SIGUSR2: increased debug log level to %u (logBytes=%ld, limit=%ld)\n",
+	      getDebug(),
+	      ftell(getDebugOut()),
+	      getDebugLimit());
       break;
     default:
       myLog(LOG_INFO,"Received signal %d", sig);
@@ -1703,7 +1709,9 @@ extern "C" {
 
   static void openLogFile(HSP *sp) {
     FILE *f_dbg = getDebugOut();
-    if(f_dbg) {
+    if(f_dbg
+       && f_dbg != stdout
+       && f_dbg != stderr) {
       // this may be a SIGHUP log rotation
       setDebugOut(NULL);
       fclose(f_dbg);
@@ -1715,8 +1723,10 @@ extern "C" {
 	myLog(LOG_ERR, "Failed to open debugLog %s : %s", sp->logFile, strerror(errno));
       }
       else {
+	chmod(sp->logFile, 0666); // so we can reopen after privilege drop
 	setlinebuf(f_dbg);
 	setDebugOut(f_dbg);
+	setDebugLimit(strtol(sp->logBytes, NULL, 0));
       }
     }
   }

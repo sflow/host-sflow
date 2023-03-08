@@ -12,6 +12,7 @@ extern "C" {
   static int debugLevel = 0;
   static bool daemonFlag = YES;
   static FILE *debugOut = NULL;
+  static long debugLimit = 0;
 
   /*________________---------------------------__________________
     ________________       UTStrBuf            __________________
@@ -138,23 +139,46 @@ extern "C" {
   FILE *getDebugOut(void) {
     return debugOut ?: stdout;
   }
-  
-  void myLogv(int syslogType, char *fmt, va_list args)
-  {
+
+  void setDebugLimit(long byteLimit) {
+    debugLimit = byteLimit;
+  }
+
+  long getDebugLimit(void) {
+    return debugLimit;
+  }
+
+  static void myLogv2(bool end, int syslogType, char *fmt, va_list args) {
     if(debugLevel
        || daemonFlag==NO) {
-      vfprintf(getDebugOut(), fmt, args);
-      fprintf(getDebugOut(), "\n");
+      FILE *out = getDebugOut();
+      if(debugLimit == 0
+	 || (ftell(out) < debugLimit)) {
+	vfprintf(out, fmt, args);
+	if(end)
+	  fprintf(out, "\n");
+      }
     }
     else
       vsyslog(syslogType, fmt, args);
   }
 
+  void myLogv(int syslogType, char *fmt, va_list args) {
+    myLogv2(YES, syslogType, fmt, args);
+  }
+
+  static void myLog2(bool end, int syslogType, char *fmt, ...)
+  {
+    va_list args;
+    va_start(args, fmt);
+    myLogv2(end, syslogType, fmt, args);
+  }
+    
   void myLog(int syslogType, char *fmt, ...)
   {
     va_list args;
     va_start(args, fmt);
-    myLogv(syslogType, fmt, args);
+    myLogv2(YES, syslogType, fmt, args);
   }
 
   void setDebug(int level) {
@@ -172,11 +196,10 @@ extern "C" {
   void myDebug(int level, char *fmt, ...)
   {
     if(debug(level)) {
+      myLog2(NO, LOG_DEBUG, "dbg%d:", level);
       va_list args;
       va_start(args, fmt);
-      fprintf(getDebugOut(), "dbg%d: ", level);
-      vfprintf(getDebugOut(), fmt, args);
-      fprintf(getDebugOut(), "\n");
+      myLogv2(YES, LOG_DEBUG, fmt, args);
     }
   }
 
@@ -1912,7 +1935,9 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     addr.sun_family = AF_UNIX;
     strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
     if(connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
-      myLog(LOG_ERR, "UTUnixDomainSocket - connect() failed: %s", strerror(errno));
+      myLog(LOG_ERR, "UTUnixDomainSocket(%s) - connect() failed: %s",
+	    path,
+	    strerror(errno));
       close(fd);
       return -1;
     }
