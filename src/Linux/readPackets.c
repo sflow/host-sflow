@@ -793,6 +793,7 @@ extern "C" {
       // UDP Header: [sPort][dPort][pduLen][csum]
       uint16_t dPort = ps->hdr[ps->l4_offset + 3];
       dPort = (dPort << 8) + ps->hdr[ps->l4_offset + 4];
+      myDebug(4, "decodePendingSample_vxlan dport=%u\n", dPort);
       if(dPort == 4789
 	 || dPort == 8472) {
 	/* VXLAN Header: 
@@ -816,6 +817,7 @@ extern "C" {
 	vni += vxlan[5];
 	vni <<= 8;
 	vni += vxlan[6];
+	myDebug(4, "decodePendingSample_vxlan vni=%u\n", vni);
 	// assume not VXLAN if vni == 0
 	if(vni != 0) {
 	  ps->vxlan_vni = vni;
@@ -828,6 +830,7 @@ extern "C" {
 	  if(mac_1[12] == 0x08
 	     && mac_1[13] == 0x00) {
 	    u_char *innerIP = mac_1 + 14;
+	    myDebug(4, "decodePendingSample_vxlan innerIP[0]=0x%02x\n", innerIP[0]);
 	    if(innerIP[0] == 0x45 /* version 4, header-length 20 */) {
 	      ps->src_1.type = SFLADDRESSTYPE_IP_V4;
 	      memcpy(&ps->src_1.address.ip_v4.addr, innerIP + 12, 4);

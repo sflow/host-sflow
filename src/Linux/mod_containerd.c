@@ -76,6 +76,7 @@ extern "C" {
     SFLAddress ipAddr;
     uint32_t dsIndex;
     char *c_name;
+    char *c_hostname;
     bool unique;
   } HSPVNIC;
 
@@ -194,10 +195,11 @@ extern "C" {
 	      if(vnic) {
 		// found IP - check for non-unique mapping
 		if(vnic->dsIndex != container->vm.dsIndex) {
-		  myDebug(1, "VNIC: clash between %s (ds=%u) and %s (ds=%u) -- setting unique=no",
-			  vnic->c_name,
+		  myDebug(1, "VNIC: IP %s clash between %s (ds=%u) and %s (ds=%u) -- setting unique=no",
+			  ipStr,
+			  vnic->c_hostname,
 			  vnic->dsIndex,
-			  container->name,
+			  container->hostname,
 			  container->vm.dsIndex);
 		  vnic->unique = NO;
 		}
@@ -208,6 +210,7 @@ extern "C" {
 		vnic->ipAddr = ipAddr;
 		vnic->dsIndex = container->vm.dsIndex;
 		vnic->c_name = my_strdup(container->name);
+		vnic->c_hostname = my_strdup(container->hostname);
 		UTHashAdd(mdata->vnicByIP, vnic);
 		vnic->unique = YES;
 		myDebug(1, "VNIC: linked to %s (ds=%u)",
@@ -550,6 +553,7 @@ extern "C" {
 	HSPVNIC *vnic = UTHashDelKey(mdata->vnicByIP, &search);
 	if(vnic) {
 	  my_free(vnic->c_name);
+	  my_free(vnic->c_hostname);
 	  my_free(vnic);
 	}
       }
@@ -1104,10 +1108,13 @@ extern "C" {
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
-    if(vnic
-       && vnic->unique) {
-      myDebug(1, "VNIC: got src %s (ds=%u)\n", vnic->c_name, vnic->dsIndex);
-      return vnic->dsIndex;
+    if(vnic) {
+      myDebug(1, "VNIC: got src %s (unique=%s, ds=%u)\n",
+	      vnic->c_hostname,
+	      vnic->dsIndex,
+	      vnic->unique ? "YES" : "NO");
+      if(vnic->unique)
+	return vnic->dsIndex;
     }
     return 0;
   }
@@ -1120,7 +1127,7 @@ extern "C" {
       *p_src_dsIndex = containerDSByIP(mod, &ps->src_1);
       *p_dst_dsIndex = containerDSByIP(mod, &ps->dst_1);
       
-      myDebug(3, "lookupContainerDS: seach by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
+      myDebug(3, "lookupContainerDS: search by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
 	      SFLAddress_print(&ps->src_1, sbuf, 50),
 	      SFLAddress_print(&ps->dst_1, dbuf, 50),
 	      *p_src_dsIndex,
