@@ -1086,7 +1086,20 @@ extern "C" {
     Packet Bus
   */
 
-  static bool containerDSByIP(EVMod *mod, SFLAddress *ipAddr) {
+  static uint32_t containerDSByMAC(EVMod *mod, SFLMacAddress *mac) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    SFLAdaptor *adaptor = adaptorByMac(sp, mac);
+    if(adaptor) {
+      uint32_t c_dsi = ADAPTOR_NIO(adaptor)->container_dsIndex;
+      myDebug(1, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
+      // make sure it wasn't marked as "non-unique"
+      if(c_dsi != 0xFFFFFFFF)
+	return c_dsi;
+    }
+    return 0;
+  }
+
+  static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr) {
     HSP_mod_CONTAINERD *mdata = (HSP_mod_CONTAINERD *)mod->data;
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
@@ -1100,25 +1113,41 @@ extern "C" {
   }
   
   static bool lookupContainerDS(EVMod *mod, HSPPendingSample *ps, uint32_t *p_src_dsIndex, uint32_t *p_dst_dsIndex) {
-    if(ps->gotInnerMAC) {
-      HSP *sp = (HSP *)EVROOTDATA(mod);
-      SFLAdaptor *src_vnic = adaptorByMac(sp, &ps->macsrc_1);
-      SFLAdaptor *dst_vnic = adaptorByMac(sp, &ps->macdst_1);
-      if(src_vnic)
-	*p_src_dsIndex = ADAPTOR_NIO(src_vnic)->container_dsIndex;
-      if(dst_vnic)
-	*p_dst_dsIndex = ADAPTOR_NIO(dst_vnic)->container_dsIndex;
-      return YES;
-    }
-    else if(ps->gotInnerIP) {
+    // start with the one most likely to match
+    // e.g. in Kubernetes with Calico IPIP or VXLAN this will be the innerIP:
+    if(ps->gotInnerIP) {
+      char sbuf[51],dbuf[51];
       *p_src_dsIndex = containerDSByIP(mod, &ps->src_1);
       *p_dst_dsIndex = containerDSByIP(mod, &ps->dst_1);
-      return YES;
+      
+      myDebug(3, "lookupContainerDS: seach by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
+	      SFLAddress_print(&ps->src_1, sbuf, 50),
+	      SFLAddress_print(&ps->dst_1, dbuf, 50),
+	      *p_src_dsIndex,
+	      *p_dst_dsIndex);
+      
+      if(*p_src_dsIndex || *p_dst_dsIndex)
+	return YES;
     }
-    else if(ps->l3_offset) {
+    if(ps->gotInnerMAC) {
+      *p_src_dsIndex = containerDSByMAC(mod, &ps->macsrc_1);
+      *p_dst_dsIndex = containerDSByMAC(mod, &ps->macdst_1);
+      if(*p_src_dsIndex || *p_dst_dsIndex)
+	return YES;
+    }
+    if(ps->l3_offset) {
+      // outer IP
       *p_src_dsIndex = containerDSByIP(mod, &ps->src);
       *p_dst_dsIndex = containerDSByIP(mod, &ps->dst);
-      return YES;
+      if(*p_src_dsIndex || *p_dst_dsIndex)
+	return YES;
+    }
+    if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
+      // outer MAC
+      *p_src_dsIndex = containerDSByMAC(mod, &ps->macsrc);
+      *p_dst_dsIndex = containerDSByMAC(mod, &ps->macdst);
+      if(*p_src_dsIndex || *p_dst_dsIndex)
+	return YES;
     }
     return NO;
   }
@@ -1129,21 +1158,19 @@ extern "C" {
     decodePendingSample(ps);
     uint32_t src_dsIndex=0, dst_dsIndex=0;
     if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
-      if(src_dsIndex || dst_dsIndex) {
-	SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
-	entElem->tag = SFLFLOW_EX_ENTITIES;
-	if(src_dsIndex
-	   && src_dsIndex != 0xFFFFFFFF) {
-	  entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
-	  entElem->flowType.entities.src_dsIndex = src_dsIndex;
-	}
-	if(dst_dsIndex
-	   && dst_dsIndex != 0xFFFFFFFF) {
-	  entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
-	  entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
-	}
-	SFLADD_ELEMENT(ps->fs, entElem);
+      SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
+      entElem->tag = SFLFLOW_EX_ENTITIES;
+      if(src_dsIndex
+	 && src_dsIndex != 0xFFFFFFFF) {
+	entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
+	entElem->flowType.entities.src_dsIndex = src_dsIndex;
       }
+      if(dst_dsIndex
+	 && dst_dsIndex != 0xFFFFFFFF) {
+	entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
+	entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
+      }
+      SFLADD_ELEMENT(ps->fs, entElem);
     }
   }
 
