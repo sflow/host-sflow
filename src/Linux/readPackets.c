@@ -791,8 +791,8 @@ extern "C" {
       // and if found, populate inner MAC and IP addrs.
       // Perhaps also for Geneve(6801) and teredo(3544)?
       // UDP Header: [sPort][dPort][pduLen][csum]
-      uint16_t dPort = ps->hdr[ps->l4_offset + 3];
-      dPort = (dPort << 8) + ps->hdr[ps->l4_offset + 4];
+      uint16_t dPort = ps->hdr[ps->l4_offset + 2];
+      dPort = (dPort << 8) + ps->hdr[ps->l4_offset + 3];
       myDebug(4, "decodePendingSample_vxlan dport=%u\n", dPort);
       if(dPort == 4789
 	 || dPort == 8472) {
