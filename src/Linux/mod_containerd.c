@@ -214,7 +214,7 @@ extern "C" {
 		UTHashAdd(mdata->vnicByIP, vnic);
 		vnic->unique = YES;
 		myDebug(1, "VNIC: linked to %s (ds=%u)",
-			vnic->c_name,
+			vnic->c_hostname,
 			vnic->dsIndex);
 	      }
 	    }
@@ -1095,7 +1095,7 @@ extern "C" {
     SFLAdaptor *adaptor = adaptorByMac(sp, mac);
     if(adaptor) {
       uint32_t c_dsi = ADAPTOR_NIO(adaptor)->container_dsIndex;
-      myDebug(1, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
+      myDebug(2, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
       // make sure it wasn't marked as "non-unique"
       if(c_dsi != 0xFFFFFFFF)
 	return c_dsi;
@@ -1109,10 +1109,10 @@ extern "C" {
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
     if(vnic) {
-      myDebug(1, "VNIC: got src %s (unique=%s, ds=%u)\n",
+      myDebug(2, "VNIC: got src %s (unique=%s, ds=%u)\n",
 	      vnic->c_hostname,
-	      vnic->dsIndex,
-	      vnic->unique ? "YES" : "NO");
+	      vnic->unique ? "YES" : "NO",
+	      vnic->dsIndex);
       if(vnic->unique)
 	return vnic->dsIndex;
     }
