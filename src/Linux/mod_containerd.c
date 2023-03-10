@@ -1024,16 +1024,17 @@ extern "C" {
        || (now_mono - container->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
       container->last_vnic = now_mono;
       // skip kubnetes "POD" containers to prevent IP clash
-      if(!my_strnequal(container->name, "k8s_POD_", 8))
+      // Note: need to understand how there can be a clash when there is only
+      // one container in the pod... but this might take care of it.
+      if(!my_strnequal(container->hostname, "k8s__", 5))
 	updateContainerAdaptors(mod, container);
     }
 
     if(container->last_cgroup == 0
        || (now_mono - container->last_cgroup) > HSP_CGROUP_REFRESH_TIMEOUT) {
       container->last_cgroup = now_mono;
-      // TODO: skip kubnetes "POD" containers, but we might want to reverse this
-      if(!my_strnequal(container->name, "k8s_POD_", 8))
-	updateContainerCgroupPaths(mod, container);
+      // TODO: do we want to skip some containers here too?
+      updateContainerCgroupPaths(mod, container);
     }
 
     cJSON *jenv = cJSON_GetObjectItem(jmetrics, "Env");
