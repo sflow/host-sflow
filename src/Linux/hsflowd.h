@@ -146,6 +146,7 @@ extern "C" {
 
   // For when a switch-port is configured using the default
   // (calculated) sampling-rate (based on link speed)
+#define HSP_BPS_RATIO "bps_ratio"
 #define HSP_SPEED_SAMPLING_RATIO 1000000
 #define HSP_SPEED_SAMPLING_MIN 100
 
@@ -170,6 +171,8 @@ extern "C" {
     uint64_t speed_min;
     uint64_t speed_max;
     bool speed_set;
+    uint32_t sampling_n;
+    bool sampling_n_set;
   } HSPPcap;
 
   typedef struct _HSPPort {

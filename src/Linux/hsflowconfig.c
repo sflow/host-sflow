@@ -824,8 +824,8 @@ extern "C" {
 	method = "interface_down";
       }
       else {
-	char speedStr[51];
 	if(adaptor->ifSpeed) {
+	  char speedStr[51];
 	  if(printSpeed(adaptor->ifSpeed, speedStr, 50)
 	     && lookupApplicationSettings(settings, NULL, speedStr, &sampling_n, NULL)) {
 	    method = speedStr;
@@ -834,11 +834,22 @@ extern "C" {
 	    // calcuate default sampling rate based on link speed.  This ensures
 	    // that a network switch comes up with manageable defaults even if
 	    // the config file is empty...
-	    sampling_n = adaptor->ifSpeed / HSP_SPEED_SAMPLING_RATIO;
-	    if(sampling_n < HSP_SPEED_SAMPLING_MIN) {
-	      sampling_n = HSP_SPEED_SAMPLING_MIN;
+	    uint32_t bpsRatio = 0;
+	    if(lookupApplicationSettings(settings, NULL, HSP_BPS_RATIO, &bpsRatio, NULL)) {
+	      // samlping.bps_ratio=0 turns off the behavior, falling back on global default
+	      if(bpsRatio > 0) {
+		sampling_n = adaptor->ifSpeed / bpsRatio;
+		method = HSP_BPS_RATIO;
+	      }
 	    }
-	    method = "speed_default";
+	    else {
+	      // use default bpsratio
+	      sampling_n = adaptor->ifSpeed / HSP_SPEED_SAMPLING_RATIO;
+	      if(sampling_n < HSP_SPEED_SAMPLING_MIN) {
+		sampling_n = HSP_SPEED_SAMPLING_MIN;
+	      }
+	      method = "speed_default";
+	    }
 	  }
 	}
       }
@@ -1748,6 +1759,10 @@ extern "C" {
 	    case HSPTOKEN_SPEED:
 	      if((tok = expectIntegerRange64(sp, tok, &pc->speed_min, &pc->speed_max, 0, LLONG_MAX)) == NULL) return NO;
 	      pc->speed_set = YES;
+	      break;
+	    case HSPTOKEN_SAMPLING:
+	      if((tok = expectInteger32(sp, tok, &pc->sampling_n, 0, HSP_MAX_SAMPLING_N)) == NULL) return NO;
+	      pc->sampling_n_set = YES;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

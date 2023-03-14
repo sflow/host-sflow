@@ -32,6 +32,7 @@ extern "C" {
     bool promisc:1;
     bool vport:1;
     bool vport_set:1;
+    bool samplingRateSet:1; // set with pcap{sampling=<n>}
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
     int n_dlts;
@@ -266,8 +267,9 @@ extern "C" {
   static void tap_open(EVMod *mod, BPFSoc *bpfs) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    
-    bpfs->samplingRate = lookupPacketSamplingRate(bpfs->adaptor, sp->sFlowSettings);
+
+    if(!bpfs->samplingRateSet)
+      bpfs->samplingRate = lookupPacketSamplingRate(bpfs->adaptor, sp->sFlowSettings);
     bpfs->subSamplingRate = bpfs->samplingRate;
 
     // create pcap
@@ -397,6 +399,8 @@ extern "C" {
     bpfs->promisc = pcap->promisc;
     bpfs->vport = pcap->vport;
     bpfs->vport_set = pcap->vport_set;
+    bpfs->samplingRate = pcap->sampling_n;
+    bpfs->samplingRateSet = pcap->sampling_n_set;
     tap_open(mod, bpfs);
   }
 
