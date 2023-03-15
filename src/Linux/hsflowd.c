@@ -1872,8 +1872,6 @@ extern "C" {
     hooks.free_fn = my_free;
     cJSON_InitHooks(&hooks);
 
-    myLog(LOG_INFO, "started");
-
     // semaphore to protect structure of sFlow agent (sampler and poller lists
     // and XDR datagram encoding)
     sp->sync_agent = (pthread_mutex_t *)my_calloc(sizeof(pthread_mutex_t));
