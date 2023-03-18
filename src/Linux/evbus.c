@@ -475,6 +475,7 @@ extern "C" {
     EVEvent *final = EVGetEvent(bus, EVEVENT_FINAL);
     EVEvent *end = EVGetEvent(bus, EVEVENT_END);
 
+    EVClockMono(&bus->tstart);
     EVEventTx(mod, start, NULL, 0);
 
     for(;;) {
@@ -503,6 +504,10 @@ extern "C" {
     return NULL;
   }
 
+  int EVBusRunningTime_mS(EVBus *bus) {
+    return EVTimeDiff_mS(&bus->tstart, &bus->now);
+  }
+  
   void EVBusRunThread(EVBus *bus, size_t stacksize) {
     // Set a more conservative stacksize here - partly because
     // we don't need more,  but mostly because Debian was refusing

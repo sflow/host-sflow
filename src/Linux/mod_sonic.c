@@ -131,6 +131,9 @@ extern "C" {
     UTArray *newPorts;
     UTArray *unmappedPorts;
     bool changedSwitchPorts:1;
+    bool changedPortIndex:1;
+    bool changedPortAlias:1;
+    bool changedPortPriority:1;
     u_char actorSystemMAC[8];
     uint32_t localAS;
     bool sflow_enable;
@@ -943,6 +946,7 @@ extern "C" {
 		signalCounterDiscontinuity(mod, prt);
 	      }
 	      prt->ifIndex = idx;
+	      mdata->changedPortIndex = YES;
 	    }
 	  }
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFINDEX_OS)) {
@@ -956,14 +960,18 @@ extern "C" {
 		signalCounterDiscontinuity(mod, prt);
 		UTHashDel(mdata->portsByOsIndex, prt);
 		// clear alias and SelectionPriority from previous adaptor
-		setPortAlias(mod, prt, NO);
-		setPortSelectionPriority(mod, prt, NO);
+		if(setPortAlias(mod, prt, NO))
+		  mdata->changedPortAlias = YES;
+		if(setPortSelectionPriority(mod, prt, NO))
+		  mdata->changedPortPriority = YES;
 	      }
 	      prt->osIndex = idx;
 	      UTHashAdd(mdata->portsByOsIndex, prt);
 	      // set alias and SelectionPriority for this adaptor
-	      setPortAlias(mod, prt, YES);
-	      setPortSelectionPriority(mod, prt, YES);
+	      if(setPortAlias(mod, prt, YES))
+		mdata->changedPortAlias = YES;
+	      if(setPortSelectionPriority(mod, prt, YES))
+		mdata->changedPortPriority = YES;
 	    }
 	  }
 	}
@@ -995,6 +1003,19 @@ extern "C" {
       db_getIfIndexMap(mod, prt);
       return YES;  // still mapping points
     }
+
+    // something changed - for example we may have just learned the alias for the
+    // port that matches the agent=<deviceName> setting in the config.
+    if(mdata->changedPortIndex
+       || mdata->changedPortAlias
+       || mdata->changedPortPriority) {
+      syncConfig(mod);
+      // reset triggers for next time
+      mdata->changedPortIndex = NO;
+      mdata->changedPortAlias = NO;
+      mdata->changedPortPriority = NO;
+    }
+
     return NO; // done with mapping ports
   }
 
@@ -1945,6 +1966,7 @@ extern "C" {
     mdata->unmappedPorts = UTArrayNew(UTARRAY_PACK);
     mdata->newCollectors = UTArrayNew(UTARRAY_PACK);
     // retainRootRequest(mod, "Needed to call out to OPX scripts (PYTHONPATH)");
+    agentDeviceStrictRequest(mod, "may be SONiC CLI setting");
 
 #ifdef HSP_SONIC_TEST_REDISONLY
     // don't allow readInterfaces to destroy 'imaginary'

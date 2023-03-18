@@ -72,6 +72,7 @@ extern "C" {
     int select_mS;
 #define EVBUS_SELECT_MS_TICK 599
 #define EVBUS_SELECT_MS_DECI 59
+    struct timespec tstart;
     struct timespec now;
     struct timespec now_tick;
     struct timespec now_deci;
@@ -173,6 +174,7 @@ extern "C" {
   void EVTimeAdd_nS(struct timespec *t, int nS);
   void EVBusRunThread(EVBus *bus, size_t stacksize);
   void EVBusRun(EVBus *bus);
+  int EVBusRunningTime_mS(EVBus *bus);
   void EVBusStop(EVBus *bus);
   EVBus *EVCurrentBus(void);
   void EVCurrentBusSet(EVBus *bus);

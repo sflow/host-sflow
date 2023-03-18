@@ -204,7 +204,7 @@ extern "C" {
     UTARRAY_WALK(mdata->dropPatterns_sw, dp) {
       if(fnmatch(dp->dropPoint, sw_symbol, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time and return it
-	myDebug(1, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
+	myDebug(2, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
 	dp = newDropPoint(sw_symbol, NO, dp->reason);
 	addDropPoint_sw(mod, dp);
 	return dp;
@@ -242,7 +242,7 @@ extern "C" {
     UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
       if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time
-	myDebug(1, "dropPoint pattern %s matched grp=%s str=%s", dp->dropPoint, group, dropPointStr);
+	myDebug(2, "dropPoint pattern %s matched grp=%s str=%s", dp->dropPoint, group, dropPointStr);
 	dp = newDropPoint(dropPointStr, NO, dp->reason);
 	addDropPoint_hw(mod, dp);
 	return dp;
@@ -609,7 +609,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
-    myDebug(1, "dropmon netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
+    myDebug(3, "dropmon netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
     
     // sFlow strutures to fill in
     SFLEvent_discarded_packet discard = { .reason = SFLDrop_unknown };
@@ -633,31 +633,31 @@ That would allow everything to stay on the stack as it does here, which has nice
       u_char *datap = UTNLA_DATA(attr);
       int datalen = UTNLA_PAYLOAD(attr);
       
-      if(debug(1)) {
+      if(debug(4)) {
 	u_char hex[1024];
 	printHex(datap, datalen, hex, 1023, YES);
-	myDebug(1, "nla_type=%u, datalen=%u, payload=%s", attr->nla_type, datalen, hex);
+	myDebug(4, "nla_type=%u, datalen=%u, payload=%s", attr->nla_type, datalen, hex);
       }
 
       bool nested = attr->nla_type & NLA_F_NESTED;
       int attributeType = attr->nla_type & ~NLA_F_NESTED;
       switch(attributeType) {
       case NET_DM_ATTR_ALERT_MODE:
-	myDebug(3, "dropmon: u8=ALERT_MODE=%u", *(uint8_t *)datap);
+	myDebug(4, "dropmon: u8=ALERT_MODE=%u", *(uint8_t *)datap);
 	// enum net_dm_alert_mode NET_DM_ALERT_MODE_PACKET == 1
 	// TODO: what to do if not packet?
 	break;
       case NET_DM_ATTR_PC:
-	myDebug(3, "dropmon: u64=PC=0x%"PRIx64, *(uint64_t *)datap);
+	myDebug(4, "dropmon: u64=PC=0x%"PRIx64, *(uint64_t *)datap);
 	break;
       case NET_DM_ATTR_SYMBOL:
-	myDebug(3, "dropmon: string=ATTR_SYMBOL=%s", datap);
+	myDebug(4, "dropmon: string=ATTR_SYMBOL=%s", datap);
 	sw_symbol = (char *)datap;
 	break;
       case NET_DM_ATTR_IN_PORT:
-	myDebug(3, "dropmon: nested=IN_PORT");
+	myDebug(4, "dropmon: nested=IN_PORT");
 	if(!nested) {
-	  myDebug(2, "dropmon: forcing NET_DM_ATTR_IN_PORT to be interpreted as nested attribute");
+	  myDebug(4, "dropmon: forcing NET_DM_ATTR_IN_PORT to be interpreted as nested attribute");
 	  nested = YES;
 	}
 	if(nested) {
@@ -666,11 +666,11 @@ That would allow everything to stay on the stack as it does here, which has nice
 	  while(UTNLA_OK(port_attr, port_len)) {
 	    switch(port_attr->nla_type) {
 	    case NET_DM_ATTR_PORT_NETDEV_IFINDEX:
-	      myDebug(3, "dropmon: u32=NETDEV_IFINDEX=%u", *(uint32_t *)UTNLA_DATA(port_attr));
+	      myDebug(4, "dropmon: u32=NETDEV_IFINDEX=%u", *(uint32_t *)UTNLA_DATA(port_attr));
 	      discard.input = *(uint32_t *)UTNLA_DATA(port_attr);
 	      break;
 	    case NET_DM_ATTR_PORT_NETDEV_NAME:
-	      myDebug(3, "dropmon: string=NETDEV_NAME=%s", (char *)UTNLA_DATA(port_attr));
+	      myDebug(4, "dropmon: string=NETDEV_NAME=%s", (char *)UTNLA_DATA(port_attr));
 	      break;
 	    }
 	    port_attr = UTNLA_NEXT(port_attr, port_len);
@@ -678,64 +678,64 @@ That would allow everything to stay on the stack as it does here, which has nice
 	}
 	break;
       case NET_DM_ATTR_TIMESTAMP:
-	myDebug(3, "dropmon: u64=TIMESTAMP=%"PRIu64, *(uint64_t *)datap);
+	myDebug(4, "dropmon: u64=TIMESTAMP=%"PRIu64, *(uint64_t *)datap);
 	break;
       case NET_DM_ATTR_PROTO:
-	myDebug(3, "dropmon: u16=PROTO=0x%04x", *(uint16_t *)datap);
+	myDebug(4, "dropmon: u16=PROTO=0x%04x", *(uint16_t *)datap);
 	// TODO: do we need to interpret protocol = 0x0800 as IPv4 and 0x86DD as IPv6?
 	// We seem to get MAC layer here, but will that always be the case?
 	break;
       case NET_DM_ATTR_PAYLOAD:
-	myDebug(3, "dropmon: PAYLOAD");
+	myDebug(4, "dropmon: PAYLOAD");
 	hdrElem.flowType.header.header_length = datalen;
 	hdrElem.flowType.header.header_bytes = datap;
 	hdrElem.flowType.header.stripped = 4;
 	break;
       case NET_DM_ATTR_PAD:
-	myDebug(3, "dropmon: PAD");
+	myDebug(4, "dropmon: PAD");
 	break;
       case NET_DM_ATTR_TRUNC_LEN:
-	myDebug(3, "dropmon: u32=TRUNC_LEN=%u", *(uint32_t *)datap);
+	myDebug(4, "dropmon: u32=TRUNC_LEN=%u", *(uint32_t *)datap);
 	trunc_len = *(uint32_t *)datap;
 	break;
       case NET_DM_ATTR_ORIG_LEN:
-	myDebug(3, "dropmon: u32=ORIG_LEN=%u", *(uint32_t *)datap);
+	myDebug(4, "dropmon: u32=ORIG_LEN=%u", *(uint32_t *)datap);
 	orig_len = *(uint32_t *)datap;
 	break;
       case NET_DM_ATTR_QUEUE_LEN:
-	myDebug(3, "dropmon: u32=QUEUE_LEN=%u", *(uint32_t *)datap);
+	myDebug(4, "dropmon: u32=QUEUE_LEN=%u", *(uint32_t *)datap);
 	break;
       case NET_DM_ATTR_STATS:
-	myDebug(3, "dropmon: nested=ATTR_STATS");
+	myDebug(4, "dropmon: nested=ATTR_STATS");
 	break;
       case NET_DM_ATTR_HW_STATS:
-	myDebug(3, "dropmon: nested=HW_STATS");
+	myDebug(4, "dropmon: nested=HW_STATS");
 	break;
       case NET_DM_ATTR_ORIGIN:
-	myDebug(3, "dropmon: u16=ORIGIN=%u", *(uint16_t *)datap);
+	myDebug(4, "dropmon: u16=ORIGIN=%u", *(uint16_t *)datap);
 	break;
       case NET_DM_ATTR_HW_TRAP_GROUP_NAME:
-	myDebug(3, "dropmon: string=TRAP_GROUP_NAME=%s", datap);
+	myDebug(4, "dropmon: string=TRAP_GROUP_NAME=%s", datap);
 	hw_group = (char *)datap;
 	break;
       case NET_DM_ATTR_HW_TRAP_NAME:
-	myDebug(3, "dropmon: string=TRAP_NAME=%s", datap);
+	myDebug(4, "dropmon: string=TRAP_NAME=%s", datap);
 	hw_name = (char *)datap;
 	break;
       case NET_DM_ATTR_HW_ENTRIES:
-	myDebug(3, "dropmon: nested=HW_ENTRIES");
+	myDebug(4, "dropmon: nested=HW_ENTRIES");
 	break;
       case NET_DM_ATTR_HW_ENTRY:
-	myDebug(3, "dropmon: nested=HW_ENTRY");
+	myDebug(4, "dropmon: nested=HW_ENTRY");
 	break;
       case NET_DM_ATTR_HW_TRAP_COUNT:
-	myDebug(3, "dropmon: u32=SW_DROPS=%u", *(uint32_t *)datap);
+	myDebug(4, "dropmon: u32=SW_DROPS=%u", *(uint32_t *)datap);
 	break;
       case NET_DM_ATTR_SW_DROPS:
-	myDebug(3, "dropmon: flag=SW_DROPS");
+	myDebug(4, "dropmon: flag=SW_DROPS");
 	break;
       case NET_DM_ATTR_HW_DROPS:
-	myDebug(3, "dropmon: flag=HW_DROPS");
+	myDebug(4, "dropmon: flag=HW_DROPS");
 	break;
       }
       attr = UTNLA_NEXT(attr, len);
@@ -768,7 +768,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(dp == NULL
        || dp->reason == -1) {
       // this one not considered a packet-drop, so ignore it.
-      myDebug(3, "trap not considered a drop. Ignoring.");
+      myDebug(4, "trap not considered a drop. Ignoring.");
       return;
     }
     
@@ -779,7 +779,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     // apply rate-limit
     if(mdata->quota <= 0) {
-      myDebug(1, "dropmon: rate-limit (%u/sec) exceeded. Dropping drop", sp->dropmon.limit);
+      myDebug(2, "dropmon: rate-limit (%u/sec) exceeded. Dropping drop", sp->dropmon.limit);
       mdata->noQuota++;
       return;
     }
@@ -855,7 +855,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       int numbytes = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
       if(numbytes <= 0)
 	break;
-      myDebug(1, "dropmon: readNetlink_DROPMON - msg = %d bytes", numbytes);
+      myDebug(4, "dropmon: readNetlink_DROPMON - msg = %d bytes", numbytes);
       struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
       while(NLMSG_OK(nlh, numbytes)){
 	if(nlh->nlmsg_type == NLMSG_DONE)
@@ -863,11 +863,11 @@ That would allow everything to stay on the stack as it does here, which has nice
 	if(nlh->nlmsg_type == NLMSG_ERROR){
 	  struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
 	  if(err_msg->error == 0) {
-	    myDebug(1, "received Netlink ACK");
+	    myDebug(4, "received Netlink ACK");
 	  }
 	  else {
 	    // TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
-	    myDebug(1, "dropmon state %u: error in netlink message: %d : %s",
+	    myDebug(4, "dropmon state %u: error in netlink message: %d : %s",
 		    mdata->state,
 		    err_msg->error,
 		    strerror(-err_msg->error));

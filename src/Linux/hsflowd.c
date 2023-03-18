@@ -52,14 +52,20 @@ extern "C" {
     // thread (it's just a pointer move,  so it should be atomic).  Otherwise we would want to
     // grab sp->sync whenever we call sfl_sampler_writeFlowSample(),  because that can
     // bring us here where we read the list of collectors.
-
-    if(sp->suppress_sendPkt)
+    
+    if(sp->suppress_sendPkt_agentAddress
+       || sp->suppress_sendPkt_waitConfig)
       return;
 
     if(sp->sFlowSettings == NULL)
       return;
 
     sp->telemetry[HSP_TELEMETRY_DATAGRAMS]++;
+    if(debug(2)) {
+      myDebug(2, "mS=%u agentCB_sendPkt() sending datagram: %u",
+	      EVBusRunningTime_mS(EVCurrentBus()),
+	      sp->telemetry[HSP_TELEMETRY_DATAGRAMS]);
+    }
 
     for(HSPCollector *coll = sp->sFlowSettings->collectors; coll; coll=coll->nxt) {
       if(coll->socklen && coll->socket > 0) {
@@ -552,25 +558,32 @@ extern "C" {
 
     // revision appears both at the beginning and at the end
     fprintf(sp->f_out, "rev_start=%u\n", sp->revisionNo);
-    if(sp->sFlowSettings_str)
+
+    // don't write out the settings if we are suppressing output at the moment
+    if(sp->sFlowSettings_str
+       && sp->suppress_sendPkt_waitConfig == NO
+       && sp->suppress_sendPkt_agentAddress == NO) {
+
       fputs(sp->sFlowSettings_str, sp->f_out);
 
-    // If agentIP or agentDevice was overridden then we just wrote that out with the sFlowSettings_str,
-    // but otherwise add the election-chosen ones here, so others can know what selection was made:
-    if(!settings->agentIP.type) {
-      char ipbuf[51];
-      fprintf(sp->f_out, "agentIP=%s\n", SFLAddress_print(&sp->agentIP, ipbuf, 50));
-    }
-    if(!settings->agentDevice)
-      fprintf(sp->f_out, "agent=%s\n", sp->agentDevice);
+      // If agentIP or agentDevice was overridden then we just wrote that out with the sFlowSettings_str,
+      // but otherwise add the election-chosen ones here, so others can know what selection was made:
+      if(!settings->agentIP.type) {
+	char ipbuf[51];
+	fprintf(sp->f_out, "agentIP=%s\n", SFLAddress_print(&sp->agentIP, ipbuf, 50));
+      }
+      if(!settings->agentDevice
+	 && sp->agentDevice)
+	fprintf(sp->f_out, "agent=%s\n", sp->agentDevice);
     
-    // jsonPort always comes from local config file, but include it here so that
-    // others know where to send their JSON application/rtmetric/rtflow messages
-    if(sp->json.port)
-      fprintf(sp->f_out, "jsonPort=%u\n", sp->json.port);
-
-    // Others may need to know our ds_index too
-    fprintf(sp->f_out, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+      // jsonPort always comes from local config file, but include it here so that
+      // others know where to send their JSON application/rtmetric/rtflow messages
+      if(sp->json.port)
+	fprintf(sp->f_out, "jsonPort=%u\n", sp->json.port);
+      
+      // Others may need to know our ds_index too
+      fprintf(sp->f_out, "ds_index=%u\n", HSP_DEFAULT_PHYSICAL_DSINDEX);
+    }
 
     // repeat the revision number. The reader knows that if the revison number
     // has not changed under his feet then he has a consistent config.
@@ -580,12 +593,13 @@ extern "C" {
     UTTruncateOpenFile(sp->f_out);
   }
 
-  /*_________________---------------------------__________________
-    _________________       tick                __________________
-    -----------------___________________________------------------
+  /*_________________---------------------------------__________________
+    _________________ refreshAdaptorsAndAgentAddress  __________________
+    -----------------_________________________________------------------
   */
 
   static void refreshAdaptorsAndAgentAddress(HSP *sp) {
+    bool suppress = NO;
     uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
     if(readInterfaces(sp, YES, &ad_added, &ad_removed, &ad_cameup, &ad_wentdown, &ad_changed) == 0) {
       myLog(LOG_ERR, "failed to re-read interfaces\n");
@@ -595,11 +609,31 @@ extern "C" {
 	      ad_added, ad_removed, ad_cameup, ad_wentdown, ad_changed);
     }
 
-    int agentAddressChanged=NO;
-    if(selectAgentAddress(sp, &agentAddressChanged) == NO) {
-      myLog(LOG_ERR, "failed to re-select agent address\n");
-      // TODO: what should we do in this case?
+    bool agentAddressChanged=NO;
+    bool agentDeviceMismatch=NO;
+    if(selectAgentAddress(sp, &agentAddressChanged, &agentDeviceMismatch) == NO) {
+      myLog(LOG_ERR, "failed to re-select agent address - suppress output");
+      // make sure we don't send anything with an invalid agent address (such
+      // as one that was just removed under our feet).  Hopefully a new address
+      // will be added and we can recover in due course.
+      suppress = YES;
     }
+    if(agentDeviceMismatch
+       && sp->agentDeviceStrict) {
+      myDebug(1, "agent device mismatch and agentDeviceStrict is set - suppress output");
+      // this can happen if the interface referred to has not come up yet, or if the config
+      // is using an alias name for it and the alias has not be learned yet (e.g. mod_sonic).
+      // If the agentDeviceStrict flag is set then we treat this as a showstopper.
+      suppress = YES;
+    }
+    
+    if(suppress
+       && sp->suppress_sendPkt_agentAddress == NO) {
+      // impose the restriction on sending with a bad agent-address right away
+      myDebug(1, "imposing suppress_sendPkt_agentAddress");
+      sp->suppress_sendPkt_agentAddress = YES;
+    }
+    
     myDebug(1, "agentAddressChanged=%s", agentAddressChanged ? "YES" : "NO");
     if(agentAddressChanged) {
       SEMLOCK_DO(sp->sync_agent) {
@@ -615,6 +649,13 @@ extern "C" {
       configSwitchPorts(sp); // in readPackets.c
       // announce (e.g. to adjust sampling rates if ifSpeeds changed)
       EVEventTxAll(sp->rootModule, HSPEVENT_INTFS_CHANGED, NULL, 0);
+    }
+
+    if(suppress == NO
+       && sp->suppress_sendPkt_agentAddress) {
+      myDebug(1, "lifting suppress_sendPkt_agentAddress");
+      // on the other hand, if we are lifting the restriction then defer it to here.
+      sp->suppress_sendPkt_agentAddress = NO;
     }
   }
 
@@ -1219,7 +1260,9 @@ extern "C" {
   static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings)
   {
     char *settingsStr = sFlowSettingsString(sp, settings);
-    myDebug(3, "installSFlowSettings: <%s>", settingsStr);
+    myDebug(3, "mS=%u installSFlowSettings: <%s>",
+	    EVBusRunningTime_mS(EVCurrentBus()),
+	    settingsStr);
     if(my_strequal(sp->sFlowSettings_str, settingsStr)) {
       // no change - don't increment the revision number
       // (which will mean that the file is not rewritten either)
@@ -1352,7 +1395,7 @@ extern "C" {
 	// make sure any agentIP related changes take effect immediately
 	refreshAdaptorsAndAgentAddress(sp);
 	// and open the tap if it was closed
-	sp->suppress_sendPkt = NO;
+	sp->suppress_sendPkt_waitConfig = NO;
       }
     }
     // if we didn't use the new settings for any reason then make
@@ -1465,6 +1508,22 @@ extern "C" {
   bool hasVNodeRole(EVMod *mod, EnumVNodePriority vnp) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     return (vnp == sp->vnodePriority);
+  }
+
+  /*_________________---------------------------__________________
+    _________________ agent device strictness   __________________
+    -----------------___________________________------------------
+    A simple mechanism to decide if we will tolerate an
+    agent=<deviceName> directive if it does not actually
+    match an existing interface name or alias.
+  */
+
+  void agentDeviceStrictRequest(EVMod *mod, char *reason) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    sp->agentDeviceStrict = YES;
+    myDebug(1, "mod %s requires strict interpretation of agentDevice setting (%s)",
+	    mod->name,
+	    reason);
   }
 
   /*_________________---------------------------__________________
@@ -2011,7 +2070,7 @@ extern "C" {
     }
 
     // must be able to choose an agent address
-    if(selectAgentAddress(sp, NULL) == NO) {
+    if(selectAgentAddress(sp, NULL, NULL) == NO) {
       myLog(LOG_ERR, "failed to select agent address");
       exit(EXIT_FAILURE);
     }
@@ -2147,13 +2206,18 @@ extern "C" {
       //   config_done
     }
 
+    // may decide to make this the default at some point,  but that
+    // might be a breaking change in some places where the agent=xxx
+    // setting is wrong.
+    // sp->agentDeviceStrict = YES;
+    
     if(sp->DNSSD.DNSSD
        || sp->sonic.sonic) {
       // mod_dnssd and mod_sonic should start with a blank config.
       // Sending should be suppressed until the config (especially agentIP)
       // are fully established.
       // TODO: should this apply to EAPI too?
-      sp->suppress_sendPkt = YES;
+      sp->suppress_sendPkt_waitConfig = YES;
     }
     else {
       // For all other cases we just push in the config from the file.

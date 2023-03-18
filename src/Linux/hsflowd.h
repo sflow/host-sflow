@@ -523,6 +523,7 @@ extern "C" {
     uint32_t revisionNo;
     uint32_t subAgentId;
     char *agentDevice;
+    bool agentDeviceStrict;
     SFLAddress agentIP;
 
     // config-file-only settings by module
@@ -704,7 +705,8 @@ extern "C" {
     uint32_t refreshAdaptorListSecs; // poll interval
     time_t next_refreshAdaptorList; // deadline
 
-    bool suppress_sendPkt;
+    bool suppress_sendPkt_agentAddress; // problem with agent address
+    bool suppress_sendPkt_waitConfig; // waiting for valid config
 
     uint32_t checkAdaptorListSecs; // poll interval
     time_t next_checkAdaptorList; // deadline
@@ -751,7 +753,7 @@ extern "C" {
   int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling);
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings);
   uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
-  bool selectAgentAddress(HSP *sp, int *p_changed);
+  bool selectAgentAddress(HSP *sp, bool *p_changed, bool *p_mismatch);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr, bool atEnd);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
   void dynamic_config_line(HSPSFlowSettings *st, char *line);
@@ -782,6 +784,7 @@ extern "C" {
   
   // capabilities
   void retainRootRequest(EVMod *mod, char *reason);
+  void agentDeviceStrictRequest(EVMod *mod, char *reason);
 
   // vnode priority
   void requestVNodeRole(EVMod *mod, EnumVNodePriority vnp);

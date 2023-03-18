@@ -1135,7 +1135,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  bool selectAgentAddress(HSP *sp, int *p_changed) {
+  bool selectAgentAddress(HSP *sp, bool *p_changed, bool *p_mismatch) {
 
     SFLAddress *ip = NULL;
     HSPSFlowSettings *st = sp->sFlowSettings;
@@ -1159,17 +1159,27 @@ extern "C" {
     }
     else if(st
 	    && st->agentDevice) {
-      myDebug(1, "selectAgentAddress pegged to device in current settings");
+      myDebug(1, "selectAgentAddress pegged to device %s in current settings", st->agentDevice);
       selectedAdaptor = adaptorByName(sp, st->agentDevice);
       if(selectedAdaptor == NULL)
 	selectedAdaptor = adaptorByAlias(sp, st->agentDevice);
+      if(selectedAdaptor == NULL
+	 && p_mismatch) {
+	myDebug(1, "device name mismatch");
+	*p_mismatch = YES;
+      }
     }
     else if(st_file
 	    && st_file->agentDevice) {
-      myDebug(1, "selectAgentAddress pegged to device in config file");
+      myDebug(1, "selectAgentAddress pegged to device %s in config file", st_file->agentDevice);
       selectedAdaptor = adaptorByName(sp, st_file->agentDevice);
       if(selectedAdaptor == NULL)
 	selectedAdaptor = adaptorByAlias(sp, st_file->agentDevice);
+      if(selectedAdaptor == NULL
+	 && p_mismatch) {
+	myDebug(1, "device name mismatch");
+	*p_mismatch = YES;
+      }
     }
     
     if(ip == NULL) {
