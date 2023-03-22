@@ -105,6 +105,16 @@ extern "C" {
 #define HSP_READNL_RCV_BUF 8192
 #define HSP_READNL_BATCH 100
 
+  /* Replicate some definitions we need from inet_diag.h here,
+     so we can compile on an older OS if necessary. This assumes
+     that the kernel will only ever add to these, and never
+     change them.
+  */
+#define INET_DIAG_INFO 2
+#define INET_DIAG_MARK 15
+#define INET_DIAG_CLASS_ID 17
+#define INET_DIAG_CGROUP_ID 21
+
   typedef struct _HSPTCPSample {
     struct _HSPTCPSample *prev; // timeoutQ
     struct _HSPTCPSample *next; // timeoutQ
@@ -215,8 +225,44 @@ extern "C" {
       struct rtattr *attr = (struct rtattr *)(diag_msg + 1);
 
       while(RTA_OK(attr, rtalen)) {
-	// may also see INET_DIAG_MARK here
-	if(attr->rta_type == INET_DIAG_INFO) {
+	switch (attr->rta_type) {
+	case INET_DIAG_MARK: {
+	  if(RTA_PAYLOAD(attr) == 4) {
+	    uint32_t mark;
+	    memcpy(&mark, RTA_DATA(attr), 4);
+	    myDebug(1, "INET_DIAG_MARK=%u", mark);
+	    // TODO: record in pendingSample
+	  }
+	}
+	  break;
+	case INET_DIAG_CGROUP_ID: {
+	  if(RTA_PAYLOAD(attr) == 8) {
+	    uint64_t cgid;
+	    memcpy(&cgid, RTA_DATA(attr), 8);
+	    myDebug(1, "INET_DIAG_CGROUP_ID=%"PRIu64, cgid);
+	    // TODO: record in pendingSample
+	  }
+	}
+	  break;
+	case INET_DIAG_CLASS_ID: {
+	  if(RTA_PAYLOAD(attr) == 4) {
+	    uint32_t class_id;
+	    memcpy(&class_id, RTA_DATA(attr), 4);
+	    myDebug(1, "INET_DIAG_CLASS=%u", class_id);
+	    // TODO: record in pendingSample
+	  }
+	}
+	  break;
+	case INET_DIAG_SOCKOPT: {
+	  if(RTA_PAYLOAD(attr) == 2) {
+	    uint16_t sockopt_flags;
+	    memcpy(&sockopt_flags, RTA_DATA(attr), 2);
+	    myDebug(1, "INET_DIAG_SOCKOPT=0x%02X", sockopt_flags);
+	    // TODO: record in pendingSample
+	  }
+	}
+	  break;
+	case  INET_DIAG_INFO: {
 	  // The payload is a struct tcp_info as defined in linux/tcp.h,  but we use
 	  // struct my_tcp_info - copied from a system running kernel rev 4.7.3.  New
 	  // fields are only added to the end of the struct so this works for forwards
@@ -270,6 +316,11 @@ extern "C" {
 	      releasePendingSample(sp, ps);
 	    }
 	  }
+	}
+	  break;
+	default:
+	  myDebug(1, "INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
+	  break;
 	}
 	attr = RTA_NEXT(attr, rtalen);
       }

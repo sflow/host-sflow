@@ -57,7 +57,9 @@ extern "C" {
 #define NET_DM_ATTR_HW_TRAP_COUNT 19             /* u32 */
 #define NET_DM_ATTR_SW_DROPS 20                  /* flag */
 #define NET_DM_ATTR_HW_DROPS 21                  /* flag */
-#define NET_DM_ATTR_MAX NET_DM_ATTR_HW_DROPS
+#define NET_DM_ATTR_FLOW_ACTION_COOKIE 22        /* binary */
+#define NET_DM_ATTR_REASON 23                    /* string */
+#define NET_DM_ATTR_MAX NET_DM_ATTR_REASON
 
 /* net_dm_alert_mode */
 #define NET_DM_ALERT_MODE_SUMMARY 0
@@ -122,14 +124,17 @@ extern "C" {
     uint32_t last_grp_seq;
     UTHash *dropPoints_sw;
     UTHash *dropPoints_hw;
+    UTHash *dropPoints_rn;
     UTArray *dropPatterns_sw;
     UTArray *dropPatterns_hw;
+    UTArray *dropPatterns_rn;
     UTHash *notifiers;
     uint32_t feedControlErrors;
     int quota;   // nofification rate-limit
     uint32_t noQuota; // number of rate-limit drops
     uint32_t ignoredDrops_hw;
     uint32_t ignoredDrops_sw;
+    uint32_t ignoredDrops_rn;
     uint32_t totalDrops_thisTick; // for threshold
     bool dropmon_disabled;
   } HSP_mod_DROPMON;
@@ -177,6 +182,14 @@ extern "C" {
       UTArrayAdd(mdata->dropPatterns_hw, dropPoint);
     else
       UTHashAdd(mdata->dropPoints_hw, dropPoint);
+  }
+
+  static void addDropPoint_rn(EVMod *mod, HSPDropPoint *dropPoint) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    if(dropPoint->pattern)
+      UTArrayAdd(mdata->dropPatterns_rn, dropPoint);
+    else
+      UTHashAdd(mdata->dropPoints_rn, dropPoint);
   }
 
   /*_________________---------------------------__________________
@@ -242,9 +255,42 @@ extern "C" {
     UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
       if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time
-	myDebug(2, "dropPoint pattern %s matched grp=%s str=%s", dp->dropPoint, group, dropPointStr);
+	myDebug(2, "dropPoint pattern %s matched grp=%s str=%s",
+		dp->dropPoint,
+		group ?: "<not supplied>",
+		dropPointStr);
 	dp = newDropPoint(dropPointStr, NO, dp->reason);
 	addDropPoint_hw(mod, dp);
+	return dp;
+      }
+    }
+
+    return NULL;
+  }
+
+  static HSPDropPoint *getDropPoint_rn(EVMod *mod, char *dropReason) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+
+    // we may have been configured to ignore rn drops
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(!sp->dropmon.rn) {
+      mdata->ignoredDrops_rn++;
+      return NULL;
+    }
+
+    // direct lookup
+    HSPDropPoint search = { .dropPoint = dropReason };
+    HSPDropPoint *dp = UTHashGet(mdata->dropPoints_rn, &search);
+    if(dp)
+      return dp;
+
+    // see if we can find it via a pattern
+    UTARRAY_WALK(mdata->dropPatterns_rn, dp) {
+      if(fnmatch(dp->dropPoint, dropReason, FNM_CASEFOLD) == 0) {
+	// yes - add the direct lookup to the hash table for next time and return it
+	myDebug(2, "dropPoint pattern %s matched %s", dp->dropPoint, dropReason);
+	dp = newDropPoint(dropReason, NO, dp->reason);
+	addDropPoint_rn(mod, dp);
 	return dp;
       }
     }
@@ -289,6 +335,9 @@ extern "C" {
   };
   static HSPDropPointLoader LoadDropPoints_hw[] = {
 #include "dropPoints_hw.h"
+  };
+  static HSPDropPointLoader LoadDropPoints_rn[] = {
+#include "dropPoints_rn.h"
   };
 #undef HSP_DROPPOINT
 
@@ -348,6 +397,14 @@ extern "C" {
 	HSPDropPoint *dp = buildDropPoint(&dplAll);
 	if(dp)
 	  addDropPoint_hw(mod, dp);
+      }
+    }
+
+    if(sp->dropmon.rn) {
+      for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_rn); ii++) {
+	HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_rn[ii]);
+	if(dp)
+	  addDropPoint_rn(mod, dp);
       }
     }
   }
@@ -621,6 +678,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     char *hw_group=NULL;
     char *hw_name=NULL;
     char *sw_symbol=NULL;
+    char *reason=NULL;
     // space to assemble hw_function if included
     char hwFnBuf[SFL_MAX_FUNCTION_SYMBOL_LEN+1];
     
@@ -737,6 +795,10 @@ That would allow everything to stay on the stack as it does here, which has nice
       case NET_DM_ATTR_HW_DROPS:
 	myDebug(4, "dropmon: flag=HW_DROPS");
 	break;
+      case NET_DM_ATTR_REASON:
+	myDebug(4, "dropmon: string=REASON=%s", datap);
+	reason = (char *)datap;
+	break;
       }
       attr = UTNLA_NEXT(attr, len);
     }
@@ -759,12 +821,17 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(!hdrElem.flowType.header.header_protocol)
       hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
 
-    // look up drop point
+    // look up drop point - allowing fallback if muliple attrs were supplied
     HSPDropPoint *dp = NULL;
-    if(hw_name)
+    if(reason)
+      dp = getDropPoint_rn(mod, reason);
+    if(dp == NULL
+       && hw_name)
       dp = getDropPoint_hw(mod, hw_group, hw_name);
-    else if(sw_symbol)
+    if(dp == NULL
+       && sw_symbol)
       dp = getDropPoint_sw(mod, sw_symbol);
+    
     if(dp == NULL
        || dp->reason == -1) {
       // this one not considered a packet-drop, so ignore it.
@@ -798,7 +865,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     SFLADD_ELEMENT(&discard, &hdrElem);
 
-    // include function struct (only for sw events).
+    // include function struct (expected only for rn,sw events).
     if(sw_symbol) {
       fnElem.flowType.function.symbol.str = dp->dropPoint;
       fnElem.flowType.function.symbol.len = my_strlen(dp->dropPoint);
@@ -806,7 +873,8 @@ That would allow everything to stay on the stack as it does here, which has nice
     }
     else if(sp->dropmon.hw_function) {
       // This option (off by default) is to help with discovering (not missing)
-      // new codes that do not map to defined drop reason codes.
+      // new codes that do not map to defined drop reason codes, by reporting them
+      // as a formatted string in the SYMBOL export.
       // This formatting assumes there is no space in the hw_name but it's not serious
       // if there is because the string, if used, will likely be taken as a whole.
       snprintf(hwFnBuf, SFL_MAX_FUNCTION_SYMBOL_LEN, "%s %s", hw_name ?: "-", hw_group ?: "-"); 
@@ -1081,8 +1149,10 @@ That would allow everything to stay on the stack as it does here, which has nice
       retainRootRequest(mod, "needed to start drop-monitor netlink feed.");
     mdata->dropPoints_hw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_sw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
+    mdata->dropPoints_rn = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPatterns_hw = UTArrayNew(UTARRAY_DFLT);
     mdata->dropPatterns_sw = UTArrayNew(UTARRAY_DFLT);
+    mdata->dropPatterns_rn = UTArrayNew(UTARRAY_DFLT);
     mdata->notifiers = UTHASH_NEW(SFLNotifier, dsi, UTHASH_DFLT);
     loadDropPoints(mod);
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);

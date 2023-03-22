@@ -1369,6 +1369,7 @@ extern "C" {
 	    sp->dropmon.max = 100000;
 	    sp->dropmon.sw = YES;
 	    sp->dropmon.hw = YES;
+	    sp->dropmon.rn = YES;
 	    sp->dropmon.hw_unknown = NO;
 	    sp->dropmon.hw_function = NO;
 	    level[++depth] = HSPOBJ_DROPMON;
@@ -1733,6 +1734,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_HW:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_RN:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.rn)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_HW_UNKNOWN:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_unknown)) == NULL) return NO;

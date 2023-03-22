@@ -623,6 +623,7 @@ extern "C" {
       bool start;
       bool sw;
       bool hw;
+      bool rn;
       uint32_t limit;
       uint32_t max;
       bool hw_unknown;
