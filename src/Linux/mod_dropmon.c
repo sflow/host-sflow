@@ -672,6 +672,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     SFLEvent_discarded_packet discard = { .reason = SFLDrop_unknown };
     SFLFlow_sample_element hdrElem = { .tag=SFLFLOW_HEADER };
     SFLFlow_sample_element fnElem = { .tag=SFLFLOW_EX_FUNCTION };
+    SFLFlow_sample_element hwElem = { .tag=SFLFLOW_EX_HW_TRAP };
+    SFLFlow_sample_element rnElem = { .tag=SFLFLOW_EX_LINUX_REASON };
+    
     // and some parameters to pick up for cross-check below
     uint32_t trunc_len=0;
     uint32_t orig_len=0;
@@ -679,8 +682,6 @@ That would allow everything to stay on the stack as it does here, which has nice
     char *hw_name=NULL;
     char *sw_symbol=NULL;
     char *reason=NULL;
-    // space to assemble hw_function if included
-    char hwFnBuf[SFL_MAX_FUNCTION_SYMBOL_LEN+1];
     
     struct nlattr *attr = (struct nlattr *)(msg + GENL_HDRLEN);
     int len = msglen - GENL_HDRLEN;
@@ -865,22 +866,24 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     SFLADD_ELEMENT(&discard, &hdrElem);
 
-    // include function struct (expected only for rn,sw events).
+    // include raw strings too.  Helpful for debugging or if the
+    // curated sFlow drop code does not capture a new trap.
+    if(hw_name) {
+      hwElem.flowType.hw_trap.group.str = hw_group;
+      hwElem.flowType.hw_trap.group.len = my_strlen(hw_group);
+      hwElem.flowType.hw_trap.trap.str = hw_name;
+      hwElem.flowType.hw_trap.trap.len = my_strlen(hw_name);
+      SFLADD_ELEMENT(&discard, &hwElem);
+    }
     if(sw_symbol) {
-      fnElem.flowType.function.symbol.str = dp->dropPoint;
-      fnElem.flowType.function.symbol.len = my_strlen(dp->dropPoint);
+      fnElem.flowType.function.symbol.str = sw_symbol;
+      fnElem.flowType.function.symbol.len = my_strlen(sw_symbol);
       SFLADD_ELEMENT(&discard, &fnElem);
     }
-    else if(sp->dropmon.hw_function) {
-      // This option (off by default) is to help with discovering (not missing)
-      // new codes that do not map to defined drop reason codes, by reporting them
-      // as a formatted string in the SYMBOL export.
-      // This formatting assumes there is no space in the hw_name but it's not serious
-      // if there is because the string, if used, will likely be taken as a whole.
-      snprintf(hwFnBuf, SFL_MAX_FUNCTION_SYMBOL_LEN, "%s %s", hw_name ?: "-", hw_group ?: "-"); 
-      fnElem.flowType.function.symbol.str = hwFnBuf;
-      fnElem.flowType.function.symbol.len = my_strlen(hwFnBuf);
-      SFLADD_ELEMENT(&discard, &fnElem);
+    if(reason) {
+      rnElem.flowType.linux_reason.reason.str = reason;
+      rnElem.flowType.linux_reason.reason.len = my_strlen(reason);
+      SFLADD_ELEMENT(&discard, &rnElem);
     }
 
     SEMLOCK_DO(sp->sync_agent) {

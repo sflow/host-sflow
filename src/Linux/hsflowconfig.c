@@ -1741,8 +1741,11 @@ extern "C" {
 	    case HSPTOKEN_HW_UNKNOWN:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_unknown)) == NULL) return NO;
 	      break;
-	    case HSPTOKEN_HW_FUNCTION:
-	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_function)) == NULL) return NO;
+	    case HSPTOKEN_HW_FUNCTION: {
+	      // deprecated but still parse to consume cleanly if well-formed */
+	      bool ignore;
+	      if((tok = expectONOFF(sp, tok, &ignore)) == NULL) return NO;
+	    }
 	      break;
 	    case HSPTOKEN_LIMIT:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.limit, 1, HSP_MAX_NOTIFY_RATELIMIT)) == NULL) return NO;

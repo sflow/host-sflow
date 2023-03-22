@@ -2000,6 +2000,7 @@ extern "C" {
     sp->dropmon.start = NO;
     sp->dropmon.limit = 1000;
     sp->dropmon.sw = NO;
+    sp->dropmon.rn = NO;
     sp->dropmon.hw = YES;
 #endif /* HSP_LOAD_CUMULUS */
 

@@ -690,6 +690,11 @@ static int computeFlowSampleElementsSize(SFLReceiver *receiver, SFLFlow_sample_e
     case SFLFLOW_EX_FUNCTION:  elemSiz = stringEncodingLength(&elem->flowType.function.symbol); break;
     case SFLFLOW_EX_TRANSIT: elemSiz = XDRSIZ_SFLEXTENDED_TRANSIT; break;
     case SFLFLOW_EX_Q_DEPTH: elemSiz = XDRSIZ_SFLEXTENDED_Q_DEPTH; break;
+    case SFLFLOW_EX_HW_TRAP:
+      elemSiz = stringEncodingLength(&elem->flowType.hw_trap.group);
+      elemSiz += stringEncodingLength(&elem->flowType.hw_trap.trap);
+      break;
+    case SFLFLOW_EX_LINUX_REASON: elemSiz = stringEncodingLength(&elem->flowType.linux_reason.reason); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
@@ -799,6 +804,11 @@ static int sfl_receiver_writeFlowSampleElements(SFLReceiver *receiver, SFLFlow_s
     case SFLFLOW_EX_FUNCTION: putString(receiver, &elem->flowType.function.symbol); break;
     case SFLFLOW_EX_TRANSIT: putNet32(receiver, elem->flowType.transit_delay.delay); break;
     case SFLFLOW_EX_Q_DEPTH: putNet32(receiver, elem->flowType.queue_depth.depth); break;
+    case SFLFLOW_EX_HW_TRAP:
+      putString(receiver, &elem->flowType.hw_trap.group);
+      putString(receiver, &elem->flowType.hw_trap.trap);
+      break;
+    case SFLFLOW_EX_LINUX_REASON: putString(receiver, &elem->flowType.linux_reason.reason); break;
     default:
       sflError(receiver, "unexpected packet_data_tag");
       return -1;
