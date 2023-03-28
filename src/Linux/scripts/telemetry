@@ -3,6 +3,7 @@
 # examples:
 # telemetry
 # telemetry GetAll
+# telemetry GetAgent
 # telemetry GetVersion
 # telemetry Get datagrams
 
@@ -20,7 +21,7 @@ else
   CMD="${DBUS_SEND}.GetAll";
 fi
 
-$CMD | gawk '
+$CMD | awk '
       /method/ { next; }
         /dict/ { dict=1; next; }
       /string/ { if(dict){ var=$2; dict=0; next; }}

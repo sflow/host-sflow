@@ -50,6 +50,8 @@ static const char* introspect_xml =
 "	<interface name=\"" HSP_DBUS_INTF_TELEMETRY "\">\n"
 "		<method name=\"GetVersion\">\n"
 "		</method>\n"
+"		<method name=\"GetAgent\">\n"
+"		</method>\n"
 "		<method name=\"GetAll\">\n"
 "		</method>\n"
 "		<method name=\"Get\">\n"
@@ -138,6 +140,20 @@ static const char* introspect_xml =
   }
 
   /*_________________---------------------------__________________
+    _________________     my_dbus_strdup        __________________
+    -----------------___________________________------------------
+  */
+  
+  static char *my_dbus_strdup(char *str) {
+    if(str == NULL)
+      return NULL;
+    int len = strlen(str);
+    char *ans = dbus_malloc(len + 1);
+    strncpy(ans, str, len);
+    return ans;
+  }
+
+  /*_________________---------------------------__________________
     _________________  m_telemetry_GetVersion   __________________
     -----------------___________________________------------------
   */
@@ -147,6 +163,32 @@ static const char* introspect_xml =
       return DBUS_HANDLER_RESULT_NEED_MEMORY;
     dbus_message_append_args(reply,
 			     DBUS_TYPE_STRING, &hsp_version,
+			     DBUS_TYPE_INVALID);
+    send_reply(mod, reply);
+    dbus_message_unref(reply);
+    return DBUS_HANDLER_RESULT_HANDLED;
+  }
+
+  /*_________________---------------------------__________________
+    _________________  m_telemetry_GetAgent     __________________
+    -----------------___________________________------------------
+  */
+
+
+  static DBusHandlerResult m_telemetry_GetAgent(EVMod *mod, DBusMessage *msg) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    static char ipbuf[51];
+    SFLAddress_print(&sp->agentIP, ipbuf, 50);
+    // DBUS expects this to be free()-able using dbus_free(). If we don't
+    // copy to heap we get a segfault.  It might be possible to supply
+    // my own free function (DbusFreeFunction) but the following works
+    // so no problem:
+    char *ip = my_dbus_strdup(ipbuf);
+    DBusMessage *reply = dbus_message_new_method_return(msg);
+    if (!reply)
+      return DBUS_HANDLER_RESULT_NEED_MEMORY;
+    dbus_message_append_args(reply,
+			     DBUS_TYPE_STRING, &ip,
 			     DBUS_TYPE_INVALID);
     send_reply(mod, reply);
     dbus_message_unref(reply);
@@ -325,6 +367,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
     }
     else if(!strcmp(HSP_DBUS_INTF_TELEMETRY, iface)) {
       if(!strcmp("GetVersion", method)) return m_telemetry_GetVersion(mod, msg);
+      if(!strcmp("GetAgent", method)) return m_telemetry_GetAgent(mod, msg);
       if(!strcmp("GetAll", method)) return m_telemetry_GetAll(mod, msg);
       if(!strcmp("Get", method)) return m_telemetry_Get(mod, msg);
     }
