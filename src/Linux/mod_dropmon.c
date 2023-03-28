@@ -172,24 +172,33 @@ extern "C" {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     if(dropPoint->pattern)
       UTArrayAdd(mdata->dropPatterns_sw, dropPoint);
-    else
+    else {
+      if(UTHashGet(mdata->dropPoints_sw, dropPoint))
+	myLog(LOG_INFO, "WARNING: duplicate software-dropPoint key: %s", dropPoint->dropPoint);
       UTHashAdd(mdata->dropPoints_sw, dropPoint);
+    }
   }
 
   static void addDropPoint_hw(EVMod *mod, HSPDropPoint *dropPoint) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     if(dropPoint->pattern)
       UTArrayAdd(mdata->dropPatterns_hw, dropPoint);
-    else
+    else {
+      if(UTHashGet(mdata->dropPoints_hw, dropPoint))
+	myLog(LOG_INFO, "WARNING: duplicate hardware-dropPoint key: %s", dropPoint->dropPoint);
       UTHashAdd(mdata->dropPoints_hw, dropPoint);
+    }
   }
 
   static void addDropPoint_rn(EVMod *mod, HSPDropPoint *dropPoint) {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     if(dropPoint->pattern)
       UTArrayAdd(mdata->dropPatterns_rn, dropPoint);
-    else
+    else {
+      if(UTHashGet(mdata->dropPoints_rn, dropPoint))
+	myLog(LOG_INFO, "WARNING: duplicate reason-dropPoint key: %s", dropPoint->dropPoint);
       UTHashAdd(mdata->dropPoints_rn, dropPoint);
+    }
   }
 
   /*_________________---------------------------__________________
@@ -315,6 +324,7 @@ extern "C" {
       if(my_strequal(reasonName, sflow_codes[ii].name))
 	return sflow_codes[ii].code;
     }
+    myLog(LOG_INFO, "WARNING: sFlow reason code %s not found", reasonName);
     return -1;
   }
 
@@ -678,6 +688,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     // and some parameters to pick up for cross-check below
     uint32_t trunc_len=0;
     uint32_t orig_len=0;
+    uint16_t skb_protocol=0;
     char *hw_group=NULL;
     char *hw_name=NULL;
     char *sw_symbol=NULL;
@@ -740,9 +751,12 @@ That would allow everything to stay on the stack as it does here, which has nice
 	myDebug(4, "dropmon: u64=TIMESTAMP=%"PRIu64, *(uint64_t *)datap);
 	break;
       case NET_DM_ATTR_PROTO:
-	myDebug(4, "dropmon: u16=PROTO=0x%04x", *(uint16_t *)datap);
-	// TODO: do we need to interpret protocol = 0x0800 as IPv4 and 0x86DD as IPv6?
-	// We seem to get MAC layer here, but will that always be the case?
+	skb_protocol = *(uint16_t *)datap;
+	myDebug(4, "dropmon: u16=PROTO=0x%04x", skb_protocol);
+	// This is the skb->protocol field e.g. 0x0800 for IP.
+	// Local only packet with have all-zeros smac and dmac.
+	// When unused buffers are freed (e.g. in skb_queue_purge())
+	// they appear here with PROTO==0. Those we choose to ignore.
 	break;
       case NET_DM_ATTR_PAYLOAD:
 	myDebug(4, "dropmon: PAYLOAD");
@@ -826,15 +840,18 @@ That would allow everything to stay on the stack as it does here, which has nice
     HSPDropPoint *dp = NULL;
     if(reason)
       dp = getDropPoint_rn(mod, reason);
-    if(dp == NULL
+    if((dp == NULL
+	|| dp->reason == SFLDrop_unknown)
        && hw_name)
       dp = getDropPoint_hw(mod, hw_group, hw_name);
-    if(dp == NULL
+    if((dp == NULL
+	|| dp->reason == SFLDrop_unknown)
        && sw_symbol)
       dp = getDropPoint_sw(mod, sw_symbol);
     
     if(dp == NULL
-       || dp->reason == -1) {
+       || dp->reason == -1
+       || skb_protocol == 0) {
       // this one not considered a packet-drop, so ignore it.
       myDebug(4, "trap not considered a drop. Ignoring.");
       return;
