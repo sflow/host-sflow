@@ -114,6 +114,7 @@ extern "C" {
 #define INET_DIAG_MARK 15
 #define INET_DIAG_CLASS_ID 17
 #define INET_DIAG_CGROUP_ID 21
+#define INET_DIAG_SOCKOPT 22
 
   typedef struct _HSPTCPSample {
     struct _HSPTCPSample *prev; // timeoutQ
