@@ -16,6 +16,7 @@ print ("packet samples dropped internally = " + str(sflow_telemetry.Get("dropped
 print ("packet samples sent = " + str(sflow_telemetry.Get("flow_samples")))
 print ("counter samples sent = " + str(sflow_telemetry.Get("counter_samples")))
 print ("drop event samples sent = " + str(sflow_telemetry.Get("event_samples")))
+print ("drop event samples suppressed = " + str(sflow_telemetry.Get("event_samples_suppressed")))
 print ("datagrams sent = " + str(sflow_telemetry.Get("datagrams")))
 
 # switchport

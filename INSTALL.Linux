@@ -27,7 +27,8 @@ will typically be required for compilation:
  DBUS: dbus-dev(el) or libdbus-1-dev
  OPX: libsystemd-daemon-dev
  CONTAINERD: golang
-
+ K8S: uuid-dev or libuuid-devel
+ 
 To start the daemon, run:
 
 % sudo service hsflowd start

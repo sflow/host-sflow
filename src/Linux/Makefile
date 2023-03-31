@@ -40,7 +40,7 @@ ifeq ($(GCOV),yes)
 endif
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO K8S
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
 FEATURES_DENTOS= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
@@ -194,6 +194,7 @@ LIBS_DNSSD=-lresolv
 CFLAGS_XEN=
 LIBS_XEN= -lxenstore -lxenctrl
 
+# KVM requires libvirt-del(el), libxml2-dev(el)
 CFLAGS_KVM= -I/usr/include/libvirt -I/usr/include/libxml2
 LIBS_KVM= -lvirt -lxml2
 
@@ -203,6 +204,7 @@ LIBS_DOCKER= -lm
 CFLAGS_ULOG=
 LIBS_ULOG=
 
+# NFLOG requires libnfnetlink-dev(el)
 CFLAGS_NFLOG= -I/usr/include/libnfnetlink
 LIBS_NFLOG= -lnfnetlink
 
@@ -212,12 +214,14 @@ LIBS_PSAMPLE=
 CFLAGS_DROPMON=
 LIBS_DROPMON=
 
+# PCAP requires libpcap-dev(el)
 CFLAGS_PCAP=
 LIBS_PCAP=-lpcap
 
 CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP
 LIBS_TCP=
 
+# For dependencies, compile using CUDA docker image
 CFLAGS_NVML ?= -I/usr/local/cuda/include/
 LIBDIR_NVML ?= /usr/local/cuda/lib64/stubs/
 LIBS_NVML= -L$(LIBDIR_NVML) -lnvidia-ml
@@ -231,6 +235,7 @@ LIBS_DENT=
 CFLAGS_OVS=
 LIBS_OVS=
 
+# OPX requires libsystemd-daemon-dev
 CFLAGS_OPX= -I/usr/include/opx
 LIBS_OPX= -lsystemd -lopx_cps_api_common -lopx_cps_class_map
 # For OS10 the same libraries are under different names:
@@ -239,26 +244,34 @@ ifneq ($(shell echo $(FEATURES2)|grep -c " OS10 "),0)
   LIBS_OPX= -lsystemd -lcps-api-common -lcps-class-map-util
 endif
 
+# SONIC requires libhiredis-dev(el)
 CFLAGS_SONIC=
 LIBS_SONIC=-lhiredis
 ifeq ($(REDISONLY),yes)
   CFLAGS_SONIC += -DHSP_SONIC_TEST_REDISONLY
 endif
 
+# DBUS requires dbus-dev(el) or libdbus-1-dev
 CFLAGS_DBUS=$(shell pkg-config dbus-1 --cflags)
 LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 
 CFLAGS_NETLINK=
 LIBS_NETLINK=
 
+# SYSTEMD requires DBUS, openssl-dev(el), libssl-dev(el)
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
 LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
 
 CFLAGS_EAPI=
 LIBS_EAPI=
 
+# CONTAINERD requires golang
 CFLAGS_CONTAINERD=
 LIBS_CONTAINERD= -lm -lcrypto
+
+# K8S requires goland, uuid-dev or libuuid-devel
+CFLAGS_K8S=
+LIBS_K8S= -lm -luuid
 
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
@@ -316,6 +329,7 @@ OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o util_netlink.o
 OBJS_EAPI=mod_eapi.o
 OBJS_CONTAINERD=mod_containerd.o
+OBJS_K8S=mod_k8s.o
 
 BUILDTGTS= mod_json.so \
            mod_dnssd.so \
@@ -372,6 +386,8 @@ EAPI: mod_eapi.so
 CONTAINERD: mod_containerd.so
 
 CONTAINERDGO: hsflowd_containerd
+
+K8S: mod_k8s.so
 
 #########  hsflowd  #########
 
@@ -580,6 +596,14 @@ mod_containerd.o: mod_containerd.c $(HEADERS)
 mod_containerd.so: $(OBJS_CONTAINERD)
 	$(LD) -o $@ $(OBJS_CONTAINERD) $(LDFLAGS_SHARED) $(LIBS_CONTAINERD)
 
+#----------------------------
+
+mod_k8s.o: mod_k8s.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c $(CFLAGS_K8S)
+
+mod_k8s.so: $(OBJS_K8S)
+	$(LD) -o $@ $(OBJS_K8S) $(LDFLAGS_SHARED) $(LIBS_K8S)
+
 
 #########  install  #########
 
@@ -665,3 +689,4 @@ mod_dbus.o: mod_dbus.c $(HEADERS)
 mod_systemd.o: mod_systemd.c $(HEADERS)
 mod_eapi.o: mod_eapi.c $(HEADERS)
 mod_containerd.o: mod_containerd.c $(HEADERS)
+mod_k8s.o: mod_k8s.c $(HEADERS)
