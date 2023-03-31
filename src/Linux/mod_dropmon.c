@@ -866,6 +866,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(mdata->quota <= 0) {
       myDebug(2, "dropmon: rate-limit (%u/sec) exceeded. Dropping drop", sp->dropmon.limit);
       mdata->noQuota++;
+      sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES_SUPPRESSED]++;
       return;
     }
     else
@@ -905,7 +906,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     SEMLOCK_DO(sp->sync_agent) {
       sfl_notifier_writeEventSample(notifier, &discard);
-      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+      sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES]++;
     }
 
     // first successful event confirms we are up and running

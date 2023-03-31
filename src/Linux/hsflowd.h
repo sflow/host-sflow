@@ -231,7 +231,8 @@ extern "C" {
     VMTYPE_KVM,
     VMTYPE_DOCKER,
     VMTYPE_SYSTEMD,
-    VMTYPE_CONTAINERD } EnumVMType;
+    VMTYPE_CONTAINERD,
+    VMTYPE_POD } EnumVMType;
 
   typedef struct _HSPGpuID {
     char uuid[16];
@@ -466,6 +467,7 @@ extern "C" {
     HSP_TELEMETRY_FLOW_SAMPLES_SUPPRESSED,
     HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED,
     HSP_TELEMETRY_EVENT_SAMPLES,
+    HSP_TELEMETRY_EVENT_SAMPLES_SUPPRESSED,
     HSP_TELEMETRY_NUM_COUNTERS
   } EnumHSPTelemetry;
 
@@ -480,6 +482,7 @@ extern "C" {
     "flow_samples_suppressed",
     "counter_samples_suppressed",
     "event_samples",
+    "event_samples_suppressed"
   };
 #endif
 
