@@ -147,7 +147,7 @@ static const char* introspect_xml =
   static char *my_dbus_strdup(char *str) {
     if(str == NULL)
       return NULL;
-    int len = strlen(str);
+    int len = my_strlen(str);
     char *ans = dbus_malloc(len + 1);
     strncpy(ans, str, len);
     return ans;
