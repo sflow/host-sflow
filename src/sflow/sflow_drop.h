@@ -86,7 +86,7 @@ SFL_DROP(pkt_too_small,324)
 SFL_DROP(unhandled_proto,325)
 SFL_DROP(ipv6disabled,326)
 SFL_DROP(invalid_proto,327)
-SFL_DROP(ip_noproto,328)
+SFL_DROP(ip_noproto,328) /* deprecated: use protocol_unreachable(2) */
 SFL_DROP(skb_csum,329)
 SFL_DROP(skb_ucopy_fault,330)
 SFL_DROP(dev_ready,331)
