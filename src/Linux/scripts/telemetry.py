@@ -15,6 +15,7 @@ print ("hsflowd agent IP address is: " + sflow_telemetry.GetAgent())
 print ("packet samples dropped internally = " + str(sflow_telemetry.Get("dropped_samples")))
 print ("packet samples sent = " + str(sflow_telemetry.Get("flow_samples")))
 print ("counter samples sent = " + str(sflow_telemetry.Get("counter_samples")))
+print ("drop event samples sent = " + str(sflow_telemetry.Get("event_samples")))
 print ("datagrams sent = " + str(sflow_telemetry.Get("datagrams")))
 
 # switchport
