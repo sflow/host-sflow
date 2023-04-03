@@ -49,6 +49,7 @@ FEATURES_OPX= OPX DBUS SYSTEMD
 FEATURES_SONIC= SONIC PSAMPLE DOCKER DROPMON
 FEATURES_XEN= XEN OVS
 FEATURES_HOST= NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD PSAMPLE DENT DROPMON
+FEATURES_CONTAINERD= CONTAINERDGO
 
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
@@ -57,6 +58,7 @@ MODDIR     ?= /etc/hsflowd/modules
 SYSTEMDDIR ?= /lib/systemd/system
 DBUSDIR    ?= /etc/dbus-1/system.d
 
+# in FEATURES2 every token has spaces before and after
 FEATURES2=" $(FEATURES) "
 $(info $$FEATURES is [$(FEATURES)] from $(origin FEATURES))
 $(info $$FEATURES2 is [$(FEATURES2)] from $(origin FEATURES))
@@ -118,7 +120,20 @@ ifneq ($(shell echo $(FEATURES2)|grep -c " HOST "),0)
   XTGTS += $(FEATURES_HOST)
 endif
 
+# CONTAINERD requires CONTAINERDGO
+ifneq ($(shell echo $(FEATURES2)|grep -c " CONTAINERD "),0)
+  XTGTS += $(FEATURES_CONTAINERD)
+endif
+
+# K8S also requires CONTAINERDGO
+ifneq ($(shell echo $(FEATURES2)|grep -c " K8S "),0)
+  XTGTS += $(FEATURES_CONTAINERD)
+endif
+
+# in XTGTS2 every token has spaces before and after
+XTGTS2=" $(XTGTS) "
 $(info $$XTGTS is [$(XTGTS)])
+$(info $$XTGTS2 is [$(XTGTS2)])
 
 # alternative mount points (to support hsflowd running in container
 # and/or with no root privileges)
@@ -269,7 +284,7 @@ LIBS_EAPI=
 CFLAGS_CONTAINERD=
 LIBS_CONTAINERD= -lm -lcrypto
 
-# K8S requires goland, uuid-dev or libuuid-devel
+# K8S requires golang, (lib)uuid-dev(el)
 CFLAGS_K8S=
 LIBS_K8S= -lm -luuid
 
@@ -622,7 +637,7 @@ ifneq ($(strip $(HSFLOWD_DBUS_CONF)),)
 	$(INSTALL) -d $(DBUS_D)
 	$(INSTALL) -m 644 $(HSFLOWD_DBUS_CONF) $(DBUS_D)
 endif
-ifneq ($(shell echo $(FEATURES2)|grep -c " CONTAINERDGO "),0)
+ifneq ($(shell echo $(XTGTS2)|grep -c " CONTAINERDGO "),0)
 	$(INSTALL) -m 700 containerd/hsflowd_containerd $(BIN_D)
 endif
 
