@@ -68,19 +68,19 @@ extern "C" {
     UTHash *containers;
   } HSPVMState_POD;
 
-#define HSP_CONTAINERD_READER "/usr/sbin/hsflowd_containerd"
-#define HSP_CONTAINERD_DATAPREFIX "data>"
+#define HSP_K8S_READER "/usr/sbin/hsflowd_containerd"
+#define HSP_K8S_DATAPREFIX "data>"
 
-#define HSP_CONTAINERD_MAX_FNAME_LEN 255
-#define HSP_CONTAINERD_MAX_LINELEN 512
-#define HSP_CONTAINERD_SHORTID_LEN 12
+#define HSP_K8S_MAX_FNAME_LEN 255
+#define HSP_K8S_MAX_LINELEN 512
+#define HSP_K8S_SHORTID_LEN 12
 
-#define HSP_CONTAINERD_WAIT_NOSOCKET 10
-#define HSP_CONTAINERD_WAIT_EVENTDROP 5
-#define HSP_CONTAINERD_WAIT_STARTUP 2
-#define HSP_CONTAINERD_WAIT_RECHECK 120
-#define HSP_CONTAINERD_WAIT_STATS 3
-#define HSP_CONTAINERD_REQ_TIMEOUT 10
+#define HSP_K8S_WAIT_NOSOCKET 10
+#define HSP_K8S_WAIT_EVENTDROP 5
+#define HSP_K8S_WAIT_STARTUP 2
+#define HSP_K8S_WAIT_RECHECK 120
+#define HSP_K8S_WAIT_STATS 3
+#define HSP_K8S_REQ_TIMEOUT 10
 
 #define HSP_NVIDIA_VIS_DEV_ENV "NVIDIA_VISIBLE_DEVICES"
 #define HSP_MAJOR_NVIDIA 195
@@ -164,9 +164,9 @@ extern "C" {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     myDebug(1, "podLinkCB: line=<%s>", line);
-    char deviceName[HSP_CONTAINERD_MAX_LINELEN];
-    char macStr[HSP_CONTAINERD_MAX_LINELEN];
-    char ipStr[HSP_CONTAINERD_MAX_LINELEN];
+    char deviceName[HSP_K8S_MAX_LINELEN];
+    char macStr[HSP_K8S_MAX_LINELEN];
+    char ipStr[HSP_K8S_MAX_LINELEN];
     uint32_t ifIndex;
     if(sscanf(line, "VNIC: %u %s %s %s", &ifIndex, deviceName, macStr, ipStr) == 4) {
       u_char mac[6];
@@ -295,8 +295,8 @@ extern "C" {
       close(pfd[1]);
 
       // open /proc/<nspid>/ns/net
-      char topath[HSP_CONTAINERD_MAX_FNAME_LEN+1];
-      snprintf(topath, HSP_CONTAINERD_MAX_FNAME_LEN, PROCFS_STR "/%u/ns/net", nspid);
+      char topath[HSP_K8S_MAX_FNAME_LEN+1];
+      snprintf(topath, HSP_K8S_MAX_FNAME_LEN, PROCFS_STR "/%u/ns/net", nspid);
       int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
       if(nsfd < 0) {
 	fprintf(stderr, "cannot open %s : %s", topath, strerror(errno));
@@ -479,7 +479,7 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = pod->hostname ?: pod->id; // TODO: consider config setting sp->containerd.hostname
+    char *hname = pod->hostname ?: pod->id;
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, vm->uuid, 16);
@@ -786,8 +786,8 @@ extern "C" {
     HSPVMState *vm = &container->vm;
     if(vm) {
       // open /proc/<pid>/cgroup
-      char cgpath[HSP_CONTAINERD_MAX_FNAME_LEN+1];
-      snprintf(cgpath, HSP_CONTAINERD_MAX_FNAME_LEN, PROCFS_STR "/%u/cgroup", container->pid);
+      char cgpath[HSP_K8S_MAX_FNAME_LEN+1];
+      snprintf(cgpath, HSP_K8S_MAX_FNAME_LEN, PROCFS_STR "/%u/cgroup", container->pid);
       FILE *procFile = fopen(cgpath, "r");
       if(procFile) {
 	char line[MAX_PROC_LINE_CHARS];
@@ -804,7 +804,7 @@ extern "C" {
 		  if(container->cgroup_devices)
 		    my_free(container->cgroup_devices);
 		  container->cgroup_devices = my_strdup(path);
-		  myDebug(1, "containerd: container(%s)->cgroup_devices=%s", container->name, container->cgroup_devices);
+		  myDebug(1, "k8s: container(%s)->cgroup_devices=%s", container->name, container->cgroup_devices);
 		}
 	      }
 	    }
@@ -833,7 +833,7 @@ extern "C" {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
-    if(!hasVNodeRole(mod, HSP_VNODE_PRIORITY_CONTAINERD))
+    if(!hasVNodeRole(mod, HSP_VNODE_PRIORITY_POD))
       return;
 
     memset(&mdata->vnodeElem, 0, sizeof(mdata->vnodeElem));
@@ -1199,8 +1199,8 @@ extern "C" {
   
   static void readContainerData(EVMod *mod, char *str, void *magic) {
     // HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    int prefixLen = strlen(HSP_CONTAINERD_DATAPREFIX);
-    if(memcmp(str, HSP_CONTAINERD_DATAPREFIX, prefixLen) == 0) {
+    int prefixLen = strlen(HSP_K8S_DATAPREFIX);
+    if(memcmp(str, HSP_K8S_DATAPREFIX, prefixLen) == 0) {
       cJSON *top = cJSON_Parse(str + prefixLen);
       readContainerJSON(mod, top, magic);
       cJSON_Delete(top);
@@ -1358,9 +1358,9 @@ extern "C" {
       // Could pass debugLevel to reader like this:
       // char level[16];
       // snprintf(level, 16, "%u", getDebug());
-      // char *cmd[] = { HSP_CONTAINERD_READER, "--debugLevel", level,  NULL };
+      // char *cmd[] = { HSP_K8S_READER, "--debugLevel", level,  NULL };
       // but can always debug reader separately, so just invoke it like this:
-      char *cmd[] = { HSP_CONTAINERD_READER, NULL };
+      char *cmd[] = { HSP_K8S_READER, NULL };
       mdata->readerPid = EVBusExec(mod, mdata->pollBus, mdata, cmd, readCB);
     }
   }
@@ -1386,7 +1386,7 @@ extern "C" {
     retainRootRequest(mod, "needed by mod_k8s to access containerd.sock");
     retainRootRequest(mod, "needed by mod_k8s to probe for adaptors in other namespaces");
 
-    requestVNodeRole(mod, HSP_VNODE_PRIORITY_CONTAINERD);
+    requestVNodeRole(mod, HSP_VNODE_PRIORITY_POD);
 
     buildRegexPatterns(mod);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_POD, id, UTHASH_SKEY);
@@ -1401,7 +1401,7 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
 
-    if(sp->containerd.markTraffic) {
+    if(sp->k8s.markTraffic) {
       EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)

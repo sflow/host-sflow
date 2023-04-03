@@ -490,6 +490,7 @@ extern "C" {
     HSP_VNODE_PRIORITY_SYSTEMD=1,
     HSP_VNODE_PRIORITY_DOCKER,
     HSP_VNODE_PRIORITY_CONTAINERD,
+    HSP_VNODE_PRIORITY_POD,
     HSP_VNODE_PRIORITY_KVM,
     HSP_VNODE_PRIORITY_XEN
   } EnumVNodePriority;
@@ -567,6 +568,10 @@ extern "C" {
       bool hostname;
       bool markTraffic;
     } containerd;
+    struct {
+      bool k8s;
+      bool markTraffic;
+    } k8s;
     struct {
       bool cumulus;
       char *swp_regex_str;

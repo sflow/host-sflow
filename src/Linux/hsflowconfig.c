@@ -60,6 +60,7 @@ extern "C" {
     HSPOBJ_KVM,
     HSPOBJ_DOCKER,
     HSPOBJ_CONTAINERD,
+    HSPOBJ_K8S,
     HSPOBJ_ULOG,
     HSPOBJ_NFLOG,
     HSPOBJ_PSAMPLE,
@@ -89,6 +90,7 @@ extern "C" {
     "kvm",
     "docker",
     "containerd",
+    "k8s",
     "ulog",
     "nflog",
     "psample",
@@ -1343,6 +1345,11 @@ extern "C" {
 	    sp->containerd.containerd = YES;
 	    level[++depth] = HSPOBJ_CONTAINERD;
 	    break;
+	  case HSPTOKEN_K8S:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->k8s.k8s = YES;
+	    level[++depth] = HSPOBJ_K8S;
+	    break;
 	  case HSPTOKEN_ULOG:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->ulog.ulog = YES;
@@ -1648,6 +1655,20 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_CGROUP_TRAFFIC:
 	      if((tok = expectONOFF(sp, tok, &sp->containerd.markTraffic)) == NULL) return NO;
+	      break;
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_K8S:
+	  {
+	    switch(tok->stok) {
+	    case HSPTOKEN_CGROUP_TRAFFIC:
+	      if((tok = expectONOFF(sp, tok, &sp->k8s.markTraffic)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
