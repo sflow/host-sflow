@@ -120,15 +120,16 @@ ifneq ($(shell echo $(FEATURES2)|grep -c " HOST "),0)
   XTGTS += $(FEATURES_HOST)
 endif
 
-# CONTAINERD requires CONTAINERDGO
-ifneq ($(shell echo $(FEATURES2)|grep -c " CONTAINERD "),0)
-  XTGTS += $(FEATURES_CONTAINERD)
-endif
-
-# K8S also requires CONTAINERDGO
-ifneq ($(shell echo $(FEATURES2)|grep -c " K8S "),0)
-  XTGTS += $(FEATURES_CONTAINERD)
-endif
+# CONTAINERD and K8S require CONTAINERDGO, but it is
+# easier not to capture this dependency so that the
+# Go program can more easily be compiled separately
+# (e.g. using golang docker hub image)
+#ifneq ($(shell echo $(FEATURES2)|grep -c " CONTAINERD "),0)
+#  XTGTS += $(FEATURES_CONTAINERD)
+#endif
+#ifneq ($(shell echo $(FEATURES2)|grep -c " K8S "),0)
+#  XTGTS += $(FEATURES_CONTAINERD)
+#endif
 
 # in XTGTS2 every token has spaces before and after
 XTGTS2=" $(XTGTS) "
