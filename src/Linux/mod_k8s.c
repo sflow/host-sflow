@@ -45,14 +45,15 @@ extern "C" {
 
   typedef struct _HSPVMState_POD {
     HSPVMState vm; // superclass: must come first
-    char *id;
-    char *name;
     char *hostname;
     char *sandbox;
-    pid_t pid;
-    uint32_t state; // SFLVirDomainState
-    uint32_t gpu_dev:1;
-    uint32_t gpu_env:1;
+    pid_t nspid; // selected from containers
+    uint32_t state; // SFLVirDomainState - from containers
+    bool gpu_dev_tried:1;
+    bool gpu_dev:1;
+    bool gpu_env_tried:1;
+    bool gpu_env:1;
+    
     uint64_t memoryLimit;
     time_t last_vnic;
     time_t last_cgroup;
@@ -100,7 +101,6 @@ extern "C" {
 
   typedef struct _HSP_mod_K8S {
     EVBus *pollBus;
-    UTHash *vmsByID;
     UTHash *vmsBySandbox;
     UTHash *containersByID;
     SFLCounters_sample_element vnodeElem;
@@ -137,11 +137,10 @@ extern "C" {
   char *podStr(HSPVMState_POD *pod, char *buf, int bufLen) {
     u_char uuidstr[100];
     printUUID((u_char *)pod->vm.uuid, uuidstr, 100);
-    snprintf(buf, bufLen, "name: %s hostname: %s uuid: %s id: %s",
-	     pod->name,
+    snprintf(buf, bufLen, "sandbox: %s hostname: %s uuid: %s",
+	     pod->sandbox,
 	     pod->hostname,
-	     pod->vm.uuid,
-	     pod->id);
+	     pod->vm.uuid);
     return buf;
   }
 
@@ -235,7 +234,7 @@ extern "C" {
 		vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
 		vnic->ipAddr = ipAddr;
 		vnic->dsIndex = pod->vm.dsIndex;
-		vnic->c_name = my_strdup(pod->name);
+		vnic->c_name = my_strdup(pod->sandbox);
 		vnic->c_hostname = my_strdup(pod->hostname);
 		UTHashAdd(mdata->vnicByIP, vnic);
 		vnic->unique = YES;
@@ -271,9 +270,11 @@ extern "C" {
 
   int readPodInterfaces(EVMod *mod, HSPVMState_POD *pod)  {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    pid_t nspid = pod->pid;
+    pid_t nspid = pod->nspid;
     myDebug(2, "readPodInterfaces: pid=%u", nspid);
-    if(nspid == 0) return 0;
+    if(nspid == 0)
+      return 0;
+    
 
     // do the dirty work after a fork, so we can just exit afterwards,
     // same as they do in "ip netns exec"
@@ -479,7 +480,7 @@ extern "C" {
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
     hidElem.tag = SFLCOUNTERS_HOST_HID;
-    char *hname = pod->hostname ?: pod->id;
+    char *hname = pod->hostname ?: pod->sandbox;
     hidElem.counterBlock.host_hid.hostname.str = hname;
     hidElem.counterBlock.host_hid.hostname.len = my_strlen(hname);
     memcpy(hidElem.counterBlock.host_hid.uuid, vm->uuid, 16);
@@ -661,49 +662,36 @@ extern "C" {
     UTHashFree(pod->containers);
 
     // remove from hash tables
-    if(UTHashDel(mdata->vmsByID, pod) == NULL) {
-      myLog(LOG_ERR, "UTHashDel (vmsByID) failed: pod %s=%s", pod->name, pod->id);
-      if(debug(1))
-	podHTPrint(mdata->vmsByID, "vmsByID");
-    }
     if(UTHashDel(mdata->vmsBySandbox, pod) == NULL) {
-      myLog(LOG_ERR, "UTHashDel (vmsBySandbox) failed: pod %s=%s", pod->name, pod->id);
+      myLog(LOG_ERR, "UTHashDel (vmsBySandbox) failed: pod %s", pod->sandbox);
       if(debug(1))
 	podHTPrint(mdata->vmsBySandbox, "vmsBySandbox");
     }
 
-    if(pod->id)
-      my_free(pod->id);
-    if(pod->name)
-      my_free(pod->name);
+    if(pod->sandbox)
+      my_free(pod->sandbox);
     if(pod->hostname)
       my_free(pod->hostname);
 
     removeAndFreeVM(mod, &pod->vm);
   }
 
-  static HSPVMState_POD *getPod(EVMod *mod, char *id, char *sandbox, bool create) {
+  static HSPVMState_POD *getPod(EVMod *mod, char *sandbox, bool create) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(id == NULL) return NULL;
-    HSPVMState_POD cont = { .id = id };
-    HSPVMState_POD *pod = UTHashGet(mdata->vmsByID, &cont);
+    HSPVMState_POD cont = { .sandbox = sandbox };
+    HSPVMState_POD *pod = UTHashGet(mdata->vmsBySandbox, &cont);
     if(pod == NULL
        && create) {
       char uuid[16];
-      // turn pod ID into a UUID - just take the first 16 bytes of the id
-      if(parseUUID(id, uuid) == NO) {
-	myLog(LOG_ERR, "parsing pod UUID from <%s> - fall back on auto-generated", id);
-	uuidgen_type5(sp, (u_char *)uuid, id);
-      }
-
+      // turn sandbox string into a type 5 UUID
+      uuidgen_type5(sp, (u_char *)uuid, sandbox);
+      // and use that to look up the datasource
       pod = (HSPVMState_POD *)getVM(mod, uuid, YES, sizeof(HSPVMState_POD), VMTYPE_POD, agentCB_getCounters_POD_request);
       assert(pod != NULL);
       if(pod) {
-	pod->id = my_strdup(id);
 	pod->sandbox = my_strdup(sandbox);
 	// add to collections
-	UTHashAdd(mdata->vmsByID, pod);
 	UTHashAdd(mdata->vmsBySandbox, pod);
 	// collection of child containers
 	pod->containers = UTHASH_NEW(HSPK8sContainer, id, UTHASH_SKEY);
@@ -721,14 +709,6 @@ extern "C" {
     _________________  add and remove container __________________
     -----------------___________________________------------------
   */
-
-  static HSPVMState_POD *getPodBySandbox(EVMod *mod, char *sandbox) {
-    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    if(sandbox == NULL)
-      return NULL;
-    HSPVMState_POD search = { .sandbox = sandbox };
-    return UTHashGet(mdata->vmsBySandbox, &search);
-  }
 
   static HSPVMState_POD *podAddContainer(EVMod *mod, HSPVMState_POD *pod, HSPK8sContainer *container) {
     return UTHashGetOrAdd(pod->containers, container);
@@ -778,16 +758,18 @@ extern "C" {
   }
 
   /*_________________-----------------------------__________________
-    _________________  updateContainerCgroupPaths __________________
+    _________________    updatePodCgroupPaths     __________________
     -----------------_____________________________------------------
   */
 
-  static void updatePodCgroupPaths(EVMod *mod, HSPVMState_POD *container) {
-    HSPVMState *vm = &container->vm;
+  static void updatePodCgroupPaths(EVMod *mod, HSPVMState_POD *pod) {
+    if(pod->nspid == 0)
+      return;
+    HSPVMState *vm = &pod->vm;
     if(vm) {
       // open /proc/<pid>/cgroup
       char cgpath[HSP_K8S_MAX_FNAME_LEN+1];
-      snprintf(cgpath, HSP_K8S_MAX_FNAME_LEN, PROCFS_STR "/%u/cgroup", container->pid);
+      snprintf(cgpath, HSP_K8S_MAX_FNAME_LEN, PROCFS_STR "/%u/cgroup", pod->nspid);
       FILE *procFile = fopen(cgpath, "r");
       if(procFile) {
 	char line[MAX_PROC_LINE_CHARS];
@@ -800,11 +782,11 @@ extern "C" {
 	    char path[MAX_PROC_LINE_CHARS];
 	    if(sscanf(line, "%d:%[^:]:%[^:]", &entryNo, type, path) == 3) {
 	      if(my_strequal(type, "devices")) {
-		if(!my_strequal(container->cgroup_devices, path)) {
-		  if(container->cgroup_devices)
-		    my_free(container->cgroup_devices);
-		  container->cgroup_devices = my_strdup(path);
-		  myDebug(1, "k8s: container(%s)->cgroup_devices=%s", container->name, container->cgroup_devices);
+		if(!my_strequal(pod->cgroup_devices, path)) {
+		  if(pod->cgroup_devices)
+		    my_free(pod->cgroup_devices);
+		  pod->cgroup_devices = my_strdup(path);
+		  myDebug(1, "k8s: pod(%s)->cgroup_devices=%s", pod->sandbox, pod->cgroup_devices);
 		}
 	      }
 	    }
@@ -813,14 +795,6 @@ extern "C" {
 	fclose(procFile);
       }
     }
-  }
-
-  /*_________________---------------------------__________________
-    _________________   buildRegexPatterns      __________________
-    -----------------___________________________------------------
-  */
-  static void buildRegexPatterns(EVMod *mod) {
-    // HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
   }
 
   /*_________________---------------------------__________________
@@ -840,7 +814,7 @@ extern "C" {
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
     mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
     mdata->vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
-    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = UTHashN(mdata->vmsByID);
+    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = UTHashN(mdata->vmsBySandbox);
     mdata->vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
     mdata->vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
     SFLADD_ELEMENT(cs, &mdata->vnodeElem);
@@ -887,6 +861,7 @@ extern "C" {
 
   static void readPodGPUsFromEnv(EVMod *mod, HSPVMState_POD *pod, cJSON *jenv) {
     // look through env vars for evidence of GPUs assigned to this pod
+    pod->gpu_env_tried = YES;
     int entries = cJSON_GetArraySize(jenv);
     UTArray *arr = pod->vm.gpus;
     for(int ii = 0; ii < entries; ii++) {
@@ -910,7 +885,7 @@ extern "C" {
 	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
 	      if(parseUUID(str + 4, gpu->uuid)) {
 		gpu->has_uuid = YES;
-		myDebug(2, "adding GPU uuid to pod: %s", pod->name);
+		myDebug(2, "adding GPU uuid to pod: %s", pod->sandbox);
 		UTArrayAdd(arr, gpu);
 		pod->gpu_env = YES;
 	      }
@@ -927,6 +902,7 @@ extern "C" {
   
 
   static void readPodGPUsFromDev(EVMod *mod, HSPVMState_POD *pod) {
+    pod->gpu_dev_tried = YES;
     // look through devices to see if individial GPUs are exposed
     char path[HSP_MAX_PATHLEN];
     sprintf(path, SYSFS_STR "/fs/cgroup/devices/%s/devices.list", pod->cgroup_devices);
@@ -966,7 +942,7 @@ extern "C" {
 	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
 	      gpu->minor = minor;
 	      gpu->has_minor = YES;
-	      myDebug(2, "adding GPU dev to pod: %s", pod->name);
+	      myDebug(2, "adding GPU dev to pod: %s", pod->sandbox);
 	      UTArrayAdd(arr, gpu);
 	    }
 	  }
@@ -974,6 +950,24 @@ extern "C" {
       }
       fclose(procFile);
     }
+  }
+
+
+  /*_________________---------------------------__________________
+    _________________    setPodNSPid            __________________
+    -----------------___________________________------------------
+  */
+
+  static pid_t setPodNSPid(EVMod *mod, HSPVMState_POD *pod) {
+    // pick up an nspid from my list of active containers
+    HSPK8sContainer *container;
+    UTHASH_WALK(pod->containers, container) {
+      if(container->pid) {
+	pod->nspid = container->pid;
+	break;
+      }
+    }
+    return pod->nspid;
   }
 
   /*_________________---------------------------__________________
@@ -1130,70 +1124,59 @@ extern "C" {
 	container->dsk.wr_bytes = jwr_bytes->valuedouble;
     }
 
-    HSPVMState_POD *pod = NULL;
-    if(isSandbox) {
-      // For sandbox container we allocate a datasource that sends counters,
-      // We also detect cgroup,network namespace interfaces and GPU devices.
-      pod = getPod(mod, jid->valuestring, compoundSandbox, YES);
-      if(pod) {
-	// We have the pid, so we can probe for the MAC and peer-ifIndex
-	// see if spacing the VNIC refresh reduces load
-	time_t now_mono = mdata->pollBus->now.tv_sec;
-
-	if(pod->last_vnic == 0
-	   || (now_mono - pod->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
-	  pod->last_vnic = now_mono;
-	  updatePodAdaptors(mod, pod);
-	}
-
-	if(pod->last_cgroup == 0
-	   || (now_mono - pod->last_cgroup) > HSP_CGROUP_REFRESH_TIMEOUT) {
-	  pod->last_cgroup = now_mono;
-	  updatePodCgroupPaths(mod, pod);
-	}
-
-	cJSON *jenv = cJSON_GetObjectItem(jmetrics, "Env");
-	if(jenv
-	   && pod->gpu_dev == NO)
-	  readPodGPUsFromEnv(mod, pod, jenv);
-	
-	if(pod->cgroup_devices)
-	  readPodGPUsFromDev(mod, pod);
-
-	// send the counter sample right away
-	// (the Go program has read /etc/hsflowd.auto to get the
-	// polling interval, so it is already handling the polling
-	// periodicity for us).
-	getCounters_POD(mod, pod);
-	// maybe this was the last one?
-	if(podDone(mod, pod)) {
-	  removeAndFreeVM_POD(mod, pod);
-	}
-	else {
-	  // the sandbox container should also be in the list of
-	  // containers for the pod.... I think.  It might make the
-	  // stats easier to understand if we don't do this.  For
-	  // example,  the sanbox container might add a CPU core
-	  // to the count?
-	  podAddContainer(mod, pod, container);
-	}
-      }
+    // now get the pod, key'd by sandbox name. That means we will allocated
+    // it immediately whether this container is the sandbox container or not.
+    HSPVMState_POD *pod = getPod(mod, compoundSandbox, YES);
+    assert(pod != NULL);
+    // and make sure this container is assigned to this pod.
+    podAddContainer(mod, pod, container);
+    // and set/update the nspid
+    setPodNSPid(mod, pod);
+    
+    // probe for the MAC and peer-ifIndex (will only
+    // work if we have at least one regular container here
+    // since the sandbox has pid==0).
+    
+    // see if spacing the VNIC refresh reduces load
+    time_t now_mono = mdata->pollBus->now.tv_sec;
+    
+    if(pod->last_vnic == 0
+       || (now_mono - pod->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
+      pod->last_vnic = now_mono;
+      updatePodAdaptors(mod, pod);
     }
-    else {
-      // not sandbox - regular container - find sandbox and add this to it.
-      // Note that if we learn about the pod before we learn about the
-      // sandbox then we will lose one polling cycle and the container
-      // will only be added to the pod the next time it updates.  To avoid
-      // that we could either look to see if the sandbox id is in the
-      // JSON every time,  or just use the compoundSanbox string as the
-      // only key for pods, because then we can create the pod and send
-      // counters for it as soon as we see the first container from it.
-      // At least I think we can do that.  Not sure it's really necessary,
-      // however. Seems safer to only create the datasource when we have
-      // the JSON for the sandbox.
-      pod = getPodBySandbox(mod, compoundSandbox);
-      if(pod)
-	podAddContainer(mod, pod, container);
+
+    if(pod->last_cgroup == 0
+       || (now_mono - pod->last_cgroup) > HSP_CGROUP_REFRESH_TIMEOUT) {
+      pod->last_cgroup = now_mono;
+      updatePodCgroupPaths(mod, pod);
+    }
+
+    if(!isSandbox) {
+      // Only try to find the GPU info once, but don't
+      // try it on the sandbox container because it won't
+      // have the full ENV.
+      cJSON *jenv = cJSON_GetObjectItem(jmetrics, "Env");
+      if(jenv
+	 && !pod->gpu_env_tried)
+	readPodGPUsFromEnv(mod, pod, jenv);
+      
+      if(pod->cgroup_devices
+	 && !pod->gpu_dev_tried)
+	readPodGPUsFromDev(mod, pod);
+    }
+
+    if(isSandbox) {
+      // send the counter sample right away
+      // (the Go program has read /etc/hsflowd.auto to get the
+      // polling interval, so it is already handling the polling
+      // periodicity for us).
+      getCounters_POD(mod, pod);
+      // maybe this was the last one?
+      if(podDone(mod, pod)) {
+	myDebug(1, "k8s: pod done (%s) removeAndFree", pod->sandbox);
+	removeAndFreeVM_POD(mod, pod);
+      }
     }
   }
   
@@ -1388,8 +1371,6 @@ extern "C" {
 
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_POD);
 
-    buildRegexPatterns(mod);
-    mdata->vmsByID = UTHASH_NEW(HSPVMState_POD, id, UTHASH_SKEY);
     mdata->vmsBySandbox = UTHASH_NEW(HSPVMState_POD, sandbox, UTHASH_SKEY);
     mdata->containersByID = UTHASH_NEW(HSPK8sContainer, id, UTHASH_SKEY);
     mdata->cgroupPathIdx = -1;
