@@ -424,11 +424,19 @@ extern "C" {
     }
 
     // accumulate CPU, mem, diskI/O counters from containers
-    HSPK8sContainerStats stats = {};
+    myDebug(2, "k8s: getCounters_POD(): pod %s has %u containers",
+	    pod->hostname,
+	    UTHashN(pod->containers));
+
+    HSPK8sContainerStats stats = { 0 };
     HSPK8sContainer *container;
     UTHASH_WALK(pod->containers, container) {
       stats.state = container->stats.state;
       stats.cpu_count += container->stats.cpu_count;
+      myDebug(2, "k8s: getCounters_POD(): container %s has cpu_count %u (total now = %u)",
+	      container->name,
+	      container->stats.cpu_count,
+	      stats.cpu_count);
       stats.cpu_total += container->stats.cpu_total;
       stats.mem_usage += container->stats.mem_usage;
       stats.memoryLimit += container->stats.memoryLimit;
@@ -606,8 +614,8 @@ extern "C" {
   static HSPVMState_POD *getPod(EVMod *mod, char *hostname, bool create) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    HSPVMState_POD cont = { .hostname = hostname };
-    HSPVMState_POD *pod = UTHashGet(mdata->vmsByHostname, &cont);
+    HSPVMState_POD search = { .hostname = hostname };
+    HSPVMState_POD *pod = UTHashGet(mdata->vmsByHostname, &search);
     if(pod == NULL
        && create) {
       char uuid[16];
