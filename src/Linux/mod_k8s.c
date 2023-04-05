@@ -431,7 +431,9 @@ extern "C" {
     HSPK8sContainerStats stats = { 0 };
     HSPK8sContainer *container;
     UTHASH_WALK(pod->containers, container) {
-      stats.state = container->stats.state;
+      if(container->stats.state == SFL_VIR_DOMAIN_RUNNING) {
+	stats.state = SFL_VIR_DOMAIN_RUNNING;
+      }
       stats.cpu_count += container->stats.cpu_count;
       myDebug(2, "k8s: getCounters_POD(): container %s has cpu_count %u (total now = %u)",
 	      container->name,
@@ -450,6 +452,9 @@ extern "C" {
       stats.dsk.errs += container->stats.dsk.errs;
       // TODO: accumulate net counters too?  (If they appear)
     }
+
+    // TODO: how to detect that a POD has stopped?  No containers running?
+    pod->state = stats.state;
     
     // host ID
     SFLCounters_sample_element hidElem = { 0 };
@@ -482,7 +487,7 @@ extern "C" {
     // VM cpu counters [ref xenstat.c]
     SFLCounters_sample_element cpuElem = { 0 };
     cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
-    cpuElem.counterBlock.host_vrt_cpu.state = stats.state;
+    cpuElem.counterBlock.host_vrt_cpu.state = pod->state;
     cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = stats.cpu_count ?: (uint32_t)round(stats.cpu_count_dbl);
     cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(stats.cpu_total / 1000000); // convert to mS
     SFLADD_ELEMENT(&cs, &cpuElem);
@@ -625,6 +630,7 @@ extern "C" {
       pod = (HSPVMState_POD *)getVM(mod, uuid, YES, sizeof(HSPVMState_POD), VMTYPE_POD, agentCB_getCounters_POD_request);
       assert(pod != NULL);
       if(pod) {
+	pod->state = SFL_VIR_DOMAIN_RUNNING;
 	pod->hostname = my_strdup(hostname);
 	// add to collections
 	UTHashAdd(mdata->vmsByHostname, pod);
