@@ -80,11 +80,16 @@ extern "C" {
 
 #define MY_MAX_HOSTNAME_CHARS 255 // override sFlow standard of SFL_MAX_HOSTNAME_CHARS (64)
 
+  typedef struct _HSPVNICPodEntry {
+    char *c_hostname;
+    uint32_t dsIndex;
+  } HSPVNICPodEntry;
+  
   typedef struct _HSPVNIC {
     SFLAddress ipAddr;
+    UTHash *podEntries;
     uint32_t dsIndex;
-    char *c_hostname;
-    bool unique;
+#define HSPVNIC_DSINDEX_NONUNIQUE 0xFFFFFFFF
   } HSPVNIC;
 
 #define HSP_VNIC_REFRESH_TIMEOUT 300
@@ -122,6 +127,24 @@ extern "C" {
     HSPVMState_POD *pod;
     UTHASH_WALK(ht, pod)
       myLog(LOG_INFO, "%s: %s", prefix, podStr(pod, buf, 1024));
+  }
+
+  /*________________---------------------------__________________
+    ________________    setVNIC_ds             __________________
+    ----------------___________________________------------------
+  */
+
+  static uint32_t setVNIC_ds(EVMod *mod, HSPVNIC *vnic) {
+    // set the dsIndex to the podEntry->dsIndex if there is only one,
+    // otherwise indicate that it is not a unique mapping.
+    vnic->dsIndex = HSPVNIC_DSINDEX_NONUNIQUE; // not-unique
+    if(UTHashN(vnic->podEntries) == 1) {
+      HSPVNICPodEntry *podEntry;
+      UTHASH_WALK(vnic->podEntries, podEntry) {
+	vnic->dsIndex = podEntry->dsIndex;
+      }
+    }
+    return vnic->dsIndex;
   }
 
   /*________________---------------------------__________________
@@ -174,7 +197,7 @@ extern "C" {
 	    else {
 	      myDebug(1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
 	      // mark is as not a unique mapping
-	      nio->container_dsIndex = 0xFFFFFFFF;
+	      nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
 	    }
 	  }
 
@@ -183,40 +206,39 @@ extern "C" {
 	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)) {
 	    if(!SFLAddress_isZero(&ipAddr)
 	       && mdata->vnicByIP) {
-	      myDebug(1, "VNIC: learned virtual ipAddr: %s", ipStr);
 	      // Can use this to associate traffic with this pod
 	      // if this address appears in sampled packet header as
 	      // outer or inner IP
 	      ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
 	      HSPVNIC search = { .ipAddr = ipAddr };
 	      HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
+	      HSPVNICPodEntry *podEntry = NULL;	      
 	      if(vnic) {
-		// found IP - check for non-unique mapping
-		if(vnic->dsIndex != pod->vm.dsIndex) {
-		  myDebug(1, "VNIC: IP %s clash between %s (ds=%u) and %s (ds=%u) -- setting unique=no",
-			  ipStr,
-			  vnic->c_hostname,
-			  vnic->dsIndex,
-			  pod->hostname,
-			  pod->vm.dsIndex);
-		  vnic->unique = NO;
-		}
+		// found VNIC - check for this pod
+		HSPVNICPodEntry search = { .c_hostname = pod->hostname };
+		podEntry = UTHashGet(vnic->podEntries, &search);
 	      }
 	      else {
-		// add new VNIC entry
+		// add new VNIC
 		vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
 		vnic->ipAddr = ipAddr;
-		vnic->dsIndex = pod->vm.dsIndex;
-		vnic->c_hostname = my_strdup(pod->hostname);
+		vnic->podEntries = UTHASH_NEW(HSPVNICPodEntry, c_hostname, UTHASH_SKEY);
 		UTHashAdd(mdata->vnicByIP, vnic);
-		vnic->unique = YES;
-		myDebug(1, "VNIC: linked to %s (ds=%u)",
-			vnic->c_hostname,
-			vnic->dsIndex);
 	      }
+	      if(!podEntry) {
+		// add new podEntry
+		podEntry = (HSPVNICPodEntry *)my_calloc(sizeof(HSPVNICPodEntry));
+		podEntry->dsIndex = pod->vm.dsIndex;
+		podEntry->c_hostname = my_strdup(pod->hostname);
+		UTHashAdd(vnic->podEntries, podEntry);
+		myDebug(1, "VNIC: ip %s linked to %s (ds=%u)",
+			ipStr,
+			podEntry->c_hostname,
+			podEntry->dsIndex);
+	      }
+	      setVNIC_ds(mod, vnic);
 	    }
 	  }
-
 	}
       }
     }
@@ -559,12 +581,28 @@ extern "C" {
     ADAPTORLIST_WALK(pod->vm.interfaces, ad) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(ad);
       if(nio->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
-	HSPVNIC search = { };
-	search.ipAddr = nio->ipAddr;
-	HSPVNIC *vnic = UTHashDelKey(mdata->vnicByIP, &search);
+	HSPVNIC vnSearch = { };
+	vnSearch.ipAddr = nio->ipAddr;
+	HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &vnSearch);
 	if(vnic) {
-	  my_free(vnic->c_hostname);
-	  my_free(vnic);
+	  HSPVNICPodEntry peSearch = { .c_hostname = pod->hostname };
+	  HSPVNICPodEntry *podEntry = UTHashDelKey(vnic->podEntries, &peSearch);
+	  if(podEntry) {
+	    my_free(podEntry->c_hostname);
+	    my_free(podEntry);
+	  }
+	  if(UTHashN(vnic->podEntries) == 0) {
+	    // empty VNIC, remove
+	    HSPVNIC *vnic = UTHashDelKey(mdata->vnicByIP, &vnSearch);
+	    if(vnic) {
+	      UTHashFree(vnic->podEntries);
+	      my_free(vnic);
+	    }
+	  }
+	  else {
+	    // recalculate the VNIC dsIndex (maybe now it is unique?)
+	    setVNIC_ds(mod, vnic);
+	  }
 	}
       }
     }
@@ -1136,7 +1174,7 @@ extern "C" {
       uint32_t c_dsi = ADAPTOR_NIO(adaptor)->container_dsIndex;
       myDebug(2, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
       // make sure it wasn't marked as "non-unique"
-      if(c_dsi != 0xFFFFFFFF)
+      if(c_dsi != HSPVNIC_DSINDEX_NONUNIQUE)
 	return c_dsi;
     }
     return 0;
@@ -1147,15 +1185,9 @@ extern "C" {
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
-    if(vnic) {
-      myDebug(2, "VNIC: got src %s (unique=%s, ds=%u)\n",
-	      vnic->c_hostname,
-	      vnic->unique ? "YES" : "NO",
-	      vnic->dsIndex);
-      if(vnic->unique)
-	return vnic->dsIndex;
-    }
-    return 0;
+    return (vnic)
+      ? vnic->dsIndex
+      : 0;
   }
   
   static bool lookupContainerDS(EVMod *mod, HSPPendingSample *ps, uint32_t *p_src_dsIndex, uint32_t *p_dst_dsIndex) {
@@ -1207,12 +1239,12 @@ extern "C" {
       SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
       entElem->tag = SFLFLOW_EX_ENTITIES;
       if(src_dsIndex
-	 && src_dsIndex != 0xFFFFFFFF) {
+	 && src_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
 	entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
 	entElem->flowType.entities.src_dsIndex = src_dsIndex;
       }
       if(dst_dsIndex
-	 && dst_dsIndex != 0xFFFFFFFF) {
+	 && dst_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
 	entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
 	entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
       }
