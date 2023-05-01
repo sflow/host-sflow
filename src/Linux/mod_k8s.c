@@ -55,6 +55,7 @@ extern "C" {
     bool gpu_dev:1;
     bool gpu_env_tried:1;
     bool gpu_env:1;
+    time_t last_heard;
     time_t last_vnic;
     time_t last_cgroup;
     char *cgroup_devices;
@@ -105,6 +106,7 @@ extern "C" {
     UTHash *vnicByIP;
     uint32_t configRevisionNo;
     pid_t readerPid;
+    int idleSweepCountdown;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -1013,13 +1015,18 @@ extern "C" {
     // next gather the latest metrics for this container
     cJSON *jcpu = cJSON_GetObjectItem(jmetrics, "Cpu");
     if(jcpu) {
-      // TODO: get status from data.  With containerd it is the Process Status string
+      cJSON *jcpustate = cJSON_GetObjectItem(jcpu, "VirDomainState");
       container->stats.state = SFL_VIR_DOMAIN_RUNNING;
-      
-      cJSON *jcputime = cJSON_GetObjectItem(jcpu, "CpuTime");
-      if(jcputime) {
-	container->stats.cpu_total = jcputime->valuedouble;
+      if(jcpustate) {
+	container->stats.state = jcpustate->valueint;
+	if(container->stats.state != SFL_VIR_DOMAIN_RUNNING)
+	  myDebug(2, "container (name=%s) state=%u",
+		  jn_s,
+		  container->stats.state);
       }
+      cJSON *jcputime = cJSON_GetObjectItem(jcpu, "CpuTime");
+      if(jcputime)
+	container->stats.cpu_total = jcputime->valuedouble;
       cJSON *jcpucount = cJSON_GetObjectItem(jcpu, "CpuCount");
       if(jcpucount)
 	container->stats.cpu_count = jcpucount->valueint;
@@ -1086,7 +1093,8 @@ extern "C" {
       
       // see if spacing the VNIC refresh reduces load
       time_t now_mono = mdata->pollBus->now.tv_sec;
-      
+      pod->last_heard = now_mono;
+
       if(pod->last_vnic == 0
 	 || (now_mono - pod->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
 	pod->last_vnic = now_mono;
@@ -1273,7 +1281,25 @@ extern "C" {
   */
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    //HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+
+    if(--mdata->idleSweepCountdown <= 0) {
+      // rearm
+      time_t idleTimeout = 1 + (sp->actualPollingInterval * 2);
+      mdata->idleSweepCountdown = idleTimeout;
+      // look for idle pods
+      time_t now_mono = mdata->pollBus->now.tv_sec;
+      HSPVMState_POD *pod;
+      UTHASH_WALK(mdata->vmsByHostname, pod) {
+	if(pod->last_heard
+	   && (now_mono - pod->last_heard) > idleTimeout) {
+	  char buf[256];
+	  myDebug(1, "Removing idle pod (%s)", podStr(pod, buf, 256));
+	  removeAndFreeVM_POD(mod, pod);
+	}    
+      }
+    }
   }
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
