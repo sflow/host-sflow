@@ -432,7 +432,7 @@ extern "C" {
     tcpSample->pktdirn = localSrc ? PKTDIR_sent : PKTDIR_received;
     // just the established TCP connections
     tcpSample->conn_req.sdiag_protocol = ipproto;
-    tcpSample->udp = (ps->ipproto == IPPROTO_UDP);
+    tcpSample->udp = (ipproto == IPPROTO_UDP);
     if(ipproto == IPPROTO_TCP) {
       tcpSample->conn_req.idiag_states = (1<<TCP_ESTABLISHED);
       // just the tcp_info
@@ -473,12 +473,12 @@ extern "C" {
     }
     // L4 ports
     if(localSrc) {
-      sockid->idiag_sport = sport;
-      sockid->idiag_dport = dport;
+      sockid->idiag_sport = htons(sport);
+      sockid->idiag_dport = htons(dport);
     }
     else {
-      sockid->idiag_sport = dport;
-      sockid->idiag_dport = sport;
+      sockid->idiag_sport = htons(dport);
+      sockid->idiag_dport = htons(sport);
     }
     // specify the ifIndex in case the socket is bound
     // see INET_MATCH in net/ipv4/inet_hashtables.c
