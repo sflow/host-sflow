@@ -119,7 +119,7 @@ extern "C" {
     printUUID((u_char *)pod->vm.uuid, uuidstr, 100);
     snprintf(buf, bufLen, "hostname: %s uuid: %s containers: %u",
 	     pod->hostname,
-	     pod->vm.uuid,
+	     uuidstr,
 	     UTHashN(pod->containers));
     return buf;
   }
@@ -1294,8 +1294,8 @@ extern "C" {
       UTHASH_WALK(mdata->vmsByHostname, pod) {
 	if(pod->last_heard
 	   && (now_mono - pod->last_heard) > idleTimeout) {
-	  char buf[256];
-	  myDebug(1, "Removing idle pod (%s)", podStr(pod, buf, 256));
+	  char buf[1024];
+	  myDebug(1, "Removing idle pod (%s)", podStr(pod, buf, 1024));
 	  removeAndFreeVM_POD(mod, pod);
 	}    
       }
