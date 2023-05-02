@@ -412,30 +412,28 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void lookup_sample(EVMod *mod, HSPPendingSample *ps) {
+  static void lookup_sample(EVMod *mod, HSPPendingSample *ps, SFLAddress *ipsrc, SFLAddress *ipdst, uint8_t ipproto, uint16_t sport, uint16_t dport, bool localSrc) {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
-    // src+dst tcp_ports are at start of TCP or UDP header
-    uint16_t tcp_ports[2];
-    memcpy(tcp_ports, ps->hdr + ps->l4_offset, 4);
     
     if(debug(2)) {
       char ipb1[51], ipb2[51];
-      myDebug(3, "%s proto=%u ip_ver==%d local_src=%u local_dst=%u, src=%s dst=%s",
-	      (ps->ipproto == IPPROTO_TCP) ? "TCP" : "UDP",
-	      ps->ipproto,
-	      ps->ipversion, ps->localSrc, ps->localDst,
-	      SFLAddress_print(&ps->src,ipb1,50),
-	      SFLAddress_print(&ps->dst,ipb2,50));
+      myDebug(2, "proto=%u local_src=%u src=%s:%u dst=%s:%u",
+	      ipproto,
+	      localSrc,
+	      SFLAddress_print(ipsrc,ipb1,50),
+	      sport,
+	      SFLAddress_print(ipdst,ipb2,50),
+	      dport);
     }
 
     // OK,  we are going to look this one up
     HSPTCPSample *tcpSample = tcpSampleNew();
     tcpSample->qtime = mdata->packetBus->now;
-    tcpSample->pktdirn = ps->localSrc ? PKTDIR_sent : PKTDIR_received;
+    tcpSample->pktdirn = localSrc ? PKTDIR_sent : PKTDIR_received;
     // just the established TCP connections
-    tcpSample->conn_req.sdiag_protocol = ps->ipproto;
+    tcpSample->conn_req.sdiag_protocol = ipproto;
     tcpSample->udp = (ps->ipproto == IPPROTO_UDP);
-    if(ps->ipproto == IPPROTO_TCP) {
+    if(ipproto == IPPROTO_TCP) {
       tcpSample->conn_req.idiag_states = (1<<TCP_ESTABLISHED);
       // just the tcp_info
       tcpSample->conn_req.idiag_ext |= (1 << (INET_DIAG_INFO - 1));
@@ -448,47 +446,39 @@ extern "C" {
     // copy into inet_diag_sockid, but flip if we are the destination
     struct inet_diag_sockid *sockid = &tcpSample->conn_req.id;
     // addresses
-    tcpSample->src = ps->src;
-    tcpSample->dst = ps->dst;
-    if(ps->ipversion == 4) {
+    tcpSample->src = *ipsrc;
+    tcpSample->dst = *ipdst;
+    if(ipsrc->type == SFLADDRESSTYPE_IP_V4) {
       tcpSample->conn_req.sdiag_family = AF_INET;
-      if(ps->localSrc) {
-	memcpy(sockid->idiag_src, &ps->src.address.ip_v4, 4);
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-	memcpy(sockid->idiag_dst, &ps->dst.address.ip_v4, 4);
-#endif
+      if(localSrc) {
+	memcpy(sockid->idiag_src, &ipsrc->address.ip_v4, 4);
+	memcpy(sockid->idiag_dst, &ipdst->address.ip_v4, 4);
       }
       else {
 	tcpSample->flipped = YES;
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-	memcpy(sockid->idiag_src, &ps->dst.address.ip_v4, 4);
-#endif
-	memcpy(sockid->idiag_dst, &ps->src.address.ip_v4, 4);
+	memcpy(sockid->idiag_src, &ipdst->address.ip_v4, 4);
+	memcpy(sockid->idiag_dst, &ipsrc->address.ip_v4, 4);
       }
     }
     else {
       tcpSample->conn_req.sdiag_family = AF_INET6;
-      if(ps->localSrc) {
-	memcpy(sockid->idiag_src, &ps->src.address.ip_v6, 16);
-	memcpy(sockid->idiag_dst, &ps->dst.address.ip_v6, 16);
+      if(localSrc) {
+	memcpy(sockid->idiag_src, &ipsrc->address.ip_v6, 16);
+	memcpy(sockid->idiag_dst, &ipdst->address.ip_v6, 16);
       }
       else {
-	memcpy(sockid->idiag_src, &ps->dst.address.ip_v6, 16);
-	memcpy(sockid->idiag_dst, &ps->src.address.ip_v6, 16);
+	memcpy(sockid->idiag_src, &ipdst->address.ip_v6, 16);
+	memcpy(sockid->idiag_dst, &ipsrc->address.ip_v6, 16);
       }
     }
-    // tcp ports
-    if(ps->localSrc) {
-      sockid->idiag_sport = tcp_ports[0];
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-      sockid->idiag_dport = tcp_ports[1];
-#endif
+    // L4 ports
+    if(localSrc) {
+      sockid->idiag_sport = sport;
+      sockid->idiag_dport = dport;
     }
     else {
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-      sockid->idiag_sport = tcp_ports[1];
-#endif
-      sockid->idiag_dport = tcp_ports[0];
+      sockid->idiag_sport = dport;
+      sockid->idiag_dport = sport;
     }
     // specify the ifIndex in case the socket is bound
     // see INET_MATCH in net/ipv4/inet_hashtables.c
@@ -514,11 +504,7 @@ extern "C" {
       UTNLDiag_send(mdata->nl_sock,
 		    &tcpSample->conn_req,
 		    sizeof(tcpSample->conn_req),
-#ifdef HSP_INET_DIAG_USE_DUMP_UDP
-		    tcpSample->udp, // DUMP flag!
-#else
-		    NO,
-#endif
+		    tcpSample->udp, // set DUMP flag if UDP
 		    ++mdata->nl_seq_tx);
       mdata->diag_tx++;
     }
@@ -535,61 +521,49 @@ extern "C" {
     int ip_ver = decodePendingSample(ps);
     if(ip_ver == 4
        || ip_ver == 6) {
-      if (ps->ipproto == IPPROTO_TCP
-	  || ps->ipproto == IPPROTO_UDP) {
-	// was it to or from this host?
+      if (ps->ipproto == IPPROTO_TCP) {
+	// was it to or from this host / management IP?
 	if(!ps->localTest) {
 	  ps->localSrc = isLocalAddress(sp, &ps->src);
 	  ps->localDst = isLocalAddress(sp, &ps->dst);
 	  ps->localTest = YES;
 	}
 	if(ps->localSrc != ps->localDst)
-	  lookup_sample(mod, ps);
+	  lookup_sample(mod,
+			ps,
+			&ps->src,
+			&ps->dst,
+			ps->ipproto,
+			ps->l4_sport,
+			ps->l4_dport,
+			ps->localSrc);
       }
-#if 0
       else if (sp->tcp.tunnel
-	       && ps->gotInnerIP) {
+	       && ps->gotInnerIP
+	       && ps->ipproto_1 == IPPROTO_TCP
+	       && ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
 	// look up using the inner IP addresses instead
 	// this behavior is only enabled with tcp {tunnel=on}.
 	// Setting tunnel=on should only ever be done when
 	// running on an end-host. If running on a router this
 	// might trigger a storm of pointless netlink lookups.
-	ps->l3_offset = ps->l4_offset;
-	uint8_t *ptr = ps->hdr + ps->l3_offset;
-	if((ps->hdr_len - ps->l3_offset) > sizeof(struct iphdr)) {
-	  // look at first byte of header.... 
-	  //  ___________________________ 
-	  // |   version   |    hdrlen   | 
-	  //  --------------------------- 
-	  if((*ptr >> 4) == 4) {
-	    if((*ptr & 15) >= 5) {
-	      ps->l4_offset += ((*ptr & 15) * 4);
-	      ps->ipproto = ptr[9];
-	      // to determine direction, use the MAC layer
-	      if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
-		ps->localSrc = (adaptorByMac(sp, &ps->macsrc) != NULL);
-		ps->localDst = (adaptorByMac(sp, &ps->macdst) != NULL);
-		myDebug(2, "tcp: IPIP localSrc=%s localDst=%s",
-			ps->localSrc ? "YES":"NO",
-			ps->localDst ? "YES":"NO");
-		if(ps->localSrc != ps->localDst) {
-		  HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
-		  // overwrite with the inner addresses
-		  ps->src = ps->src_1;
-		  ps->dst = ps->dst_1;
-		  // and do the lookup
-		  lookup_sample(mod, ps);
-		  mdata->ipip_tx++;
-		}
-	      }
-	    }
-	  }
-	}
+	
+	// to determine direction, use the MAC layer
+	ps->localSrc = (adaptorByMac(sp, &ps->macsrc) != NULL);
+	ps->localDst = (adaptorByMac(sp, &ps->macdst) != NULL);
+	if(ps->localSrc != ps->localDst)
+	  lookup_sample(mod,
+			ps,
+			&ps->src_1,
+			&ps->dst_1,
+			ps->ipproto_1,
+			ps->l4_sport_1,
+			ps->l4_dport_1,
+			ps->localSrc);
       }
-#endif
     }
   }
-
+  
   /*_________________---------------------------__________________
     _________________    evt_config_first       __________________
     -----------------___________________________------------------

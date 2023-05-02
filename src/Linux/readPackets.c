@@ -779,22 +779,29 @@ extern "C" {
 	memcpy(&ps->src_1.address.ip_v4.addr, innerIP + 12, 4);
 	ps->dst_1.type = SFLADDRESSTYPE_IP_V4;
 	memcpy(&ps->dst_1.address.ip_v4.addr, innerIP + 16, 4);
+	ps->ipproto_1 = innerIP[9];
 	ps->gotInnerIP = YES;
+	ps->l4_offset += 20;
+	if(ps->ipproto_1 == 6
+	   || ps->ipproto_1 == 17) {
+	  u_char *ptr = ps->hdr + ps->l4_offset;
+	  ps->l4_sport_1 = (ptr[0] << 8) + ptr[1];
+	  ps->l4_dport_1 = (ptr[2] << 8) + ptr[3];
+	}
       }
     }
   }
   
   static void decodePendingSample_vxlan(HSPPendingSample *ps) {
+    int ip_offset_1 = ps->l4_offset + 8 /* udp */ + 8 /* vxlan */ + 12 /* inner MAC */;
     if(ps->ipproto == IPPROTO_UDP
-       && ps->hdr_len >= (ps->l4_offset + 8 /* udp */ + 8 /* vxlan */ + 12 /* inner MAC */)) {
+       && ps->hdr_len >= ip_offset_1) {
       // Check for VXLAN(4789|8472) header at l4_offset,
       // and if found, populate inner MAC and IP addrs.
       // Perhaps also for Geneve(6801) and teredo(3544)?
       // UDP Header: [sPort][dPort][pduLen][csum]
-      uint16_t dPort = ps->hdr[ps->l4_offset + 2];
-      dPort = (dPort << 8) + ps->hdr[ps->l4_offset + 3];
-      if(dPort == 4789
-	 || dPort == 8472) {
+      if(ps->l4_dport == 4789
+	 || ps->l4_dport == 8472) {
 	/* VXLAN Header: 
 	   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ 
 	   |R|R|R|R|I|R|R|R|            Reserved                           | 
@@ -826,14 +833,24 @@ extern "C" {
 	  ps->gotInnerMAC = YES;
 	  // check only for simplest IP encapsulation
 	  if(mac_1[12] == 0x08
-	     && mac_1[13] == 0x00) {
+	     && mac_1[13] == 0x00
+	     && ps->hdr_len > (ip_offset_1 + 20)) {
 	    u_char *innerIP = mac_1 + 14;
 	    if(innerIP[0] == 0x45 /* version 4, header-length 20 */) {
 	      ps->src_1.type = SFLADDRESSTYPE_IP_V4;
 	      memcpy(&ps->src_1.address.ip_v4.addr, innerIP + 12, 4);
 	      ps->dst_1.type = SFLADDRESSTYPE_IP_V4;
 	      memcpy(&ps->dst_1.address.ip_v4.addr, innerIP + 16, 4);
+	      ps->ipproto_1 = innerIP[9];
 	      ps->gotInnerIP = YES;
+	      ps->l4_offset = ip_offset_1 + 20;
+	      if(ps->hdr_len > (ps->l4_offset + 4)
+		 && (ps->ipproto_1 == IPPROTO_TCP
+		     || ps->ipproto_1 == IPPROTO_UDP)) {
+		u_char *ptr = ps->hdr + ps->l4_offset;
+		ps->l4_sport_1 = (ptr[0] << 8) + ptr[1];
+		ps->l4_dport_1 = (ptr[2] << 8) + ptr[3];
+	      }
 	    }
 	  }
 	  // TODO: handle other L2 encapsulations
@@ -872,12 +889,23 @@ extern "C" {
 	  }
 	  // extract tunneled addresses
 	  if(ps->l4_offset) {
-	    if(ps->ipproto == IPPROTO_IPIP)
-	      decodePendingSample_ipip(ps);
-	    if(ps->ipproto == IPPROTO_UDP)
+	    u_char *ptr = ps->hdr + ps->l4_offset;
+	    switch(ps->ipproto) {
+	    case IPPROTO_TCP:
+	      ps->l4_sport = (ptr[0] << 8) + ptr[1];
+	      ps->l4_dport = (ptr[2] << 8) + ptr[3];
+	      break;
+	    case IPPROTO_UDP:
+	      ps->l4_sport = (ptr[0] << 8) + ptr[1];
+	      ps->l4_dport = (ptr[2] << 8) + ptr[3];
 	      decodePendingSample_vxlan(ps);
+	      break;
+	    case IPPROTO_IPIP:
+	      decodePendingSample_ipip(ps);
+	      break;
+	    }
 	  }
-	  break;
+	  break; // found header
 	}
       }
       ps->decoded = YES;

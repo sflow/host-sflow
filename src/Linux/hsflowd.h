@@ -436,10 +436,13 @@ extern "C" {
     SFLMacAddress macdst_1; // inner MAC dst (over tunnel)
     SFLAddress src_1;
     SFLAddress dst_1;
-    //uint16_t l4_sport;
-    //uint16_t l4_dport;
+    uint16_t l4_sport;
+    uint16_t l4_dport;
+    uint16_t l4_sport_1;
+    uint16_t l4_dport_1;
     uint32_t vxlan_vni;
     uint8_t ipproto;
+    uint8_t ipproto_1;
     bool decoded:1;
     // local address test
     bool localTest:1;

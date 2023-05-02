@@ -234,7 +234,7 @@ LIBS_DROPMON=
 CFLAGS_PCAP=
 LIBS_PCAP=-lpcap
 
-CFLAGS_TCP= -DHSP_INET_DIAG_USE_DUMP_UDP
+CFLAGS_TCP=
 LIBS_TCP=
 
 # For dependencies, compile using CUDA docker image
