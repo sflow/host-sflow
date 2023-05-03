@@ -404,6 +404,7 @@ extern "C" {
 #define HSPEVENT_INTF_COUNTER_SAMPLE "icsample"  // (csample *) building intf counter-sample
 #define HSPEVENT_VM_COUNTER_SAMPLE "vcsample"    // (csample *) building vm counter-sample
 #define HSPEVENT_FLOW_SAMPLE "flow_sample"       // (HSPPendingSample *) building flow-sample
+#define HSPEVENT_FLOW_SAMPLE_RELEASED "flow_sample_released"  // (HSPPendingSample *) flow-sample after lookups completed
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
 #define HSPEVENT_CONFIG_LINE "config_line"       // (line)...next config line
 #define HSPEVENT_CONFIG_END "config_end"         // (n_servers *) end config lines
@@ -421,6 +422,8 @@ extern "C" {
     SFLSampler *sampler;
     int refCount;
     UTArray *ptrsToFree;
+    // cgroup (e.g. if looked up by INET_DIAG)
+    uint64_t cgroup_id;
     // header decode
     int ipversion;
     uint8_t *hdr;
@@ -503,6 +506,7 @@ extern "C" {
     EVMod *rootModule;
     EVBus *pollBus;
     EVEvent *evt_flow_sample;
+    EVEvent *evt_flow_sample_released;
 
     // agent
     SFLAgent *agent;

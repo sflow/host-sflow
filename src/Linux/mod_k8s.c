@@ -60,6 +60,7 @@ extern "C" {
     time_t last_cgroup;
     char *cgroup_devices;
     UTHash *containers;
+    int cgroup_id;
   } HSPVMState_POD;
 
 #define HSP_K8S_READER "/usr/sbin/hsflowd_containerd"
@@ -79,6 +80,13 @@ extern "C" {
 #define HSP_NVIDIA_VIS_DEV_ENV "NVIDIA_VISIBLE_DEVICES"
 #define HSP_MAJOR_NVIDIA 195
 
+  // what directory to look up cgroupsPath to get the
+  // same cgroup_id inode that is reported by TCP DIAG
+  // TODO: this may vary on different platforms and Linux kernels so
+  // it might have to be a config parameter,  or we might have to
+  // search and remember...
+#define HSP_K8S_CGROUPS "/sys/fs/cgroup/unified/"
+  
 #define MY_MAX_HOSTNAME_CHARS 255 // override sFlow standard of SFL_MAX_HOSTNAME_CHARS (64)
 
   typedef struct _HSPVNICPodEntry {
@@ -98,7 +106,8 @@ extern "C" {
 
   typedef struct _HSP_mod_K8S {
     EVBus *pollBus;
-    UTHash *vmsByHostname;
+    UTHash *podsByHostname;
+    UTHash *podsByCgroupId;
     UTHash *containersByID;
     SFLCounters_sample_element vnodeElem;
     int cgroupPathIdx;
@@ -644,10 +653,16 @@ extern "C" {
     UTHashFree(pod->containers);
 
     // remove from hash tables
-    if(UTHashDel(mdata->vmsByHostname, pod) == NULL) {
-      myLog(LOG_ERR, "UTHashDel (vmsByHostname) failed: pod %s", pod->hostname);
+    if(UTHashDel(mdata->podsByHostname, pod) == NULL) {
+      myLog(LOG_ERR, "UTHashDel (podsByHostname) failed: pod %s", pod->hostname);
       if(debug(1))
-	podHTPrint(mdata->vmsByHostname, "vmsByHostname");
+	podHTPrint(mdata->podsByHostname, "podsByHostname");
+    }
+    if(pod->cgroup_id
+       && UTHashDel(mdata->podsByCgroupId, pod) == NULL) {
+      myLog(LOG_ERR, "UTHashDel (podsByCgroupId) failed: pod %s", pod->hostname);
+      if(debug(1))
+	podHTPrint(mdata->podsByCgroupId, "podsByCgroupId");
     }
 
     if(pod->hostname)
@@ -656,11 +671,11 @@ extern "C" {
     removeAndFreeVM(mod, &pod->vm);
   }
 
-  static HSPVMState_POD *getPod(EVMod *mod, char *hostname, bool create) {
+  static HSPVMState_POD *getPod(EVMod *mod, char *hostname, char *cgpath, bool create) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPVMState_POD search = { .hostname = hostname };
-    HSPVMState_POD *pod = UTHashGet(mdata->vmsByHostname, &search);
+    HSPVMState_POD *pod = UTHashGet(mdata->podsByHostname, &search);
     if(pod == NULL
        && create) {
       char uuid[16];
@@ -673,9 +688,23 @@ extern "C" {
 	pod->state = SFL_VIR_DOMAIN_RUNNING;
 	pod->hostname = my_strdup(hostname);
 	// add to collections
-	UTHashAdd(mdata->vmsByHostname, pod);
+	UTHashAdd(mdata->podsByHostname, pod);
 	// collection of child containers
 	pod->containers = UTHASH_NEW(HSPK8sContainer, id, UTHASH_SKEY);
+	if(cgpath) {
+	  // get inode that TCP DIAG will report as 'cgroup_id'
+	  char path[HSP_K8S_MAX_FNAME_LEN];
+	  snprintf(path, HSP_K8S_MAX_FNAME_LEN, HSP_K8S_CGROUPS "%s", cgpath);
+	  struct stat statBuf = {};
+	  if(stat(path, &statBuf) == 0) {
+	    pod->cgroup_id = statBuf.st_ino;
+	    myDebug(1, "Learned cgroup_id = %u for pod %s",
+		    pod->cgroup_id,
+		    pod->hostname);
+	    // remember this for packet sample lookup
+	    UTHashAdd(mdata->podsByCgroupId, pod);
+	  }
+	}
       }
     }
     return pod;
@@ -787,7 +816,7 @@ extern "C" {
     mdata->vnodeElem.tag = SFLCOUNTERS_HOST_VRT_NODE;
     mdata->vnodeElem.counterBlock.host_vrt_node.mhz = sp->cpu_mhz;
     mdata->vnodeElem.counterBlock.host_vrt_node.cpus = sp->cpu_cores;
-    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = UTHashN(mdata->vmsByHostname);
+    mdata->vnodeElem.counterBlock.host_vrt_node.num_domains = UTHashN(mdata->podsByHostname);
     mdata->vnodeElem.counterBlock.host_vrt_node.memory = sp->mem_total;
     mdata->vnodeElem.counterBlock.host_vrt_node.memory_free = sp->mem_free;
     SFLADD_ELEMENT(cs, &mdata->vnodeElem);
@@ -982,10 +1011,6 @@ extern "C" {
 
     cJSON *jnames = cJSON_GetObjectItem(jmetrics, "Names");
     if(jnames) {
-      cJSON *jcgpth = cJSON_GetObjectItem(jnames, "CgroupsPath");
-      if(jcgpth) {
-	myDebug(1, "cgroupspath=%s\n", jcgpth->valuestring);
-      }
       logField(1, " ", jnames, "Image");
       logField(1, " ", jnames, "Hostname");
       logField(1, " ", jnames, "ContainerName");
@@ -1000,12 +1025,13 @@ extern "C" {
     cJSON *jhn = cJSON_GetObjectItem(jnames, "Hostname");
     cJSON *jsn = cJSON_GetObjectItem(jnames, "SandboxName");
     cJSON *jsns = cJSON_GetObjectItem(jnames, "SandboxNamespace");
+    cJSON *jcgpth = cJSON_GetObjectItem(jnames, "CgroupsPath");
     char *jn_s = (jn && strlen(jn->valuestring)) ? jn->valuestring : NULL;
     char *jt_s = (jt && strlen(jt->valuestring)) ? jt->valuestring : NULL;
     char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
     char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
     char *jsns_s = (jsns && strlen(jsns->valuestring)) ? jsns->valuestring : NULL;
-
+    char *jcgpth_s = (jcgpth && strlen(jcgpth->valuestring)) ? jcgpth->valuestring : NULL;
     // containerType indicates sandbox
     container->isSandbox = (my_strequal(jt_s, "sandbox"));
 
@@ -1077,7 +1103,7 @@ extern "C" {
 	     jsns_s ?: "");
     // now get the pod, key'd by sandbox name. That means we will allocated
     // it immediately whether this container is the sandbox container or not.
-    HSPVMState_POD *pod = getPod(mod, compoundName, YES);
+    HSPVMState_POD *pod = getPod(mod, compoundName, jcgpth_s, YES);
     assert(pod != NULL);
 
     // make sure this container is assigned to this pod.
@@ -1170,7 +1196,7 @@ extern "C" {
   }
   
   /*_________________---------------------------__________________
-    _________________    evt_flow_sample        __________________
+    _________________ evt_flow_sample_released  __________________
     -----------------___________________________------------------
     Packet Bus
   */
@@ -1238,12 +1264,40 @@ extern "C" {
     return NO;
   }
   
-  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    // HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+  static void evt_flow_sample_released(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPPendingSample *ps = (HSPPendingSample *)data;
-    decodePendingSample(ps);
-    uint32_t src_dsIndex=0, dst_dsIndex=0;
-    if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
+    uint32_t src_dsIndex=0;
+    uint32_t dst_dsIndex=0;
+    bool gotMapping = NO;
+
+    // method 1 - if INET_DIAG reported a cgroup_id associated with the socket
+    if(ps->cgroup_id) {
+      HSPVMState_POD search = { .cgroup_id = ps->cgroup_id };
+      HSPVMState_POD *pod = UTHashGet(mdata->podsByCgroupId, &search);
+      if(pod) {
+	gotMapping = YES;
+	myDebug(2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
+		ps->cgroup_id,
+		pod->hostname,
+		pod->vm.dsIndex);
+	if(ps->localSrc)
+	  src_dsIndex = pod->vm.dsIndex;
+	else
+	  dst_dsIndex = pod->vm.dsIndex;
+      }
+    }
+    
+    // method 2 - match on addresses in packet header
+    if(!gotMapping) {
+      decodePendingSample(ps);
+      if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
+	gotMapping = YES;
+      }
+    }
+
+    // If we mapping the sample, add the "entities" annotation
+    if(gotMapping) {
       SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
       entElem->tag = SFLFLOW_EX_ENTITIES;
       if(src_dsIndex
@@ -1291,7 +1345,7 @@ extern "C" {
       // look for idle pods
       time_t now_mono = mdata->pollBus->now.tv_sec;
       HSPVMState_POD *pod;
-      UTHASH_WALK(mdata->vmsByHostname, pod) {
+      UTHASH_WALK(mdata->podsByHostname, pod) {
 	if(pod->last_heard
 	   && (now_mono - pod->last_heard) > idleTimeout) {
 	  char buf[1024];
@@ -1339,7 +1393,8 @@ extern "C" {
 
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_POD);
 
-    mdata->vmsByHostname = UTHASH_NEW(HSPVMState_POD, hostname, UTHASH_SKEY);
+    mdata->podsByHostname = UTHASH_NEW(HSPVMState_POD, hostname, UTHASH_SKEY);
+    mdata->podsByCgroupId = UTHASH_NEW(HSPVMState_POD, cgroup_id, UTHASH_DFLT);
     mdata->containersByID = UTHASH_NEW(HSPK8sContainer, id, UTHASH_SKEY);
     mdata->cgroupPathIdx = -1;
     
@@ -1350,17 +1405,22 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
 
-    if(sp->k8s.markTraffic) {
-      EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-      EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
-      mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
+    mdata->vnicByIP = UTHASH_NEW(HSPVNIC, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
 
-      // learn my own namespace inode from /proc/self/ns/net
-      if(stat("/proc/self/ns/net", &mdata->myNS) == 0)
-	myDebug(1, "my namespace dev.inode == %u.%u",
-		mdata->myNS.st_dev,
-		mdata->myNS.st_ino);
+    // learn my own namespace inode from /proc/self/ns/net
+    if(stat("/proc/self/ns/net", &mdata->myNS) == 0)
+      myDebug(1, "my namespace dev.inode == %u.%u",
+	      mdata->myNS.st_dev,
+	      mdata->myNS.st_ino);
+
+    if(sp->k8s.markTraffic) {
+      // By requesting HSPEVENT_FLOW_SAMPLE_RELEASED rather than
+      // HSPEVENT_FLOW_SAMPLE we ensure that mod_tcp (if loaded)
+      // will have completed it's annotation of the sample first.
+      EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+      EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE_RELEASED), evt_flow_sample_released);
     }
+
   }
 
 #if defined(__cplusplus)

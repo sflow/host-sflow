@@ -111,6 +111,7 @@ extern "C" {
      change them.
   */
 #define INET_DIAG_INFO 2
+#define INET_DIAG_SHUTDOWN 8
 #define INET_DIAG_MARK 15
 #define INET_DIAG_CLASS_ID 17
 #define INET_DIAG_CGROUP_ID 21
@@ -221,45 +222,53 @@ extern "C" {
     // the socket and get the application (command line)
     // but there does not seem to be a direct lookup
     // for that.
+    // More efficient is to look up the cgroup_id that
+    // is supplied by newer kernels (starting with
+    // ubuntu22, i.e. approx kernel 5.15)
 
     if(rtalen > 0) {
+      uint64_t cgroup_id = 0;
+      uint32_t mark = 0;
+      uint8_t shutdown = 0;
+      uint32_t class_id = 0;
+      uint16_t sockopt_flags = 0;
+      
       struct rtattr *attr = (struct rtattr *)(diag_msg + 1);
 
       while(RTA_OK(attr, rtalen)) {
 	switch (attr->rta_type) {
 	case INET_DIAG_MARK: {
 	  if(RTA_PAYLOAD(attr) == 4) {
-	    uint32_t mark;
 	    memcpy(&mark, RTA_DATA(attr), 4);
 	    myDebug(1, "INET_DIAG_MARK=%u", mark);
-	    // TODO: record in pendingSample
 	  }
 	}
 	  break;
 	case INET_DIAG_CGROUP_ID: {
 	  if(RTA_PAYLOAD(attr) == 8) {
-	    uint64_t cgid;
-	    memcpy(&cgid, RTA_DATA(attr), 8);
-	    myDebug(1, "INET_DIAG_CGROUP_ID=%"PRIu64, cgid);
-	    // TODO: record in pendingSample
+	    memcpy(&cgroup_id, RTA_DATA(attr), 8);
+	    myDebug(1, "INET_DIAG_CGROUP_ID=%"PRIu64, cgroup_id);
+	  }
+	}
+	  break;
+	case INET_DIAG_SHUTDOWN: {
+	  if(RTA_PAYLOAD(attr) == 1) {
+	    memcpy(&shutdown, RTA_DATA(attr), 1);
+	    myDebug(1, "INET_DIAG_SHUTDOWN=%u", shutdown);
 	  }
 	}
 	  break;
 	case INET_DIAG_CLASS_ID: {
 	  if(RTA_PAYLOAD(attr) == 4) {
-	    uint32_t class_id;
 	    memcpy(&class_id, RTA_DATA(attr), 4);
 	    myDebug(1, "INET_DIAG_CLASS=%u", class_id);
-	    // TODO: record in pendingSample
 	  }
 	}
 	  break;
 	case INET_DIAG_SOCKOPT: {
 	  if(RTA_PAYLOAD(attr) == 2) {
-	    uint16_t sockopt_flags;
 	    memcpy(&sockopt_flags, RTA_DATA(attr), 2);
 	    myDebug(1, "INET_DIAG_SOCKOPT=0x%02X", sockopt_flags);
-	    // TODO: record in pendingSample
 	  }
 	}
 	  break;
@@ -313,6 +322,8 @@ extern "C" {
 	      tcpElem->flowType.tcp_info.min_rtt = tcpi.tcpi_min_rtt;
 	      // add to sample
 	      SFLADD_ELEMENT(ps->fs, tcpElem);
+	      // tag the the sample with additional meta-data learned here
+	      ps->cgroup_id = cgroup_id;
 	      // release sample
 	      releasePendingSample(sp, ps);
 	    }

@@ -274,14 +274,14 @@ LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 CFLAGS_NETLINK=
 LIBS_NETLINK=
 
-# SYSTEMD requires DBUS, openssl-dev(el), libssl-dev(el)
+# SYSTEMD requires DBUS, (lib)uuid-dev(el)
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
-LIBS_SYSTEMD=$(LIBS_DBUS) -lcrypto
+LIBS_SYSTEMD=$(LIBS_DBUS) -luuid
 
 CFLAGS_EAPI=
 LIBS_EAPI=
 
-# CONTAINERD requires golang
+# CONTAINERD requires golang, openssl-dev(el)
 CFLAGS_CONTAINERD=
 LIBS_CONTAINERD= -lm -lcrypto
 

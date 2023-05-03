@@ -285,6 +285,14 @@ extern "C" {
   {
     if(--ps->refCount == 0) {
       EVBus *bus = EVCurrentBus();
+
+      // some consumers of packet-samples will want to wait until everyone has
+      // looked at it and released it before they process it. For example, mod_k8s
+      // wants the sample after any netlink DIAG lookup has been performed on it.
+      if(sp->evt_flow_sample_released == NULL)
+	sp->evt_flow_sample_released = EVGetEvent(bus, HSPEVENT_FLOW_SAMPLE_RELEASED);
+      EVEventTx(sp->rootModule, sp->evt_flow_sample_released, ps, sizeof(*ps));
+      
       if(ps->suppress) {
 	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES_SUPPRESSED]++;
       }

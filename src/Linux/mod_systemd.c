@@ -22,6 +22,7 @@ extern "C" {
 #include <dbus/dbus.h>
 #include <openssl/sha.h>
 #include <dirent.h>
+#include <uuid/uuid.h>
 
 #include "hsflowd.h"
 #include "cpu_utils.h"
@@ -223,27 +224,13 @@ extern "C" {
 
   static void uuidgen_type5(HSP *sp, u_char *uuid, char *name) {
     // Generate type 5 UUID (rfc 4122)
-    SHA_CTX ctx;
-    unsigned char sha_bits[SHA_DIGEST_LENGTH];
-    SHA1_Init(&ctx);
-    SHA1_Update(&ctx, sp->uuid, 16); // use sp->uuid as "namespace UUID"
-    SHA1_Update(&ctx, name, my_strlen(name));
+    int len = my_strlen(name);
     // also hash in agent IP address in case sp->uuid is missing or not unique
-    SHA1_Update(&ctx,
-		&sp->agentIP.address,
-		(sp->agentIP.type == SFLADDRESSTYPE_IP_V6 ? 16 : 4));
-    SHA1_Final(sha_bits, &ctx);
-    // now generate a type-5 UUID according to the recipe here:
-    // http://stackoverflow.com/questions/10867405/generating-v5-uuid-what-is-name-and-namespace
-    // SHA1 Digest:   74738ff5 5367 e958 9aee 98fffdcd1876 94028007
-    // UUID (v5):     74738ff5-5367-5958-9aee-98fffdcd1876
-    //                          ^_low nibble is set to 5 to indicate type 5
-    //                                   ^_first two bits set to 1 and 0, respectively
-    memcpy(uuid, sha_bits, 16);
-    uuid[6] &= 0x0F;
-    uuid[6] |= 0x50;
-    uuid[8] &= 0x3F;
-    uuid[8] |= 0x80;
+    int addrLen = sp->agentIP.type == SFLADDRESSTYPE_IP_V6 ? 16 : 4;
+    char *buf = (char *)UTHeapQNew(len + addrLen);
+    memcpy(buf, name, len);
+    memcpy(buf + len, &sp->agentIP.address, addrLen);
+    uuid_generate_sha1(uuid, (u_char *)sp->uuid, buf, len + addrLen);
   }
 
   /*_________________---------------------------__________________
@@ -1244,16 +1231,20 @@ extern "C" {
   }
 	
   /*_________________---------------------------__________________
-    _________________       evt_flow_sample     __________________
+    _________________  evt_flow_sample_released __________________
     -----------------___________________________------------------
     packet bus!
   */
 
-  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+  static void evt_flow_sample_released(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     mdata->packetSamples++; // used to enable socket lookup
     HSPPendingSample *ps = (HSPPendingSample *)data;
+    if(ps->cgroup_id) {
+      myDebug(2, "mod_systemd: inet_diag cgroup = %u", ps->cgroup_id);
+      // TODO: map this to the service dsIndex
+    }
     int ip_ver = decodePendingSample(ps);
     if((ip_ver == 4 || ip_ver == 6)
        && (ps->ipproto == IPPROTO_TCP || ps->ipproto == IPPROTO_UDP)) {
@@ -1538,7 +1529,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     // packet bus
     if(sp->systemd.markTraffic) {
       mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-      EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
+      EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE_RELEASED), evt_flow_sample_released);
       mdata->listenSocks = UTHASH_NEW(HSPListenSock, sapId, UTHASH_SYNC); // need sync (poll + packet thread)
       mdata->listenSocksByInode = UTHASH_NEW(HSPListenSock, inode, UTHASH_DFLT); // only used in poll thread
     }
