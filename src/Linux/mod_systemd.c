@@ -174,19 +174,19 @@ extern "C" {
 	if(my_strequal(fsType, "cgroup")) {
 	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINELEN);
 	  if(fsPath) {
-	    if(fnmatch(fsPath, "*/systemd", 0) == 0) {
+	    if(fnmatch("*/systemd", fsPath, 0) == 0) {
 	      myDebug(1, "found cgroup v1 systemd controller path = %s", fsPath);
 	      mdata->cgroup_systemd = my_strdup(fsPath);
 	    }
-	    if(fnmatch(fsPath, "*/cpuacct", 0) == 0) {
+	    if(fnmatch("*/cpuacct", fsPath, 0) == 0) {
 	      myDebug(1, "found cgroup v1 cpuacct controller path = %s", fsPath);
 	      mdata->cgroup_cpuacct = my_strdup(fsPath);
 	    }
-	    if(fnmatch(fsPath, "*/memory", 0) == 0) {
+	    if(fnmatch("*/memory", fsPath, 0) == 0) {
 	      myDebug(1, "found cgroup v1 memory controller path = %s", fsPath);
 	      mdata->cgroup_memory = my_strdup(fsPath);
 	    }
-	    if(fnmatch(fsPath, "*/blkio", 0) == 0) {
+	    if(fnmatch("*/blkio", fsPath, 0) == 0) {
 	      myDebug(1, "found cgroup v1 blkio controller path = %s", fsPath);
 	      mdata->cgroup_blkio = my_strdup(fsPath);
 	    }

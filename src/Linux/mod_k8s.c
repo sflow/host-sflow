@@ -164,7 +164,7 @@ extern "C" {
 	if(my_strequal(fsType, "cgroup")) {
 	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
 	  if(fsPath
-	     && fnmatch(fsPath, "*/devices", 0) == 0) {
+	     && fnmatch("*/devices", fsPath, 0) == 0) {
 	    myDebug(1, "found cgroup devices controller path = %s", fsPath);
 	    mdata->cgroup_devices_path = my_strdup(fsPath);
 	  }
