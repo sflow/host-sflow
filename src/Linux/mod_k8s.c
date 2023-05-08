@@ -15,13 +15,13 @@ extern "C" {
 #include <sched.h>
 #include <openssl/sha.h>
 #include <uuid/uuid.h>
+#include <fnmatch.h>
 
 #include "hsflowd.h"
 #include "cpu_utils.h"
 #include "math.h"
 
   // limit the number of chars we will read from each line
-  // in /proc/net/dev and /prov/net/vlan/config
   // (there can be more than this - my_readline will chop for us)
 #define MAX_PROC_LINE_CHARS 320
 
@@ -80,13 +80,6 @@ extern "C" {
 #define HSP_NVIDIA_VIS_DEV_ENV "NVIDIA_VISIBLE_DEVICES"
 #define HSP_MAJOR_NVIDIA 195
 
-  // what directory to look up cgroupsPath to get the
-  // same cgroup_id inode that is reported by TCP DIAG
-  // TODO: this may vary on different platforms and Linux kernels so
-  // it might have to be a config parameter,  or we might have to
-  // search and remember...
-#define HSP_K8S_CGROUPS "/sys/fs/cgroup/unified/"
-  
 #define MY_MAX_HOSTNAME_CHARS 255 // override sFlow standard of SFL_MAX_HOSTNAME_CHARS (64)
 
   typedef struct _HSPVNICPodEntry {
@@ -110,12 +103,13 @@ extern "C" {
     UTHash *podsByCgroupId;
     UTHash *containersByID;
     SFLCounters_sample_element vnodeElem;
-    int cgroupPathIdx;
     struct stat myNS;
     UTHash *vnicByIP;
     uint32_t configRevisionNo;
     pid_t readerPid;
     int idleSweepCountdown;
+    char *cgroup_path;
+    char *cgroup_devices_path;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -138,6 +132,46 @@ extern "C" {
     HSPVMState_POD *pod;
     UTHASH_WALK(ht, pod)
       myLog(LOG_INFO, "%s: %s", prefix, podStr(pod, buf, 1024));
+  }
+
+  /*________________---------------------------__________________
+    ________________    readCgroupPaths        __________________
+    ----------------___________________________------------------
+  */
+
+  static void readCgroupPaths(EVMod *mod) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    char mpath[HSP_K8S_MAX_FNAME_LEN+1];
+    snprintf(mpath, HSP_K8S_MAX_FNAME_LEN, PROCFS_STR "mounts");
+    FILE *procFile = fopen(mpath, "r");
+    if(procFile) {
+      // limit the number of chars we will read from each line
+      // (there can be more than this - my_readline will chop for us)
+      char line[MAX_PROC_LINE_CHARS];
+      int truncated;
+      while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
+	char buf[MAX_PROC_LINE_CHARS];
+	char *p = line;
+	char *fsType = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
+	if(my_strequal(fsType, "cgroup2")) {
+	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
+	  if(fsPath) {
+	    myDebug(1, "found cgroup2 path = %s", fsPath);
+	    mdata->cgroup_path = my_strdup(fsPath);
+	  }
+	}
+	// devices controller is still cgroups v1
+	if(my_strequal(fsType, "cgroup")) {
+	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
+	  if(fsPath
+	     && fnmatch(fsPath, "*/devices", 0) == 0) {
+	    myDebug(1, "found cgroup devices controller path = %s", fsPath);
+	    mdata->cgroup_devices_path = my_strdup(fsPath);
+	  }
+	}
+      }
+      fclose(procFile);
+    }
   }
 
   /*________________---------------------------__________________
@@ -691,10 +725,11 @@ extern "C" {
 	UTHashAdd(mdata->podsByHostname, pod);
 	// collection of child containers
 	pod->containers = UTHASH_NEW(HSPK8sContainer, id, UTHASH_SKEY);
-	if(cgpath) {
+	if(cgpath
+	   && mdata->cgroup_path) {
 	  // get inode that TCP DIAG will report as 'cgroup_id'
 	  char path[HSP_K8S_MAX_FNAME_LEN];
-	  snprintf(path, HSP_K8S_MAX_FNAME_LEN, HSP_K8S_CGROUPS "%s", cgpath);
+	  snprintf(path, HSP_K8S_MAX_FNAME_LEN, "%s/%s", mdata->cgroup_path, cgpath);
 	  struct stat statBuf = {};
 	  if(stat(path, &statBuf) == 0) {
 	    pod->cgroup_id = statBuf.st_ino;
@@ -894,13 +929,13 @@ extern "C" {
     }
   }
   
-
   static void readPodGPUsFromDev(EVMod *mod, HSPVMState_POD *pod) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     myDebug(1, "readPodGPUsFromDev(%s)", pod->hostname);
     pod->gpu_dev_tried = YES;
     // look through devices to see if individial GPUs are exposed
     char path[HSP_MAX_PATHLEN];
-    sprintf(path, SYSFS_STR "/fs/cgroup/devices/%s/devices.list", pod->cgroup_devices);
+    sprintf(path, "%s/%s/devices.list", mdata->cgroup_devices_path, pod->cgroup_devices);
     FILE *procFile = fopen(path, "r");
     if(procFile) {
       UTArray *arr = pod->vm.gpus;
@@ -1396,7 +1431,6 @@ extern "C" {
     mdata->podsByHostname = UTHASH_NEW(HSPVMState_POD, hostname, UTHASH_SKEY);
     mdata->podsByCgroupId = UTHASH_NEW(HSPVMState_POD, cgroup_id, UTHASH_DFLT);
     mdata->containersByID = UTHASH_NEW(HSPK8sContainer, id, UTHASH_SKEY);
-    mdata->cgroupPathIdx = -1;
     
     // register call-backs
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
@@ -1421,6 +1455,7 @@ extern "C" {
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE_RELEASED), evt_flow_sample_released);
     }
 
+    readCgroupPaths(mod);
   }
 
 #if defined(__cplusplus)
