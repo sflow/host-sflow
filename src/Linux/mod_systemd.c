@@ -45,8 +45,6 @@ extern "C" {
 
 #define HSP_DBUS_MONITOR 0
 
-#define HSP_SYSTEMD_CGROUP_ACCT SYSFS_STR "/fs/cgroup/%s%s/%s"
-  
   typedef void (*HSPDBusHandler)(EVMod *mod, DBusMessage *dbm, void *magic);
 
   typedef struct _HSPDBusRequest {
@@ -110,7 +108,10 @@ extern "C" {
 #endif
     uint32_t page_size;
     char *cgroup_path;
-    char *cgroup_acct;
+    char *cgroup_systemd;
+    char *cgroup_cpuacct;
+    char *cgroup_memory;
+    char *cgroup_blkio;
     uint packetSamples;
   } HSP_mod_SYSTEMD;
 
@@ -169,6 +170,29 @@ extern "C" {
 	    mdata->cgroup_path = my_strdup(fsPath);
 	  }
 	}
+	// cgroups v1 systemd, cpuacct, memory, blkio
+	if(my_strequal(fsType, "cgroup")) {
+	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINELEN);
+	  if(fsPath) {
+	    if(fnmatch(fsPath, "*/systemd", 0) == 0) {
+	      myDebug(1, "found cgroup v1 systemd controller path = %s", fsPath);
+	      mdata->cgroup_systemd = my_strdup(fsPath);
+	    }
+	    if(fnmatch(fsPath, "*/cpuacct", 0) == 0) {
+	      myDebug(1, "found cgroup v1 cpuacct controller path = %s", fsPath);
+	      mdata->cgroup_cpuacct = my_strdup(fsPath);
+	    }
+	    if(fnmatch(fsPath, "*/memory", 0) == 0) {
+	      myDebug(1, "found cgroup v1 memory controller path = %s", fsPath);
+	      mdata->cgroup_memory = my_strdup(fsPath);
+	    }
+	    if(fnmatch(fsPath, "*/blkio", 0) == 0) {
+	      myDebug(1, "found cgroup v1 blkio controller path = %s", fsPath);
+	      mdata->cgroup_blkio = my_strdup(fsPath);
+	    }
+	  }
+	}
+	
       }
       fclose(procFile);
     }
@@ -235,8 +259,9 @@ extern "C" {
 	// add to collections
 	UTHashAdd(mdata->vmsByID, container);
 	UTHashAdd(mdata->vmsByUUID, container);
-	// see if we can get a cgroup id
-	if(unit->cgroup) {
+	// see if we can get a cgroup id (no point if it is not cgroups v2)
+	if(unit->cgroup
+	   && mdata->cgroup_path) {
 	  char fName[HSP_SYSTEMD_MAX_FNAME_LEN+1];
 	  snprintf(fName, HSP_SYSTEMD_MAX_FNAME_LEN, "%s/%s",
 		   mdata->cgroup_path,
@@ -494,11 +519,10 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static bool readCgroupCounters(EVMod *mod, char *acct, char *cgroup, char *fname, int nvals, HSPNameVal *nameVals, bool multi) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
+  static bool readCgroupCounters(EVMod *mod, char *ctrlPath, char *cgroup, char *fname, int nvals, HSPNameVal *nameVals, bool multi) {
     int found = 0;
     char statsFileName[HSP_SYSTEMD_MAX_FNAME_LEN+1];
-    snprintf(statsFileName, HSP_SYSTEMD_MAX_FNAME_LEN, mdata->cgroup_acct, acct, cgroup, fname);
+    snprintf(statsFileName, HSP_SYSTEMD_MAX_FNAME_LEN, "%s/%s/%s", ctrlPath, cgroup, fname);
     FILE *statsFile = fopen(statsFileName, "r");
     if(statsFile == NULL) {
       myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
@@ -679,13 +703,14 @@ extern "C" {
 
     // Fallback 1 - try groups v1 cpu accounting
     if(cpu_total == 0
-       && unit->cpuAccounting) {
+       && unit->cpuAccounting
+       && mdata->cgroup_cpuacct) {
       HSPNameVal cpuVals[] = {
 	{ "user",0,0 },
 	{ "system",0,0},
 	{ NULL,0,0},
       };
-      if(readCgroupCounters(mod, "cpuacct", unit->cgroup, "cpuacct.stat", 2, cpuVals, NO)) {
+      if(readCgroupCounters(mod, mdata->cgroup_cpuacct, unit->cgroup, "cpuacct.stat", 2, cpuVals, NO)) {
 	if(cpuVals[0].nv_found) cpu_total += cpuVals[0].nv_val64;
 	if(cpuVals[1].nv_found) cpu_total += cpuVals[1].nv_val64;
       }
@@ -709,12 +734,13 @@ extern "C" {
     }
     // Fallback 1 - try cgroups v1 accounting
     if(rss == 0
-       && unit->memoryAccounting) {
+       && unit->memoryAccounting
+       && mdata->cgroup_memory) {
       HSPNameVal memVals[] = {
 	{ "rss",0,0 },
 	{ NULL,0,0},
       };
-      if(readCgroupCounters(mod, "memory", unit->cgroup, "memory.stat", 2, memVals, NO)) {
+      if(readCgroupCounters(mod, mdata->cgroup_memory, unit->cgroup, "memory.stat", 2, memVals, NO)) {
 	if(memVals[0].nv_found) rss += memVals[0].nv_val64;
       }
     }
@@ -729,13 +755,14 @@ extern "C" {
     // VM disk I/O counters
     SFLCounters_sample_element dskElem = { 0 };
     dskElem.tag = SFLCOUNTERS_HOST_VRT_DSK;
-    if(unit->blockIOAccounting) {
+    if(unit->blockIOAccounting
+       && mdata->cgroup_blkio) {
       HSPNameVal dskValsB[] = {
 	{ "Read",0,0 },
 	{ "Write",0,0},
 	{ NULL,0,0},
       };
-      if(readCgroupCounters(mod, "blkio", unit->cgroup, "blkio.io_service_bytes_recursive", 2, dskValsB, YES)) {
+      if(readCgroupCounters(mod, mdata->cgroup_blkio, unit->cgroup, "blkio.io_service_bytes_recursive", 2, dskValsB, YES)) {
 	if(dskValsB[0].nv_found) {
 	  dskElem.counterBlock.host_vrt_dsk.rd_bytes += dskValsB[0].nv_val64;
 	}
@@ -750,7 +777,7 @@ extern "C" {
 	{ NULL,0,0},
       };
 
-      if(readCgroupCounters(mod, "blkio", unit->cgroup, "blkio.io_serviced_recursive", 2, dskValsO, YES)) {
+      if(readCgroupCounters(mod, mdata->cgroup_blkio, unit->cgroup, "blkio.io_serviced_recursive", 2, dskValsO, YES)) {
 	if(dskValsO[0].nv_found) {
 	  dskElem.counterBlock.host_vrt_dsk.rd_req += dskValsO[0].nv_val64;
 	}
@@ -956,8 +983,9 @@ extern "C" {
 	  process->marked = YES;
 
 	char path[HSP_SYSTEMD_MAX_FNAME_LEN+1];
+	char *systemd_controller = mdata->cgroup_path ?: mdata->cgroup_systemd;
 	snprintf(path, HSP_SYSTEMD_MAX_FNAME_LEN, "%s/%s/cgroup.procs",
-		 mdata->cgroup_path,
+		 systemd_controller,
 		 unit->cgroup);
 	FILE *pidsFile = fopen(path, "r");
 	if(pidsFile == NULL) {
@@ -1388,9 +1416,7 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
 
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_SYSTEMD);
 
-    // path formats for cgroup info - can be overridden in config
-    mdata->cgroup_acct = sp->systemd.cgroup_acct ?: HSP_SYSTEMD_CGROUP_ACCT;
-    // but we should be able to learn from /proc/mounts...
+    // learn cgroup controller paths from /proc/mounts...
     readCgroupPaths(mod);
 
     // get page size for scaling memory pages->bytes
