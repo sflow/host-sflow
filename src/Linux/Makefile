@@ -274,9 +274,9 @@ LIBS_DBUS=$(shell pkg-config dbus-1 --libs)
 CFLAGS_NETLINK=
 LIBS_NETLINK=
 
-# SYSTEMD requires DBUS, (lib)uuid-dev(el)
+# SYSTEMD requires DBUS, (lib)uuid-dev(el), openssl-dev(el)
 CFLAGS_SYSTEMD=$(CFLAGS_DBUS)
-LIBS_SYSTEMD=$(LIBS_DBUS) -luuid
+LIBS_SYSTEMD=$(LIBS_DBUS) -luuid -lcrypto
 
 CFLAGS_EAPI=
 LIBS_EAPI=

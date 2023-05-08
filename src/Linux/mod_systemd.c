@@ -265,6 +265,32 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+#ifndef UUID_TYPE_DCE_SHA1
+  static void uuidgen_type5(HSP *sp, u_char *uuid, char *name) {
+    // Generate type 5 UUID (rfc 4122)
+    SHA_CTX ctx;
+    unsigned char sha_bits[SHA_DIGEST_LENGTH];
+    SHA1_Init(&ctx);
+    SHA1_Update(&ctx, sp->uuid, 16); // use sp->uuid as "namespace UUID"
+    SHA1_Update(&ctx, name, my_strlen(name));
+    // also hash in agent IP address in case sp->uuid is missing or not unique
+    SHA1_Update(&ctx,
+		&sp->agentIP.address,
+		(sp->agentIP.type == SFLADDRESSTYPE_IP_V6 ? 16 : 4));
+    SHA1_Final(sha_bits, &ctx);
+    // now generate a type-5 UUID according to the recipe here:
+    // http://stackoverflow.com/questions/10867405/generating-v5-uuid-what-is-name-and-namespace
+    // SHA1 Digest:   74738ff5 5367 e958 9aee 98fffdcd1876 94028007
+    // UUID (v5):     74738ff5-5367-5958-9aee-98fffdcd1876
+    //                          ^_low nibble is set to 5 to indicate type 5
+    //                                   ^_first two bits set to 1 and 0, respectively
+    memcpy(uuid, sha_bits, 16);
+    uuid[6] &= 0x0F;
+    uuid[6] |= 0x50;
+    uuid[8] &= 0x3F;
+    uuid[8] |= 0x80;
+  }
+#else
   static void uuidgen_type5(HSP *sp, u_char *uuid, char *name) {
     // Generate type 5 UUID (rfc 4122)
     int len = my_strlen(name);
@@ -275,7 +301,8 @@ extern "C" {
     memcpy(buf + len, &sp->agentIP.address, addrLen);
     uuid_generate_sha1(uuid, (u_char *)sp->uuid, buf, len + addrLen);
   }
-
+#endif
+  
   /*_________________---------------------------__________________
     _________________    HSPDBusUnit            __________________
     -----------------___________________________------------------
