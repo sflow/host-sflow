@@ -1818,6 +1818,9 @@ extern "C" {
 	    case HSPTOKEN_TUNNEL:
 	      if((tok = expectONOFF(sp, tok, &sp->tcp.tunnel)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_UDP:
+	      if((tok = expectONOFF(sp, tok, &sp->tcp.udp)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

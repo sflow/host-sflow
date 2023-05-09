@@ -126,6 +126,7 @@ extern "C" {
     bool flipped:1;
     bool udp:1;
     struct inet_diag_req_v2 conn_req;
+    struct inet_diag_sockid normalized_id;
     struct timespec qtime;
 #define HSP_TCP_TIMEOUT_MS 400
     EnumPktDirection pktdirn;
@@ -194,7 +195,11 @@ extern "C" {
       return;
 
     // see if we can get back to the HSPTCPSample that triggered this lookup
-    HSPTCPSample search = { .conn_req.id = diag_msg->id };
+    HSPTCPSample search = { .normalized_id = diag_msg->id };
+    // kernel may have IPv4 addresses in 0:0:FFFF0000:IP form, so detect that
+    // here and make it match what we would have queried with:
+    if(UTNLDiag_sockid_normalize(&search.normalized_id))
+      myDebug(2, "tcp: sockid normalized");
     HSPTCPSample *found = UTHashDelKey(mdata->sampleHT, &search);
 
     if(found) {
@@ -208,7 +213,7 @@ extern "C" {
 
     // user info.  Prefer getpwuid_r() if avaiable...
     struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
-    myDebug(2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u)",
+    myDebug(2, "tcp: diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u)",
 	    found ? "YES" : "NO",
 	    found ? (found->udp ? "UDP":"TCP") : "",
 	    diag_msg->idiag_uid,
@@ -240,35 +245,35 @@ extern "C" {
 	case INET_DIAG_MARK: {
 	  if(RTA_PAYLOAD(attr) == 4) {
 	    memcpy(&mark, RTA_DATA(attr), 4);
-	    myDebug(1, "INET_DIAG_MARK=%u", mark);
+	    myDebug(1, "tcp: INET_DIAG_MARK=%u", mark);
 	  }
 	}
 	  break;
 	case INET_DIAG_CGROUP_ID: {
 	  if(RTA_PAYLOAD(attr) == 8) {
 	    memcpy(&cgroup_id, RTA_DATA(attr), 8);
-	    myDebug(1, "INET_DIAG_CGROUP_ID=%"PRIu64, cgroup_id);
+	    myDebug(1, "tcp: INET_DIAG_CGROUP_ID=%"PRIu64, cgroup_id);
 	  }
 	}
 	  break;
 	case INET_DIAG_SHUTDOWN: {
 	  if(RTA_PAYLOAD(attr) == 1) {
 	    memcpy(&shutdown, RTA_DATA(attr), 1);
-	    myDebug(1, "INET_DIAG_SHUTDOWN=%u", shutdown);
+	    myDebug(1, "tcp: INET_DIAG_SHUTDOWN=%u", shutdown);
 	  }
 	}
 	  break;
 	case INET_DIAG_CLASS_ID: {
 	  if(RTA_PAYLOAD(attr) == 4) {
 	    memcpy(&class_id, RTA_DATA(attr), 4);
-	    myDebug(1, "INET_DIAG_CLASS=%u", class_id);
+	    myDebug(1, "tcp: INET_DIAG_CLASS=%u", class_id);
 	  }
 	}
 	  break;
 	case INET_DIAG_SOCKOPT: {
 	  if(RTA_PAYLOAD(attr) == 2) {
 	    memcpy(&sockopt_flags, RTA_DATA(attr), 2);
-	    myDebug(1, "INET_DIAG_SOCKOPT=0x%02X", sockopt_flags);
+	    myDebug(1, "tcp: INET_DIAG_SOCKOPT=0x%02X", sockopt_flags);
 	  }
 	}
 	  break;
@@ -286,16 +291,16 @@ extern "C" {
 	  struct my_tcp_info tcpi = { 0 };
 	  int readLen = RTA_PAYLOAD(attr);
 	  if(readLen > sizeof(struct my_tcp_info)) {
-	    myDebug(3, "New kernel has new fields in struct tcp_info. Check it out!");
+	    myDebug(3, "tcp: New kernel has new fields in struct tcp_info. Check it out!");
 	    readLen = sizeof(struct my_tcp_info);
 	  }
 	  memcpy(&tcpi, RTA_DATA(attr), readLen);
-	  myDebug(2, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
+	  myDebug(2, "tcp: TCP diag: RTT=%uuS (variance=%uuS) [%s]",
 		  tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
 		  UTNLDiag_sockid_print(&diag_msg->id));
 	  if(found) {
 	    uint32_t nSamples = UTArrayN(found->samples);
-	    myDebug(2, "found TCPSample: %s RTT:%uuS, annotating %u packet samples",
+	    myDebug(2, "tcp: found TCPSample: %s RTT:%uuS, annotating %u packet samples",
 		    tcpSamplePrint(found),
 		    tcpi.tcpi_rtt,
 		    nSamples);
@@ -331,7 +336,7 @@ extern "C" {
 	}
 	  break;
 	default:
-	  myDebug(1, "INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
+	  myDebug(1, "tcp: INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
 	  break;
 	}
 	attr = RTA_NEXT(attr, rtalen);
@@ -397,7 +402,7 @@ extern "C" {
 	break;
       }
       else {
-	myDebug(2, "removing timed-out request (%s)", tcpSamplePrint(ts));
+	myDebug(2, "tcp: removing timed-out request (%s)", tcpSamplePrint(ts));
 	HSPTCPSample *next_ts = ts->next;
 	// remove from Q
 	UTQ_REMOVE(mdata->timeoutQ, ts);
@@ -428,7 +433,7 @@ extern "C" {
     
     if(debug(2)) {
       char ipb1[51], ipb2[51];
-      myDebug(2, "proto=%u local_src=%u src=%s:%u dst=%s:%u",
+      myDebug(2, "tcp: proto=%u local_src=%u src=%s:%u dst=%s:%u",
 	      ipproto,
 	      localSrc,
 	      SFLAddress_print(ipsrc,ipb1,50),
@@ -497,16 +502,19 @@ extern "C" {
     // I have no cookie :(
     sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
     sockid->idiag_cookie[1] = INET_DIAG_NOCOOKIE;
+    // normalize for sampleHT key
+    tcpSample->normalized_id = *sockid;
+    UTNLDiag_sockid_normalize(&tcpSample->normalized_id);
     // put a hold on this one while we look it up
     holdPendingSample(ps);
     HSPTCPSample *tsInQ = UTHashGet(mdata->sampleHT, tcpSample);
     if(tsInQ) {
-      myDebug(2, "request already pending");
+      myDebug(2, "tcp: request already pending");
       UTArrayAdd(tsInQ->samples, ps);
       tcpSampleFree(tcpSample);
     }
     else {
-      myDebug(2, "new request: %s", tcpSamplePrint(tcpSample));
+      myDebug(2, "tcp: new request: %s", tcpSamplePrint(tcpSample));
       UTArrayAdd(tcpSample->samples, ps);
       // add to HT and timeout queue
       UTHashAdd(mdata->sampleHT, tcpSample);
@@ -532,7 +540,8 @@ extern "C" {
     int ip_ver = decodePendingSample(ps);
     if(ip_ver == 4
        || ip_ver == 6) {
-      if (ps->ipproto == IPPROTO_TCP) {
+      if (ps->ipproto == IPPROTO_TCP
+	  || (sp->tcp.udp && !ps->gotInnerIP)) {
 	// was it to or from this host / management IP?
 	if(!ps->localTest) {
 	  ps->localSrc = isLocalAddress(sp, &ps->src);
@@ -600,7 +609,7 @@ extern "C" {
   void mod_tcp(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_TCP));
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
-    mdata->sampleHT = UTHASH_NEW(HSPTCPSample, conn_req.id, UTHASH_DFLT);
+    mdata->sampleHT = UTHASH_NEW(HSPTCPSample, normalized_id, UTHASH_DFLT);
     // trim the hash-key len to select only the socket part of inet_diag_sockid
     // and leave out the interface and the cookie
     mdata->sampleHT->f_len = 36;

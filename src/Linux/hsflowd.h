@@ -652,6 +652,7 @@ extern "C" {
     struct {
       bool tcp;
       bool tunnel;
+      bool udp;
     } tcp;
     struct {
       bool dbus;

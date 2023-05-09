@@ -44,6 +44,7 @@ extern "C" {
   } EnumKernelTCPState;
 
   char *UTNLDiag_sockid_print(struct inet_diag_sockid *sockid);
+  bool UTNLDiag_sockid_normalize(struct inet_diag_sockid *sockid);
 
   int UTNLDiag_open(void);
 

@@ -15,21 +15,61 @@ extern "C" {
 
   char *UTNLDiag_sockid_print(struct inet_diag_sockid *sockid) {
     static char buf[256];
-    snprintf(buf, 256, "%08x:%08x:%08x:%08x %u - %08x:%08x:%08x:%08x %u if:%u",
-	     sockid->idiag_src[0],
-	     sockid->idiag_src[1],
-	     sockid->idiag_src[2],
-	     sockid->idiag_src[3],
-	     sockid->idiag_sport,
-	     sockid->idiag_dst[0],
-	     sockid->idiag_dst[1],
-	     sockid->idiag_dst[2],
-	     sockid->idiag_dst[3],
-	     sockid->idiag_dport,
-	     sockid->idiag_if);
+    snprintf(buf, 256, "%08x:%08x:%08x:%08x %u - %08x:%08x:%08x:%08x %u if:%u cookie: %0x8:%08x",
+	     ntohl(sockid->idiag_src[0]),
+	     ntohl(sockid->idiag_src[1]),
+	     ntohl(sockid->idiag_src[2]),
+	     ntohl(sockid->idiag_src[3]),
+	     ntohs(sockid->idiag_sport),
+	     ntohl(sockid->idiag_dst[0]),
+	     ntohl(sockid->idiag_dst[1]),
+	     ntohl(sockid->idiag_dst[2]),
+	     ntohl(sockid->idiag_dst[3]),
+	     ntohs(sockid->idiag_dport),
+	     ntohl(sockid->idiag_if),
+	     ntohl(sockid->idiag_cookie[0]),
+	     ntohl(sockid->idiag_cookie[1]));
     return buf;
   }
 
+  /*__________________---------------------------__________________
+    __________________ UTNLDiag_sockid_normalize __________________
+    ------------------___________________________------------------
+  */
+
+  bool UTNLDiag_sockid_normalize(struct inet_diag_sockid *sockid) {
+    bool rewritten = NO;
+    if(sockid->idiag_src[0] == 0
+       && sockid->idiag_src[1] == 0
+       && ntohl(sockid->idiag_src[2]) == 0xFFFF) {
+      // convert v4-as-v6 to v4
+      sockid->idiag_src[0] = sockid->idiag_src[3];
+      sockid->idiag_src[2] = 0;
+      sockid->idiag_src[3] = 0;
+      rewritten = YES;
+    }
+    if(sockid->idiag_dst[0] == 0
+       && sockid->idiag_dst[1] == 0
+       && ntohl(sockid->idiag_dst[2]) == 0xFFFF) {
+      // convert v4-as-v6 to v4
+      sockid->idiag_dst[0] = sockid->idiag_dst[3];
+      sockid->idiag_dst[2] = 0;
+      sockid->idiag_dst[3] = 0;
+      rewritten = YES;
+    }
+    if(sockid->idiag_if) {
+      sockid->idiag_if = 0;
+      rewritten = YES;
+    }
+    if(sockid->idiag_cookie[0] != INET_DIAG_NOCOOKIE
+       || sockid->idiag_cookie[1] != INET_DIAG_NOCOOKIE) {
+      sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
+      sockid->idiag_cookie[1] = INET_DIAG_NOCOOKIE;
+      rewritten = YES;
+    }
+    return rewritten;
+  }
+       
   /*_________________---------------------------__________________
     _________________      UTNLDiag_send        __________________
     -----------------___________________________------------------
