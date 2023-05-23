@@ -184,6 +184,13 @@ LD=gcc
 OPT_ALL= -O3 -DNDEBUG
 OPT_REG= -g -O2
 OPT_DBG= -g -ggdb
+
+# use "UTHEAP=no OPT=-g" to turn off buffer-recycling
+# so that "valgrind --leak-check=yes hsflowd -d" can find leaks.
+ifndef UTHEAP
+  UTHEAP=yes
+endif
+
 ifndef OPT
   OPT=$(OPT_REG)
 endif
@@ -292,7 +299,9 @@ LIBS_K8S= -lm -luuid
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += $(CFLAGS_MOUNTPOINTS)
-CFLAGS += -DUTHEAP
+ifeq ($(UTHEAP),yes)
+  CFLAGS += -DUTHEAP
+endif
 CFLAGS += -DHSP_OPTICAL_STATS
 CFLAGS += -DHSP_MOD_DIR=$(MODDIR)
 CFLAGS += -Wall -Wstrict-prototypes -Wunused-value
