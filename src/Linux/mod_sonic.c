@@ -1121,7 +1121,8 @@ extern "C" {
 	  // This "index" field is neither ifIndex nor osIndex, so ignore it.
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFSPEED))
 	    prt->ifSpeed = db_getU64(c_val) * HSP_SONIC_FIELD_IFSPEED_UNITS;
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFALIAS)) {
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFALIAS)
+	     && !my_strequal(prt->ifAlias, c_val->str)) {
 	    if(prt->ifAlias)
 	      my_free(prt->ifAlias);
 	    prt->ifAlias = my_strdup(c_val->str);
