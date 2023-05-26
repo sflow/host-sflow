@@ -53,6 +53,8 @@ extern "C" {
 #define HSP_SONIC_FIELD_COLLECTOR_VRF "collector_vrf"
 #define HSP_SONIC_VRF_DEFAULT "default"
 
+#define HSP_SONIC_FIELD_SYSTEMREADY_STATUS "Status"
+
 #define HSP_SONIC_DEFAULT_POLLING_INTERVAL 20
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
 
@@ -61,6 +63,7 @@ extern "C" {
   typedef enum {
     HSP_SONIC_STATE_INIT=0,
     HSP_SONIC_STATE_CONNECT,
+    HSP_SONIC_STATE_WAIT_READY,
     HSP_SONIC_STATE_CONNECTED,
     HSP_SONIC_STATE_DISCOVER,
     HSP_SONIC_STATE_DISCOVER_MAPPING,
@@ -136,6 +139,7 @@ extern "C" {
     bool changedPortPriority:1;
     u_char actorSystemMAC[8];
     uint32_t localAS;
+    bool system_ready;
     bool sflow_enable;
     uint32_t sflow_polling;
     char *sflow_agent;
@@ -662,7 +666,7 @@ extern "C" {
     if(status == REDIS_OK) {
       db->connected = YES;
       if(db_allConnected(db->mod))
-	mdata->state = HSP_SONIC_STATE_CONNECTED;
+	mdata->state = HSP_SONIC_STATE_WAIT_READY;
     }
   }
 
@@ -671,6 +675,7 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)db->mod->data;
     myDebug(1, "sonic db_disconnectCB: status= %d", status);
     db->connected = NO;
+    mdata->system_ready = NO;
     mdata->state = HSP_SONIC_STATE_CONNECT;
   }
 
@@ -1570,6 +1575,56 @@ extern "C" {
     }
   }
 
+
+  /*_________________---------------------------__________________
+    _________________    db_getSystemReady      __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_getSystemReadyCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    redisReply *reply = (redisReply *)magic;
+
+    myDebug(1, "sonic getSflowGlobalCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
+    if(reply == NULL)
+      return; // will stay in same state (e,g. HSP_SONIC_STATE_WAIT_READY)
+    bool system_ready = NO;
+    if(reply->type == REDIS_REPLY_ARRAY
+       && reply->elements > 0
+       && ISEVEN(reply->elements)) {
+      for(int ii = 0; ii < reply->elements; ii += 2) {
+	redisReply *f_name = reply->element[ii];
+	redisReply *f_val = reply->element[ii + 1];
+	if(f_name->type == REDIS_REPLY_STRING) {
+	  myDebug(1, "sonic getSystemReadyCB: %s=%s", f_name->str, db_replyStr(f_val, db->replyBuf, YES));
+	  
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SYSTEMREADY_STATUS))
+	    system_ready = my_strequal(f_val->str, "UP");
+	}
+      }
+    }
+    // now see if there are any changes. 
+    if(system_ready != mdata->system_ready) {
+      myDebug(1, "sonic system_ready %u -> %u", mdata->system_ready, system_ready);
+      mdata->system_ready = system_ready;
+    }
+    if(system_ready
+       && mdata->state == HSP_SONIC_STATE_WAIT_READY)
+      mdata->state = HSP_SONIC_STATE_CONNECTED;
+  }
+
+  static void db_getSystemReady(EVMod *mod) {
+    HSPSonicDBClient *db = db_selectClient(mod, HSP_SONIC_DB_STATE_NAME);
+    if(db) {
+      myDebug(1, "sonic getSystemReady()");
+      int status = redisAsyncCommand(db->ctx, db_getSystemReadyCB, NULL, "HGETALL SYSTEM_READY|SYSTEM_STATE");
+      myDebug(1, "sonic getSystemReady() returned %d", status);
+    }
+  }
+  
   /*_________________---------------------------__________________
     _________________      dbEvt_subscribe      __________________
     -----------------___________________________------------------
@@ -1797,6 +1852,9 @@ extern "C" {
       loadDBConfig(mod);
       addEventClients(mod);
       db_connect(mod);
+      break;
+    case HSP_SONIC_STATE_WAIT_READY:
+      db_getSystemReady(mod);
       break;
     case HSP_SONIC_STATE_CONNECTED:
       // connected - learn config
