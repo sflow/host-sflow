@@ -554,7 +554,7 @@ extern "C" {
     while(isspace(*str)) {
       // also return NULL for a string with only spaces in it
       // (don't want that condition to slip through unnoticed)
-      if(++str >= end)
+      if(++str > end)
 	return NULL;
     }
 

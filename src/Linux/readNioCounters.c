@@ -65,6 +65,9 @@ extern "C" {
 	if(sscanf(line, "%[^:]:%[^\n]", buf_var, buf_val) == 2) {
 	  char *tok_var = trimWhitespace(buf_var, my_strnlen(buf_var, MAX_PROC_LINE_CHARS-1));
 	  char *tok_val = trimWhitespace(buf_val, my_strnlen(buf_val, MAX_PROC_LINE_CHARS-1));
+	  if(tok_var == NULL
+	     || tok_val == NULL)
+	    continue;
 
 	  if(readingMaster) {
 	    if(my_strequal(tok_var, "MII Status")) {
