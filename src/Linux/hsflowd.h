@@ -308,8 +308,6 @@ extern "C" {
   // cache nio counters per adaptor
   typedef struct _HSPAdaptorNIO {
     SFLAddress ipAddr;
-    UTHash *ip4Addrs;
-    UTHash *ip6Addrs;
     EnumHSPDevType devType;
     bool up:1;
     bool loopback:1;
@@ -829,6 +827,7 @@ extern "C" {
   // local IPs
   HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev);
   void localIPFree(HSPLocalIP *lip);
+  int localIPInstances(void);
 
   // readPackets.c
 #define HSP_SAMPLEOPT_BRIDGE      0x0001

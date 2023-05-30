@@ -1247,6 +1247,8 @@ extern "C" {
     ----------------___________________________------------------
   */
 
+  static __thread int th_n_adaptors=0;
+  
   SFLAdaptor *adaptorNew(char *dev, u_char *macBytes, size_t userDataSize, uint32_t ifIndex) {
     SFLAdaptor *ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
     ad->deviceName = my_strdup(dev);
@@ -1256,6 +1258,7 @@ extern "C" {
       memcpy(ad->macs[0].mac, macBytes, 6);
       ad->num_macs = 1;
     }
+    th_n_adaptors++;
     return ad;
   }
 
@@ -1275,7 +1278,12 @@ extern "C" {
       if(ad->deviceName) my_free(ad->deviceName);
       if(ad->userData) my_free(ad->userData);
       my_free(ad);
+      th_n_adaptors--;
     }
+  }
+
+  int adaptorInstances(void) {
+    return th_n_adaptors;
   }
 
   /*________________---------------------------__________________

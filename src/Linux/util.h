@@ -226,6 +226,7 @@ extern "C" {
   SFLAdaptor *adaptorNew(char *dev, u_char *macBytes, size_t userDataSize, uint32_t ifIndex);
   int adaptorEqual(SFLAdaptor *ad1, SFLAdaptor *ad2);
   void adaptorFree(SFLAdaptor *ad);
+  int adaptorInstances(void);
 
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew(void);

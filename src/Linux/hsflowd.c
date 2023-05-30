@@ -181,8 +181,16 @@ extern "C" {
     deleteAdaptorFromHT(sp->adaptorsByMac, ad, "byMac");
     if(ad->peer_ifIndex)
       deleteAdaptorFromHT(sp->adaptorsByPeerIndex, ad, "byPeerIndex");
-    if(freeFlag)
+    if(freeFlag) {
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(ad);
+      if(nio->sampler)
+	myDebug(1, "deleteAdaptor: adaptor %s has sFlow sampler", ad->deviceName);
+      if(nio->poller)
+	myDebug(1, "deleteAdaptor: adaptor %s has sFlow poller", ad->deviceName);
+      if(nio->deviceAlias)
+	myDebug(1, "deleteAdaptor: adaptor %s has deviceAlias", ad->deviceName);
       adaptorFree(ad);
+    }
   }
 
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag) {
@@ -299,16 +307,24 @@ extern "C" {
     -----------------___________________________------------------
   */
 
+  static __thread int th_n_localIPs = 0;
+
   HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev) {
     HSPLocalIP *lip = my_calloc(sizeof(HSPLocalIP));
     lip->ipAddr = *ipAddr;
     lip->dev = my_strdup(dev);
+    th_n_localIPs++;
     return lip;
   }
 
   void localIPFree(HSPLocalIP *lip) {
     my_free(lip->dev);
     my_free(lip);
+    th_n_localIPs--;
+  }
+
+  int localIPInstances(void) {
+    return th_n_localIPs;
   }
 
   /*_________________---------------------------__________________
@@ -644,6 +660,10 @@ extern "C" {
       installSFlowSettings(sp, sp->sFlowSettings);
     }
 
+    myDebug(1, "instances: adaptors=%d, localIP=%d",
+	    adaptorInstances(),
+	    localIPInstances());
+    
     if(ad_added || ad_removed || ad_cameup || ad_wentdown || ad_changed) {
       // test for switch ports
       configSwitchPorts(sp); // in readPackets.c
