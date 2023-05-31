@@ -16,6 +16,7 @@ extern "C" {
 
 #ifdef GPROF
 #include "gperftools/profiler.h"
+#include "gperftools/heap-profiler.h"
 #endif
 
   // globals - easier for signal handler
@@ -1879,7 +1880,8 @@ extern "C" {
 
 #ifdef GPROF
     myDebug(1, "GPROF ProfilerStart()");
-    ProfilerStart(NULL);
+    ProfilerStart("gperftools_cpu_profile");
+    HeapProfilerStart("gperftools_heap_profile");
 #endif
 
     if(getDaemon()) {
@@ -2290,6 +2292,8 @@ extern "C" {
     myDebug(1, "GPROF ProfilerStop()");
     ProfilerFlush();
     ProfilerStop();
+    HeapProfilerDump("hsflowd exit");
+    HeapProfilerStop();
 #endif
     
     exit(exitStatus);

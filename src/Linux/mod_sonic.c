@@ -455,6 +455,11 @@ extern "C" {
     UTStrBuf_free(db->replyBuf);
     my_free(db->hostname);
     my_free(db->unixSocketPath);
+    my_free(db->passPath);
+    if(db->ctx) {
+      redisAsyncFree(ctx);
+      db->ctx = NULL;
+    }
     my_free(db);
   }
 
@@ -719,6 +724,7 @@ extern "C" {
     myDebug(1, "sonic db_connectClient failed (fd=%d) err=%s", fd, errm);
     if(ctx)
       redisAsyncFree(ctx);
+      
     return NO;
   }
 
