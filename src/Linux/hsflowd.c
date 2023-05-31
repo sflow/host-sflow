@@ -14,6 +14,10 @@ extern "C" {
 #include "malloc.h" // for malloc_info()
 #endif
 
+#ifdef GPROF
+#include "gperftools/profiler.h"
+#endif
+
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
   int exitStatus = EXIT_SUCCESS;
@@ -1829,6 +1833,11 @@ extern "C" {
     UTHeapInit();
 #endif
 
+#ifdef GPROF
+    myDebug(1, "GPROF ProfilerStart()");
+    ProfilerStart(NULL);
+#endif
+    
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
     setlogmask(LOG_UPTO(LOG_DEBUG));
@@ -2277,6 +2286,11 @@ extern "C" {
       remove(sp->pidFile);
     }
 
+#ifdef GPROF
+    myDebug(1, "GPROF ProfilerStop()");
+    ProfilerStop();
+#endif
+    
     exit(exitStatus);
   } /* main() */
 

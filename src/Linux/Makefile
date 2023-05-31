@@ -195,19 +195,37 @@ ifndef OPT
   OPT=$(OPT_REG)
 endif
 
+# option to use gperftools
+CFLAGS_GPROF=
+LDFLAGS_GPROF=
+LIBS_GPROF=
+ifeq ($(GPROF),yes)
+  CFLAGS_GPROF= -DGPROF -fno-builtin-malloc -fno-builtin-calloc -fno-builtin-realloc -fno-builtin-free
+  LDFLAGS_GPROF=
+  LIBS_GPROF= -ltcmalloc_and_profiler
+  LIBS_GPROF += -lunwind # only for 64-bit?
+endif
+
 # other source directories
 SFLOWDIR=../sflow
 JSONDIR=../json
 
-# CFLAGS and LIBS - common
+# CFLAGS and LIBS - for hsflowd main
 CFLAGS_HSFLOWD= -I. -I$(JSONDIR) -I$(SFLOWDIR)
+LDFLAGS_HSFLOWD= -rdynamic
+LDFLAGS_HSFLOWD += $(LDFLAGS_GCOV)
+LDFLAGS_HSFLOWD += $(LDFLAGS_GPROF)
 LIBS_HSFLOWD= $(JSONDIR)/libcjson.a $(SFLOWDIR)/libsflow.a -lm -pthread -ldl -lrt
+LIBS_HSFLOWD += $(LIBS_GPROF)
 
+# CFLAGS and LIBS - for all shared-library modules
 CFLAGS_SHARED= -fPIC
-LDFLAGS_SHARED= -shared $(LDFLAGS_GCOV)
+LDFLAGS_SHARED= -shared
+LDFLAGS_SHARED += $(LDFLAGS_GCOV)
+LDFLAGS_SHARED += $(LDFLAGS_GPROF)
 # LDFLAGS_SHARED += --build-id
 
-# CFLAGS and LIBS - modules
+# CFLAGS and LIBS - for individual modules
 CFLAGS_JSON=
 LIBS_JSON=
 
@@ -307,7 +325,7 @@ CFLAGS += -DHSP_MOD_DIR=$(MODDIR)
 CFLAGS += -Wall -Wstrict-prototypes -Wunused-value
 CFLAGS += -Wunused-function
 CFLAGS += $(CFLAGS_GCOV)
-LIBS=
+CFLAGS += $(CFLAGS_GPROF)
 
 # xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
 # /etc/redhat-release to get the version number as in xenserver-ddk/Makefile,  but then it
@@ -417,7 +435,7 @@ K8S: mod_k8s.so
 #########  hsflowd  #########
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS) $(LIBS_HSFLOWD) -rdynamic
+	$(CC) $(CFLAGS) -o $@ $(OBJS_HSFLOWD) $(LIBS_HSFLOWD) $(LDFLAGS_HSFLOWD)
 
 #########  hsflowd_containerd  #########
 
