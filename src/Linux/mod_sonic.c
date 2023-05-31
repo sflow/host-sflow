@@ -452,7 +452,7 @@ extern "C" {
 
   static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port, char *unixSocketPath, char *passPath) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    myDebug(1, "addDB: %s hostname=%s, port=%d, unixSocketPath=%s", dbInstance, hostname, port, unixSocketPath);
+    myDebug(1, "addDB: %s hostname=%s, port=%d, unixSocketPath=%s passPath=%s", dbInstance, hostname, port, unixSocketPath, passPath);
     HSPSonicDBClient *db = getDB(mod, dbInstance);
     if(db == NULL) {
       db = (HSPSonicDBClient *)my_calloc(sizeof(HSPSonicDBClient));
@@ -463,7 +463,11 @@ extern "C" {
       db->port = port;
       db->unixSocketPath = my_strdup(unixSocketPath);
       db->passPath = my_strdup(passPath);
-      UTHashAdd(mdata->dbInstances, db);
+      HSPSonicDBClient *replaced = UTHashAdd(mdata->dbInstances, db);
+      if(replaced) {
+	myDebug(1, "sonic addDB: replaced HSPSonicDBClient: %s", replaced->dbInstance);
+	// TODO: this should be freed - but possibly in the db_cleanupCB instead?
+      }
       // the socket will be opened later
     }
     return db;
