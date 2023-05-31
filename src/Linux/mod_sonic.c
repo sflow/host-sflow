@@ -696,22 +696,25 @@ extern "C" {
     else {
       myDebug(1, "sonic db_connectClient: missing unixsock or host:port");
     }
-    if(ctx) {
+    int fd = ctx ? ctx->c.fd : -1;
+    if(ctx
+       && fd >= 0
+       && ctx->err == 0) {
+      myDebug(1, "sonic db_connectClient suceeded: fd=%d", fd);
       redisAsyncSetConnectCallback(ctx, db_connectCB);
       redisAsyncSetDisconnectCallback(ctx, db_disconnectCB);
-      int fd = ctx->c.fd;
-      myDebug(1, "sonic redis fd == %d", fd);
-      if(fd > 0) {
-	db->sock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, db /* magic */);
-	// db->ev.addRead = db_addReadCB; // EVBus always ready to read
-	// db->ev.delRead = db_delReadCB; // no-op
-	ctx->ev.addWrite = db_addWriteCB;
-	// db->ev.delWrite = db_delWriteCB; // no-op
-	ctx->ev.cleanup = db_cleanupCB;
-	ctx->ev.data = db;
-	return YES;
-      }
+      db->sock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, db /* magic */);
+      // db->ev.addRead = db_addReadCB; // EVBus always ready to read
+      // db->ev.delRead = db_delReadCB; // no-op
+      ctx->ev.addWrite = db_addWriteCB;
+      // db->ev.delWrite = db_delWriteCB; // no-op
+      ctx->ev.cleanup = db_cleanupCB;
+      ctx->ev.data = db;
+      return YES;
     }
+    char *errm = ctx ? ctx->errstr : "ctx=NULL";
+    myDebug(1, "sonic db_connectClient failed (fd=%d) err=%s", fd, errm);
+    redisAsyncFree(ctx);
     return NO;
   }
 
