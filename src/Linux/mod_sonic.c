@@ -686,12 +686,12 @@ extern "C" {
     if(sp->sonic.unixsock
        && db->unixSocketPath) {
       myDebug(1, "sonic db_connectClient %s = %s", db->dbInstance, db->unixSocketPath);
-      ctx = db->ctx = redisAsyncConnectUnix(db->unixSocketPath);
+      ctx = redisAsyncConnectUnix(db->unixSocketPath);
     }
     else if(db->hostname
 	    && db->port) {
       myDebug(1, "sonic db_connectClient %s = %s:%d", db->dbInstance, db->hostname, db->port);
-      ctx = db->ctx = redisAsyncConnect(db->hostname, db->port);
+      ctx = redisAsyncConnect(db->hostname, db->port);
     }
     else {
       myDebug(1, "sonic db_connectClient: missing unixsock or host:port");
@@ -710,6 +710,7 @@ extern "C" {
       // db->ev.delWrite = db_delWriteCB; // no-op
       ctx->ev.cleanup = db_cleanupCB;
       ctx->ev.data = db;
+      db->ctx = ctx;
       return YES;
     }
     char *errm = ctx ? ctx->errstr : "ctx=NULL";
