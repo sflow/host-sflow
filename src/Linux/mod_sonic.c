@@ -450,14 +450,14 @@ extern "C" {
     return UTHashGet(mdata->dbInstances, &search);
   }
 
-  static void freeDB(HSPSonicDBTable *db) {
+  static void freeDB(HSPSonicDBClient *db) {
     my_free(db->dbInstance);
     UTStrBuf_free(db->replyBuf);
     my_free(db->hostname);
     my_free(db->unixSocketPath);
     my_free(db->passPath);
     if(db->ctx) {
-      redisAsyncFree(ctx);
+      redisAsyncFree(db->ctx);
       db->ctx = NULL;
     }
     my_free(db);
