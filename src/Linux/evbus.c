@@ -9,6 +9,10 @@ extern "C" {
 #include "util.h"
 #include "evbus.h"
 
+#ifdef GPROF
+#include "gperftools/profiler.h"
+#endif
+
   // only one running bus in each thread - keep track with thread-local var
   // so we can always know what the current "home" bus is and detect
   // inter-bus (inter-thread) messages automatically in EVEventTx
@@ -463,6 +467,10 @@ extern "C" {
   }
 
   static void *busRun(void *magic) {
+#ifdef GPROF
+    myDebug(1, "GPROF ProfilerRegisterThread()");
+    ProfilerRegisterThread();
+#endif
     EVBus *bus = (EVBus *)magic;
     EVMod *mod = bus->root->rootModule;
     assert(bus->running == NO);

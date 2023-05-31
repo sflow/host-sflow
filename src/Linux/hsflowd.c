@@ -1832,11 +1832,6 @@ extern "C" {
 #ifdef UTHEAP
     UTHeapInit();
 #endif
-
-#ifdef GPROF
-    myDebug(1, "GPROF ProfilerStart()");
-    ProfilerStart(NULL);
-#endif
     
     // open syslog
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
@@ -1881,6 +1876,11 @@ extern "C" {
       myLog(LOG_ERR,"Another %s is already running. If this is an error, remove %s", argv[0], sp->pidFile);
       exit(EXIT_FAILURE);
     }
+
+#ifdef GPROF
+    myDebug(1, "GPROF ProfilerStart()");
+    ProfilerStart(NULL);
+#endif
 
     if(getDaemon()) {
       // fork to daemonize
@@ -2288,6 +2288,7 @@ extern "C" {
 
 #ifdef GPROF
     myDebug(1, "GPROF ProfilerStop()");
+    ProfilerFlush();
     ProfilerStop();
 #endif
     
