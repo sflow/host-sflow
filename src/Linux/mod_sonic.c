@@ -450,6 +450,14 @@ extern "C" {
     return UTHashGet(mdata->dbInstances, &search);
   }
 
+  static void freeDB(HSPSonicDBTable *db) {
+    my_free(db->dbInstance);
+    UTStrBuf_free(db->replyBuf);
+    my_free(db->hostname);
+    my_free(db->unixSocketPath);
+    my_free(db);
+  }
+
   static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port, char *unixSocketPath, char *passPath) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "addDB: %s hostname=%s, port=%d, unixSocketPath=%s passPath=%s", dbInstance, hostname, port, unixSocketPath, passPath);
@@ -466,22 +474,12 @@ extern "C" {
       HSPSonicDBClient *replaced = UTHashAdd(mdata->dbInstances, db);
       if(replaced) {
 	myDebug(1, "sonic addDB: replaced HSPSonicDBClient: %s", replaced->dbInstance);
-	// TODO: this should be freed - but possibly in the db_cleanupCB instead?
+	freeDB(db);
       }
       // the socket will be opened later
     }
     return db;
   }
-
-#if 0
-  static void freeDB(HSPSonicDBTable *db) {
-    my_free(db->dbInstance);
-    UTStrBuf_free(db->replyBuf);
-    my_free(db->hostname);
-    my_free(db->unixSocketPath);
-    my_free(db);
-  }
-#endif
 
   /*_________________---------------------------__________________
     _________________   get/add db tables       __________________
@@ -719,7 +717,8 @@ extern "C" {
     }
     char *errm = ctx ? ctx->errstr : "ctx=NULL";
     myDebug(1, "sonic db_connectClient failed (fd=%d) err=%s", fd, errm);
-    redisAsyncFree(ctx);
+    if(ctx)
+      redisAsyncFree(ctx);
     return NO;
   }
 
