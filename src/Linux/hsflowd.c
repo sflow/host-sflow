@@ -686,6 +686,12 @@ extern "C" {
 
   static void evt_poll_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    
+    if(sp->suppress_sendPkt_waitConfig) {
+      myDebug(1, "hsflowd: evt_poll_tick() waitConfig");
+      return;
+    }
+
     time_t clk = evt->bus->now.tv_sec;
 
     // reset the pollActions
@@ -2083,26 +2089,31 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-    // must be able to read interfaces. Minimal discovery this time.
-    // Just enough to decide on an agent address.  No ethtool probing.
-    if(readInterfaces(sp, NO, NULL, NULL, NULL, NULL, NULL) == 0) {
-      myLog(LOG_ERR, "failed to read interfaces");
-      exit(EXIT_FAILURE);
+    if(sp->DNSSD.DNSSD
+       || sp->sonic.sonic) {
+      myDebug(1, "waitConfig: postpone readInterfaces and selectAgentAddress");
     }
-
-    // must be able to choose an agent address
-    if(selectAgentAddress(sp, NULL, NULL) == NO) {
-      myLog(LOG_ERR, "failed to select agent address");
-      exit(EXIT_FAILURE);
+    else {
+      // must be able to read interfaces. Minimal discovery this time.
+      // Just enough to decide on an agent address.  No ethtool probing.
+      if(readInterfaces(sp, NO, NULL, NULL, NULL, NULL, NULL) == 0) {
+	myLog(LOG_ERR, "failed to read interfaces");
+	exit(EXIT_FAILURE);
+      }
+      
+      // must be able to choose an agent address
+      if(selectAgentAddress(sp, NULL, NULL) == NO) {
+	myLog(LOG_ERR, "failed to select agent address");
+	exit(EXIT_FAILURE);
+      }
     }
-
-    // we must have an agentIP now, so we can use
-    // it to seed the random number generator
-    SFLAddress *agentIP = &sp->agentIP;
-    uint32_t seed = 0;
-    if(agentIP->type == SFLADDRESSTYPE_IP_V4) seed = agentIP->address.ip_v4.addr;
-    else memcpy(&seed, agentIP->address.ip_v6.addr + 12, 4);
-    sfl_random_init(seed);
+    
+    // seed the random number generator with the low order bits of the monotonic clock.
+    // We used to use the agent address but this way it can be chosen later in the startup
+    // sequence.
+    struct timespec tsnow;
+    EVClockMono(&tsnow);
+    sfl_random_init(tsnow.tv_nsec);
 
     // Resolve which UUID we are going to use to represent this host
     chooseUUID(sp);
