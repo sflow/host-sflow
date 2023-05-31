@@ -1588,7 +1588,7 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
 
-    myDebug(1, "sonic getSflowGlobalCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
+    myDebug(1, "sonic getSystemReadyCB: reply=%s", db_replyStr(reply, db->replyBuf, YES));
     if(reply == NULL)
       return; // will stay in same state (e,g. HSP_SONIC_STATE_WAIT_READY)
     bool system_ready = NO;
