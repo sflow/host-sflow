@@ -724,7 +724,10 @@ extern "C" {
     }
     char *errm = ctx ? ctx->errstr : "ctx=NULL";
     myDebug(1, "sonic db_connectClient failed (fd=%d) err=%s", fd, errm);
-    // No more cleanup required here (calling redisAsyncFree(ctx) triggers SIGSEGV)
+    if(ctx) {
+      myDebug(1, "Connection failed but context still returned - calling redisAsyncFree(ctx)");
+      redisAsyncFree(ctx);
+    }
     return NO;
   }
 
