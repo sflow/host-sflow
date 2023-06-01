@@ -799,10 +799,18 @@ extern "C" {
   static void db_authCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)db->mod->data;
     redisReply *reply = (redisReply *)magic;
     myDebug(1, "sonic db_authCB: %s reply=%s",
 	    db->dbInstance,
 	    db_replyStr(reply, db->replyBuf, YES));
+    if(reply
+       && reply->type == REDIS_REPLY_ERROR) {
+      myDebug(1, "sonic db_authCB ERROR calling redisAsyncFree() to disconnect");
+      redisAsyncFree(db->ctx);
+      myDebug(1, "sonic resetting state to CONNECT");
+      mdata->state = HSP_SONIC_STATE_CONNECT;
+    }
   }
 
   static bool db_auth(EVMod *mod, HSPSonicDBClient *db) {
