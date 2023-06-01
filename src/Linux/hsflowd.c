@@ -1873,7 +1873,9 @@ extern "C" {
     readSystemUUID(sp);
 
     // don't run if we think another one is already running
-    if(UTFileExists(sp->pidFile)) {
+    // (unless we are obviously debugging manually with -ddd or above)
+    if(getDebug() < 2
+       && UTFileExists(sp->pidFile)) {
       myLog(LOG_ERR,"Another %s is already running. If this is an error, remove %s", argv[0], sp->pidFile);
       exit(EXIT_FAILURE);
     }
