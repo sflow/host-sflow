@@ -450,6 +450,7 @@ extern "C" {
     return UTHashGet(mdata->dbInstances, &search);
   }
 
+#if 0
   static void freeDB(HSPSonicDBClient *db) {
     my_free(db->dbInstance);
     UTStrBuf_free(db->replyBuf);
@@ -462,7 +463,8 @@ extern "C" {
     }
     my_free(db);
   }
-
+#endif
+  
   static HSPSonicDBClient *addDB(EVMod *mod, char *dbInstance, char *hostname, int port, char *unixSocketPath, char *passPath) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     myDebug(1, "addDB: %s hostname=%s, port=%d, unixSocketPath=%s passPath=%s", dbInstance, hostname, port, unixSocketPath, passPath);
@@ -472,17 +474,15 @@ extern "C" {
       db->dbInstance = my_strdup(dbInstance);
       db->replyBuf = UTStrBuf_new();
       db->mod = mod;
-      db->hostname = my_strdup(hostname);
-      db->port = port;
-      db->unixSocketPath = my_strdup(unixSocketPath);
-      db->passPath = my_strdup(passPath);
-      HSPSonicDBClient *replaced = UTHashAdd(mdata->dbInstances, db);
-      if(replaced) {
-	myDebug(1, "sonic addDB: replaced HSPSonicDBClient: %s", replaced->dbInstance);
-	freeDB(db);
-      }
-      // the socket will be opened later
+      UTHashAdd(mdata->dbInstances, db);
     }
+    // allow some parameters to change if we are reading the config again
+    // (e.g. because there was a connection or authentication failure)
+    db->port = port;
+    setStr(&db->hostname, hostname);
+    setStr(&db->unixSocketPath, unixSocketPath);
+    setStr(&db->passPath, passPath);
+    // the socket will be opened later
     return db;
   }
 
