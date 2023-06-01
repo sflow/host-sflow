@@ -1928,6 +1928,9 @@ extern "C" {
 	    case HSPTOKEN_UNIXSOCK:
 	      if((tok = expectONOFF(sp, tok, &sp->sonic.unixsock)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_DBCONFIG:
+	      if((tok = expectString(sp, tok, &sp->sonic.dbconfig, "path")) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

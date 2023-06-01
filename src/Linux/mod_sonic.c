@@ -539,7 +539,8 @@ extern "C" {
   }
 
   static void loadDBConfig(EVMod *mod) {
-    char *fname = HSP_SONIC_DB_JSON;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    char *fname = sp->sonic.dbconfig ?: HSP_SONIC_DB_JSON;
     myDebug(1, "sonic loadDBConfig from %s", fname);
     resetDBConfig(mod);
     FILE *fjson = fopen(fname, "r");
@@ -722,9 +723,7 @@ extern "C" {
     }
     char *errm = ctx ? ctx->errstr : "ctx=NULL";
     myDebug(1, "sonic db_connectClient failed (fd=%d) err=%s", fd, errm);
-    if(ctx)
-      redisAsyncFree(ctx);
-      
+    // No more cleanup required here (calling redisAsyncFree(ctx) triggers SIGSEGV)
     return NO;
   }
 

@@ -606,6 +606,7 @@ extern "C" {
       bool unixsock;
       bool setIfAlias;
       bool setIfName;
+      char *dbconfig;
     } sonic;
     struct {
       bool nvml;
