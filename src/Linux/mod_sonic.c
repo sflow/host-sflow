@@ -703,6 +703,7 @@ extern "C" {
     }
     else {
       myDebug(1, "sonic db_connectClient: missing unixsock or host:port");
+      return NO;
     }
     int fd = ctx ? ctx->c.fd : -1;
     if(ctx
@@ -733,18 +734,19 @@ extern "C" {
     HSPSonicDBClient *db;
     UTHASH_WALK(mdata->dbInstances, db) {
       if(!db->connected) {
-	db_connectClient(mod, db);
-	// async connect requires something to do before it will complete,
-	// so go ahead and issue the first query.  Use a neutral "no-op"
-	// and save the actual discovery queries for the next step once
-	// everything is connected.
-	if(db->passPath
-	   && db_auth(mod, db)) {
-	  myDebug(1, "sonic db_connect(%s): auth sent", db->dbInstance);
-	}
-	else {
-	  db_ping(mod, db);
+	if(db_connectClient(mod, db)) {
+	  // async connect requires something to do before it will complete,
+	  // so go ahead and issue the first query.  Use a neutral "no-op"
+	  // and save the actual discovery queries for the next step once
+	  // everything is connected.
+	  if(db->passPath
+	     && db_auth(mod, db)) {
+	    myDebug(1, "sonic db_connect(%s): auth sent", db->dbInstance);
+	  }
+	  else {
+	    db_ping(mod, db);
 	  myDebug(1, "sonic db_connect(%s): ping sent", db->dbInstance);
+	  }
 	}
       }
     }
