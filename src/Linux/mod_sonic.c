@@ -139,6 +139,7 @@ extern "C" {
     bool changedPortPriority:1;
     u_char actorSystemMAC[8];
     uint32_t localAS;
+    time_t waitReadyStart;
     bool system_ready;
     bool sflow_enable;
     uint32_t sflow_polling;
@@ -673,8 +674,10 @@ extern "C" {
     myDebug(1, "sonic db_connectCB: status= %d", status);
     if(status == REDIS_OK) {
       db->connected = YES;
-      if(db_allConnected(db->mod))
+      if(db_allConnected(db->mod)) {
 	mdata->state = HSP_SONIC_STATE_WAIT_READY;
+	mdata->waitReadyStart = mdata->pollBus->now.tv_sec;
+      }
     }
   }
 
@@ -1234,6 +1237,7 @@ extern "C" {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
     EVMod *mod = db->mod;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
     HSPSonicPort *prt = (HSPSonicPort *)req_magic;
 
@@ -1299,7 +1303,7 @@ extern "C" {
 	  | HSP_ETCTR_OPER
 	  | HSP_ETCTR_ADMIN;
 	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs);
-	nio->last_update = sp->pollBus->now.tv_sec;
+	nio->last_update = mdata->pollBus->now.tv_sec;
       }
     }
   }
@@ -1862,6 +1866,7 @@ extern "C" {
   */
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
 
     switch(mdata->state) {
@@ -1879,10 +1884,20 @@ extern "C" {
       db_connect(mod);
       break;
     case HSP_SONIC_STATE_WAIT_READY:
-      db_getSystemReady(mod);
+      // all dbs connected - wait for SYSTEM_READY
+      {
+	time_t waiting = mdata->pollBus->now.tv_sec - mdata->waitReadyStart;
+	if(waiting < sp->sonic.waitReady) {
+	  db_getSystemReady(mod);
+	}
+	else {
+	  myDebug(1, "sonic: waitReady timeout after %u seconds", waiting);
+	  mdata->state = HSP_SONIC_STATE_CONNECTED;
+	}
+      }
       break;
     case HSP_SONIC_STATE_CONNECTED:
-      // connected - learn config
+      // connected and ready - learn config
       db_getMeta(mod);
       dbEvt_subscribe(mod);
       // the next step is to read the starting agent/polling/collector

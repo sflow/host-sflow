@@ -607,6 +607,8 @@ extern "C" {
       bool setIfAlias;
       bool setIfName;
       char *dbconfig;
+      uint32_t waitReady; // seconds
+#define HSP_SONIC_DEFAULT_WAITREADY_SECS 180
     } sonic;
     struct {
       bool nvml;

@@ -2069,6 +2069,7 @@ extern "C" {
     sp->sonic.unixsock = YES;
     sp->sonic.setIfAlias = YES;
     sp->sonic.setIfName = YES;
+    sp->sonic.waitReady = HSP_SONIC_DEFAULT_WAITREADY_SECS;
     sp->psample.psample = YES;
     sp->psample.ingress = YES;
     sp->psample.egress = YES;

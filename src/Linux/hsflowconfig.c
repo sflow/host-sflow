@@ -1431,6 +1431,7 @@ extern "C" {
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->sonic.sonic = YES;
 	    sp->sonic.unixsock = YES;
+	    sp->sonic.waitReady = HSP_SONIC_DEFAULT_WAITREADY_SECS;
 	    level[++depth] = HSPOBJ_SONIC;
 	    break;
 	  case HSPTOKEN_DBUS:
@@ -1930,6 +1931,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_DBCONFIG:
 	      if((tok = expectString(sp, tok, &sp->sonic.dbconfig, "path")) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_WAITREADY:
+	      if((tok = expectInteger32(sp, tok, &sp->sonic.waitReady, 0, 0xFFFFFFFF)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
