@@ -180,7 +180,10 @@ extern "C" {
 
 #define HSP_DOCKER_SOCK  VARFS_STR "/run/docker.sock"
 #define HSP_DOCKER_MAX_CONCURRENT 15
-#define HSP_DOCKER_HTTP " HTTP/1.1\nHost: " HSP_DOCKER_SOCK "\n\n"
+  // note: used to set Host: HSP_DOCKER_SOCK but started to see
+  // "malformed host header" errors so switched to Host: http
+  // which emulates the request that curl(1) sends.
+#define HSP_DOCKER_HTTP " HTTP/1.1\nHost: http\n\n"
 #define HSP_DOCKER_API "v1.24"
 #define HSP_DOCKER_REQ_EVENTS "GET /" HSP_DOCKER_API "/events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
 #define HSP_DOCKER_REQ_CONTAINERS "GET /" HSP_DOCKER_API "/containers/json" HSP_DOCKER_HTTP
