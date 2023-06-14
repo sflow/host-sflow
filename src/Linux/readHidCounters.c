@@ -68,6 +68,9 @@ extern "C" {
 #ifdef __s390__
     hid->machine_type = SFLMT_s390;
 #endif
+#ifdef __aarch64__
+    hid->machine_type = SFLMT_arm;
+#endif
 
     // remember it globally too
     sp->machine_type = hid->machine_type;
