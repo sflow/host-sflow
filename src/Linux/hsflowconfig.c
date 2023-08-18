@@ -598,7 +598,7 @@ extern "C" {
     UTStrBuf *buf = UTStrBuf_new();
 
     if(settings) {
-      char ipbuf[51];
+      char ipbuf[64];
       UTStrBuf_printf(buf, "hostname=%s\n", sp->hostname);
       UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
       UTStrBuf_printf(buf, "header=%u\n", settings->headerBytes);
@@ -618,7 +618,7 @@ extern "C" {
       // If these overrides are removed again in another dynamic update then we simply leave them
       // out here and it should trigger a return to the previous behavior.
       if(settings->agentIP.type)
-	UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&settings->agentIP, ipbuf, 50));
+	UTStrBuf_printf(buf, "agentIP=%s\n", SFLAddress_print(&settings->agentIP, ipbuf, 63));
       if(settings->agentDevice)
 	UTStrBuf_printf(buf, "agent=%s\n", settings->agentDevice);
 
@@ -631,13 +631,34 @@ extern "C" {
 	// this might mean we write a .auto file with no collectors in it,
 	// so let's hope the slave agents all do the right thing with that(!)
 	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
-	  char collectorStr[128];
-	  // ip/port/deviceName/namespace
-	  sprintf(collectorStr, "collector=%s/%u/%s/%s\n",
-		  SFLAddress_print(&collector->ipAddr, ipbuf, 50),
-		  collector->udpPort,
-		  collector->deviceName ?: "",
-		  collector->namespace ?: "");
+	  char collectorStr[256];
+	  // the evt_config_line syntax uses collector=ip/port/deviceName/namespace
+	  // and the dnsSD and SONiC modules pass config lines around that way, but here we
+	  // need to preserve the original collector=IP[ PORT] syntax so that unmodified
+	  // sub-agents reading this file (such as mod_sflow for apache, nginx-sflow-module
+	  // and jmx-sflow-agent) all see what they were expecting. At least, that's
+	  // OK provided the dev and namespace are not set. If dev/namespace _are_ set then we
+	  // need the sub-agents to interpret them correctly or not at all.  So that's how
+	  // we end up here, using the old syntax if it's just ip and port, but adopting
+	  // the new syntax when we need to express ip/port/dev/ns.
+	  SFLAddress_print(&collector->ipAddr, ipbuf, 63);
+	  if(collector->deviceName == NULL
+	     && collector->namespace == NULL) {
+	    // old syntax:  collector=IP or collector=IP PORT
+	    if(collector->udpPort == SFL_DEFAULT_COLLECTOR_PORT)
+	      sprintf(collectorStr, "collector=%s\n", ipbuf);
+	    else
+	      sprintf(collectorStr, "collector=%s %u\n", ipbuf, collector->udpPort);
+	  }
+	  else {
+	    // new syntax: collector=IP/PORT/DEV/NS
+	    // TODO: use snprintf or another UTStrBuf here
+	    sprintf(collectorStr, "collector=%s/%u/%s/%s\n",
+		    ipbuf,
+		    collector->udpPort,
+		    collector->deviceName ?: "",
+		    collector->namespace ?: "");
+	  }
 	  strArrayAdd(iplist, collectorStr);
 	}
       }
