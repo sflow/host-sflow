@@ -1,0 +1,12 @@
+#!/bin/bash
+echo "build_hsflowd on platform:  $1"
+
+git clone https://github.com/sflow/host-sflow \
+&& cd host-sflow \
+&& make deb FEATURES="SONIC"
+
+for deb in `ls *.deb`; do cp "$deb" "/packages/${deb/hsflowd/hsflowd-$1}"; done
+echo ""
+echo "files in /packages:"
+ls -l /packages
+
