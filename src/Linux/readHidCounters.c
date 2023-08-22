@@ -22,13 +22,12 @@ extern "C" {
       return NO;
     }
 
-    if(uu.nodename) {
-      int len = my_strlen(uu.nodename);
-      if(len > hbufLen) len = hbufLen;
-      memcpy(hbuf, uu.nodename, len);
-      hid->hostname.str = hbuf;
-      hid->hostname.len = len;
-    }
+    int nlen = my_strnlen(uu.nodename, _UTSNAME_NODENAME_LENGTH);
+    if(nlen > hbufLen)
+      nlen = hbufLen;
+    memcpy(hbuf, uu.nodename, nlen);
+    hid->hostname.str = hbuf;
+    hid->hostname.len = nlen;
 
     // UUID
     memcpy(hid->uuid, sp->uuid, 16);
@@ -79,13 +78,12 @@ extern "C" {
     hid->os_name = SFLOS_linux;
 
     // os release
-    if(uu.release) {
-      int len = my_strlen(uu.release);
-      if(len > rbufLen) len = rbufLen;
-      memcpy(rbuf, uu.release, len);
-      hid->os_release.str = rbuf;
-      hid->os_release.len = len;
-    }
+    int rlen = my_strnlen(uu.release, _UTSNAME_RELEASE_LENGTH);
+    if(rlen > rbufLen)
+      rlen = rbufLen;
+    memcpy(rbuf, uu.release, rlen);
+    hid->os_release.str = rbuf;
+    hid->os_release.len = rlen;
 
     return YES;
   }
