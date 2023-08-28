@@ -227,6 +227,7 @@ extern "C" {
 
     uint16_t ifin=0,ifout=0;
     uint32_t pkt_len=0;
+    uint32_t hdr_len=0;
     uint32_t grp_no=0;
     uint32_t grp_seq=0;
     uint32_t sample_n=0;
@@ -250,7 +251,10 @@ extern "C" {
       case PSAMPLE_ATTR_SAMPLE_GROUP: grp_no = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_GROUP_SEQ: grp_seq = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_SAMPLE_RATE: sample_n = *(uint32_t *)datap; break;
-      case PSAMPLE_ATTR_DATA: pkt = datap; break;
+      case PSAMPLE_ATTR_DATA:
+	pkt = datap;
+	hdr_len = ps_attr->nla_len;
+	break;
       case HSP_PSAMPLE_ATTR_OUT_TC:
 	{
 	  // queue id
@@ -387,7 +391,7 @@ extern "C" {
 		   pkt, // mac hdr
 		   14, // mac hdr len
 		   pkt + 14, // payload
-		   pkt_len - 14, // captured payload len
+		   hdr_len - 14, // captured payload len
 		   pkt_len - 14, // whole pdu len
 		   drops,
 		   this_sample_n,
