@@ -859,7 +859,7 @@ extern "C" {
 	    // the config file is empty...
 	    uint32_t bpsRatio = 0;
 	    if(lookupApplicationSettings(settings, NULL, HSP_BPS_RATIO, &bpsRatio, NULL)) {
-	      // samlping.bps_ratio=0 turns off the behavior, falling back on global default
+	      // sampling.bps_ratio=0 turns off the behavior, falling back on global default
 	      if(bpsRatio > 0) {
 		sampling_n = adaptor->ifSpeed / bpsRatio;
 		if(sampling_n == 0)
