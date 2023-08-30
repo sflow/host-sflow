@@ -1393,13 +1393,15 @@ extern "C" {
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->dropmon.dropmon = YES;
 	    sp->dropmon.start = YES;
-	    sp->dropmon.limit = 100;
-	    sp->dropmon.max = 100000;
+	    sp->dropmon.limit = HSP_DEFAULT_DROPLIMIT;
+	    sp->dropmon.max = HSP_DEFAULT_DROPTRAP_MAX;
 	    sp->dropmon.sw = YES;
 	    sp->dropmon.hw = YES;
 	    sp->dropmon.rn = YES;
 	    sp->dropmon.hw_unknown = NO;
 	    sp->dropmon.hw_function = NO;
+	    sp->dropmon.sw_passive = NO;
+	    sp->dropmon.hw_passive = NO;
 	    level[++depth] = HSPOBJ_DROPMON;
 	    break;
 	  case HSPTOKEN_PCAP:
@@ -1789,6 +1791,12 @@ extern "C" {
 	      bool ignore;
 	      if((tok = expectONOFF(sp, tok, &ignore)) == NULL) return NO;
 	    }
+	      break;
+	    case HSPTOKEN_SW_PASSIVE:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.sw_passive)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_HW_PASSIVE:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_passive)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_LIMIT:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.limit, 1, HSP_MAX_NOTIFY_RATELIMIT)) == NULL) return NO;
@@ -2195,6 +2203,17 @@ extern "C" {
 	    myLog(LOG_ERR, "CIDR parse error in dynamic config record <%s>=<%s>", keyBuf, valBuf);
 	  }
 	}
+	else if(!strcasecmp(keyBuf, "dropLimit")) {
+	  st->dropLimit = strtol(valBuf, NULL, 0);
+	  st->dropLimit_set = YES;
+	}
+	else if(tokenMatch(keyBuf, HSPTOKEN_HEADERBYTES)) {
+	  st->headerBytes = strtol(valBuf, NULL, 0);
+	  if(st->headerBytes > HSP_MAX_HEADER_BYTES)
+	    st->headerBytes = HSP_MAX_HEADER_BYTES;
+	}
+	// TODO: add datagramBytes, samplingDirection here
+	// so they can be overridden dynamically by DNSSD, SONiC etc.
 	else {
 	  myLog(LOG_INFO, "unexpected dynamic config record <%s>=<%s>", keyBuf, valBuf);
 	}

@@ -75,7 +75,7 @@ extern "C" {
 #define HSP_DROPMON_READNL_RCV_BUF 8192
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000
-#define HSP_DROPMON_QUEUE 100
+#define HSP_DROPMON_QUEUE 1000 // seems to be default (in kernel net/core/drop_monitor.c)
 
   typedef enum {
     HSP_DROPMON_STATE_INIT=0,
@@ -130,7 +130,7 @@ extern "C" {
     UTArray *dropPatterns_rn;
     UTHash *notifiers;
     uint32_t feedControlErrors;
-    int quota;   // nofification rate-limit
+    int quota;   // notification rate-limit
     uint32_t noQuota; // number of rate-limit drops
     uint32_t ignoredDrops_hw;
     uint32_t ignoredDrops_sw;
@@ -211,7 +211,8 @@ extern "C" {
 
     // we may have been configured to ignore sw drops
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(!sp->dropmon.sw) {
+    if(!sp->dropmon.sw
+       && !sp->dropmon.sw_passive) {
       mdata->ignoredDrops_sw++;
       return NULL;
     }
@@ -241,7 +242,8 @@ extern "C" {
 
     // we may have been configured to ignore hw drops
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(!sp->dropmon.hw) {
+    if(!sp->dropmon.hw
+       && !sp->dropmon.hw_passive) {
       mdata->ignoredDrops_hw++;
       return NULL;
     }
@@ -385,7 +387,8 @@ extern "C" {
   static void loadDropPoints(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
-    if(sp->dropmon.sw) {
+    if(sp->dropmon.sw
+       || sp->dropmon.sw_passive) {
       for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_sw); ii++) {
 	HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_sw[ii]);
 	if(dp)
@@ -393,7 +396,8 @@ extern "C" {
       }
     }
 
-    if(sp->dropmon.hw) {
+    if(sp->dropmon.hw
+       || sp->dropmon.hw_passive) {
       for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_hw); ii++) {
 	HSPDropPoint *dp = buildDropPoint(&LoadDropPoints_hw[ii]);
 	if(dp)
@@ -470,9 +474,11 @@ Or we could call with a vararg list of strutures containing nlattr type,len,payl
 That would allow everything to stay on the stack as it does here, which has nice properties.
 */
 
-  static int start_DROPMON(EVMod *mod, bool startIt)
+  static int start_DROPMON(EVMod *mod, bool startIt, bool sw, bool hw)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+
+    // Always transition state even on no-op
     setState(mod,
 	     startIt
 	     ? HSP_DROPMON_STATE_START
@@ -480,34 +486,46 @@ That would allow everything to stay on the stack as it does here, which has nice
     
     struct nlmsghdr nlh = { };
     struct genlmsghdr ge = { };
-    struct nlattr attr1 = { };
-    struct nlattr attr2 = { };
+    struct nlattr attr[2] = { };
 
-    attr1.nla_len = sizeof(attr1);
-    attr1.nla_type = NET_DM_ATTR_SW_DROPS;
-    attr2.nla_len = sizeof(attr2);
-    attr2.nla_type = NET_DM_ATTR_HW_DROPS;
+    int fl = 0; // count flags
+    if(sw) {
+      attr[fl].nla_len = sizeof(struct nlattr);
+      attr[fl].nla_type = NET_DM_ATTR_SW_DROPS;
+      fl++;
+    }
+    if(hw) {
+      attr[fl].nla_len = sizeof(struct nlattr);
+      attr[fl].nla_type = NET_DM_ATTR_HW_DROPS;
+      fl++;
+    }
+
+    if(fl == 0) {
+      // no-op
+      return;
+    }
 
     ge.cmd = startIt
       ? NET_DM_CMD_START
       : NET_DM_CMD_STOP;
     ge.version = 1;
 
-    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(ge) + sizeof(attr1) + sizeof(attr2));
+    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(ge) + (fl * sizeof(struct nlattr)));
     nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_ACK;
     nlh.nlmsg_type = mdata->family_id;
     nlh.nlmsg_seq = ++mdata->nl_seq;
     nlh.nlmsg_pid = UTNLGeneric_pid(mod->id);
 
+    // There will be either 3 or 4 elements in this msg
     struct iovec iov[4] = {
       { .iov_base = &nlh,  .iov_len = sizeof(nlh) },
       { .iov_base = &ge,   .iov_len = sizeof(ge) },
-      { .iov_base = &attr1, .iov_len = sizeof(attr1) },
-      { .iov_base = &attr2, .iov_len = sizeof(attr2) },
+      { .iov_base = &attr[0], .iov_len = sizeof(struct nlattr) },
+      { .iov_base = &attr[1], .iov_len = sizeof(struct nlattr) },
     };
 
     struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
-    struct msghdr msg = { .msg_name = &sa, .msg_namelen = sizeof(sa), .msg_iov = iov, .msg_iovlen = 4 };
+				 struct msghdr msg = { .msg_name = &sa, .msg_namelen = sizeof(sa), .msg_iov = iov, .msg_iovlen = (2 + fl) };
     return sendmsg(mdata->nl_sock, &msg, 0);
   }
 
@@ -995,7 +1013,24 @@ That would allow everything to stay on the stack as it does here, which has nice
     
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
-  
+
+    if(sp->sFlowSettings->dropLimit_set) {
+      // dynamic override of dropLimit
+      sp->dropmon.limit = sp->sFlowSettings->dropLimit;
+      if(sp->dropmon.limit > 0) {
+	// dropLimit was set to positive integer in SONiC or DNS-SD.
+	// This implies that we should activate the feed even if dropmon.start is currently off,
+	// but we still assume that hardware DROPMON activation happens elsewhere.
+	// TODO: We may have to revisit this if our activation of sw drops here
+	// obstructs that activation of hw drops elsewhere.
+	myDebug(1, "dropmon: limit set dynamically=%u => start=YES", sp->dropmon.limit);
+	sp->dropmon.start = YES;
+	sp->dropmon.sw = YES;
+	sp->dropmon.rn = YES;
+	sp->dropmon.hw_passive = YES;
+      }
+    }
+
     if(mdata->dropmon_configured) {
       // already configured from the first time (when we still had root privileges)
       return;
@@ -1038,7 +1073,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       }
       else {
 	myDebug(1, "dropmon: graceful shutdown: turning off feed");
-	start_DROPMON(mod, NO);
+	start_DROPMON(mod, NO, sp->dropmon.sw, sp->dropmon.hw);
       }
     }
     if(mdata->nl_evsock) {
@@ -1111,7 +1146,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       // failure if the channel was already configured externally.
       // TODO: should probably wait for answer before ploughing
       // ahead with this start_DROPMON call.
-      start_DROPMON(mod, YES);
+      start_DROPMON(mod, YES, sp->dropmon.sw, sp->dropmon.hw);
       break;
     case HSP_DROPMON_STATE_START:
       // waiting for start response
@@ -1167,7 +1202,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     mod->data = my_calloc(sizeof(HSP_mod_DROPMON));
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     if(sp->dropmon.start)
-      retainRootRequest(mod, "needed to start drop-monitor netlink feed.");
+      retainRootRequest(mod, "need CAP_NET_ADMIN to start drop-monitor netlink feed.");
     mdata->dropPoints_hw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_sw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_rn = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);

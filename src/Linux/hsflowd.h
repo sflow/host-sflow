@@ -207,6 +207,8 @@ extern "C" {
     uint32_t pollingInterval;
     uint32_t headerBytes;
     uint32_t datagramBytes;
+    uint32_t dropLimit;
+    bool dropLimit_set;
 
     // option to control switch-port sampling direction
     // No longer used (v2.0.38).
@@ -640,8 +642,12 @@ extern "C" {
       bool sw;
       bool hw;
       bool rn;
+      bool sw_passive;
+      bool hw_passive;
       uint32_t limit;
+#define HSP_DEFAULT_DROPLIMIT 100
       uint32_t max;
+#define HSP_DEFAULT_DROPTRAP_MAX 100000 // "circuit-breaker" turns off feed
       bool hw_unknown;
       bool hw_function;
     } dropmon;

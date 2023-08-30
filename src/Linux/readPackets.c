@@ -246,6 +246,7 @@ extern "C" {
       SEMLOCK_DO(sp->sync_agent) {
 	adaptorNIO->sampler = sfl_agent_addSampler(sp->agent, &dsi);
 	sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
+	// TODO: adapt if headerBytes changes dynamically in config settings
 	sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sp->sFlowSettings_file->headerBytes);
       }
     }

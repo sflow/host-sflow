@@ -48,6 +48,9 @@ extern "C" {
 #define HSP_SONIC_FIELD_SFLOW_ADMIN_STATE "admin_state"
 #define HSP_SONIC_FIELD_SFLOW_POLLING "polling_interval"
 #define HSP_SONIC_FIELD_SFLOW_AGENT "agent_id"
+#define HSP_SONIC_FIELD_SFLOW_DROP_MONITOR_LIMIT "drop_monitor_limit" // *proposed*
+#define HSP_SONIC_FIELD_SFLOW_SAMPLE_DIRECTION "sample_direction" // *proposed*
+
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
 #define HSP_SONIC_FIELD_COLLECTOR_VRF "collector_vrf"
@@ -144,6 +147,9 @@ extern "C" {
     bool sflow_enable;
     uint32_t sflow_polling;
     char *sflow_agent;
+    uint32_t sflow_dropLimit;
+    bool sflow_dropLimit_set;
+    char *sflow_direction;
     UTHash *collectors;
     UTArray *newCollectors;
     EVEvent *configStartEvent;
@@ -1396,7 +1402,9 @@ extern "C" {
     // first extract the latest settings
     bool sflow_enable = NO;
     char *sflow_agent = NULL;
-    uint32_t sflow_polling = HSP_SONIC_DEFAULT_POLLING_INTERVAL;;
+    uint32_t sflow_polling = HSP_SONIC_DEFAULT_POLLING_INTERVAL;
+    uint32_t sflow_dropLimit = 0;
+    char *sflow_direction = NULL;
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -1414,6 +1422,14 @@ extern "C" {
 
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_POLLING))
 	    sflow_polling = db_getU32(f_val);
+
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_DROP_MONITOR_LIMIT)) {
+	    sflow_dropLimit = db_getU32(f_val);
+	    mdata->sflow_dropLimit_set = YES;
+	  }
+
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_SAMPLE_DIRECTION))
+	    sflow_direction = f_val->str;
 	}
       }
     }
@@ -1433,6 +1449,19 @@ extern "C" {
     if(sflow_polling != mdata->sflow_polling) {
       myDebug(1, "sonic sflow_polling %u -> %u", mdata->sflow_polling, sflow_polling);
       mdata->sflow_polling = sflow_polling;
+    }
+    if(sflow_dropLimit != mdata->sflow_dropLimit) {
+      myDebug(1, "sonic sflow_dropLimit %u -> %u", mdata->sflow_dropLimit, sflow_dropLimit);
+      mdata->sflow_dropLimit = sflow_dropLimit;
+    }
+    if(!my_strequal(sflow_direction, mdata->sflow_direction)) {
+      // For SONiC mod_psample is configured to accept egress samples if they appear,
+      // so just print this setting for now.  If we ever have to observe it more tightly
+      // then we will have to check the per-interface settings too.
+      myDebug(1, "sonic sflow_direction %s -> %s",
+	      mdata->sflow_direction ?: "<not set>",
+	      sflow_direction ?: "<not set>");
+      setStr(&mdata->sflow_direction, sflow_direction);
     }
     // if this is normal startup then don't syncConfig yet (that happens when the collectors
     // have been discovered for the first time).  However if it was a dynamic reconfig then go
@@ -1739,6 +1768,7 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________    syncConfig             __________________
     -----------------___________________________------------------
+   Any changes here should be reflected in hsflowconfig.c:dynamic_config_line
   */
 
   static void syncConfig(EVMod *mod) {
@@ -1754,6 +1784,11 @@ extern "C" {
       }
       snprintf(cfgLine, EV_MAX_EVT_DATALEN, "polling=%u", mdata->sflow_polling);
       EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+      if(mdata->sflow_dropLimit_set) {
+	snprintf(cfgLine, EV_MAX_EVT_DATALEN, "dropLimit=%u", mdata->sflow_dropLimit);
+	EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+      }
+      // TODO: add headerBytes, datagramBytes (when settable in redis) too?
       HSPSonicCollector *coll;
       UTHASH_WALK(mdata->collectors, coll) {
 	if(coll->parseOK) {

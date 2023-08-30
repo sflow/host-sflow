@@ -2074,6 +2074,18 @@ extern "C" {
     sp->psample.ingress = YES;
     sp->psample.egress = YES;
     sp->psample.group = 1; // Ingress PSAMPLE group number. Expects egress on (group+1).
+    // include dropmon but only in passive mode, so that events will be sent but only if
+    // DROPMON netlink channel is configured elsewhere. However if dropLimit is set in
+    // redis then mod_sonic will request activation and these settings will be overridden
+    // in mod_dropmon.c:evt_config_changed().
+    sp->dropmon.dropmon = YES;
+    sp->dropmon.start = NO;
+    sp->dropmon.limit = HSP_DEFAULT_DROPLIMIT;;
+    sp->dropmon.sw = NO;
+    sp->dropmon.sw_passive = YES;
+    sp->dropmon.rn = YES;
+    sp->dropmon.hw = NO;
+    sp->dropmon.hw_passive = YES;
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN
