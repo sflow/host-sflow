@@ -502,7 +502,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     if(fl == 0) {
       // no-op
-      return;
+      return 0;
     }
 
     ge.cmd = startIt
