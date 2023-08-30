@@ -53,6 +53,8 @@ extern "C" {
     HSP_EV_resize,
     HSP_EV_top,
     HSP_EV_update,
+    HSP_EV_exec_die,
+    HSP_EV_prune,
     HSP_EV_NUM_CODES
   } EnumHSPContainerEvent;
 
@@ -81,7 +83,9 @@ extern "C" {
     "rename",
     "resize",
     "top",
-    "update"
+    "update",
+    "exec_die", // added for 1.43 VVV
+    "prune"
   };
 
   typedef enum {
@@ -1780,6 +1784,8 @@ extern "C" {
     case HSP_EV_resize:
     case HSP_EV_top:
     case HSP_EV_update:
+    case HSP_EV_exec_die:
+    case HSP_EV_prune:
     default:
       // leave as HSP_CS_UNKNOWN so as not to trigger a state-change below,
       // but still allow for a name update.
@@ -1914,7 +1920,11 @@ extern "C" {
   static void processDockerResponse(EVMod *mod, EVSocket *sock, HSPDockerRequest *req) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     char *line = UTSTRBUF_STR(sock->ioline);
-    myDebug(2, "processDockerResponse got answer (seqNo=%d): <%s>", req->seqNo, line);
+    myDebug(2, "processDockerResponse (state=%u) got answer (seqNo=%d len=%u): <%s>",
+	    req->state,
+	    req->seqNo,
+	    UTSTRBUF_LEN(sock->ioline),
+	    line);
     switch(req->state) {
 
     case HSPDOCKERREQ_HEADERS:
