@@ -22,7 +22,7 @@ extern "C" {
       return NO;
     }
 
-    int nlen = my_strnlen(uu.nodename, _UTSNAME_NODENAME_LENGTH);
+    int nlen = my_strnlen(uu.nodename, sizeof(uu.nodename));
     if(nlen > hbufLen)
       nlen = hbufLen;
     memcpy(hbuf, uu.nodename, nlen);
@@ -78,7 +78,7 @@ extern "C" {
     hid->os_name = SFLOS_linux;
 
     // os release
-    int rlen = my_strnlen(uu.release, _UTSNAME_RELEASE_LENGTH);
+    int rlen = my_strnlen(uu.release, sizeof(uu.release));
     if(rlen > rbufLen)
       rlen = rbufLen;
     memcpy(rbuf, uu.release, rlen);
