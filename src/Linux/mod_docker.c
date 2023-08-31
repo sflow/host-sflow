@@ -188,11 +188,14 @@ extern "C" {
   // "malformed host header" errors so switched to Host: http
   // which emulates the request that curl(1) sends.
 #define HSP_DOCKER_HTTP " HTTP/1.1\nHost: http\n\n"
+  // HTTP 1.1 keeps the connection open by default, so to keep the
+  // transaction socket-logic the same below we now add the "Connection: close" header.
+#define HSP_DOCKER_HTTP_CLOSE " HTTP/1.1\nHost: http\nConnection: close\n\n"
 #define HSP_DOCKER_API "v1.24"
 #define HSP_DOCKER_REQ_EVENTS "GET /" HSP_DOCKER_API "/events?filters={\"type\":[\"container\"]}" HSP_DOCKER_HTTP
-#define HSP_DOCKER_REQ_CONTAINERS "GET /" HSP_DOCKER_API "/containers/json" HSP_DOCKER_HTTP
-#define HSP_DOCKER_REQ_INSPECT_ID "GET /" HSP_DOCKER_API "/containers/%s/json" HSP_DOCKER_HTTP
-#define HSP_DOCKER_REQ_STATS_ID "GET /" HSP_DOCKER_API "/containers/%s/stats?stream=false" HSP_DOCKER_HTTP
+#define HSP_DOCKER_REQ_CONTAINERS "GET /" HSP_DOCKER_API "/containers/json" HSP_DOCKER_HTTP_CLOSE
+#define HSP_DOCKER_REQ_INSPECT_ID "GET /" HSP_DOCKER_API "/containers/%s/json" HSP_DOCKER_HTTP_CLOSE
+#define HSP_DOCKER_REQ_STATS_ID "GET /" HSP_DOCKER_API "/containers/%s/stats?stream=false" HSP_DOCKER_HTTP_CLOSE
 #define HSP_CONTENT_LENGTH_REGEX "^Content-Length: ([0-9]+)$"
   
 #define HSP_DOCKER_MAX_FNAME_LEN 255
