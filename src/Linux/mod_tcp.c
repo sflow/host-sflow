@@ -407,13 +407,14 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     uint32_t n_thisTick = mdata->diag_tx + mdata->diag_rx + mdata->nl_seq_lost + mdata->diag_timeouts;
     if(n_thisTick != mdata->n_lastTick) {
-      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u",
+      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%ui, sockets=%u",
 	      mdata->diag_tx,
 	      mdata->diag_rx,
 	      mdata->nl_seq_lost,
 	      mdata->diag_timeouts,
 	      mdata->samples_annotated,
-	      mdata->ipip_tx);
+	      mdata->ipip_tx,
+	      UTHashN(mdata->socketHT));
      mdata->n_lastTick = n_thisTick;
     }
 
@@ -548,6 +549,7 @@ extern "C" {
 	  // wait here
 	  pthread_join(*thread, NULL); // TODO: check for error?
 	  my_free(thread);
+	  myDebug(1, "getNetlinkSocket(): opened new socket in namespace: %u", nspid);
 	}
       }
       else {
@@ -586,18 +588,21 @@ extern "C" {
     // make sure we have a netlink socket in the namespace before we do anything more
     pid_t nspid = ps->src_nspid ?: ps->dst_nspid; // probably only one set anyway
     HSPTCPNetlinkSocket *sock = getNetlinkSocket(mod, nspid, YES);
-    if(sock == NULL)
+    if(sock == NULL) {
+      myDebug(2, "lookup_sample(): no socket for nspid=%u", nspid);
       return;
+    }
     
     if(debug(2)) {
       char ipb1[51], ipb2[51];
-      myDebug(2, "tcp: proto=%u local_src=%u src=%s:%u dst=%s:%u",
+      myDebug(2, "tcp: proto=%u local_src=%u src=%s:%u dst=%s:%u nspid=%u",
 	      ipproto,
 	      localSrc,
 	      SFLAddress_print(ipsrc,ipb1,50),
 	      sport,
 	      SFLAddress_print(ipdst,ipb2,50),
-	      dport);
+	      dport,
+	      nspid);
     }
 
     // OK,  we are going to look this one up
@@ -656,6 +661,7 @@ extern "C" {
     }
     // specify the ifIndex in case the socket is bound
     // see INET_MATCH in net/ipv4/inet_hashtables.c
+    // TODO: this may be broken when we query other namespaces?
     sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
     // I have no cookie :(
     sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;

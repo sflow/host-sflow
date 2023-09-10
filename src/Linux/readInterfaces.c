@@ -463,7 +463,7 @@ extern "C" {
       modinfo.cmd = ETHTOOL_GMODULEINFO;
       ifr->ifr_data = (char *)&modinfo;
       if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
-	myLog(LOG_INFO, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
+	myDebug(1, "ETHTOOL_GMODULEINFO %s succeeded eeprom_len = %u eeprom_type=%u",
 	      adaptor->deviceName,
 	      modinfo.eeprom_len,
 	      modinfo.type);
