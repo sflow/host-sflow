@@ -209,7 +209,7 @@ extern "C" {
     HSPPendingCSample *ps = (HSPPendingCSample *)data;
     HSP_mod_NVML *mdata = (HSP_mod_NVML *)mod->data;
     // For these events, poller->userData points to
-    // HSPVMState_DOCKER/SYSTEMD/KVM/XEN which
+    // HSPVMState_DOCKER/SYSTEMD/KVM/XEN/POD which
     // all start with the HSPVMState structure.
     if(ps->poller
        && ps->poller->userData) {
