@@ -116,8 +116,24 @@ extern "C" {
 #define INET_DIAG_CLASS_ID 17
 #define INET_DIAG_CGROUP_ID 21
 #define INET_DIAG_SOCKOPT 22
+  
+#define HSPTCP_NL_SOCKET_IDLE_TIMEOUT_MS 60000
 
-  typedef struct _HSPTCPSample {
+  typedef struct _HSPTCPNetlinkSocket {
+    pid_t nspid;
+    int nl_sock;
+    int lastUsed; // monotonic mS
+    char *err_step;
+    char *err_msg;
+    uint32_t diag_tx;
+    uint32_t diag_rx;
+    uint32_t nl_seq_tx;
+    uint32_t nl_seq_rx;
+    uint32_t nl_seq_lost;
+    EVMod *mod;
+  } HSPTCPNetlinkSocket;
+
+    typedef struct _HSPTCPSample {
     struct _HSPTCPSample *prev; // timeoutQ
     struct _HSPTCPSample *next; // timeoutQ
     UTArray *samples; // HSPPendingSample
@@ -134,17 +150,15 @@ extern "C" {
 
   typedef struct _HSP_mod_TCP {
     EVBus *packetBus;
-    int nl_sock;
-    uint32_t nl_seq_tx;
-    uint32_t nl_seq_rx;
-    uint32_t nl_seq_lost;
     uint32_t diag_tx;
     uint32_t diag_rx;
+    uint32_t nl_seq_lost;
     uint32_t samples_annotated;
     uint32_t diag_timeouts;
     uint32_t n_lastTick;
     uint32_t ipip_tx;
     UTHash *sampleHT;
+    UTHash *socketHT;
     UTQ(HSPTCPSample) timeoutQ;
   } HSP_mod_TCP;
 
@@ -181,13 +195,15 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void parse_diag_msg(EVMod *mod, struct inet_diag_msg *diag_msg, int rtalen, uint32_t seqNo)
+  static void parse_diag_msg(HSPTCPNetlinkSocket *sock, struct inet_diag_msg *diag_msg, int rtalen, uint32_t seqNo)
   {
+    EVMod *mod = sock->mod;
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
+    sock->diag_rx++;
     mdata->diag_rx++;
-
+    
     if(diag_msg == NULL)
       return;
     if(diag_msg->idiag_family != AF_INET
@@ -206,23 +222,26 @@ extern "C" {
       // use this to confirm seqNo advance so we can report on
       // the number of our requests that seem to be outstanding
       // or lost (assumes requests answered in order)
-      uint32_t lost = seqNo - mdata->nl_seq_rx - 1;
+      uint32_t lost = seqNo - sock->nl_seq_rx - 1;
+      sock->nl_seq_lost += lost;
+      sock->nl_seq_rx = seqNo;
+      // keep overall total too
       mdata->nl_seq_lost += lost;
-      mdata->nl_seq_rx = seqNo;
     }
 
     // user info.  Prefer getpwuid_r() if avaiable...
     struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
-    myDebug(2, "tcp: diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u)",
+    myDebug(2, "tcp: diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
 	    found ? "YES" : "NO",
 	    found ? (found->udp ? "UDP":"TCP") : "",
 	    diag_msg->idiag_uid,
 	    uid_info ? uid_info->pw_name : "<user not found>",
 	    diag_msg->idiag_inode,
-	    mdata->diag_tx,
-	    mdata->diag_rx,
-	    mdata->nl_seq_tx - mdata->nl_seq_rx,
-	    mdata->nl_seq_lost);
+	    sock->diag_tx,
+	    sock->diag_rx,
+	    sock->nl_seq_tx - sock->nl_seq_rx,
+	    sock->nl_seq_lost,
+	    sock->nspid);
     // Theoretically we could follow the inode back to
     // the socket and get the application (command line)
     // but there does not seem to be a direct lookup
@@ -358,13 +377,25 @@ extern "C" {
   */
 
   static void diagCB(void *magic, int sockFd, uint32_t seqNo, struct inet_diag_msg *diag_msg, int rtalen) {
-      parse_diag_msg((EVMod *)magic, diag_msg, rtalen, seqNo);
+      parse_diag_msg((HSPTCPNetlinkSocket *)magic, diag_msg, rtalen, seqNo);
   }
 
-  static void readNL(EVMod *mod, EVSocket *sock, void *magic)
+  static void readNL(EVMod *mod, EVSocket *evsock, void *magic)
   {
+    HSPTCPNetlinkSocket *sock = (HSPTCPNetlinkSocket *)magic;
+    sock->mod = mod;
+    // TODO: this call needs another magic pointer so we can send both mod and sock!
+    UTNLDiag_recv(sock, sock->nl_sock, diagCB);
+  }
+
+  /*_________________---------------------------__________________
+    _________________       now_mS              __________________
+    -----------------___________________________------------------
+  */
+
+  static int now_mS(EVMod *mod) {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
-    UTNLDiag_recv(mod, mdata->nl_sock, diagCB);
+    return EVBusRunningTime_mS(mdata->packetBus);
   }
 
   /*_________________---------------------------__________________
@@ -384,6 +415,16 @@ extern "C" {
 	      mdata->samples_annotated,
 	      mdata->ipip_tx);
      mdata->n_lastTick = n_thisTick;
+    }
+
+    int nowMs = now_mS(mod);
+    HSPTCPNetlinkSocket *sock;
+    UTHASH_WALK(mdata->socketHT, sock) {
+      if((nowMs - sock->lastUsed) > HSPTCP_NL_SOCKET_IDLE_TIMEOUT_MS) {
+	UTHashDel(mdata->socketHT, sock);
+	close(sock->nl_sock);
+	my_free(sock);
+      }
     }
   }
 
@@ -424,12 +465,129 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________     get_netlink_socket    __________________
+    -----------------___________________________------------------
+  */
+
+#include <linux/version.h>
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,0,0) || (__GLIBC__ <= 2 && __GLIBC_MINOR__ < 14))
+#ifndef CLONE_NEWNET
+#define CLONE_NEWNET 0x40000000	/* New network namespace (lo, device, names sockets, etc) */
+#endif
+
+#define MY_SETNS(fd, nstype) syscall(__NR_setns, fd, nstype)
+#else
+#define MY_SETNS(fd, nstype) setns(fd, nstype)
+#endif
+
+#define HSP_MAX_NETNS_PATH 256
+
+  static void *openNetlinkSocket(void *magic) {
+    HSPTCPNetlinkSocket *sock = (HSPTCPNetlinkSocket *)magic;
+
+    if(sock->nspid) {
+      // switch namespace now
+      // (1) open /proc/<nspid>/ns/net
+      char topath[HSP_MAX_NETNS_PATH];
+      snprintf(topath, HSP_MAX_NETNS_PATH, PROCFS_STR "/%u/ns/net", sock->nspid);
+      int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
+      if(nsfd < 0) {
+	sock->err_step = "open()";
+	sock->err_msg = strerror(errno);
+	return NULL;
+      }
+      // (2) set network namespace
+      // CLONE_NEWNET means nsfd must refer to a network namespace
+      if(MY_SETNS(nsfd, CLONE_NEWNET) < 0) {
+	sock->err_step = "setns()";
+	sock->err_msg = strerror(errno);
+	return NULL;
+      }
+      // (3) call unshare
+      if(unshare(CLONE_NEWNS) < 0) {
+	sock->err_step = "unshare()";
+	sock->err_msg = strerror(errno);
+	return NULL;
+      }
+    }
+
+    // open the netlink socket
+    if((sock->nl_sock = UTNLDiag_open()) == -1) {
+      sock->err_step = "UTNLDiag_open()";
+      sock->err_msg = strerror(errno);
+      return NULL;
+    }
+    return sock;
+  }
+
+  static HSPTCPNetlinkSocket *getNetlinkSocket(EVMod *mod, pid_t nspid, bool create) {
+    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+
+    // see if we opened it aleady
+    HSPTCPNetlinkSocket search = { .nspid = nspid };
+    HSPTCPNetlinkSocket *sock = (HSPTCPNetlinkSocket *)UTHashGet(mdata->socketHT, &search);
+    if(sock)
+      return sock;
+
+    if(create) {
+      sock = my_calloc(sizeof(*sock));
+      sock->nspid = nspid;
+
+      if(nspid) {
+	// fork a new thread that can switch to the namespace before opening the socket
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, EV_BUS_STACKSIZE);
+	pthread_t *thread = my_calloc(sizeof(pthread_t));
+	int err = pthread_create(thread, &attr, openNetlinkSocket, sock);
+	if(err) {
+	  sock->err_step = "pthread_create()";
+	  sock->err_msg = strerror(errno);
+	}
+	else {
+	  // wait here
+	  pthread_join(*thread, NULL); // TODO: check for error?
+	  my_free(thread);
+	}
+      }
+      else {
+	// open in default namespace
+	openNetlinkSocket(sock);
+      }
+
+      // check for error
+      if(sock->err_step) {
+	myLog(LOG_ERR, "getNetlinkSocket(): failed at step: %s with error: %s\n",
+	      sock->err_step,
+	      sock->err_msg);
+	my_free(sock);
+	return NULL;
+      }
+
+      // stash
+      UTHashAdd(mdata->socketHT, sock);
+
+      // register the callback
+      EVBusAddSocket(mod, mdata->packetBus, sock->nl_sock, readNL, sock);
+      sock->nl_seq_tx = sock->nl_seq_rx = 0x50C00L; // True Romance
+    }
+
+    return sock;
+  }
+
+  /*_________________---------------------------__________________
     _________________       lookup_sample       __________________
     -----------------___________________________------------------
   */
 
   static void lookup_sample(EVMod *mod, HSPPendingSample *ps, SFLAddress *ipsrc, SFLAddress *ipdst, uint8_t ipproto, uint16_t sport, uint16_t dport, bool localSrc) {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
+
+    // make sure we have a netlink socket in the namespace before we do anything more
+    pid_t nspid = ps->src_nspid ?: ps->dst_nspid; // probably only one set anyway
+    HSPTCPNetlinkSocket *sock = getNetlinkSocket(mod, nspid, YES);
+    if(sock == NULL)
+      return;
     
     if(debug(2)) {
       char ipb1[51], ipb2[51];
@@ -519,12 +677,13 @@ extern "C" {
       // add to HT and timeout queue
       UTHashAdd(mdata->sampleHT, tcpSample);
       UTQ_ADD_TAIL(mdata->timeoutQ, tcpSample);
-      // send the netlink request
-      UTNLDiag_send(mdata->nl_sock,
+      UTNLDiag_send(sock->nl_sock,
 		    &tcpSample->conn_req,
 		    sizeof(tcpSample->conn_req),
 		    tcpSample->udp, // set DUMP flag if UDP
-		    ++mdata->nl_seq_tx);
+		    ++sock->nl_seq_tx);
+      sock->lastUsed = now_mS(mod);
+      sock->diag_tx++;
       mdata->diag_tx++;
     }
   }
@@ -544,8 +703,8 @@ extern "C" {
 	  || (sp->tcp.udp && !ps->gotInnerIP)) {
 	// was it to or from this host / management IP?
 	if(!ps->localTest) {
-	  ps->localSrc = isLocalAddress(sp, &ps->src);
-	  ps->localDst = isLocalAddress(sp, &ps->dst);
+	  ps->localSrc = ps->src_dsIndex || isLocalAddress(sp, &ps->src);
+	  ps->localDst = ps->dst_dsIndex || isLocalAddress(sp, &ps->dst);
 	  ps->localTest = YES;
 	}
 	if(ps->localSrc != ps->localDst)
@@ -568,9 +727,10 @@ extern "C" {
 	// running on an end-host. If running on a router this
 	// might trigger a storm of pointless netlink lookups.
 	
-	// to determine direction, use the MAC layer
-	ps->localSrc = (adaptorByMac(sp, &ps->macsrc) != NULL);
-	ps->localDst = (adaptorByMac(sp, &ps->macdst) != NULL);
+	// to determine direction, use the MAC layer, or the
+	// container/pod/vm mapping if known...
+	ps->localSrc = ps->src_dsIndex || (adaptorByMac(sp, &ps->macsrc) != NULL);
+	ps->localDst = ps->dst_dsIndex || (adaptorByMac(sp, &ps->macdst) != NULL);
 	if(ps->localSrc != ps->localDst)
 	  lookup_sample(mod,
 			ps,
@@ -583,23 +743,6 @@ extern "C" {
       }
     }
   }
-  
-  /*_________________---------------------------__________________
-    _________________    evt_config_first       __________________
-    -----------------___________________________------------------
-  */
-
-  static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
-
-    // open the netlink monitoring socket
-    if((mdata->nl_sock = UTNLDiag_open()) == -1) {
-      myLog(LOG_ERR, "nl_sock open failed: %s", strerror(errno));
-      return;
-    }
-    EVBusAddSocket(mod, mdata->packetBus, mdata->nl_sock, readNL, NULL);
-    mdata->nl_seq_tx = mdata->nl_seq_rx = 0x50C00L;
-  }
 
   /*_________________---------------------------__________________
     _________________    module init            __________________
@@ -610,12 +753,16 @@ extern "C" {
     mod->data = my_calloc(sizeof(HSP_mod_TCP));
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     mdata->sampleHT = UTHASH_NEW(HSPTCPSample, normalized_id, UTHASH_DFLT);
+    mdata->socketHT = UTHASH_NEW(HSPTCPNetlinkSocket, nspid, UTHASH_DFLT);
+
+    // TODO: do we need to retain CAP_NET_ADMIN (or something else) to open
+    // netlink sockets in other namespaces on demand?
+
     // trim the hash-key len to select only the socket part of inet_diag_sockid
     // and leave out the interface and the cookie
     mdata->sampleHT->f_len = 36;
     // register call-backs
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);

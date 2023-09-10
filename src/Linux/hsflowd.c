@@ -537,6 +537,12 @@ extern "C" {
     return state;
   }
 
+  HSPVMState *getVM_byDS(EVMod *mod, uint32_t dsIndex) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSPVMState search = { .dsIndex = dsIndex };
+    return (HSPVMState *)UTHashGet(sp->vmsByDsIndex, &search);
+  }
+
   void removeAndFreeVM(EVMod *mod, HSPVMState *state) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // make sure we are never called from a different thread

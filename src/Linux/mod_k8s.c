@@ -1299,39 +1299,59 @@ extern "C" {
     return NO;
   }
   
+  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSPPendingSample *ps = (HSPPendingSample *)data;
+    uint32_t src_dsIndex=0;
+    uint32_t dst_dsIndex=0;
+
+    decodePendingSample(ps);
+    if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
+      // TODO: add namespace / cgroup-id to packet sample
+      // so mod_tcp can use it.
+      // capture src/dst DS info in packet
+      if(src_dsIndex) {
+	ps->src_dsIndex = src_dsIndex;
+	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, src_dsIndex);
+	if(pod)
+	  ps->src_nspid = pod->nspid;
+      }
+      if(dst_dsIndex) {
+	ps->dst_dsIndex = dst_dsIndex;
+	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, dst_dsIndex);
+	if(pod)
+	  ps->dst_nspid = pod->nspid;
+      }
+    }
+  }
+
   static void evt_flow_sample_released(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPPendingSample *ps = (HSPPendingSample *)data;
     uint32_t src_dsIndex=0;
     uint32_t dst_dsIndex=0;
-    bool gotMapping = NO;
+    // we may already know
+    bool gotMapping = (ps->src_dsIndex && ps->dst_dsIndex);
 
-    // method 1 - if INET_DIAG reported a cgroup_id associated with the socket
-    if(ps->cgroup_id) {
-      HSPVMState_POD search = { .cgroup_id = ps->cgroup_id };
-      HSPVMState_POD *pod = UTHashGet(mdata->podsByCgroupId, &search);
-      if(pod) {
-	gotMapping = YES;
-	myDebug(2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
-		ps->cgroup_id,
-		pod->hostname,
-		pod->vm.dsIndex);
-	if(ps->localSrc)
-	  src_dsIndex = pod->vm.dsIndex;
-	else
-	  dst_dsIndex = pod->vm.dsIndex;
-      }
-    }
-    
-    // method 2 - match on addresses in packet header
     if(!gotMapping) {
-      decodePendingSample(ps);
-      if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
-	gotMapping = YES;
+      // method 1 - if INET_DIAG reported a cgroup_id associated with the socket
+      if(ps->cgroup_id) {
+	HSPVMState_POD search = { .cgroup_id = ps->cgroup_id };
+	HSPVMState_POD *pod = UTHashGet(mdata->podsByCgroupId, &search);
+	if(pod) {
+	  gotMapping = YES;
+	  myDebug(2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
+		  ps->cgroup_id,
+		  pod->hostname,
+		  pod->vm.dsIndex);
+	  if(ps->localSrc)
+	    src_dsIndex = pod->vm.dsIndex;
+	  else
+	    dst_dsIndex = pod->vm.dsIndex;
+	}
       }
     }
 
-    // If we mapping the sample, add the "entities" annotation
+    // If we mapped the sample, add the "entities" annotation
     if(gotMapping) {
       SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
       entElem->tag = SFLFLOW_EX_ENTITIES;
@@ -1452,6 +1472,7 @@ extern "C" {
       // HSPEVENT_FLOW_SAMPLE we ensure that mod_tcp (if loaded)
       // will have completed it's annotation of the sample first.
       EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+      EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE_RELEASED), evt_flow_sample_released);
     }
 

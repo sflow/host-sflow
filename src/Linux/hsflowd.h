@@ -455,6 +455,12 @@ extern "C" {
     // inner addresses
     bool gotInnerMAC:1;
     bool gotInnerIP:1;
+    // learned vm/container/pod datasource from/to
+    uint32_t src_dsIndex;
+    uint32_t dst_dsIndex;
+    // and the network namespace
+    pid_t src_nspid;
+    pid_t dst_nspid;
   } HSPPendingSample;
 
   typedef struct _HSPPendingCSample {
@@ -864,6 +870,7 @@ extern "C" {
 
   // VM lifecycle
   HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);
+  HSPVMState *getVM_byDS(EVMod *mod, uint32_t dsIndex);
   void removeAndFreeVM(EVMod *mod, HSPVMState *state);
 
   // logging support
