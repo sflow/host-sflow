@@ -110,6 +110,13 @@ extern "C" {
     int idleSweepCountdown;
     char *cgroup_path;
     char *cgroup_devices_path;
+    uint32_t ds_byMAC;
+    uint32_t ds_byInnerMAC;
+    uint32_t ds_byIP;
+    uint32_t ds_byInnerIP;
+    uint32_t ds_byDiag;
+    uint32_t pod_byDS;
+    uint32_t pod_byCgroup;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -1260,6 +1267,7 @@ extern "C" {
   }
   
   static bool lookupContainerDS(EVMod *mod, HSPPendingSample *ps, uint32_t *p_src_dsIndex, uint32_t *p_dst_dsIndex) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     // start with the one most likely to match
     // e.g. in Kubernetes with Calico IPIP or VXLAN this will be the innerIP:
     if(ps->gotInnerIP) {
@@ -1273,33 +1281,42 @@ extern "C" {
 	      *p_src_dsIndex,
 	      *p_dst_dsIndex);
       
-      if(*p_src_dsIndex || *p_dst_dsIndex)
+      if(*p_src_dsIndex || *p_dst_dsIndex) {
+	mdata->ds_byInnerIP++;
 	return YES;
+      }
     }
     if(ps->gotInnerMAC) {
       *p_src_dsIndex = containerDSByMAC(mod, &ps->macsrc_1);
       *p_dst_dsIndex = containerDSByMAC(mod, &ps->macdst_1);
-      if(*p_src_dsIndex || *p_dst_dsIndex)
+      if(*p_src_dsIndex || *p_dst_dsIndex) {
+	mdata->ds_byInnerMAC++;
 	return YES;
+      }
     }
     if(ps->l3_offset) {
       // outer IP
       *p_src_dsIndex = containerDSByIP(mod, &ps->src);
       *p_dst_dsIndex = containerDSByIP(mod, &ps->dst);
-      if(*p_src_dsIndex || *p_dst_dsIndex)
+      if(*p_src_dsIndex || *p_dst_dsIndex) {
+	mdata->ds_byIP++;
 	return YES;
+      }
     }
     if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
       // outer MAC
       *p_src_dsIndex = containerDSByMAC(mod, &ps->macsrc);
       *p_dst_dsIndex = containerDSByMAC(mod, &ps->macdst);
-      if(*p_src_dsIndex || *p_dst_dsIndex)
+      if(*p_src_dsIndex || *p_dst_dsIndex) {
+	mdata->ds_byMAC++;
 	return YES;
+      }
     }
     return NO;
   }
   
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPPendingSample *ps = (HSPPendingSample *)data;
     uint32_t src_dsIndex=0;
     uint32_t dst_dsIndex=0;
@@ -1312,14 +1329,18 @@ extern "C" {
       if(src_dsIndex) {
 	ps->src_dsIndex = src_dsIndex;
 	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, src_dsIndex);
-	if(pod)
+	if(pod) {
 	  ps->src_nspid = pod->nspid;
+	  mdata->pod_byDS++;
+	}
       }
       if(dst_dsIndex) {
 	ps->dst_dsIndex = dst_dsIndex;
 	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, dst_dsIndex);
-	if(pod)
+	if(pod) {
 	  ps->dst_nspid = pod->nspid;
+	  mdata->pod_byDS++;
+	}
       }
     }
   }
@@ -1339,6 +1360,7 @@ extern "C" {
 	HSPVMState_POD *pod = UTHashGet(mdata->podsByCgroupId, &search);
 	if(pod) {
 	  gotMapping = YES;
+	  mdata->pod_byCgroup++;
 	  myDebug(2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
 		  ps->cgroup_id,
 		  pod->hostname,
@@ -1392,6 +1414,15 @@ extern "C" {
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+
+    myDebug(1, "mod_k8s: ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,ds_byDiag=%u,pod_byDS=%u,pod_byCgroup=%u",
+	    mdata->ds_byMAC,
+	    mdata->ds_byInnerMAC,
+	    mdata->ds_byIP,
+	    mdata->ds_byInnerIP,
+	    mdata->ds_byDiag,
+	    mdata->pod_byDS,
+	    mdata->pod_byCgroup);
 
     if(--mdata->idleSweepCountdown <= 0) {
       // rearm

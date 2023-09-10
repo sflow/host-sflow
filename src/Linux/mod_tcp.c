@@ -407,7 +407,7 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     uint32_t n_thisTick = mdata->diag_tx + mdata->diag_rx + mdata->nl_seq_lost + mdata->diag_timeouts;
     if(n_thisTick != mdata->n_lastTick) {
-      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%ui, sockets=%u",
+      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u, sockets=%u",
 	      mdata->diag_tx,
 	      mdata->diag_rx,
 	      mdata->nl_seq_lost,
