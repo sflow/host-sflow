@@ -728,6 +728,20 @@ extern "C" {
     }
   }
 
+  static void checkForDebugActions(HSP *sp) {
+    // see if there are debug actions to process
+    if(sp->debugFile) {
+      struct stat statBuf = {};
+      if(stat(sp->debugFile, &statBuf) == 0) {
+	time_t mtim = statBuf.st_mtim.tv_sec;
+	if(sp->debugFileModTime != mtim) {
+	  sp->debugFileModTime = mtim;
+	  readDebugActions(sp, sp->debugFile);
+	}
+      }
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________       tick                __________________
     -----------------___________________________------------------
@@ -829,16 +843,7 @@ extern "C" {
     }
 
     // see if there are debug actions to process
-    if(sp->debugFile) {
-      struct stat statBuf = {};
-      if(stat(sp->debugFile, &statBuf) == 0) {
-	time_t mtim = statBuf.st_mtim.tv_sec;
-	if(sp->debugFileModTime != mtim) {
-	  sp->debugFileModTime = mtim;
-	  readDebugActions(sp, sp->debugFile);
-	}
-      }
-    }
+    checkForDebugActions(sp);
   }
 
   /*_________________---------------------------__________________
@@ -2328,8 +2333,7 @@ extern "C" {
     // sp->agentDeviceStrict = YES;
 
     // check for module debug actions early
-    if(sp->debugFile)
-      readDebugActions(sp, sp->debugFile);
+    checkForDebugActions(sp);
 
     if(sp->DNSSD.DNSSD
        || sp->sonic.sonic) {
