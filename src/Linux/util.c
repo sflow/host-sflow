@@ -148,8 +148,8 @@ extern "C" {
     return debugLimit;
   }
 
-  static void myLogv2(bool end, int syslogType, char *fmt, va_list args) {
-    if(debugLevel
+  void myLogv2(int level, bool end, int syslogType, char *fmt, va_list args) {
+    if(level
        || daemonFlag==NO) {
       FILE *out = getDebugOut();
       if(debugLimit == 0
@@ -164,21 +164,21 @@ extern "C" {
   }
 
   void myLogv(int syslogType, char *fmt, va_list args) {
-    myLogv2(YES, syslogType, fmt, args);
+    myLogv2(debugLevel, YES, syslogType, fmt, args);
   }
 
-  static void myLog2(bool end, int syslogType, char *fmt, ...)
+  void myLog2(int level, bool end, int syslogType, char *fmt, ...)
   {
     va_list args;
     va_start(args, fmt);
-    myLogv2(end, syslogType, fmt, args);
+    myLogv2(level, end, syslogType, fmt, args);
   }
     
   void myLog(int syslogType, char *fmt, ...)
   {
     va_list args;
     va_start(args, fmt);
-    myLogv2(YES, syslogType, fmt, args);
+    myLogv2(debugLevel, YES, syslogType, fmt, args);
   }
 
   void setDebug(int level) {
@@ -196,10 +196,10 @@ extern "C" {
   void myDebug(int level, char *fmt, ...)
   {
     if(debug(level)) {
-      myLog2(NO, LOG_DEBUG, "dbg%d:", level);
+      myLog2(level, NO, LOG_DEBUG, "dbg%d:", level);
       va_list args;
       va_start(args, fmt);
-      myLogv2(YES, LOG_DEBUG, fmt, args);
+      myLogv2(level, YES, LOG_DEBUG, fmt, args);
     }
   }
 

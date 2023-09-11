@@ -691,6 +691,44 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    readDebugActions       __________________
+    -----------------___________________________------------------
+  */
+
+  static void readDebugActions(HSP *sp, char *path) {
+    FILE *f_actions = fopen(path, "r");
+    if(f_actions) {
+      char line[HSP_MAX_DEBUG_LINELEN];
+      int truncated;
+      int lineNo=0;
+      while(my_readline(f_actions, line, HSP_MAX_DEBUG_LINELEN, &truncated) != EOF) {
+	if(truncated
+	   || ++lineNo >= HSP_MAX_DEBUG_ACTIONS) {
+	  myDebug(1, "debug-action overload");
+	  break;
+	}
+	char *varval = (char *)line;
+	char keyBuf[HSP_MAX_DEBUG_LINELEN];
+	char valBuf[HSP_MAX_DEBUG_LINELEN];
+	if(parseNextTok(&varval, "=", YES, '"', YES, keyBuf, HSP_MAX_DEBUG_LINELEN)
+	   && parseNextTok(&varval, "=", YES, '"', YES, valBuf, HSP_MAX_DEBUG_LINELEN)) {
+	  // for now, accept only <mod>=<level>
+	  int debugLevel = strtol(valBuf, NULL, 0);
+	  EVMod *mod = EVGetModule(sp->rootModule, keyBuf);
+	  if(mod) {
+	    myDebug(1, "setting mod=%s debugLevel=%u", mod->name, debugLevel);
+	    mod->debugLevel = debugLevel;
+	  }
+	  else {
+	    myDebug(1, "debug action ignored: %s", line);
+	  }
+	}
+      }
+      fclose(f_actions);
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________       tick                __________________
     -----------------___________________________------------------
   */
@@ -790,6 +828,17 @@ extern "C" {
       sp->outputRevisionNo = sp->revisionNo;
     }
 
+    // see if there are debug actions to process
+    if(sp->debugFile) {
+      struct stat statBuf = {};
+      if(stat(sp->debugFile, &statBuf) == 0) {
+	time_t mtim = statBuf.st_mtim.tv_sec;
+	if(sp->debugFileModTime != mtim) {
+	  sp->debugFileModTime = mtim;
+	  readDebugActions(sp, sp->debugFile);
+	}
+      }
+    }
   }
 
   /*_________________---------------------------__________________
@@ -953,7 +1002,7 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dvPp:f:l:o:u:m:?hc:D:L:")) != -1) {
+    while ((in = getopt(argc, argv, "dvPp:f:F:l:o:u:m:?hc:D:L:")) != -1) {
       switch(in) {
       case 'v':
 	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
@@ -968,6 +1017,7 @@ extern "C" {
       case 'P': sp->dropPriv = NO; break;
       case 'p': sp->pidFile = optarg; break;
       case 'f': sp->configFile = optarg; break;
+      case 'F': sp->debugFile = optarg; break;
       case 'l': sp->modulesPath = my_strlen(optarg) ? optarg : NULL; break;
       case 'o': sp->outputFile = optarg; break;
       case 'c': sp->crashFile = optarg; break;
@@ -2276,7 +2326,11 @@ extern "C" {
     // might be a breaking change in some places where the agent=xxx
     // setting is wrong.
     // sp->agentDeviceStrict = YES;
-    
+
+    // check for module debug actions early
+    if(sp->debugFile)
+      readDebugActions(sp, sp->debugFile);
+
     if(sp->DNSSD.DNSSD
        || sp->sonic.sonic) {
       // mod_dnssd and mod_sonic should start with a blank config.

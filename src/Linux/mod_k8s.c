@@ -49,7 +49,7 @@ extern "C" {
   typedef struct _HSPVMState_POD {
     HSPVMState vm; // superclass: must come first
     char *hostname;
-    pid_t nspid; // selected from containers
+    uint32_t /*pid_t*/ nspid; // selected from containers
     uint32_t state; // SFLVirDomainState - from containers
     bool gpu_dev_tried:1;
     bool gpu_dev:1;
@@ -89,6 +89,7 @@ extern "C" {
   
   typedef struct _HSPVNIC {
     SFLAddress ipAddr;
+    uint32_t nspid;
     UTHash *podEntries;
     uint32_t dsIndex;
 #define HSPVNIC_DSINDEX_NONUNIQUE 0xFFFFFFFF
@@ -114,8 +115,7 @@ extern "C" {
     uint32_t ds_byInnerMAC;
     uint32_t ds_byIP;
     uint32_t ds_byInnerIP;
-    uint32_t ds_byDiag;
-    uint32_t pod_byDS;
+    uint32_t pod_byAddr;
     uint32_t pod_byCgroup;
   } HSP_mod_K8S;
 
@@ -163,7 +163,7 @@ extern "C" {
 	if(my_strequal(fsType, "cgroup2")) {
 	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
 	  if(fsPath) {
-	    myDebug(1, "found cgroup2 path = %s", fsPath);
+	    EVDebug(mod, 1, "found cgroup2 path = %s", fsPath);
 	    mdata->cgroup_path = my_strdup(fsPath);
 	  }
 	}
@@ -172,7 +172,7 @@ extern "C" {
 	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINE_CHARS);
 	  if(fsPath
 	     && fnmatch("*/devices", fsPath, 0) == 0) {
-	    myDebug(1, "found cgroup devices controller path = %s", fsPath);
+	    EVDebug(mod, 1, "found cgroup devices controller path = %s", fsPath);
 	    mdata->cgroup_devices_path = my_strdup(fsPath);
 	  }
 	}
@@ -210,12 +210,13 @@ extern "C" {
   static int podLinkCB(EVMod *mod, HSPVMState_POD *pod, char *line) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    myDebug(1, "podLinkCB: line=<%s>", line);
+    EVDebug(mod, 1, "podLinkCB: line=<%s>", line);
     char deviceName[HSP_K8S_MAX_LINELEN];
     char macStr[HSP_K8S_MAX_LINELEN];
     char ipStr[HSP_K8S_MAX_LINELEN];
     uint32_t ifIndex;
-    if(sscanf(line, "VNIC: %u %s %s %s", &ifIndex, deviceName, macStr, ipStr) == 4) {
+    uint32_t nspid;
+    if(sscanf(line, "VNIC: %u %s %s %s %u", &ifIndex, deviceName, macStr, ipStr, &nspid) == 5) {
       u_char mac[6];
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
 	SFLAdaptor *adaptor = adaptorListGet(pod->vm.interfaces, deviceName);
@@ -231,11 +232,11 @@ extern "C" {
 
 	  if(UTHashGet(sp->adaptorsByMac, adaptor) == NULL)
 	    if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL)
-	      myDebug(1, "Warning: pod adaptor overwriting adaptorsByMac");
+	      EVDebug(mod, 1, "Warning: pod adaptor overwriting adaptorsByMac");
 
 	  if(UTHashGet(sp->adaptorsByIndex, adaptor) == NULL)
 	    if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL)
-	      myDebug(1, "Warning: pod adaptor overwriting adaptorsByIndex");
+	      EVDebug(mod, 1, "Warning: pod adaptor overwriting adaptorsByIndex");
 
 	  // mark it as a vm/pod device
 	  // and record the dsIndex there for easy mapping later
@@ -243,11 +244,12 @@ extern "C" {
 	  // to indicate that it should not be used to map to pod.
 	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 	  nio->vm_or_container = YES;
+	  nio->container_nspid = nspid;
 	  if(nio->container_dsIndex != pod->vm.dsIndex) {
 	    if(nio->container_dsIndex == 0)
 	      nio->container_dsIndex = pod->vm.dsIndex;
 	    else {
-	      myDebug(1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
+	      EVDebug(mod, 1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
 	      // mark is as not a unique mapping
 	      nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
 	    }
@@ -283,7 +285,7 @@ extern "C" {
 		podEntry->dsIndex = pod->vm.dsIndex;
 		podEntry->c_hostname = my_strdup(pod->hostname);
 		UTHashAdd(vnic->podEntries, podEntry);
-		myDebug(1, "VNIC: ip %s linked to %s (ds=%u)",
+		EVDebug(mod, 1, "VNIC: ip %s linked to %s (ds=%u)",
 			ipStr,
 			podEntry->c_hostname,
 			podEntry->dsIndex);
@@ -316,8 +318,8 @@ extern "C" {
 
   int readPodInterfaces(EVMod *mod, HSPVMState_POD *pod)  {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    pid_t nspid = pod->nspid;
-    myDebug(2, "readPodInterfaces: pid=%u", nspid);
+    uint32_t nspid = pod->nspid;
+    EVDebug(mod, 2, "readPodInterfaces: pid=%u", nspid);
     if(nspid == 0)
       return 0;
     
@@ -352,10 +354,10 @@ extern "C" {
 
       struct stat statBuf;
       if(fstat(nsfd, &statBuf) == 0) {
-	myDebug(2, "pod namespace dev.inode == %u.%u", statBuf.st_dev, statBuf.st_ino);
+	EVDebug(mod, 2, "pod namespace dev.inode == %u.%u", statBuf.st_dev, statBuf.st_ino);
 	if(statBuf.st_dev == mdata->myNS.st_dev
 	   && statBuf.st_ino == mdata->myNS.st_ino) {
-	  myDebug(1, "skip my own namespace");
+	  EVDebug(mod, 1, "skip my own namespace");
 	  exit(0);
 	}
       }
@@ -413,7 +415,7 @@ extern "C" {
 		// ifIndex and MAC when looking at pod interfaces
 		if(ioctl(fd,SIOCGIFINDEX, &ifr) < 0) {
 		  // only complain about this if we are debugging
-		  myDebug(1, "pod device %s Get SIOCGIFINDEX failed : %s",
+		  EVDebug(mod, 1, "pod device %s Get SIOCGIFINDEX failed : %s",
 			  devName,
 			  strerror(errno));
 		}
@@ -424,7 +426,7 @@ extern "C" {
 		  // see if we can get an IP address
 		  if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
 		    // only complain about this if we are debugging
-		    myDebug(1, "device %s Get SIOCGIFADDR failed : %s",
+		    EVDebug(mod, 1, "device %s Get SIOCGIFADDR failed : %s",
 			    devName,
 			    strerror(errno));
 		  }
@@ -439,7 +441,7 @@ extern "C" {
 
 		  // Get the MAC Address for this interface
 		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
-		    myDebug(1, "device %s Get SIOCGIFHWADDR failed : %s",
+		    EVDebug(mod, 1, "device %s Get SIOCGIFHWADDR failed : %s",
 			      devName,
 			      strerror(errno));
 		  }
@@ -449,7 +451,7 @@ extern "C" {
 		    char ipStr[64];
 		    SFLAddress_print(&ipAddr, ipStr, 64);
 		    // send this info back up the pipe to my my parent
-		    printf("VNIC: %u %s %s %s\n", ifIndex, devName, macStr, ipStr);
+		    printf("VNIC: %u %s %s %s %u\n", ifIndex, devName, macStr, ipStr, nspid);
 		  }
 		}
 	      }
@@ -498,7 +500,7 @@ extern "C" {
     }
 
     // accumulate CPU, mem, diskI/O counters from containers
-    myDebug(2, "k8s: getCounters_POD(): pod %s has %u containers",
+    EVDebug(mod, 2, "getCounters_POD(): pod %s has %u containers",
 	    pod->hostname,
 	    UTHashN(pod->containers));
 
@@ -509,7 +511,7 @@ extern "C" {
 	stats.state = SFL_VIR_DOMAIN_RUNNING;
       }
       stats.cpu_count += container->stats.cpu_count;
-      myDebug(2, "k8s: getCounters_POD(): container %s has cpu_count %u (total now = %u)",
+      EVDebug(mod, 2, "getCounters_POD(): container %s has cpu_count %u (total now = %u)",
 	      container->name,
 	      container->stats.cpu_count,
 	      stats.cpu_count);
@@ -662,7 +664,7 @@ extern "C" {
 
   static void removeAndFreeContainer(EVMod *mod, HSPK8sContainer *container) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    myDebug(1, "removeAndFreeContainer: removing container %s=%s", container->name, container->id);
+    EVDebug(mod, 1, "removeAndFreeContainer: removing container %s=%s", container->name, container->id);
     
     // remove from hash table
     if(UTHashDel(mdata->containersByID, container) == NULL) {
@@ -679,7 +681,7 @@ extern "C" {
 
   static void removeAndFreeVM_POD(EVMod *mod, HSPVMState_POD *pod) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    myDebug(1, "removeAndFreeVM: removing pod with dsIndex=%u", pod->vm.dsIndex);
+    EVDebug(mod, 1, "removeAndFreeVM: removing pod with dsIndex=%u", pod->vm.dsIndex);
 
     // remove any VNIC lookups by IP (this semaphore-protected hash table is point
     // of contact between poll thread and packet thread).
@@ -740,7 +742,7 @@ extern "C" {
 	  struct stat statBuf = {};
 	  if(stat(path, &statBuf) == 0) {
 	    pod->cgroup_id = statBuf.st_ino;
-	    myDebug(1, "Learned cgroup_id = %u for pod %s",
+	    EVDebug(mod, 1, "Learned cgroup_id = %u for pod %s",
 		    pod->cgroup_id,
 		    pod->hostname);
 	    // remember this for packet sample lookup
@@ -830,7 +832,7 @@ extern "C" {
 		  if(pod->cgroup_devices)
 		    my_free(pod->cgroup_devices);
 		  pod->cgroup_devices = my_strdup(path);
-		  myDebug(1, "k8s: pod(%s)->cgroup_devices=%s", pod->hostname, pod->cgroup_devices);
+		  EVDebug(mod, 1, "pod(%s)->cgroup_devices=%s", pod->hostname, pod->cgroup_devices);
 		}
 	      }
 	    }
@@ -896,7 +898,7 @@ extern "C" {
 
   static void readPodGPUsFromEnv(EVMod *mod, HSPVMState_POD *pod, cJSON *jenv) {
     // look through env vars for evidence of GPUs assigned to this pod
-    myDebug(1, "readPodGPUsFromEnv(%s)", pod->hostname);
+    EVDebug(mod, 1, "readPodGPUsFromEnv(%s)", pod->hostname);
     pod->gpu_env_tried = YES;
     int entries = cJSON_GetArraySize(jenv);
     UTArray *arr = pod->vm.gpus;
@@ -908,25 +910,25 @@ extern "C" {
 	if(vvstr
 	   && my_strnequal(vvstr, HSP_NVIDIA_VIS_DEV_ENV, vlen)
 	   && vvstr[vlen] == '=') {
-	  myDebug(2, "parsing GPU env: %s", vvstr);
+	  EVDebug(mod, 2, "parsing GPU env: %s", vvstr);
 	  char *gpu_uuids = vvstr + vlen + 1;
 	  clearPodGPUs(mod, pod);
 	  // (re)populate
 	  char *str;
 	  char buf[128];
 	  while((str = parseNextTok(&gpu_uuids, ",", NO, 0, YES, buf, 128)) != NULL) {
-	    myDebug(2, "parsing GPU uuidstr: %s", str);
+	    EVDebug(mod, 2, "parsing GPU uuidstr: %s", str);
 	    // expect GPU-<uuid>
 	    if(my_strnequal(str, "GPU-", 4)) {
 	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
 	      if(parseUUID(str + 4, gpu->uuid)) {
 		gpu->has_uuid = YES;
-		myDebug(2, "adding GPU uuid to pod: %s", pod->hostname);
+		EVDebug(mod, 2, "adding GPU uuid to pod: %s", pod->hostname);
 		UTArrayAdd(arr, gpu);
 		pod->gpu_env = YES;
 	      }
 	      else {
-		myDebug(2, "GPU uuid parse failed");
+		EVDebug(mod, 2, "GPU uuid parse failed");
 		my_free(gpu);
 	      }
 	    }
@@ -938,7 +940,7 @@ extern "C" {
   
   static void readPodGPUsFromDev(EVMod *mod, HSPVMState_POD *pod) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    myDebug(1, "readPodGPUsFromDev(%s)", pod->hostname);
+    EVDebug(mod, 1, "readPodGPUsFromDev(%s)", pod->hostname);
     pod->gpu_dev_tried = YES;
     // look through devices to see if individial GPUs are exposed
     char path[HSP_MAX_PATHLEN];
@@ -979,7 +981,7 @@ extern "C" {
 	      HSPGpuID *gpu = my_calloc(sizeof(HSPGpuID));
 	      gpu->minor = minor;
 	      gpu->has_minor = YES;
-	      myDebug(2, "adding GPU dev to pod: %s", pod->hostname);
+	      EVDebug(mod, 2, "adding GPU dev to pod: %s", pod->hostname);
 	      UTArrayAdd(arr, gpu);
 	    }
 	  }
@@ -995,12 +997,12 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static pid_t setPodNSPid(EVMod *mod, HSPVMState_POD *pod) {
+  static uint32_t setPodNSPid(EVMod *mod, HSPVMState_POD *pod) {
     // pick up an nspid from my list of active containers
     HSPK8sContainer *container;
     UTHASH_WALK(pod->containers, container) {
       if(container->pid) {
-	pod->nspid = container->pid;
+	pod->nspid = (uint32_t)container->pid;
 	break;
       }
     }
@@ -1088,7 +1090,7 @@ extern "C" {
       if(jcpustate) {
 	container->stats.state = jcpustate->valueint;
 	if(container->stats.state != SFL_VIR_DOMAIN_RUNNING)
-	  myDebug(2, "container (name=%s) state=%u",
+	  EVDebug(mod, 2, "container (name=%s) state=%u",
 		  jn_s,
 		  container->stats.state);
       }
@@ -1198,7 +1200,7 @@ extern "C" {
       getCounters_POD(mod, pod);
       // maybe this was the last one?
       if(podDone(mod, pod)) {
-	myDebug(1, "k8s: pod done (%s) removeAndFree", pod->hostname);
+	EVDebug(mod, 1, "pod done (%s) removeAndFree", pod->hostname);
 	removeAndFreeVM_POD(mod, pod);
       }
     }
@@ -1221,18 +1223,18 @@ extern "C" {
       break;
     case EVSOCKETREAD_STR:
       // UTStrBuf_chomp(sock->ioline);
-      myDebug(1, "readContainerCB: %s", UTSTRBUF_STR(sock->ioline));
+      EVDebug(mod, 1, "readContainerCB: %s", UTSTRBUF_STR(sock->ioline));
       readContainerData(mod, UTSTRBUF_STR(sock->ioline), magic);
       UTStrBuf_reset(sock->ioline);
       break;
     case EVSOCKETREAD_EOF:
-      myDebug(1, "readContainerCB EOF");
+      EVDebug(mod, 1, "readContainerCB EOF");
       break;
     case EVSOCKETREAD_BADF:
-      myDebug(1, "readContainerCB BADF");
+      EVDebug(mod, 1, "readContainerCB BADF");
       break;
     case EVSOCKETREAD_ERR:
-      myDebug(1, "readContainerCB ERR");
+      EVDebug(mod, 1, "readContainerCB ERR");
       break;
     }
   }
@@ -1243,149 +1245,151 @@ extern "C" {
     Packet Bus
   */
 
-  static uint32_t containerDSByMAC(EVMod *mod, SFLMacAddress *mac) {
+  static uint32_t containerDSByMAC(EVMod *mod, SFLMacAddress *mac, uint32_t *p_nspid) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFLAdaptor *adaptor = adaptorByMac(sp, mac);
     if(adaptor) {
-      uint32_t c_dsi = ADAPTOR_NIO(adaptor)->container_dsIndex;
-      myDebug(2, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      uint32_t c_dsi = nio->container_dsIndex;
+      EVDebug(mod, 2, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
       // make sure it wasn't marked as "non-unique"
-      if(c_dsi != HSPVNIC_DSINDEX_NONUNIQUE)
+      if(c_dsi != 0
+	 && c_dsi != HSPVNIC_DSINDEX_NONUNIQUE) {
+	*(p_nspid) = nio->container_nspid; // get pod namespace too
 	return c_dsi;
+      }
     }
     return 0;
   }
 
-  static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr) {
+  static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr, uint32_t *p_nspid) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
-    return (vnic)
-      ? vnic->dsIndex
-      : 0;
+    if(vnic) {
+      (*p_nspid) = vnic->nspid; // get pod namespace too
+      return vnic->dsIndex;
+    }
+    return 0;
   }
   
-  static bool lookupContainerDS(EVMod *mod, HSPPendingSample *ps, uint32_t *p_src_dsIndex, uint32_t *p_dst_dsIndex) {
+  static bool lookupContainerDatasourceAndNamespace(EVMod *mod, HSPPendingSample *ps) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     // start with the one most likely to match
     // e.g. in Kubernetes with Calico IPIP or VXLAN this will be the innerIP:
     if(ps->gotInnerIP) {
       char sbuf[51],dbuf[51];
-      *p_src_dsIndex = containerDSByIP(mod, &ps->src_1);
-      *p_dst_dsIndex = containerDSByIP(mod, &ps->dst_1);
+      ps->src_dsIndex = containerDSByIP(mod, &ps->src_1, &ps->src_nspid);
+      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst_1, &ps->dst_nspid);
       
-      myDebug(3, "lookupContainerDS: search by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
+      EVDebug(mod, 3, "lookupContainerDS: search by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
 	      SFLAddress_print(&ps->src_1, sbuf, 50),
 	      SFLAddress_print(&ps->dst_1, dbuf, 50),
-	      *p_src_dsIndex,
-	      *p_dst_dsIndex);
+	      ps->src_dsIndex,
+	      ps->dst_dsIndex);
       
-      if(*p_src_dsIndex || *p_dst_dsIndex) {
+      if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byInnerIP++;
 	return YES;
       }
     }
     if(ps->gotInnerMAC) {
-      *p_src_dsIndex = containerDSByMAC(mod, &ps->macsrc_1);
-      *p_dst_dsIndex = containerDSByMAC(mod, &ps->macdst_1);
-      if(*p_src_dsIndex || *p_dst_dsIndex) {
+      ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc_1, &ps->src_nspid);
+      ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst_1, &ps->dst_nspid);
+      if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byInnerMAC++;
 	return YES;
       }
     }
     if(ps->l3_offset) {
       // outer IP
-      *p_src_dsIndex = containerDSByIP(mod, &ps->src);
-      *p_dst_dsIndex = containerDSByIP(mod, &ps->dst);
-      if(*p_src_dsIndex || *p_dst_dsIndex) {
+      ps->src_dsIndex = containerDSByIP(mod, &ps->src, &ps->src_nspid);
+      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst, &ps->dst_nspid);
+      if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byIP++;
 	return YES;
       }
     }
     if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
       // outer MAC
-      *p_src_dsIndex = containerDSByMAC(mod, &ps->macsrc);
-      *p_dst_dsIndex = containerDSByMAC(mod, &ps->macdst);
-      if(*p_src_dsIndex || *p_dst_dsIndex) {
+      ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc, &ps->src_nspid);
+      ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst, &ps->dst_nspid);
+      if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byMAC++;
 	return YES;
       }
     }
     return NO;
   }
+
+  /*_________________---------------------------__________________
+    _________________    evt_flow_sample        __________________
+    -----------------___________________________------------------
+  */
   
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPPendingSample *ps = (HSPPendingSample *)data;
-    uint32_t src_dsIndex=0;
-    uint32_t dst_dsIndex=0;
-
     decodePendingSample(ps);
-    if(lookupContainerDS(mod, ps, &src_dsIndex, &dst_dsIndex)) {
-      // TODO: add namespace / cgroup-id to packet sample
-      // so mod_tcp can use it.
-      // capture src/dst DS info in packet
-      if(src_dsIndex) {
-	ps->src_dsIndex = src_dsIndex;
-	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, src_dsIndex);
-	if(pod) {
-	  ps->src_nspid = pod->nspid;
-	  mdata->pod_byDS++;
-	}
-      }
-      if(dst_dsIndex) {
-	ps->dst_dsIndex = dst_dsIndex;
-	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, dst_dsIndex);
-	if(pod) {
-	  ps->dst_nspid = pod->nspid;
-	  mdata->pod_byDS++;
-	}
-      }
+    if(lookupContainerDatasourceAndNamespace(mod, ps)) {
+      mdata->pod_byAddr++;
     }
   }
+
+  /*_________________----------------------------___________________
+    _________________  evt_flow_sample_released  ___________________
+    -----------------____________________________-------------------
+    If the sample was held up waiting for a DIAG query then this
+    is the point where that query has completed (or timed-out, or failed)
+  */
 
   static void evt_flow_sample_released(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPPendingSample *ps = (HSPPendingSample *)data;
-    uint32_t src_dsIndex=0;
-    uint32_t dst_dsIndex=0;
-    // we may already know
-    bool gotMapping = (ps->src_dsIndex && ps->dst_dsIndex);
 
-    if(!gotMapping) {
-      // method 1 - if INET_DIAG reported a cgroup_id associated with the socket
+    // we may already know
+    if(ps->src_dsIndex == 0
+       && ps->dst_dsIndex == 0) {
+      // nope, but INET_DIAG may have reported a cgroup_id associated with the socket
+      // so this is another chance to map from packet to pod.  Of course we may have
+      // needed to know the namespace for that to work,  and if we knew the namespace
+      // then we should already have a dsIndex.  So this step really only helps if
+      // the INET_DIAG lookup succeeds in my own namespace even though I didn't
+      // recognize the IP/MAC addresses from the packet as belonging to a pod.
       if(ps->cgroup_id) {
 	HSPVMState_POD search = { .cgroup_id = ps->cgroup_id };
 	HSPVMState_POD *pod = UTHashGet(mdata->podsByCgroupId, &search);
 	if(pod) {
-	  gotMapping = YES;
 	  mdata->pod_byCgroup++;
-	  myDebug(2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
+	  EVDebug(mod, 2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
 		  ps->cgroup_id,
 		  pod->hostname,
 		  pod->vm.dsIndex);
 	  if(ps->localSrc)
-	    src_dsIndex = pod->vm.dsIndex;
+	    ps->src_dsIndex = pod->vm.dsIndex;
 	  else
-	    dst_dsIndex = pod->vm.dsIndex;
+	    ps->dst_dsIndex = pod->vm.dsIndex;
 	}
       }
     }
 
     // If we mapped the sample, add the "entities" annotation
-    if(gotMapping) {
+    if((ps->src_dsIndex
+	&& ps->src_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE)
+       || (ps->dst_dsIndex
+	   && ps->dst_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE)) {
       SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
       entElem->tag = SFLFLOW_EX_ENTITIES;
-      if(src_dsIndex
-	 && src_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
+      if(ps->src_dsIndex
+	 && ps->src_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
 	entElem->flowType.entities.src_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
-	entElem->flowType.entities.src_dsIndex = src_dsIndex;
+	entElem->flowType.entities.src_dsIndex = ps->src_dsIndex;
       }
-      if(dst_dsIndex
-	 && dst_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
+      if(ps->dst_dsIndex
+	 && ps->dst_dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
 	entElem->flowType.entities.dst_dsClass = SFL_DSCLASS_LOGICAL_ENTITY;
-	entElem->flowType.entities.dst_dsIndex = dst_dsIndex;
+	entElem->flowType.entities.dst_dsIndex = ps->dst_dsIndex;
       }
       SFLADD_ELEMENT(ps->fs, entElem);
     }
@@ -1415,13 +1419,12 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
 
-    myDebug(1, "mod_k8s: ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,ds_byDiag=%u,pod_byDS=%u,pod_byCgroup=%u",
+    EVDebug(mod, 1, "mod_k8s: ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u",
 	    mdata->ds_byMAC,
 	    mdata->ds_byInnerMAC,
 	    mdata->ds_byIP,
 	    mdata->ds_byInnerIP,
-	    mdata->ds_byDiag,
-	    mdata->pod_byDS,
+	    mdata->pod_byAddr,
 	    mdata->pod_byCgroup);
 
     if(--mdata->idleSweepCountdown <= 0) {
@@ -1435,7 +1438,7 @@ extern "C" {
 	if(pod->last_heard
 	   && (now_mono - pod->last_heard) > idleTimeout) {
 	  char buf[1024];
-	  myDebug(1, "Removing idle pod (%s)", podStr(pod, buf, 1024));
+	  EVDebug(mod, 1, "Removing idle pod (%s)", podStr(pod, buf, 1024));
 	  removeAndFreeVM_POD(mod, pod);
 	}    
       }
@@ -1469,7 +1472,7 @@ extern "C" {
     struct stat statBuf;
     if(sp->docker.docker == YES
        && stat("/var/run/docker.sock", &statBuf) == 0) {
-      myDebug(1, "not enabling mod_k8s because mod_docker is running and docker.sock is present");
+      EVDebug(mod, 1, "not enabling mod_k8s because mod_docker is running and docker.sock is present");
       return;
     }
 
@@ -1494,7 +1497,7 @@ extern "C" {
 
     // learn my own namespace inode from /proc/self/ns/net
     if(stat("/proc/self/ns/net", &mdata->myNS) == 0)
-      myDebug(1, "my namespace dev.inode == %u.%u",
+      EVDebug(mod, 1, "my namespace dev.inode == %u.%u",
 	      mdata->myNS.st_dev,
 	      mdata->myNS.st_ino);
 

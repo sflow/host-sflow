@@ -113,6 +113,9 @@ extern "C" {
 
 #define HSP_MAX_PATHLEN 256
 
+#define HSP_MAX_DEBUG_LINELEN 256
+#define HSP_MAX_DEBUG_ACTIONS 100
+
 // set to 1 to allow agent.cidr setting in DNSSD TXT record.
 // This is currently considered out-of-scope for the DNSSD config,
 // so for now the agent.cidr setting is only allowed in hsflowd.conf.
@@ -383,9 +386,10 @@ extern "C" {
     // numbering may write a priority number here to
     // stabilize the agent address selection.
     uint32_t selectionPriority;
-    // Container dsIndex number - for case where vnic
+    // Container dsIndex number and namespace - for case where vnic
     // belongs to container:
     uint32_t container_dsIndex;
+    uint32_t container_nspid;
   } HSPAdaptorNIO;
 
   typedef struct _HSPDiskIO {
@@ -459,8 +463,8 @@ extern "C" {
     uint32_t src_dsIndex;
     uint32_t dst_dsIndex;
     // and the network namespace
-    pid_t src_nspid;
-    pid_t dst_nspid;
+    uint32_t src_nspid;
+    uint32_t dst_nspid;
   } HSPPendingSample;
 
   typedef struct _HSPPendingCSample {
@@ -687,6 +691,8 @@ extern "C" {
 
     // daemon setup
     char *configFile;
+    char *debugFile;
+    time_t debugFileModTime;
     bool configOK;
     char *outputFile;
     char *pidFile;

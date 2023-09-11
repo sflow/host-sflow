@@ -723,6 +723,17 @@ extern "C" {
     }
   }
 
+  void EVDebug(EVMod *mod, int level, char *fmt, ...) {
+    if(mod->debugLevel <= level
+       || debug(level)) {
+      myLog2(level, NO, LOG_DEBUG, "%s:", mod->name);
+      va_list args;
+      va_start(args, fmt);
+      myLogv2(level, YES, LOG_DEBUG, fmt, args);
+    }
+  }
+
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

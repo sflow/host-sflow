@@ -48,6 +48,7 @@ extern "C" {
     void *libHandle;
     void (*initFn)(struct _EVMod *);
     void *data;
+    int debugLevel;
   } EVMod;
 
 #define EVROOTDATA(m) (m)->root->rootModule->data
@@ -181,7 +182,8 @@ extern "C" {
   void EVRun(EVBus *mainBus);
   void EVStop(EVMod *mod);
   void EVLog(uint32_t rl_secs, int syslogType, char *fmt, ...);
-
+  void EVDebug(EVMod *mod, int level, char *fmt, ...);
+  
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

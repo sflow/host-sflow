@@ -65,6 +65,9 @@ extern "C" {
   // logger
   void myLogv(int syslogType, char *fmt, va_list args);
   void myLog(int syslogType, char *fmt, ...);
+  // expose composable logging calls too
+  void myLogv2(int level, bool end, int syslogType, char *fmt, va_list args);
+  void myLog2(int level, bool end, int syslogType, char *fmt, ...);
   void setDebug(int level);
   int getDebug(void);
   void setDebugOut(FILE *out);

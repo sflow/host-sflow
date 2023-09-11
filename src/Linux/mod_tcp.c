@@ -122,6 +122,7 @@ extern "C" {
   typedef struct _HSPTCPNetlinkSocket {
     pid_t nspid;
     int nl_sock;
+    EVSocket *ev_sock;
     int lastUsed; // monotonic mS
     char *err_step;
     char *err_msg;
@@ -215,7 +216,7 @@ extern "C" {
     // kernel may have IPv4 addresses in 0:0:FFFF0000:IP form, so detect that
     // here and make it match what we would have queried with:
     if(UTNLDiag_sockid_normalize(&search.normalized_id))
-      myDebug(2, "tcp: sockid normalized");
+      EVDebug(mod, 2, "sockid normalized");
     HSPTCPSample *found = UTHashDelKey(mdata->sampleHT, &search);
 
     if(found) {
@@ -231,7 +232,7 @@ extern "C" {
 
     // user info.  Prefer getpwuid_r() if avaiable...
     struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
-    myDebug(2, "tcp: diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
+    EVDebug(mod, 2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
 	    found ? "YES" : "NO",
 	    found ? (found->udp ? "UDP":"TCP") : "",
 	    diag_msg->idiag_uid,
@@ -264,35 +265,35 @@ extern "C" {
 	case INET_DIAG_MARK: {
 	  if(RTA_PAYLOAD(attr) == 4) {
 	    memcpy(&mark, RTA_DATA(attr), 4);
-	    myDebug(1, "tcp: INET_DIAG_MARK=%u", mark);
+	    EVDebug(mod, 1, "INET_DIAG_MARK=%u", mark);
 	  }
 	}
 	  break;
 	case INET_DIAG_CGROUP_ID: {
 	  if(RTA_PAYLOAD(attr) == 8) {
 	    memcpy(&cgroup_id, RTA_DATA(attr), 8);
-	    myDebug(1, "tcp: INET_DIAG_CGROUP_ID=%"PRIu64, cgroup_id);
+	    EVDebug(mod, 1, "INET_DIAG_CGROUP_ID=%"PRIu64, cgroup_id);
 	  }
 	}
 	  break;
 	case INET_DIAG_SHUTDOWN: {
 	  if(RTA_PAYLOAD(attr) == 1) {
 	    memcpy(&shutdown, RTA_DATA(attr), 1);
-	    myDebug(1, "tcp: INET_DIAG_SHUTDOWN=%u", shutdown);
+	    EVDebug(mod, 1, "INET_DIAG_SHUTDOWN=%u", shutdown);
 	  }
 	}
 	  break;
 	case INET_DIAG_CLASS_ID: {
 	  if(RTA_PAYLOAD(attr) == 4) {
 	    memcpy(&class_id, RTA_DATA(attr), 4);
-	    myDebug(1, "tcp: INET_DIAG_CLASS=%u", class_id);
+	    EVDebug(mod, 1, "INET_DIAG_CLASS=%u", class_id);
 	  }
 	}
 	  break;
 	case INET_DIAG_SOCKOPT: {
 	  if(RTA_PAYLOAD(attr) == 2) {
 	    memcpy(&sockopt_flags, RTA_DATA(attr), 2);
-	    myDebug(1, "tcp: INET_DIAG_SOCKOPT=0x%02X", sockopt_flags);
+	    EVDebug(mod, 1, "INET_DIAG_SOCKOPT=0x%02X", sockopt_flags);
 	  }
 	}
 	  break;
@@ -310,16 +311,16 @@ extern "C" {
 	  struct my_tcp_info tcpi = { 0 };
 	  int readLen = RTA_PAYLOAD(attr);
 	  if(readLen > sizeof(struct my_tcp_info)) {
-	    myDebug(3, "tcp: New kernel has new fields in struct tcp_info. Check it out!");
+	    EVDebug(mod, 3, "New kernel has new fields in struct tcp_info. Check it out!");
 	    readLen = sizeof(struct my_tcp_info);
 	  }
 	  memcpy(&tcpi, RTA_DATA(attr), readLen);
-	  myDebug(2, "tcp: TCP diag: RTT=%uuS (variance=%uuS) [%s]",
+	  EVDebug(mod, 2, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
 		  tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
 		  UTNLDiag_sockid_print(&diag_msg->id));
 	  if(found) {
 	    uint32_t nSamples = UTArrayN(found->samples);
-	    myDebug(2, "tcp: found TCPSample: %s RTT:%uuS, annotating %u packet samples",
+	    EVDebug(mod, 2, "found TCPSample: %s RTT:%uuS, annotating %u packet samples",
 		    tcpSamplePrint(found),
 		    tcpi.tcpi_rtt,
 		    nSamples);
@@ -355,7 +356,7 @@ extern "C" {
 	}
 	  break;
 	default:
-	  myDebug(1, "tcp: INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
+	  EVDebug(mod, 1, "INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
 	  break;
 	}
 	attr = RTA_NEXT(attr, rtalen);
@@ -385,7 +386,7 @@ extern "C" {
     HSPTCPNetlinkSocket *sock = (HSPTCPNetlinkSocket *)magic;
     sock->mod = mod;
     // TODO: this call needs another magic pointer so we can send both mod and sock!
-    UTNLDiag_recv(sock, sock->nl_sock, diagCB);
+    UTNLDiag_recv(sock, sock->ev_sock->fd, diagCB);
   }
 
   /*_________________---------------------------__________________
@@ -407,7 +408,7 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
     uint32_t n_thisTick = mdata->diag_tx + mdata->diag_rx + mdata->nl_seq_lost + mdata->diag_timeouts;
     if(n_thisTick != mdata->n_lastTick) {
-      myDebug(1, "tcp: tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u, sockets=%u",
+      EVDebug(mod, 1, "tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u, sockets=%u",
 	      mdata->diag_tx,
 	      mdata->diag_rx,
 	      mdata->nl_seq_lost,
@@ -423,7 +424,9 @@ extern "C" {
     UTHASH_WALK(mdata->socketHT, sock) {
       if((nowMs - sock->lastUsed) > HSPTCP_NL_SOCKET_IDLE_TIMEOUT_MS) {
 	UTHashDel(mdata->socketHT, sock);
-	close(sock->nl_sock);
+	EVSocketClose(mod, sock->ev_sock, YES);
+	sock->nl_sock = 0;
+	sock->ev_sock = NULL; // EVSocket will be freed by EVBus
 	my_free(sock);
       }
     }
@@ -444,7 +447,7 @@ extern "C" {
 	break;
       }
       else {
-	myDebug(2, "tcp: removing timed-out request (%s)", tcpSamplePrint(ts));
+	EVDebug(mod, 2, "removing timed-out request (%s)", tcpSamplePrint(ts));
 	HSPTCPSample *next_ts = ts->next;
 	// remove from Q
 	UTQ_REMOVE(mdata->timeoutQ, ts);
@@ -518,6 +521,7 @@ extern "C" {
       sock->err_msg = strerror(errno);
       return NULL;
     }
+
     return sock;
   }
 
@@ -549,7 +553,7 @@ extern "C" {
 	  // wait here
 	  pthread_join(*thread, NULL); // TODO: check for error?
 	  my_free(thread);
-	  myDebug(1, "getNetlinkSocket(): opened new socket in namespace: %u", nspid);
+	  EVDebug(mod, 1, "getNetlinkSocket(): opened new socket in namespace: %u", nspid);
 	}
       }
       else {
@@ -570,7 +574,7 @@ extern "C" {
       UTHashAdd(mdata->socketHT, sock);
 
       // register the callback
-      EVBusAddSocket(mod, mdata->packetBus, sock->nl_sock, readNL, sock);
+      sock->ev_sock = EVBusAddSocket(mod, mdata->packetBus, sock->nl_sock, readNL, sock);
       sock->nl_seq_tx = sock->nl_seq_rx = 0x50C00L; // True Romance
     }
 
@@ -589,13 +593,13 @@ extern "C" {
     pid_t nspid = ps->src_nspid ?: ps->dst_nspid; // probably only one set anyway
     HSPTCPNetlinkSocket *sock = getNetlinkSocket(mod, nspid, YES);
     if(sock == NULL) {
-      myDebug(2, "lookup_sample(): no socket for nspid=%u", nspid);
+      EVDebug(mod, 2, "lookup_sample(): no socket for nspid=%u", nspid);
       return;
     }
     
     if(debug(2)) {
       char ipb1[51], ipb2[51];
-      myDebug(2, "tcp: proto=%u local_src=%u src=%s:%u dst=%s:%u nspid=%u",
+      EVDebug(mod, 2, "proto=%u local_src=%u src=%s:%u dst=%s:%u nspid=%u",
 	      ipproto,
 	      localSrc,
 	      SFLAddress_print(ipsrc,ipb1,50),
@@ -673,12 +677,12 @@ extern "C" {
     holdPendingSample(ps);
     HSPTCPSample *tsInQ = UTHashGet(mdata->sampleHT, tcpSample);
     if(tsInQ) {
-      myDebug(2, "tcp: request already pending");
+      EVDebug(mod, 2, "request already pending");
       UTArrayAdd(tsInQ->samples, ps);
       tcpSampleFree(tcpSample);
     }
     else {
-      myDebug(2, "tcp: new request: %s", tcpSamplePrint(tcpSample));
+      EVDebug(mod, 2, "new request: %s", tcpSamplePrint(tcpSample));
       UTArrayAdd(tcpSample->samples, ps);
       // add to HT and timeout queue
       UTHashAdd(mdata->sampleHT, tcpSample);
