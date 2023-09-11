@@ -1419,7 +1419,7 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
 
-    EVDebug(mod, 1, "mod_k8s: ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u",
+    EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u",
 	    mdata->ds_byMAC,
 	    mdata->ds_byInnerMAC,
 	    mdata->ds_byIP,
