@@ -1200,7 +1200,7 @@ extern "C" {
   */
 
   static void readCB(EVMod *mod, EVSocket *sock, void *magic) {
-    EVSocketReadLines(mod, sock, readContainerCB, YES, magic);
+    EVSocketReadLines(mod, sock, readContainerCB, NO, magic);
   }
 
   static void evt_cfg_done(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {

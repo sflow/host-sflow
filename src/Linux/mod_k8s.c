@@ -1306,17 +1306,27 @@ extern "C" {
     case EVSOCKETREAD_STR:
       // UTStrBuf_chomp(sock->ioline);
       EVDebug(mod, 1, "readContainerCB: %s", UTSTRBUF_STR(sock->ioline));
-      readContainerData(mod, UTSTRBUF_STR(sock->ioline), magic);
+      if(sock->errOut) {
+	// this is the stderr socket - log the message
+	myLog(LOG_ERR, "UTSTRBUF_STR(sock->ioline)");
+      }
+      else {
+	// stdout
+	readContainerData(mod, UTSTRBUF_STR(sock->ioline), magic);
+      }
       UTStrBuf_reset(sock->ioline);
       break;
     case EVSOCKETREAD_EOF:
       myLog(LOG_ERR, "readContainerCB EOF");
+      abort();
       break;
     case EVSOCKETREAD_BADF:
       myLog(LOG_ERR, "readContainerCB BADF");
+      abort();
       break;
     case EVSOCKETREAD_ERR:
       myLog(LOG_ERR, "readContainerCB ERR");
+      abort();
       break;
     }
   }
