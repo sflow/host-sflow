@@ -444,10 +444,13 @@ extern "C" {
 	      SFLAddress v6addr;
 	      v6addr.type = SFLADDRESSTYPE_IP_V6;
 	      if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
-		HSPIfNameToV6 *v6Entry = my_calloc(sizeof(HSPIfNameToV6));
-		v6Entry->ifName = my_strdup(trimmed);
-		v6Entry->ip6 = v6addr;
-		UTHashAdd(v6Addrs, v6Entry);
+		if(!SFLAddress_isLinkLocal(&v6addr)
+		   && !SFLAddress_isLoopback(&v6addr)) {
+		  HSPIfNameToV6 *v6Entry = my_calloc(sizeof(HSPIfNameToV6));
+		  v6Entry->ifName = my_strdup(trimmed);
+		  v6Entry->ip6 = v6addr;
+		  UTHashAdd(v6Addrs, v6Entry);
+		}
 	      }
 	    }
 	  }
