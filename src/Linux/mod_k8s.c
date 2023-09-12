@@ -89,7 +89,9 @@ extern "C" {
   
   typedef struct _HSPVNIC {
     SFLAddress ipAddr;
+    SFLAddress ip6Addr;
     uint32_t nspid;
+    uint32_t ifIndex;
     UTHash *podEntries;
     uint32_t dsIndex;
 #define HSPVNIC_DSINDEX_NONUNIQUE 0xFFFFFFFF
@@ -204,9 +206,42 @@ extern "C" {
     ----------------___________________________------------------
     
     expecting lines of the form:
-    VNIC: <ifindex> <device> <mac>
+    VNIC: <ifindex> <device> <mac> <ipv4> <ipv6> <nspid>
   */
 
+  static void mapIPToPod(EVMod *mod, HSPVMState_POD *pod, SFLAddress *ipAddr, uint32_t ifIndex) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    HSPVNIC search = { .ipAddr = *ipAddr };
+    HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
+    HSPVNICPodEntry *podEntry = NULL;	      
+    if(vnic) {
+      // found VNIC - check for this pod
+      HSPVNICPodEntry search = { .c_hostname = pod->hostname };
+      podEntry = UTHashGet(vnic->podEntries, &search);
+    }
+    else {
+      // add new VNIC
+      vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
+      vnic->ipAddr = *ipAddr;
+      vnic->ifIndex = ifIndex;
+      vnic->podEntries = UTHASH_NEW(HSPVNICPodEntry, c_hostname, UTHASH_SKEY);
+      UTHashAdd(mdata->vnicByIP, vnic);
+    }
+    if(!podEntry) {
+      // add new podEntry
+      podEntry = (HSPVNICPodEntry *)my_calloc(sizeof(HSPVNICPodEntry));
+      podEntry->dsIndex = pod->vm.dsIndex;
+      podEntry->c_hostname = my_strdup(pod->hostname);
+      UTHashAdd(vnic->podEntries, podEntry);
+      char ipStr[HSP_K8S_MAX_LINELEN];
+      EVDebug(mod, 1, "VNIC: ip %s linked to %s (ds=%u)",
+	      SFLAddress_print(ipAddr, ipStr, HSP_K8S_MAX_LINELEN),
+	      podEntry->c_hostname,
+	      podEntry->dsIndex);
+    }
+    setVNIC_ds(mod, vnic);
+  }
+  
   static int podLinkCB(EVMod *mod, HSPVMState_POD *pod, char *line) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
@@ -214,9 +249,10 @@ extern "C" {
     char deviceName[HSP_K8S_MAX_LINELEN];
     char macStr[HSP_K8S_MAX_LINELEN];
     char ipStr[HSP_K8S_MAX_LINELEN];
+    char ip6Str[HSP_K8S_MAX_LINELEN];
     uint32_t ifIndex;
     uint32_t nspid;
-    if(sscanf(line, "VNIC: %u %s %s %s %u", &ifIndex, deviceName, macStr, ipStr, &nspid) == 5) {
+    if(sscanf(line, "VNIC: %u %s %s %s %s %u", &ifIndex, deviceName, macStr, ipStr, ip6Str, &nspid) == 6) {
       u_char mac[6];
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
 	SFLAdaptor *adaptor = adaptorListGet(pod->vm.interfaces, deviceName);
@@ -257,40 +293,25 @@ extern "C" {
 
 	  // did we get an ip address too?
 	  SFLAddress ipAddr = { };
-	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)) {
-	    if(!SFLAddress_isZero(&ipAddr)
-	       && mdata->vnicByIP) {
+	  SFLAddress ip6Addr = { };
+	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)
+	     || parseNumericAddress(ip6Str, NULL, &ip6Addr, AF_INET6)) {
+
+	    bool gotV4 = (SFLAddress_isZero(&ipAddr) == NO); 
+	    bool gotV6 = (SFLAddress_isZero(&ip6Addr) == NO); 
+	    if(mdata->vnicByIP
+	       && (gotV4
+		   || gotV6)) {
 	      // Can use this to associate traffic with this pod
 	      // if this address appears in sampled packet header as
 	      // outer or inner IP
-	      ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
-	      HSPVNIC search = { .ipAddr = ipAddr };
-	      HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
-	      HSPVNICPodEntry *podEntry = NULL;	      
-	      if(vnic) {
-		// found VNIC - check for this pod
-		HSPVNICPodEntry search = { .c_hostname = pod->hostname };
-		podEntry = UTHashGet(vnic->podEntries, &search);
+	      if(gotV6) {
+		mapIPToPod(mod, pod, &ip6Addr, ifIndex);
 	      }
-	      else {
-		// add new VNIC
-		vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
-		vnic->ipAddr = ipAddr;
-		vnic->podEntries = UTHASH_NEW(HSPVNICPodEntry, c_hostname, UTHASH_SKEY);
-		UTHashAdd(mdata->vnicByIP, vnic);
+	      if(gotV4) {
+		ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
+		mapIPToPod(mod, pod, &ipAddr, ifIndex);
 	      }
-	      if(!podEntry) {
-		// add new podEntry
-		podEntry = (HSPVNICPodEntry *)my_calloc(sizeof(HSPVNICPodEntry));
-		podEntry->dsIndex = pod->vm.dsIndex;
-		podEntry->c_hostname = my_strdup(pod->hostname);
-		UTHashAdd(vnic->podEntries, podEntry);
-		EVDebug(mod, 1, "VNIC: ip %s linked to %s (ds=%u)",
-			ipStr,
-			podEntry->c_hostname,
-			podEntry->dsIndex);
-	      }
-	      setVNIC_ds(mod, vnic);
 	    }
 	  }
 	}
@@ -386,6 +407,54 @@ extern "C" {
 	exit(EXIT_FAILURE);
       }
 
+      // first build lookup from device name to IPv6 address, since we can't get that
+      // using SIOCGIFADDR below.
+      // Note: getIfAddrs() is another option but it doesn't provide the locally visible
+      // MAC address.  In fact the MAC is the main reason we have to switch namespaces here,
+      // otherwise we could just read from /proc/<nspid>/net/dev and /proc/<nspid>/net/if_inet6.
+      typedef struct {
+	char *ifName;
+	SFLAddress ip6;
+      } HSPIfNameToV6;
+      
+      UTHash *v6Addrs = UTHASH_NEW(HSPIfNameToV6, ifName, UTHASH_SKEY);
+      FILE *procV6 = fopen(PROCFS_STR "/net/if_inet6", "r");
+      if(procV6) {
+	char line[MAX_PROC_LINE_CHARS];
+	int lineNo = 0;
+	int truncated;
+	while(my_readline(procV6, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
+	  // expect lines of the form "<address> <netlink_no> <prefix_len(HEX)> <scope(HEX)> <flags(HEX)> <deviceName>
+	  // (with a header line on the first row)
+	  char devName[MAX_PROC_LINE_CHARS];
+	  u_char addr[MAX_PROC_LINE_CHARS];
+	  u_int devNo, maskBits, scope, flags;
+	  ++lineNo;
+	  if(sscanf(line, "%s %x %x %x %x %s",
+		    addr,
+		    &devNo,
+		    &maskBits,
+		    &scope,
+		    &flags,
+		    devName) == 6) {
+	    
+	    uint32_t devLen = my_strnlen(devName, MAX_PROC_LINE_CHARS-1);
+	    char *trimmed = trimWhitespace(devName, devLen);
+	    if(trimmed) {
+	      SFLAddress v6addr;
+	      v6addr.type = SFLADDRESSTYPE_IP_V6;
+	      if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
+		HSPIfNameToV6 *v6Entry = my_calloc(sizeof(HSPIfNameToV6));
+		v6Entry->ifName = my_strdup(trimmed);
+		v6Entry->ip6 = v6addr;
+		UTHashAdd(v6Addrs, v6Entry);
+	      }
+	    }
+	  }
+	}
+	fclose(procV6);
+      }
+
       FILE *procFile = fopen(PROCFS_STR "/net/dev", "r");
       if(procFile) {
 	struct ifreq ifr;
@@ -422,6 +491,7 @@ extern "C" {
 		else {
 		  int ifIndex = ifr.ifr_ifindex;
 		  SFLAddress ipAddr = {};
+		  SFLAddress ip6Addr = {};
 
 		  // see if we can get an IP address
 		  if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
@@ -439,6 +509,12 @@ extern "C" {
 		    }
 		  }
 
+		  // possibly add a v6 addr
+		  HSPIfNameToV6 search = { .ifName = devName };
+		  HSPIfNameToV6 *v6Entry = UTHashGet(v6Addrs, &search);
+		  if(v6Entry)
+		    ip6Addr = v6Entry->ip6;
+
 		  // Get the MAC Address for this interface
 		  if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
 		    EVDebug(mod, 1, "device %s Get SIOCGIFHWADDR failed : %s",
@@ -450,9 +526,12 @@ extern "C" {
 		    printHex((u_char *)&ifr.ifr_hwaddr.sa_data, 6, macStr, 12, NO);
 		    char ipStr[64];
 		    SFLAddress_print(&ipAddr, ipStr, 64);
+		    char ip6Str[64]; // (from a second-hand store...)
+		    SFLAddress_print(&ip6Addr, ip6Str, 64);
 		    // send this info back up the pipe to my my parent
-		    printf("VNIC: %u %s %s %s %u\n", ifIndex, devName, macStr, ipStr, nspid);
+		    printf("VNIC: %u %s %s %s %s %u\n", ifIndex, devName, macStr, ipStr, ip6Str, nspid);
 		  }
+
 		}
 	      }
 	    }
@@ -1245,7 +1324,7 @@ extern "C" {
     Packet Bus
   */
 
-  static uint32_t containerDSByMAC(EVMod *mod, SFLMacAddress *mac, uint32_t *p_nspid) {
+  static uint32_t containerDSByMAC(EVMod *mod, SFLMacAddress *mac, uint32_t *p_nspid, uint32_t *p_ifIndex) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFLAdaptor *adaptor = adaptorByMac(sp, mac);
     if(adaptor) {
@@ -1256,19 +1335,21 @@ extern "C" {
       if(c_dsi != 0
 	 && c_dsi != HSPVNIC_DSINDEX_NONUNIQUE) {
 	*(p_nspid) = nio->container_nspid; // get pod namespace too
+	(*p_ifIndex) = adaptor->ifIndex; // and ifIndex
 	return c_dsi;
       }
     }
     return 0;
   }
 
-  static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr, uint32_t *p_nspid) {
+  static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr, uint32_t *p_nspid, uint32_t *p_ifIndex) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
     if(vnic) {
       (*p_nspid) = vnic->nspid; // get pod namespace too
+      (*p_ifIndex) = vnic->ifIndex; // and ifIndex
       return vnic->dsIndex;
     }
     return 0;
@@ -1280,8 +1361,8 @@ extern "C" {
     // e.g. in Kubernetes with Calico IPIP or VXLAN this will be the innerIP:
     if(ps->gotInnerIP) {
       char sbuf[51],dbuf[51];
-      ps->src_dsIndex = containerDSByIP(mod, &ps->src_1, &ps->src_nspid);
-      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst_1, &ps->dst_nspid);
+      ps->src_dsIndex = containerDSByIP(mod, &ps->src_1, &ps->src_nspid, &ps->src_ifIndex);
+      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst_1, &ps->dst_nspid, &ps->dst_ifIndex);
       
       EVDebug(mod, 3, "lookupContainerDS: search by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
 	      SFLAddress_print(&ps->src_1, sbuf, 50),
@@ -1295,8 +1376,8 @@ extern "C" {
       }
     }
     if(ps->gotInnerMAC) {
-      ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc_1, &ps->src_nspid);
-      ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst_1, &ps->dst_nspid);
+      ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc_1, &ps->src_nspid, &ps->src_ifIndex);
+      ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst_1, &ps->dst_nspid, &ps->dst_ifIndex);
       if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byInnerMAC++;
 	return YES;
@@ -1304,8 +1385,8 @@ extern "C" {
     }
     if(ps->l3_offset) {
       // outer IP
-      ps->src_dsIndex = containerDSByIP(mod, &ps->src, &ps->src_nspid);
-      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst, &ps->dst_nspid);
+      ps->src_dsIndex = containerDSByIP(mod, &ps->src, &ps->src_nspid, &ps->src_ifIndex);
+      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst, &ps->dst_nspid, &ps->dst_ifIndex);
       if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byIP++;
 	return YES;
@@ -1313,8 +1394,8 @@ extern "C" {
     }
     if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
       // outer MAC
-      ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc, &ps->src_nspid);
-      ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst, &ps->dst_nspid);
+      ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc, &ps->src_nspid, &ps->src_ifIndex);
+      ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst, &ps->dst_nspid, &ps->dst_ifIndex);
       if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byMAC++;
 	return YES;

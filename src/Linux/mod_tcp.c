@@ -665,8 +665,15 @@ extern "C" {
     }
     // specify the ifIndex in case the socket is bound
     // see INET_MATCH in net/ipv4/inet_hashtables.c
-    // TODO: this may be broken when we query other namespaces?
-    sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
+    // (if not bound, then does not care, so OK to always fill in, right?)
+    if(nspid) {
+      // ifIndex as seen by container/pod/vm
+      sockid->idiag_if = localSrc ? ps->src_ifIndex : ps->dst_ifIndex;
+    }
+    else {
+      // ifIndex as seen by my packet sampler
+      sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
+    }
     // I have no cookie :(
     sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
     sockid->idiag_cookie[1] = INET_DIAG_NOCOOKIE;

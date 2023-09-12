@@ -218,7 +218,6 @@ extern "C" {
       int truncated;
       while(my_readline(procFile, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	// expect lines of the form "<address> <netlink_no> <prefix_len(HEX)> <scope(HEX)> <flags(HEX)> <deviceName>
-	// (with a header line on the first row)
 	char devName[MAX_PROC_LINE_CHARS];
 	u_char addr[MAX_PROC_LINE_CHARS];
 	u_int devNo, maskBits, scope, flags;

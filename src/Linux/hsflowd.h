@@ -465,6 +465,9 @@ extern "C" {
     // and the network namespace
     uint32_t src_nspid;
     uint32_t dst_nspid;
+    // and the ifIndex (may be in other namespace)
+    uint32_t src_ifIndex;
+    uint32_t dst_ifIndex;
   } HSPPendingSample;
 
   typedef struct _HSPPendingCSample {
