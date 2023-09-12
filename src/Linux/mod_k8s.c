@@ -1310,13 +1310,13 @@ extern "C" {
       UTStrBuf_reset(sock->ioline);
       break;
     case EVSOCKETREAD_EOF:
-      EVDebug(mod, 1, "readContainerCB EOF");
+      myLog(LOG_ERR, "readContainerCB EOF");
       break;
     case EVSOCKETREAD_BADF:
-      EVDebug(mod, 1, "readContainerCB BADF");
+      myLog(LOG_ERR, "readContainerCB BADF");
       break;
     case EVSOCKETREAD_ERR:
-      EVDebug(mod, 1, "readContainerCB ERR");
+      myLog(LOG_ERR, "readContainerCB ERR");
       break;
     }
   }
@@ -1485,7 +1485,7 @@ extern "C" {
   */
 
   static void readCB(EVMod *mod, EVSocket *sock, void *magic) {
-    EVSocketReadLines(mod, sock, readContainerCB, YES, magic);
+    EVSocketReadLines(mod, sock, readContainerCB, NO, magic);
   }
 
   static void evt_cfg_done(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
