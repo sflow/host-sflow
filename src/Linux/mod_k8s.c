@@ -89,7 +89,6 @@ extern "C" {
   
   typedef struct _HSPVNIC {
     SFLAddress ipAddr;
-    SFLAddress ip6Addr;
     uint32_t nspid;
     uint32_t ifIndex;
     UTHash *podEntries;
@@ -1339,11 +1338,18 @@ extern "C" {
 
   static uint32_t containerDSByMAC(EVMod *mod, SFLMacAddress *mac, uint32_t *p_nspid, uint32_t *p_ifIndex) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    char macstr[64];
+    EVDebug(mod, 2, "containerDSByMAC %s",
+	    SFLMacAddress_print(mac, macstr, 64)); 
     SFLAdaptor *adaptor = adaptorByMac(sp, mac);
     if(adaptor) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
       uint32_t c_dsi = nio->container_dsIndex;
-      EVDebug(mod, 2, "containerDSByMAC matched %s ds=%u\n", adaptor->deviceName, c_dsi);
+      EVDebug(mod, 2, "containerDSByMAC %s matched %s ds=%u nspid=%u",
+	      macstr,
+	      adaptor->deviceName,
+	      c_dsi,
+	      nio->container_nspid);
       // make sure it wasn't marked as "non-unique"
       if(c_dsi != 0
 	 && c_dsi != HSPVNIC_DSINDEX_NONUNIQUE) {
@@ -1357,13 +1363,23 @@ extern "C" {
 
   static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr, uint32_t *p_nspid, uint32_t *p_ifIndex) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    char ipstr[64];
+    EVDebug(mod, 2, "containerDSByIP %s",
+	    SFLAddress_print(ipAddr, ipstr, 64)); 
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
     if(vnic) {
-      (*p_nspid) = vnic->nspid; // get pod namespace too
-      (*p_ifIndex) = vnic->ifIndex; // and ifIndex
-      return vnic->dsIndex;
+      EVDebug(mod, 2, "containerDSByIP %s matched VNIC ds=%u ifIndex=%u nspid=%u",
+	      ipstr,
+	      vnic->dsIndex,
+	      vnic->ifIndex,
+	      vnic->nspid);
+      if(vnic->dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
+	(*p_nspid) = vnic->nspid; // get pod namespace too
+	(*p_ifIndex) = vnic->ifIndex; // and ifIndex
+	return vnic->dsIndex;
+      }
     }
     return 0;
   }
@@ -1522,13 +1538,14 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
 
-    EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u",
+    EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u,n_vnicByIP=%u",
 	    mdata->ds_byMAC,
 	    mdata->ds_byInnerMAC,
 	    mdata->ds_byIP,
 	    mdata->ds_byInnerIP,
 	    mdata->pod_byAddr,
-	    mdata->pod_byCgroup);
+	    mdata->pod_byCgroup,
+	    UTHashN(mdata->vnicByIP));
 
     if(--mdata->idleSweepCountdown <= 0) {
       // rearm

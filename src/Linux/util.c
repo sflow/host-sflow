@@ -1671,6 +1671,11 @@ extern "C" {
     return isAllZero(mac->mac, 6);
   }
 
+  char *SFLMacAddress_print(SFLMacAddress *addr, char *buf, size_t len) {
+    printHex(addr->mac, 6, buf, len, NO);
+    return buf;
+  }
+
   /*________________---------------------------__________________
     ________________        UTHash             __________________
     ----------------___________________________------------------

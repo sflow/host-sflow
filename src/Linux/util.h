@@ -268,6 +268,7 @@ extern "C" {
 
   int isAllZero(u_char *buf, int len);
   int isZeroMAC(SFLMacAddress *mac);
+  char *SFLMacAddress_print(SFLMacAddress *addr, char *buf, size_t len);
 
   // UTHash
   typedef struct _UTHash {

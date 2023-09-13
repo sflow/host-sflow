@@ -659,7 +659,11 @@ extern "C" {
       type_len = (ptr[0] << 8) + ptr[1];
       ptr += 2;
       
-      if(type_len == 0x8100) {
+      while(type_len == 0x8100
+	    || type_len == 0x88A8
+	    || type_len == 0x9100
+	    || type_len == 0x9200
+	    || type_len == 0x9300) {
 	// 802.1Q
 	if((end - ptr) < 4)
 	  return -1; // not enough for an 802.1Q header
