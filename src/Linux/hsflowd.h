@@ -673,6 +673,7 @@ extern "C" {
       bool tcp;
       bool tunnel;
       bool udp;
+      bool dump;
     } tcp;
     struct {
       bool dbus;

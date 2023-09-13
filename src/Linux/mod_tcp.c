@@ -587,6 +587,7 @@ extern "C" {
   */
 
   static void lookup_sample(EVMod *mod, HSPPendingSample *ps, SFLAddress *ipsrc, SFLAddress *ipdst, uint8_t ipproto, uint16_t sport, uint16_t dport, bool localSrc) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
 
     // make sure we have a netlink socket in the namespace before we do anything more
@@ -663,16 +664,21 @@ extern "C" {
       sockid->idiag_sport = htons(dport);
       sockid->idiag_dport = htons(sport);
     }
-    // specify the ifIndex in case the socket is bound
+    // specify the ifIndex in case the socket is bound?
     // see INET_MATCH in net/ipv4/inet_hashtables.c
     // (if not bound, then does not care, so OK to always fill in, right?)
-    if(nspid) {
-      // ifIndex as seen by container/pod/vm
-      sockid->idiag_if = localSrc ? ps->src_ifIndex : ps->dst_ifIndex;
+    if(sp->tcp.dump) {
+      sockid->idiag_if = 0;
     }
     else {
-      // ifIndex as seen by my packet sampler
-      sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
+      if(nspid) {
+	// ifIndex as seen by container/pod/vm
+	sockid->idiag_if = localSrc ? ps->src_ifIndex : ps->dst_ifIndex;
+      }
+      else {
+	// ifIndex as seen by my packet sampler
+	sockid->idiag_if = SFL_DS_INDEX(ps->sampler->dsi);
+      }
     }
     // I have no cookie :(
     sockid->idiag_cookie[0] = INET_DIAG_NOCOOKIE;
@@ -697,7 +703,7 @@ extern "C" {
       UTNLDiag_send(sock->nl_sock,
 		    &tcpSample->conn_req,
 		    sizeof(tcpSample->conn_req),
-		    tcpSample->udp, // set DUMP flag if UDP
+		    (tcpSample->udp || sp->tcp.dump), // set DUMP flag if UDP
 		    ++sock->nl_seq_tx);
       sock->lastUsed = now_mS(mod);
       sock->diag_tx++;
