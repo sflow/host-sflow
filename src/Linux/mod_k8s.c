@@ -1372,6 +1372,15 @@ extern "C" {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     // start with the one most likely to match
     // e.g. in Kubernetes with Calico IPIP or VXLAN this will be the innerIP:
+
+    EVDebug(mod, 3, "lookupContainerDS: hdr_prot=%u, l3_offset=%u, l4_offset=%u, ipver=%u, innerMAC=%u, innerIP=%u",
+	    ps->hdr_protocol,
+	    ps->l3_offset,
+	    ps->l4_offset,
+	    ps->ipversion,
+	    ps->gotInnerMAC,
+	    ps->gotInnerIP);
+
     if(ps->gotInnerIP) {
       char sbuf[51],dbuf[51];
       ps->src_dsIndex = containerDSByIP(mod, &ps->src_1, &ps->src_nspid, &ps->src_ifIndex);
