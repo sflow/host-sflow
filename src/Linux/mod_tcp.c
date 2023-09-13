@@ -598,7 +598,7 @@ extern "C" {
       return;
     }
     
-    if(debug(2)) {
+    {
       char ipb1[51], ipb2[51];
       EVDebug(mod, 2, "proto=%u local_src=%u src=%s:%u dst=%s:%u nspid=%u",
 	      ipproto,
