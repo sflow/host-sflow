@@ -271,11 +271,11 @@ extern "C" {
 
 	  if(UTHashGet(sp->adaptorsByMac, adaptor) == NULL)
 	    if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL)
-	      EVDebug(mod, 1, "Warning: pod adaptor overwriting adaptorsByMac");
+	      myLog(LOG_ERR, "Warning: pod adaptor overwriting adaptorsByMac");
 
 	  if(UTHashGet(sp->adaptorsByIndex, adaptor) == NULL)
 	    if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL)
-	      EVDebug(mod, 1, "Warning: pod adaptor overwriting adaptorsByIndex");
+	      myLog(LOG_ERR, "Warning: pod adaptor overwriting adaptorsByIndex");
 
 	  // mark it as a vm/pod device
 	  // and record the dsIndex there for easy mapping later
@@ -288,8 +288,8 @@ extern "C" {
 	    if(nio->container_dsIndex == 0)
 	      nio->container_dsIndex = pod->vm.dsIndex;
 	    else {
-	      EVDebug(mod, 1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
-	      // mark is as not a unique mapping
+	      myLog(LOG_ERR, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
+	      // mark it as not a unique mapping
 	      nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
 	    }
 	  }
@@ -297,24 +297,22 @@ extern "C" {
 	  // did we get an ip address too?
 	  SFLAddress ipAddr = { };
 	  SFLAddress ip6Addr = { };
-	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)
-	     || parseNumericAddress(ip6Str, NULL, &ip6Addr, AF_INET6)) {
-
-	    bool gotV4 = (SFLAddress_isZero(&ipAddr) == NO); 
-	    bool gotV6 = (SFLAddress_isZero(&ip6Addr) == NO); 
-	    if(mdata->vnicByIP
-	       && (gotV4
-		   || gotV6)) {
-	      // Can use this to associate traffic with this pod
-	      // if this address appears in sampled packet header as
-	      // outer or inner IP
-	      if(gotV6) {
-		mapIPToPod(mod, pod, &ip6Addr, ifIndex, nspid);
-	      }
-	      if(gotV4) {
+	  bool gotV4 = parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET);
+	  gotV4 = gotV4 && !SFLAddress_isZero(&ipAddr);
+	  bool gotV6 = parseNumericAddress(ip6Str, NULL, &ip6Addr, PF_INET6);
+	  gotV6 = gotV6 && !SFLAddress_isZero(&ip6Addr); 
+	  if(mdata->vnicByIP
+	     && (gotV4
+		 || gotV6)) {
+	    // Can use this to associate traffic with this pod
+	    // if this address appears in sampled packet header as
+	    // outer or inner IP
+	    if(gotV6) {
+	      mapIPToPod(mod, pod, &ip6Addr, ifIndex, nspid);
+	    }
+	    if(gotV4) {
 		ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
 		mapIPToPod(mod, pod, &ipAddr, ifIndex, nspid);
-	      }
 	    }
 	  }
 	}

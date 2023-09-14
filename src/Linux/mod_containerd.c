@@ -182,7 +182,7 @@ extern "C" {
 
 	  // did we get an ip address too?
 	  SFLAddress ipAddr = { };
-	  if(parseNumericAddress(ipStr, NULL, &ipAddr, AF_INET)) {
+	  if(parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET)) {
 	    if(!SFLAddress_isZero(&ipAddr)
 	       && mdata->vnicByIP) {
 	      myDebug(1, "VNIC: learned virtual ipAddr: %s", ipStr);

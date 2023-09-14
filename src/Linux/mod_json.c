@@ -1015,7 +1015,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	}
 	break;
       case RTFlowType_ip:
-	if(parseNumericAddress(instr, NULL, &addr, AF_INET)) {
+	if(parseNumericAddress(instr, NULL, &addr, PF_INET)) {
 	  xdr_enc_bytes(buf, (u_char *)&addr.address.ip_v4.addr, 4);
 	}
 	else {
@@ -1023,7 +1023,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	}
 	break;
       case RTFlowType_ip6:
-	if(parseNumericAddress(instr, NULL, &addr, AF_INET6)) {
+	if(parseNumericAddress(instr, NULL, &addr, PF_INET6)) {
 	  xdr_enc_bytes(buf, (u_char *)&addr.address.ip_v6.addr, 16);
 	}
 	else {

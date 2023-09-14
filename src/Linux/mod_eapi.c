@@ -107,12 +107,12 @@ Expecting something like:
     if(n_sources_v4) {
       cJSON *source = cJSON_GetArrayItem(sources_v4, 0);
       cJSON *ip = cJSON_GetObjectItem(source, "ipv4Address");
-      gotAgent = parseNumericAddress(ip->valuestring, NULL, &agent, AF_INET);
+      gotAgent = parseNumericAddress(ip->valuestring, NULL, &agent, PF_INET);
     }
     if(n_sources_v6 &&  !gotAgent) {
       cJSON *source = cJSON_GetArrayItem(sources_v6, 0);
       cJSON *ip = cJSON_GetObjectItem(source, "ipv6Address");
-      gotAgent = parseNumericAddress(ip->valuestring, NULL, &agent, AF_INET6);
+      gotAgent = parseNumericAddress(ip->valuestring, NULL, &agent, PF_INET6);
     }
     cJSON *dests_v4 = cJSON_GetObjectItem(sflow, "ipv4Destinations");
     cJSON *dests_v6 = cJSON_GetObjectItem(sflow, "ipv6Destinations");
