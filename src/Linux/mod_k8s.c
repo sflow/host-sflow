@@ -236,13 +236,15 @@ extern "C" {
     }
     setVNIC_ds(mod, vnic);
 
-    char ipstr[64];
-    EVDebug(mod, 1, "mapIPToPod: ip %s linked by VNIC(nspid=%u ifIndex=%u ds=%u) to pod %s",
-	    SFLAddress_print(ipAddr, ipstr, 64),
-	    vnic->nspid,
-	    vnic->ifIndex,
-	    vnic->dsIndex,
-	    podEntry->c_hostname);
+    if(EVDebug(mod, 1, NULL)) {
+      char ipstr[64];
+      EVDebug(mod, 1, "mapIPToPod: ip %s linked by VNIC(nspid=%u ifIndex=%u ds=%u) to pod %s",
+	      SFLAddress_print(ipAddr, ipstr, 64),
+		vnic->nspid,
+	      vnic->ifIndex,
+	      vnic->dsIndex,
+	      podEntry->c_hostname);
+    }
   }
   
   static int podLinkCB(EVMod *mod, HSPVMState_POD *pod, char *line) {
@@ -1365,18 +1367,23 @@ extern "C" {
 
   static uint32_t containerDSByIP(EVMod *mod, SFLAddress *ipAddr, uint32_t *p_nspid, uint32_t *p_ifIndex) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    char ipstr[64];
-    EVDebug(mod, 2, "containerDSByIP %s",
-	    SFLAddress_print(ipAddr, ipstr, 64)); 
+    if(EVDebug(mod, 2, NULL)) {
+      char ipstr[64];
+      EVDebug(mod, 2, "containerDSByIP %s",
+	      SFLAddress_print(ipAddr, ipstr, 64));
+    }
     HSPVNIC search = { };
     search.ipAddr = *ipAddr;
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
     if(vnic) {
-      EVDebug(mod, 2, "containerDSByIP %s matched VNIC ds=%u ifIndex=%u nspid=%u",
-	      ipstr,
-	      vnic->dsIndex,
-	      vnic->ifIndex,
-	      vnic->nspid);
+      if(EVDebug(mod, 2, NULL)) {
+	char ipstr[64];
+	EVDebug(mod, 2, "containerDSByIP %s matched VNIC ds=%u ifIndex=%u nspid=%u",
+		SFLAddress_print(ipAddr, ipstr, 64),
+		vnic->dsIndex,
+		vnic->ifIndex,
+		vnic->nspid);
+      }
       if(vnic->dsIndex != HSPVNIC_DSINDEX_NONUNIQUE) {
 	(*p_nspid) = vnic->nspid; // get pod namespace too
 	(*p_ifIndex) = vnic->ifIndex; // and ifIndex
@@ -1400,15 +1407,17 @@ extern "C" {
 	    ps->gotInnerIP);
 
     if(ps->gotInnerIP) {
-      char sbuf[51],dbuf[51];
       ps->src_dsIndex = containerDSByIP(mod, &ps->src_1, &ps->src_nspid, &ps->src_ifIndex);
       ps->dst_dsIndex = containerDSByIP(mod, &ps->dst_1, &ps->dst_nspid, &ps->dst_ifIndex);
       
-      EVDebug(mod, 3, "lookupContainerDS: search by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
-	      SFLAddress_print(&ps->src_1, sbuf, 50),
-	      SFLAddress_print(&ps->dst_1, dbuf, 50),
-	      ps->src_dsIndex,
-	      ps->dst_dsIndex);
+      if(EVDebug(mod, 3, NULL)) {
+	char sbuf[51],dbuf[51];
+	EVDebug(mod, 3, "lookupContainerDS: search by inner IP: src=%s dst=%s srcDS=%u dstDS=%u",
+		SFLAddress_print(&ps->src_1, sbuf, 50),
+		SFLAddress_print(&ps->dst_1, dbuf, 50),
+		ps->src_dsIndex,
+		ps->dst_dsIndex);
+      }
       
       if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byInnerIP++;
@@ -1540,14 +1549,16 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
 
-    EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u,n_vnicByIP=%u",
-	    mdata->ds_byMAC,
-	    mdata->ds_byInnerMAC,
-	    mdata->ds_byIP,
-	    mdata->ds_byInnerIP,
+    if(EVDebug(mod, 1, NULL)) {
+      EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u,n_vnicByIP=%u",
+	      mdata->ds_byMAC,
+	      mdata->ds_byInnerMAC,
+	      mdata->ds_byIP,
+	      mdata->ds_byInnerIP,
 	    mdata->pod_byAddr,
-	    mdata->pod_byCgroup,
-	    UTHashN(mdata->vnicByIP));
+	      mdata->pod_byCgroup,
+	      UTHashN(mdata->vnicByIP));
+    }
 
     if(--mdata->idleSweepCountdown <= 0) {
       // rearm
@@ -1559,8 +1570,12 @@ extern "C" {
       UTHASH_WALK(mdata->podsByHostname, pod) {
 	if(pod->last_heard
 	   && (now_mono - pod->last_heard) > idleTimeout) {
-	  char buf[1024];
-	  EVDebug(mod, 1, "Removing idle pod (%s)", podStr(pod, buf, 1024));
+
+	  if(EVDebug(mod, 1, NULL)) {
+	    char buf[1024];
+	    EVDebug(mod, 1, "Removing idle pod (%s)", podStr(pod, buf, 1024));
+	  }
+
 	  removeAndFreeVM_POD(mod, pod);
 	}    
       }

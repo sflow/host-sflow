@@ -156,7 +156,6 @@ extern "C" {
     uint32_t nl_seq_lost;
     uint32_t samples_annotated;
     uint32_t diag_timeouts;
-    uint32_t n_lastTick;
     uint32_t ipip_tx;
     UTHash *sampleHT;
     UTHash *socketHT;
@@ -232,17 +231,19 @@ extern "C" {
 
     // user info.  Prefer getpwuid_r() if avaiable...
     struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
-    EVDebug(mod, 2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
-	    found ? "YES" : "NO",
+    if(EVDebug(mod, 2, NULL)) {
+      EVDebug(mod, 2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
+	      found ? "YES" : "NO",
 	    found ? (found->udp ? "UDP":"TCP") : "",
-	    diag_msg->idiag_uid,
-	    uid_info ? uid_info->pw_name : "<user not found>",
-	    diag_msg->idiag_inode,
-	    sock->diag_tx,
-	    sock->diag_rx,
-	    sock->nl_seq_tx - sock->nl_seq_rx,
+	      diag_msg->idiag_uid,
+	      uid_info ? uid_info->pw_name : "<user not found>",
+	      diag_msg->idiag_inode,
+	      sock->diag_tx,
+	      sock->diag_rx,
+	      sock->nl_seq_tx - sock->nl_seq_rx,
 	    sock->nl_seq_lost,
-	    sock->nspid);
+	      sock->nspid);
+    }
     // Theoretically we could follow the inode back to
     // the socket and get the application (command line)
     // but there does not seem to be a direct lookup
@@ -315,15 +316,19 @@ extern "C" {
 	    readLen = sizeof(struct my_tcp_info);
 	  }
 	  memcpy(&tcpi, RTA_DATA(attr), readLen);
-	  EVDebug(mod, 2, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
-		  tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
-		  UTNLDiag_sockid_print(&diag_msg->id));
+	  if(EVDebug(mod, 2, NULL)) {
+	    EVDebug(mod, 2, "TCP diag: RTT=%uuS (variance=%uuS) [%s]",
+		    tcpi.tcpi_rtt, tcpi.tcpi_rttvar,
+		    UTNLDiag_sockid_print(&diag_msg->id));
+	  }
 	  if(found) {
 	    uint32_t nSamples = UTArrayN(found->samples);
-	    EVDebug(mod, 2, "found TCPSample: %s RTT:%uuS, annotating %u packet samples",
-		    tcpSamplePrint(found),
-		    tcpi.tcpi_rtt,
-		    nSamples);
+	    if(EVDebug(mod, 2, NULL)) {
+	      EVDebug(mod, 2, "found TCPSample: %s RTT:%uuS, annotating %u packet samples",
+		      tcpSamplePrint(found),
+		      tcpi.tcpi_rtt,
+		      nSamples);
+	    }
 	    mdata->samples_annotated += nSamples;
 	    HSPPendingSample *ps;
 	    UTARRAY_WALK(found->samples, ps) {
@@ -356,7 +361,9 @@ extern "C" {
 	}
 	  break;
 	default:
-	  EVDebug(mod, 1, "INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
+	  if(EVDebug(mod, 1, NULL)) {
+	    EVDebug(mod, 1, "INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
+	  }
 	  break;
 	}
 	attr = RTA_NEXT(attr, rtalen);
@@ -406,8 +413,8 @@ extern "C" {
 
   static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
-    uint32_t n_thisTick = mdata->diag_tx + mdata->diag_rx + mdata->nl_seq_lost + mdata->diag_timeouts;
-    if(n_thisTick != mdata->n_lastTick) {
+
+    if(EVDebug(mod, 1, NULL)) {
       EVDebug(mod, 1, "tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u, sockets=%u",
 	      mdata->diag_tx,
 	      mdata->diag_rx,
@@ -416,7 +423,6 @@ extern "C" {
 	      mdata->samples_annotated,
 	      mdata->ipip_tx,
 	      UTHashN(mdata->socketHT));
-     mdata->n_lastTick = n_thisTick;
     }
 
     int nowMs = now_mS(mod);
@@ -447,7 +453,9 @@ extern "C" {
 	break;
       }
       else {
-	EVDebug(mod, 2, "removing timed-out request (%s)", tcpSamplePrint(ts));
+	if(EVDebug(mod, 2, NULL)) {
+	  EVDebug(mod, 2, "removing timed-out request (%s)", tcpSamplePrint(ts));
+	}
 	HSPTCPSample *next_ts = ts->next;
 	// remove from Q
 	UTQ_REMOVE(mdata->timeoutQ, ts);
@@ -597,8 +605,8 @@ extern "C" {
       EVDebug(mod, 2, "lookup_sample(): no socket for nspid=%u", nspid);
       return;
     }
-    
-    {
+
+    if(EVDebug(mod, 2, NULL)) {
       char ipb1[51], ipb2[51];
       EVDebug(mod, 2, "proto=%u local_src=%u src=%s:%u dst=%s:%u nspid=%u",
 	      ipproto,

@@ -182,7 +182,7 @@ extern "C" {
   void EVRun(EVBus *mainBus);
   void EVStop(EVMod *mod);
   void EVLog(uint32_t rl_secs, int syslogType, char *fmt, ...);
-  void EVDebug(EVMod *mod, int level, char *fmt, ...);
+  bool EVDebug(EVMod *mod, int level, char *fmt, ...);
   
 #if defined(__cplusplus)
 } /* extern "C" */
