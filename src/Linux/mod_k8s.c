@@ -208,7 +208,7 @@ extern "C" {
     VNIC: <ifindex> <device> <mac> <ipv4> <ipv6> <nspid>
   */
 
-  static void mapIPToPod(EVMod *mod, HSPVMState_POD *pod, SFLAddress *ipAddr, uint32_t ifIndex) {
+  static void mapIPToPod(EVMod *mod, HSPVMState_POD *pod, SFLAddress *ipAddr, uint32_t ifIndex, uint32_t nspid) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSPVNIC search = { .ipAddr = *ipAddr };
     HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
@@ -223,6 +223,7 @@ extern "C" {
       vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
       vnic->ipAddr = *ipAddr;
       vnic->ifIndex = ifIndex;
+      vnic->nspid = nspid;
       vnic->podEntries = UTHASH_NEW(HSPVNICPodEntry, c_hostname, UTHASH_SKEY);
       UTHashAdd(mdata->vnicByIP, vnic);
     }
@@ -232,13 +233,16 @@ extern "C" {
       podEntry->dsIndex = pod->vm.dsIndex;
       podEntry->c_hostname = my_strdup(pod->hostname);
       UTHashAdd(vnic->podEntries, podEntry);
-      char ipStr[HSP_K8S_MAX_LINELEN];
-      EVDebug(mod, 1, "VNIC: ip %s linked to %s (ds=%u)",
-	      SFLAddress_print(ipAddr, ipStr, HSP_K8S_MAX_LINELEN),
-	      podEntry->c_hostname,
-	      podEntry->dsIndex);
     }
     setVNIC_ds(mod, vnic);
+
+    char ipstr[64];
+    EVDebug(mod, 1, "mapIPToPod: ip %s linked by VNIC(nspid=%u ifIndex=%u ds=%u) to pod %s",
+	    SFLAddress_print(ipAddr, ipstr, 64),
+	    vnic->nspid,
+	    vnic->ifIndex,
+	    vnic->dsIndex,
+	    podEntry->c_hostname);
   }
   
   static int podLinkCB(EVMod *mod, HSPVMState_POD *pod, char *line) {
@@ -305,11 +309,11 @@ extern "C" {
 	      // if this address appears in sampled packet header as
 	      // outer or inner IP
 	      if(gotV6) {
-		mapIPToPod(mod, pod, &ip6Addr, ifIndex);
+		mapIPToPod(mod, pod, &ip6Addr, ifIndex, nspid);
 	      }
 	      if(gotV4) {
 		ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
-		mapIPToPod(mod, pod, &ipAddr, ifIndex);
+		mapIPToPod(mod, pod, &ipAddr, ifIndex, nspid);
 	      }
 	    }
 	  }
