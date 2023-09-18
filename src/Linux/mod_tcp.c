@@ -140,6 +140,8 @@ extern "C" {
     UTArray *samples; // HSPPendingSample
     SFLAddress src;
     SFLAddress dst;
+    uint16_t sport;
+    uint16_t dport;
     bool flipped:1;
     bool udp:1;
     struct inet_diag_req_v2 conn_req;
@@ -182,9 +184,11 @@ extern "C" {
   static char *tcpSamplePrint(HSPTCPSample *ts) {
     static char buf[128];
     char ip1[51],ip2[51];
-    snprintf(buf, 128, "TCPSample: %s - %s samples:%u %s",
+    snprintf(buf, 128, "TCPSample: %s:%u - %s:%u samples:%u %s",
 	     SFLAddress_print(&ts->src, ip1, 50),
+	     ts->sport,
 	     SFLAddress_print(&ts->dst, ip2, 50),
+	     ts->dport,
 	     UTArrayN(ts->samples),
 	     ts->flipped ? "FLIPPED": "");
     return buf;
@@ -664,6 +668,8 @@ extern "C" {
       }
     }
     // L4 ports
+    tcpSample->sport = sport;
+    tcpSample->dport = dport;
     if(localSrc) {
       sockid->idiag_sport = htons(sport);
       sockid->idiag_dport = htons(dport);

@@ -806,7 +806,7 @@ extern "C" {
   }
   
   static void decodePendingSample_vxlan(HSPPendingSample *ps) {
-    int ip_offset_1 = ps->l4_offset + 8 /* udp */ + 8 /* vxlan */ + 12 /* inner MAC */;
+    int ip_offset_1 = ps->l4_offset + 8 /* udp */ + 8 /* vxlan */ + 14 /* inner MAC */;
     if(ps->ipproto == IPPROTO_UDP
        && ps->hdr_len >= ip_offset_1) {
       // Check for VXLAN(4789|8472) header at l4_offset,
