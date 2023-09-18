@@ -1672,7 +1672,7 @@ extern "C" {
   }
 
   char *SFLMacAddress_print(SFLMacAddress *addr, char *buf, size_t len) {
-    printHex(addr->mac, 6, buf, len, NO);
+    printHex(addr->mac, 6, (u_char *)buf, len, NO);
     return buf;
   }
 

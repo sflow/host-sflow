@@ -1302,6 +1302,7 @@ extern "C" {
   }
   
   static void readContainerCB(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     // HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     switch(status) {
     case EVSOCKETREAD_AGAIN:
@@ -1321,7 +1322,16 @@ extern "C" {
       break;
     case EVSOCKETREAD_EOF:
       myLog(LOG_ERR, "readContainerCB EOF");
-      abort();
+      // with k8s{eof=on} we will allow mod_k8s to go on
+      // even if hsflowd_containerd has terminated and
+      // closed the socket.  This is primarity for debug
+      // purposes (so we can catch this condition and run
+      // tests).
+      if(!sp->k8s.eof) {
+	// But the default will be to force the whole
+	// process to abort.
+	abort();
+      }
       break;
     case EVSOCKETREAD_BADF:
       myLog(LOG_ERR, "readContainerCB BADF");

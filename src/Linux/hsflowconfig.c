@@ -1694,6 +1694,9 @@ extern "C" {
 	    case HSPTOKEN_CGROUP_TRAFFIC:
 	      if((tok = expectONOFF(sp, tok, &sp->k8s.markTraffic)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_EOF:
+	      if((tok = expectONOFF(sp, tok, &sp->k8s.eof)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

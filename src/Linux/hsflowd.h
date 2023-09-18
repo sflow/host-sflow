@@ -591,6 +591,7 @@ extern "C" {
     struct {
       bool k8s;
       bool markTraffic;
+      bool eof;
     } k8s;
     struct {
       bool cumulus;
