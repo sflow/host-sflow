@@ -53,7 +53,7 @@ extern "C" {
       if (NVML_SUCCESS == nvmlDeviceGetHandleByIndex(ii, &gpu)) {
 	char uuidstr[128];
 	if(NVML_SUCCESS == nvmlDeviceGetUUID(gpu, uuidstr, 128)) {
-	  myDebug(2, "nvml: deviceGetUUID(index=%u) returned %s", ii, uuidstr);
+	  EVDebug(mod, 2, "nvml: deviceGetUUID(index=%u) returned %s", ii, uuidstr);
 	  // uuuidstr may have "GPU-" prefix
 	  char *uuidstr2 = uuidstr;
 	  if(my_strnequal("GPU-", uuidstr2, 4))
@@ -65,10 +65,10 @@ extern "C" {
 	  if(parseUUID(uuidstr2, id->uuid)) {
 	    id->has_uuid = YES;
 	    UTHashAdd(mdata->byUUID, id);
-	    myDebug(1, "nvml: GPU uuid added to lookup table");
+	    EVDebug(mod, 1, "nvml: GPU uuid added to lookup table");
 	  }
 	  else {
-	    myDebug(1, "nvml: failed to parse GPU uuid");
+	    EVDebug(mod, 1, "nvml: failed to parse GPU uuid");
 	  }
 
 	  unsigned int minor;
@@ -78,7 +78,7 @@ extern "C" {
 	    UTHashAdd(mdata->byMinor, id);
 	  }
 	  else {
-	    myDebug(1, "nvml: failed to retrieve GPU minor number");
+	    EVDebug(mod, 1, "nvml: failed to retrieve GPU minor number");
 	  }
 	}
       }
@@ -217,7 +217,7 @@ extern "C" {
       if(vm
 	 && vm->gpus
 	 && UTArrayN(vm->gpus) > 0) {
-	myDebug(2, "nvml: evt_vm_cs() %u vm->gpus", UTArrayN(vm->gpus));
+	EVDebug(mod, 2, "nvml: evt_vm_cs() %u vm->gpus", UTArrayN(vm->gpus));
 	// VM was assigned one or more GPU devices
 	SFLHost_gpu_nvml *nvml = init_gpu_nvml(&mdata->nvmlElem);
 	HSPGpuID *vmgpu;
@@ -239,11 +239,11 @@ extern "C" {
 	  }
 
 	  if(vmgpu->has_index) {
-	    myDebug(2, "nvml: evt_vm_cs() accumulate(idx=%u)", vmgpu->index);
+	    EVDebug(mod, 2, "nvml: evt_vm_cs() accumulate(idx=%u)", vmgpu->index);
 	    accumulateGPUCounters(mod, nvml, vmgpu->index);
 	  }
 	  else {
-	    myDebug(2, "nvml: evt_vm_cs() gpu uuid->id lookup failed");
+	    EVDebug(mod, 2, "nvml: evt_vm_cs() gpu uuid->id lookup failed");
 	  }
 	}
 	SFLADD_ELEMENT(ps->cs, &mdata->nvmlElem);
