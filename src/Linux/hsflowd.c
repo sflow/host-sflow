@@ -716,8 +716,9 @@ extern "C" {
 	  int debugLevel = strtol(valBuf, NULL, 0);
 	  EVMod *mod = EVGetModule(sp->rootModule, keyBuf);
 	  if(mod) {
-	    myDebug(1, "setting mod=%s debugLevel=%u", mod->name, debugLevel);
 	    mod->debugLevel = debugLevel;
+	    myDebug(1, "setting mod=%s debugLevel=%u", mod->name, debugLevel);
+	    EVDebug(mod, 1, "debugLevel=%u", debugLevel);
 	  }
 	  else {
 	    myDebug(1, "debug action ignored: %s", line);

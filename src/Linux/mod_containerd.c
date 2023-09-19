@@ -1049,7 +1049,7 @@ extern "C" {
       updateContainerCgroupPaths(mod, container);
     }
 
-    cJSON *jenv = cJSON_GetObjectItem(jmetrics, "Env");
+    cJSON *jenv = cJSON_GetObjectItem(top, "Env");
     if(jenv
        && container->gpu_dev == NO)
       readContainerGPUsFromEnv(mod, container, jenv);

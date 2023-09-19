@@ -1267,7 +1267,7 @@ extern "C" {
       // Only try to find the GPU info once, but don't
       // try it on the sandbox container because it won't
       // have the full ENV.
-      cJSON *jenv = cJSON_GetObjectItem(jmetrics, "Env");
+      cJSON *jenv = cJSON_GetObjectItem(top, "Env");
       if(jenv
 	 && !pod->gpu_env_tried)
 	readPodGPUsFromEnv(mod, pod, jenv);
