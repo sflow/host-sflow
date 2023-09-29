@@ -10,7 +10,7 @@ RUN echo "EXTRAS" && yum -y install \
       rpm-build \
       dbus-devel \
       openssl-devel \
-      lubuuid-devel
+      libuuid-devel
 RUN mkdir /packages && chown 777 /packages
 COPY build_hsflowd /root/build_hsflowd
 ENTRYPOINT ["/root/build_hsflowd"]
