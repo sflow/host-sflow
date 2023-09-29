@@ -10,7 +10,8 @@ RUN echo "EXTRAS" && dnf -y --enablerepo=crb install \
       dbus-devel \
       openssl-devel \
       rsync \
-      rpm-build
+      rpm-build \
+      libuuid-devel
 RUN mkdir /packages && chown 777 /packages
 COPY build_hsflowd /root/build_hsflowd
 ENTRYPOINT ["/root/build_hsflowd"]
