@@ -682,6 +682,21 @@ That would allow everything to stay on the stack as it does here, which has nice
   }
 
   /*_________________---------------------------__________________
+    _________________      hideDrop             __________________
+    -----------------___________________________------------------
+  */
+
+  static bool hideDrop(EVMod *mod, char *dropStr) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if((dropStr
+	&& regexec(sp->dropmon.hide_regex, dropStr, 0, NULL, 0) == 0)) {
+      myDebug(4, "hw drop (%s) hidden by regex\n", dropStr);
+      return YES;
+    }
+    return NO;
+  }
+
+  /*_________________---------------------------__________________
     _________________  processNetlink_DROPMON   __________________
     -----------------___________________________------------------
   */
@@ -876,6 +891,13 @@ That would allow everything to stay on the stack as it does here, which has nice
     }
     
     myDebug(1, "found dropPoint %s reason_code=%u", dp->dropPoint, dp->reason);
+
+    if(sp->dropmon.hide_regex_str) {
+      if(hideDrop(mod, hw_name)
+	 || hideDrop(mod, sw_symbol)
+	 || hideDrop(mod, reason))
+	return;
+    }
     
     // fill in discard reason
     discard.reason = dp->reason;

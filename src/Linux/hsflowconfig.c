@@ -1801,6 +1801,10 @@ extern "C" {
 	    case HSPTOKEN_HW_PASSIVE:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.hw_passive)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_HIDE:
+	      if((tok = expectRegex(sp, tok, &sp->dropmon.hide_regex)) == NULL) return NO;
+	      sp->dropmon.hide_regex_str = my_strdup(tok->str);
+	      break;
 	    case HSPTOKEN_LIMIT:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.limit, 1, HSP_MAX_NOTIFY_RATELIMIT)) == NULL) return NO;
 	      break;

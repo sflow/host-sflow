@@ -559,6 +559,7 @@ extern "C" {
       bool json;
       uint32_t port;
       char *FIFO;
+      uint32_t firefly;
     } json;
     struct {
       bool kvm;
@@ -664,6 +665,8 @@ extern "C" {
 #define HSP_DEFAULT_DROPTRAP_MAX 100000 // "circuit-breaker" turns off feed
       bool hw_unknown;
       bool hw_function;
+      regex_t *hide_regex;
+      char *hide_regex_str;
     } dropmon;
     struct {
       bool pcap;
