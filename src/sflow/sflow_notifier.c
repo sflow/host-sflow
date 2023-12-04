@@ -113,7 +113,7 @@ void sfl_notifier_writeEventSample(SFLNotifier *notifier, SFLEvent_discarded_pac
   es->sequence_number = ++notifier->seqNo;
   /* copy the other header fields in - event samples always use expanded form */
   es->ds_class = SFL_DS_CLASS(notifier->dsi);
-  es->ds_index = notifier->ds_alias ?: SFL_DS_INDEX(notifier->dsi);
+  es->ds_index = notifier->ds_alias ? notifier->ds_alias : SFL_DS_INDEX(notifier->dsi);
   /* send to my receiver */
   if(notifier->myReceiver)
     sfl_receiver_writeEventSample(notifier->myReceiver, es);

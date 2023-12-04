@@ -148,7 +148,7 @@ void sfl_sampler_writeFlowSample(SFLSampler *sampler, SFL_FLOW_SAMPLE_TYPE *fs)
   fs->sequence_number = ++sampler->flowSampleSeqNo;
   /* copy the other header fields in */
   uint32_t ds_class = SFL_DS_CLASS(sampler->dsi);
-  uint32_t ds_index = sampler->ds_alias ?: SFL_DS_INDEX(sampler->dsi);
+  uint32_t ds_index = sampler->ds_alias ? sampler->ds_alias : SFL_DS_INDEX(sampler->dsi);
 #ifdef SFL_USE_32BIT_INDEX
   fs->ds_class = ds_class;
   fs->ds_index = ds_index;

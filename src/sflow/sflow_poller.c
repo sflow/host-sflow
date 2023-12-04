@@ -136,7 +136,7 @@ void sfl_poller_writeCountersSample(SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE 
   /* fill in the rest of the header fields, and send to the receiver */
   cs->sequence_number = ++poller->countersSampleSeqNo;
   uint32_t ds_class = SFL_DS_CLASS(poller->dsi);
-  uint32_t ds_index = poller->ds_alias ?: SFL_DS_INDEX(poller->dsi);
+  uint32_t ds_index = poller->ds_alias ? poller->ds_alias : SFL_DS_INDEX(poller->dsi);
 #ifdef SFL_USE_32BIT_INDEX
   cs->ds_class = ds_class;
   cs->ds_index = ds_index;
