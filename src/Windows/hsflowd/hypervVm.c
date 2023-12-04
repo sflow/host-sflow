@@ -141,19 +141,19 @@ BOOL readXmlInstance(IXmlReader *xmlReader, SFLHost_hid_counters *hid,
 				while (readXmlProperty(xmlReader, &nameVal, &dataVal)) {
 					if (nameVal != NULL) {
 						if (wcscmp(nameVal, XML_FQDN) == 0) {
-							wcstombs_s(&hnLen, hnamebuf, hnamebufLen, dataVal, wcslen(dataVal));
+							wcstombs_s(&hnLen, hnamebuf, hnamebufLen, dataVal, _TRUNCATE);
 							//don't count the NULL
 							if (hnLen > 0) {
 								hnLen--;
 							}
-						} else if (wcscmp(nameVal, XML_OSNAME) == 0) {					
+						} else if (wcscmp(nameVal, XML_OSNAME) == 0) {
 							if (StrStrIW(dataVal, L"Windows") != NULL) {
 								osName = SFLOS_windows;
 							} else if (StrStrIW(dataVal, L"Linux") != NULL) {
 								osName = SFLOS_linux;
 							}
 						} else if (wcscmp(nameVal, XML_OSVERSION) == 0) {
-							wcstombs_s(&osrLen, osrelbuf, osrelbufLen, dataVal, wcslen(dataVal));
+							wcstombs_s(&osrLen, osrelbuf, osrelbufLen, dataVal, _TRUNCATE);
 							//don't count the NULL
 							if (osrLen > 0) {
 								osrLen--;
@@ -326,8 +326,8 @@ static void readVmHidCounters(HVSVmState *state, SFLHost_hid_counters *hid,
 			hid->hostname.str = "";
 			hid->hostname.len = 0;
 		} else {
-			size_t hnLen;
-			wcstombs_s(&hnLen, hnamebuf, hnamebufLen, punycode, wcslen(punycode));
+			size_t hnLen = 0;
+			wcstombs_s(&hnLen, hnamebuf, hnamebufLen, punycode, _TRUNCATE);
 			if (hnLen > 0) {
 				hnLen--;
 			}

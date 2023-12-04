@@ -510,6 +510,7 @@ void main(int argc, char *argv[])
             usage(argv[0]);
         }
     }
+
     SERVICE_TABLE_ENTRY ServiceTable[2];
 	ServiceTable[0].lpServiceName = HSP_SERVICE_NAME;
     ServiceTable[0].lpServiceProc = (LPSERVICE_MAIN_FUNCTION)ServiceMain;
@@ -574,7 +575,7 @@ void ServiceMain(int argc, char** argv)
 	if (isService && *programDataDir != NULL) {
 		//set the log file name to the default.
 		size_t dirLen = 0;
-		if (0 == wcstombs_s(&dirLen, mbcLogFilename, MAX_PATH, programDataDir, wcslen(programDataDir))) {
+		if (0 == wcstombs_s(&dirLen, mbcLogFilename, MAX_PATH, programDataDir, _TRUNCATE)) {
 			PathAppend(mbcLogFilename, HSP_DEFAULT_LOGFILE);
 			logFilename = mbcLogFilename;
 		} else {
