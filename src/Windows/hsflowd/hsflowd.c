@@ -442,7 +442,7 @@ static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
 		myLog(LOG_ERR, "initialiseProgramDataFiles: cannot open VM store file %S\n", vmStoreFile);
 		return false;
 	} else {
-		int cHandle = _open_osfhandle((long)fileHandle, _O_RDWR | _O_TEXT);
+		int cHandle = _open_osfhandle((intptr_t)fileHandle, _O_RDWR | _O_TEXT);
 		sp->f_vmStore = _fdopen(cHandle, "r+t");
 	}
 	fnLen = dirLen+wcslen(HSP_DEFAULT_PORTSTORE)+1;
@@ -459,7 +459,7 @@ static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
 		myLog(LOG_ERR, "initialiseProgramDataFiles: cannot open VM store file %S\n", portStoreFile);
 		return false;
 	} else {
-		int cHandle = _open_osfhandle((long)fileHandle, _O_RDWR | _O_TEXT);
+		int cHandle = _open_osfhandle((intptr_t)fileHandle, _O_RDWR | _O_TEXT);
 		sp->f_portStore = _fdopen(cHandle, "r+t");
 	}
 	return true;

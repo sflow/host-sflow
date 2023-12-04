@@ -642,7 +642,7 @@ static int computeFlowSampleElementsSize(SFLReceiver *receiver, SFLFlow_sample_e
 {
   SFLFlow_sample_element *elem;
   uint32_t elemSiz;
-  uint siz = 4; /* num_elements */
+  int siz = 4; /* num_elements */
   uint32_t num_elements = 0;
   for(elem = elements; elem != NULL; elem = elem->nxt) {
     num_elements++;
@@ -883,7 +883,7 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
   }
   
   // sanity check
-  int dgramSize = ((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  int64_t dgramSize = ((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
   assert(dgramSize - receiver->sampleCollector.pktlen == packedSize);
 
   // update the pktlen
@@ -959,7 +959,7 @@ int sfl_receiver_writeEventSample(SFLReceiver *receiver, SFLEvent_discarded_pack
   }
 
   // sanity check
-  int dgramSize = ((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
+  int64_t dgramSize = ((u_char *)receiver->sampleCollector.datap - (u_char *)receiver->sampleCollector.data);
   assert(dgramSize - receiver->sampleCollector.pktlen == packedSize);
 
   // update the pktlen
