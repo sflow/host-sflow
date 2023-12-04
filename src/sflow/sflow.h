@@ -839,7 +839,16 @@ typedef struct _SFLHost_par_counters {
   uint32_t dsIndex;       /* sFlowDataSource index */
 } SFLHost_par_counters;
 
-#define SFL_MAX_HOSTNAME_CHARS 64
+/*
+ *   From RFC1035
+ *
+ *   2.3.4. Size limits
+ *   names           255 octets or less
+ *
+ *   3.1. Name space definitions
+ *   To simplify implementations, the total length of a domain name (i.e., label octets and label length octets) is restricted to 255 octets or less.
+ */
+#define SFL_MAX_HOSTNAME_CHARS 255
 #define SFL_MAX_OSRELEASE_CHARS 32
 
 typedef struct _SFLHost_hid_counters {
