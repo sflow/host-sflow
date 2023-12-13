@@ -332,7 +332,8 @@ extern "C" {
       macdst[0]='\0';
       macsrc[0]='\0';
       uint16_t ethtype = 0;
-      if(mac_len == 14) {
+      if(mac_hdr
+	 && mac_len == 14) {
 	printHex(mac_hdr+6,6,macsrc,12,NO);
 	macsrc[12] = '\0';
 	printHex(mac_hdr+0,6,macdst,12,NO);

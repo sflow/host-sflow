@@ -77,7 +77,8 @@ extern "C" {
       SFLAdaptor *srcdev = NULL;
       SFLAdaptor *dstdev = NULL;
 
-      if(bpfs->dlt == DLT_EN10MB) {
+      switch(bpfs->dlt) {
+      case DLT_EN10MB: {
 	mac_hdr = buf;
 	mac_len = 14;
 	// global MAC -> adaptor
@@ -107,6 +108,29 @@ extern "C" {
 		  dstdev->peer_ifIndex);
 	  }
 	}
+      }
+	break;
+      case DLT_LINUX_SLL: {
+	// This encapsulation does not give us a normal MAC header
+	// <packet-type> [16b]
+	// <link-layer-address-type> [16b]
+	// <link-layer-address-len> [16b]
+	// <link-layer-address> [always padded to 64b]
+	// <protocol-type> [16b]
+	// Not sure if we can get 802.1Q or 802.2 header here?
+	// For now just insist it must be IP or IP6.
+	uint16_t type_len = (buf[14] << 8) + buf[15];
+	if(type_len != 0x0800
+	   && type_len != 0x86DD)
+	  return;
+	// We will call takeSample with mac_hdr==NULL and mac_len==16.
+	// It should then send a sample with header_protocol IP or IP6.
+	mac_len = 16;
+      }
+	break;
+      case DLT_RAW:
+      default:
+	break;
       }
 
       uint32_t ds_options = (HSP_SAMPLEOPT_DEV_SAMPLER
@@ -263,6 +287,17 @@ extern "C" {
     _________________      tap_open             __________________
     -----------------___________________________------------------
   */
+
+  static bool chooseDLT(BPFSoc *bpfs, int search) {
+    for(int ii=0; ii < bpfs->n_dlts; ii++) {
+      int dlt = bpfs->dlts[ii]; 
+      if(dlt == search) {
+	bpfs->dlt = dlt;
+	return YES;
+      }
+    }
+    return NO;
+  }
   
   static void tap_open(EVMod *mod, BPFSoc *bpfs) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
@@ -327,16 +362,11 @@ extern "C" {
       // takeSample() call more explicitly. (SFLHEADER_IEEE80211MAC or
       // SFLHEADER_IEEE80211_AMPUD or SFLHEADER_IEEE80211_AMSDU_SUBFRAME)
       // TODO: add support for MPLS encapsulation (SFLHEADER_MPLS)
-      for(int ii=0; ii < bpfs->n_dlts; ii++) {
-	int dlt = bpfs->dlts[ii]; 
-	if(dlt == DLT_EN10MB
-	   || dlt == DLT_RAW
-	   // || dlt == DLT_IEEE802_11
-	   ) {
-	  bpfs->dlt = dlt;
-	  break;
-	}
-      }
+      // Apply preference order in case there is a choice...
+      if(chooseDLT(bpfs, DLT_EN10MB) == NO)
+	if(chooseDLT(bpfs, DLT_RAW) == NO)
+	  chooseDLT(bpfs, DLT_LINUX_SLL);
+      // DLT_IEEE802_11
       if(bpfs->dlt == -1) {
 	myLog(LOG_ERR, "PCAP: %s has no supported datalink encapsulaton", bpfs->deviceName);
 	tap_close(mod, bpfs);
@@ -348,22 +378,22 @@ extern "C" {
 		pcap_datalink_val_to_name(bpfs->dlt));
 	pcap_set_datalink(bpfs->pcap, bpfs->dlt); 
       }		
+
+      // get file descriptor
+      int fd = pcap_fileno(bpfs->pcap);
+      
+      // configure BPF sampling
+      if(bpfs->samplingRate > 1)
+	setKernelSampling(sp, bpfs, fd);
+      
+      // register
+      bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
+      
+      // assume we always want to get counters for anything we are tapping.
+      // Have to force this here in case there are no samples that would
+      // trigger it in readPackets.c:takeSample()
+      forceCounterPolling(sp, bpfs->adaptor);
     }
-
-    // get file descriptor
-    int fd = pcap_fileno(bpfs->pcap);
-
-    // configure BPF sampling
-    if(bpfs->samplingRate > 1)
-      setKernelSampling(sp, bpfs, fd);
-
-    // register
-    bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
-
-    // assume we always want to get counters for anything we are tapping.
-    // Have to force this here in case there are no samples that would
-    // trigger it in readPackets.c:takeSample()
-    forceCounterPolling(sp, bpfs->adaptor);
   }
 
   /*_________________---------------------------__________________
