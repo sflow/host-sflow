@@ -142,7 +142,7 @@ uninstall-cjson: uninstall-utils
 	$(RM) $(INSTALL_LIBRARY_PATH)/$(CJSON_SHARED_VERSION)
 	$(RM) $(INSTALL_LIBRARY_PATH)/$(CJSON_SHARED_SO)
 	$(RM) $(INSTALL_INCLUDE_PATH)/cJSON.h
-	
+
 #cJSON_Utils
 uninstall-utils:
 	$(RM) $(INSTALL_LIBRARY_PATH)/$(UTILS_SHARED)

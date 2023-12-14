@@ -1312,7 +1312,7 @@ extern "C" {
       EVDebug(mod, 1, "readContainerCB: %s", UTSTRBUF_STR(sock->ioline));
       if(sock->errOut) {
 	// this is the stderr socket - log the message
-	myLog(LOG_ERR, "UTSTRBUF_STR(sock->ioline)");
+	myLog(LOG_ERR, "readContainerCB errOut: %s", UTSTRBUF_STR(sock->ioline));
       }
       else {
 	// stdout
