@@ -379,7 +379,10 @@ func (cm CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, s
 	case *v2.Metrics:
 		data2 = v
 		cm.log(1, data2)
-		sfc.Metrics.Cpu.CpuCount = uint32(len(data.CPU.Usage.PerCPU))
+		sfc.Metrics.Cpu.CpuCount = 1
+		if data.CPU.Usage.PerCPU != nil {
+			sfc.Metrics.Cpu.CpuCount = uint32(len(data.CPU.Usage.PerCPU))
+		}
 		sfc.Metrics.Cpu.CpuTime = uint32(data2.CPU.UsageUsec) // nS (see for v1 above)
 		sfc.Metrics.Mem.Memory = data.Memory.Usage.Usage
 		sfc.Metrics.Mem.MaxMemory = data.Memory.Usage.Max
