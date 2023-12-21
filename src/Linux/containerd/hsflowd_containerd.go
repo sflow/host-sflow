@@ -380,40 +380,16 @@ func (cm CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, s
 		data2 = v
 		cm.log(1, data2)
 		sfc.Metrics.Cpu.CpuCount = 1
-		if data.CPU.Usage.PerCPU != nil {
-			sfc.Metrics.Cpu.CpuCount = uint32(len(data.CPU.Usage.PerCPU))
-		}
 		sfc.Metrics.Cpu.CpuTime = uint32(data2.CPU.UsageUsec) // nS (see for v1 above)
-		sfc.Metrics.Mem.Memory = data.Memory.Usage.Usage
-		sfc.Metrics.Mem.MaxMemory = data.Memory.Usage.Max
-		for _, ioentry := range data.Blkio.IoServiceBytesRecursive {
-			//cm.log(0, "ioentry=", ioentry)
-			switch ioentry.Op {
-			case "Read":
-				sfc.Metrics.Dsk.Rd_bytes += ioentry.Value
-			case "Write":
-				sfc.Metrics.Dsk.Wr_bytes += ioentry.Value
-			case "Discard":
-			case "Sync":
-			case "Async":
-			case "Total":
-			}
+		sfc.Metrics.Mem.Memory = data2.Memory.Usage
+		sfc.Metrics.Mem.MaxMemory = data2.Memory.UsageLimit
+		for _, ioentry := range data2.Io.Usage {
+			sfc.Metrics.Dsk.Rd_bytes += ioentry.Rbytes
+			sfc.Metrics.Dsk.Wr_bytes += ioentry.Wbytes
+			sfc.Metrics.Dsk.Rd_req += uint32(ioentry.Rios)
+			sfc.Metrics.Dsk.Wr_req += uint32(ioentry.Wios)
 		}
-		for _, ioentry := range data.Blkio.IoServicedRecursive {
-			//cm.log(0, "ioentry=", ioentry)
-			switch ioentry.Op {
-			case "Read":
-				sfc.Metrics.Dsk.Rd_req += uint32(ioentry.Value)
-			case "Write":
-				sfc.Metrics.Dsk.Wr_req += uint32(ioentry.Value)
-			case "Discard":
-				sfc.Metrics.Dsk.Errs += uint32(ioentry.Value)
-			case "Sync":
-			case "Async":
-			case "Total":
-			}
-		}
-		//mjson, err := json.MarshalIndent(data, "", "   ")
+		//mjson, err := json.MarshalIndent(data2, "", "   ")
 		//if err != nil {
 		//	return err
 		//}
