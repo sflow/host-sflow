@@ -443,8 +443,8 @@ hsflowd_containerd:
 	cd containerd; \
 	echo "=== go mod init hsflowd_containerd ==="; \
 	go mod init hsflowd_containerd; \
-	echo "=== go get github.com/containerd/containerd@v1.7.11 ==="; \
-	go get github.com/containerd/containerd@v1.7.11; \
+	echo "=== go get github.com/containerd/containerd@v1.6.26 ==="; \
+	go get github.com/containerd/containerd@v1.6.26; \
 	echo "=== go build hsflowd_containerd ==="; \
 	go build hsflowd_containerd; \
 	echo "=== compile hsflowd_containerd done ==="
