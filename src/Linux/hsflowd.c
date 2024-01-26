@@ -388,27 +388,21 @@ extern "C" {
       SFLADD_ELEMENT(cs, &dskElem);
     }
 
-    // don't send L4 stats from switches.  Save the space for other things.
-    // TODO: review this.  Possibly generalize with a request-to-omit flag.
     // host TCP/IP counters
     SFLCounters_sample_element ipElem = { 0 }, icmpElem = { 0 }, tcpElem = { 0 }, udpElem = { 0 };
-    if(!sp->cumulus.cumulus
-       && !sp->opx.opx
-       && !sp->dent.dent) {
-      ipElem.tag = SFLCOUNTERS_HOST_IP;
-      icmpElem.tag = SFLCOUNTERS_HOST_ICMP;
-      tcpElem.tag = SFLCOUNTERS_HOST_TCP;
-      udpElem.tag = SFLCOUNTERS_HOST_UDP;
-      if(readTcpipCounters(sp,
-			   &ipElem.counterBlock.host_ip,
-			   &icmpElem.counterBlock.host_icmp,
-			   &tcpElem.counterBlock.host_tcp,
-			   &udpElem.counterBlock.host_udp)) {
-	SFLADD_ELEMENT(cs, &ipElem);
-	SFLADD_ELEMENT(cs, &icmpElem);
-	SFLADD_ELEMENT(cs, &tcpElem);
-	SFLADD_ELEMENT(cs, &udpElem);
-      }
+    ipElem.tag = SFLCOUNTERS_HOST_IP;
+    icmpElem.tag = SFLCOUNTERS_HOST_ICMP;
+    tcpElem.tag = SFLCOUNTERS_HOST_TCP;
+    udpElem.tag = SFLCOUNTERS_HOST_UDP;
+    if(readTcpipCounters(sp,
+			 &ipElem.counterBlock.host_ip,
+			 &icmpElem.counterBlock.host_icmp,
+			 &tcpElem.counterBlock.host_tcp,
+			 &udpElem.counterBlock.host_udp)) {
+      SFLADD_ELEMENT(cs, &ipElem);
+      SFLADD_ELEMENT(cs, &icmpElem);
+      SFLADD_ELEMENT(cs, &tcpElem);
+      SFLADD_ELEMENT(cs, &udpElem);
     }
 
     SFLCounters_sample_element adaptorsElem = { 0 };
