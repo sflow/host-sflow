@@ -81,6 +81,9 @@
     <ClCompile Include=".\dnsSD.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\sflow\sflow_notifier.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="hsflowd.h">

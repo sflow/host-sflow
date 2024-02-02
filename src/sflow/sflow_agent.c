@@ -160,7 +160,7 @@ void sfl_agent_set_address(SFLAgent *agent, SFLAddress *ip)
 
 uint32_t sfl_agent_uptime_mS(SFLAgent *agent)
 {
-  return ((agent->now - agent->bootTime) * 1000) + (agent->now_nS / 1000000);
+  return static_cast<uint32_t>((static_cast<uint64_t>(agent->now - agent->bootTime) * 1000) + (agent->now_nS / 1000000));
 }
 
 /*_________________---------------------------__________________

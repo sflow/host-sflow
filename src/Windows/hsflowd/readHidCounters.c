@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 #include "hsflowd.h"
+#include <VersionHelpers.h>
 
 /**
  * Populates the host_descr structure with, computer name for hostname,
@@ -30,17 +31,42 @@ void readHidCounters(HSP *sp, SFLHost_hid_counters *hid){
 
 	hid->os_name = SFLOS_windows;
 
-	ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
-    osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-	dwRes = GetVersionEx(&osvi);
-	if (dwRes){
-		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS,"%d.%d.%d %s",
-				osvi.dwMajorVersion,
-				osvi.dwMinorVersion,
-				osvi.dwBuildNumber,
-				osvi.szCSDVersion);
-		hid->os_release.len = (uint32_t)strnlen(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS);
+	if (GetComputerNameExA(ComputerNameDnsHostname, dnsBuf, &dnsLen)) {
+		uint32_t copyLen = dnsLen < SFL_MAX_HOSTNAME_CHARS ? dnsLen : SFL_MAX_HOSTNAME_CHARS;
+		memcpy(hid->hostname.str, dnsBuf, copyLen);
+		hid->hostname.str[copyLen] = '\0';
+		hid->hostname.len = copyLen;
 	}
+
+	hid->os_name = SFLOS_windows;
+
+	ZeroMemory(&osvi, sizeof(OSVERSIONINFO));
+	osvi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+
+	if (IsWindows10OrGreater()) {
+		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS, "%s", "Windows 10 or later");
+	}
+	else if (IsWindows8Point1OrGreater()) {
+		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS, "%s", "Windows 8.1 or later");
+	}
+	else if (IsWindows8OrGreater()) {
+		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS, "%s", "Windows 8 or later");
+	}
+	else if (IsWindows7SP1OrGreater()) {
+		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS, "%s", "Windows 7 SP1 or later");
+	}
+	else if (IsWindowsVistaSP2OrGreater()) {
+		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS, "%s", "Windows Vista SP2 or later");
+	}
+	else {
+		sprintf_s(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS, "%d.%d.%d %s",
+			osvi.dwMajorVersion,
+			osvi.dwMinorVersion,
+			osvi.dwBuildNumber,
+			osvi.szCSDVersion);
+	}
+
+	hid->os_release.len = (uint32_t)strnlen(hid->os_release.str, SFL_MAX_OSRELEASE_CHARS);
 
 	GetNativeSystemInfo(&si);
 	hid->machine_type = SFLMT_unknown;

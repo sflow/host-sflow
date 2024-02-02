@@ -442,7 +442,7 @@ static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
 		myLog(LOG_ERR, "initialiseProgramDataFiles: cannot open VM store file %S\n", vmStoreFile);
 		return false;
 	} else {
-		int cHandle = _open_osfhandle((long)fileHandle, _O_RDWR | _O_TEXT);
+		int cHandle = _open_osfhandle((intptr_t)fileHandle, _O_RDWR | _O_TEXT);
 		sp->f_vmStore = _fdopen(cHandle, "r+t");
 	}
 	fnLen = dirLen+wcslen(HSP_DEFAULT_PORTSTORE)+1;
@@ -459,7 +459,7 @@ static bool initialiseProgramDataFiles(HSP *sp, wchar_t *programDataDir)
 		myLog(LOG_ERR, "initialiseProgramDataFiles: cannot open VM store file %S\n", portStoreFile);
 		return false;
 	} else {
-		int cHandle = _open_osfhandle((long)fileHandle, _O_RDWR | _O_TEXT);
+		int cHandle = _open_osfhandle((intptr_t)fileHandle, _O_RDWR | _O_TEXT);
 		sp->f_portStore = _fdopen(cHandle, "r+t");
 	}
 	return true;
@@ -510,6 +510,7 @@ void main(int argc, char *argv[])
             usage(argv[0]);
         }
     }
+
     SERVICE_TABLE_ENTRY ServiceTable[2];
 	ServiceTable[0].lpServiceName = HSP_SERVICE_NAME;
     ServiceTable[0].lpServiceProc = (LPSERVICE_MAIN_FUNCTION)ServiceMain;
@@ -574,7 +575,7 @@ void ServiceMain(int argc, char** argv)
 	if (isService && *programDataDir != NULL) {
 		//set the log file name to the default.
 		size_t dirLen = 0;
-		if (0 == wcstombs_s(&dirLen, mbcLogFilename, MAX_PATH, programDataDir, wcslen(programDataDir))) {
+		if (0 == wcstombs_s(&dirLen, mbcLogFilename, MAX_PATH, programDataDir, _TRUNCATE)) {
 			PathAppend(mbcLogFilename, HSP_DEFAULT_LOGFILE);
 			logFilename = mbcLogFilename;
 		} else {

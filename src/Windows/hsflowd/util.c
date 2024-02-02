@@ -192,7 +192,7 @@ void *UTHeapQNew(size_t len)
 		utRealm.bufferLists[queueIdx] = utBuf->nxt;
 	} else {
 		// allocate a new one
-		utBuf = (UTHeapHeader *)my_os_calloc(1<<queueIdx);
+		utBuf = (UTHeapHeader*)my_os_calloc(static_cast<size_t>(1) << queueIdx);
 		utRealm.totalAllocatedBytes += (1<<queueIdx);
 	}
 	// remember the details so we know what to do on free (overwriting the nxt pointer)
@@ -225,7 +225,7 @@ void UTHeapQFree(void *buf)
 			// reference count reached zero, so it's time to free this buffer for real
 			// read the queue index before we overwrite it
 			uint16_t queueIdx = utBuf->h.queueIdx;
-			memset(utBuf, 0, 1 << queueIdx);
+			memset(utBuf, 0, static_cast<size_t>(1) << queueIdx);
 			// put it back on the queue
 			utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
 			utRealm.bufferLists[queueIdx] = utBuf;
@@ -325,7 +325,7 @@ char *my_wcstombs(wchar_t *wcstr)
 {
 	size_t wcslen = 1+wcsnlen_s(wcstr, UT_DEFAULT_MAX_STRLEN);
 	char *str = (char *)my_calloc(wcslen * sizeof(char));
-	size_t numConverted;
+	size_t numConverted = 0;
 	wcstombs_s(&numConverted, str, wcslen, wcstr, wcslen);
 	return str;
 }
