@@ -726,12 +726,13 @@ That would allow everything to stay on the stack as it does here, which has nice
     char *hw_name=NULL;
     char *sw_symbol=NULL;
     char *reason=NULL;
+
+    // increment counter for threshold check
+    mdata->totalDrops_thisTick++;
     
     struct nlattr *attr = (struct nlattr *)(msg + GENL_HDRLEN);
     int len = msglen - GENL_HDRLEN;
     while(UTNLA_OK(attr, len)) {
-      // increment counter for threshold check
-      mdata->totalDrops_thisTick++;
 
       u_char *datap = UTNLA_DATA(attr);
       int datalen = UTNLA_PAYLOAD(attr);
