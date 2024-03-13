@@ -84,7 +84,7 @@ extern "C" {
   static void getFamily_PSAMPLE(EVMod *mod)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
-    myDebug(1, "psample: getFamily");
+    EVDebug(mod, 1, "getFamily");
     mdata->state = HSP_PSAMPLE_STATE_GET_FAMILY;
     UTNLGeneric_send(mdata->nl_sock,
 		     mod->id,
@@ -104,7 +104,7 @@ extern "C" {
   static void joinGroup_PSAMPLE(EVMod *mod)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
-    myDebug(1, "psample: joinGroup");
+    EVDebug(mod, 1, "joinGroup");
     mdata->state = HSP_PSAMPLE_STATE_JOIN_GROUP;
     // register for the multicast group_id
     if(setsockopt(mdata->nl_sock,
@@ -129,7 +129,7 @@ extern "C" {
     char *msg = (char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
-    myDebug(1, "generic netlink CMD = %u", genl->cmd);
+    EVDebug(mod, 1, "generic netlink CMD = %u", genl->cmd);
 
     for(int offset = GENL_HDRLEN; offset < msglen; ) {
       struct nlattr *attr = (struct nlattr *)(msg + offset);
@@ -145,10 +145,10 @@ extern "C" {
 	break;
       case CTRL_ATTR_FAMILY_ID:
 	mdata->family_id = *(uint16_t *)attr_datap;
-	myDebug(1, "generic family id: %u", mdata->family_id); 
+	EVDebug(mod, 1, "generic family id: %u", mdata->family_id); 
 	break;
       case CTRL_ATTR_FAMILY_NAME:
-	myDebug(1, "generic family name: %s", attr_datap); 
+	EVDebug(mod, 1, "generic family name: %s", attr_datap); 
 	break;
       case CTRL_ATTR_MCAST_GROUPS:
 	for(int grp_offset = NLA_HDRLEN; grp_offset < attr->nla_len;) {
@@ -171,11 +171,11 @@ extern "C" {
 	    switch(gf_attr->nla_type) {
 	    case CTRL_ATTR_MCAST_GRP_NAME:
 	      grp_name = grp_attr_datap;
-	      myDebug(1, "psample multicast group: %s", grp_name); 
+	      EVDebug(mod, 1, "psample multicast group: %s", grp_name); 
 	      break;
 	    case CTRL_ATTR_MCAST_GRP_ID:
 	      grp_id = *(uint32_t *)grp_attr_datap;
-	      myDebug(1, "psample multicast group id: %u", grp_id); 
+	      EVDebug(mod, 1, "psample multicast group id: %u", grp_id); 
 	      break;
 	    }
 	    gf_offset += NLMSG_ALIGN(gf_attr->nla_len);
@@ -184,7 +184,7 @@ extern "C" {
 	     && grp_name
 	     && grp_id
 	     && my_strequal(grp_name, PSAMPLE_NL_MCGRP_SAMPLE_NAME)) {
-	    myDebug(1, "psample found group %s=%u", grp_name, grp_id);
+	    EVDebug(mod, 1, "psample found group %s=%u", grp_name, grp_id);
 	    mdata->group_id = grp_id;
 	    joinGroup_PSAMPLE(mod);
 	  }
@@ -193,7 +193,7 @@ extern "C" {
 	}
 	break;
       default:
-	myDebug(1, "psample attr type: %u (nested=%u) len: %u",
+	EVDebug(mod, 1, "psample attr type: %u (nested=%u) len: %u",
 		attr->nla_type,
 		attr->nla_type & NLA_F_NESTED,
 		attr->nla_len);
@@ -223,7 +223,7 @@ extern "C" {
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
-    myDebug(1, "psample netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
+    EVDebug(mod, 1, "psample netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
 
     uint16_t ifin=0,ifout=0;
     uint32_t pkt_len=0;
@@ -309,7 +309,7 @@ extern "C" {
     }
 #endif
 
-    myDebug(3, "psample: grp=%u", grp_no);
+    EVDebug(mod, 3, "grp=%u", grp_no);
 
     // TODO: this filter can be pushed into kernel with BPF expression on socket
     // but that might affect control messages?  For now it seems unlikely that
@@ -336,7 +336,7 @@ extern "C" {
       }
       mdata->last_grp_seq[egress] = grp_seq;
 
-      myDebug(2, "psample: grp=%u in=%u out=%u n=%u seq=%u drops=%u pktlen=%u",
+      EVDebug(mod, 2, "grp=%u in=%u out=%u n=%u seq=%u drops=%u pktlen=%u",
 	      grp_no,
 	      ifin,
 	      ifout,
@@ -350,7 +350,7 @@ extern "C" {
       SFLAdaptor *samplerDev = egress ? outDev : inDev;
       if(!samplerDev) {
         // handle startup race-condition where interface has not been discovered yet
-        myDebug(2, "psample: unknown ifindex %u (startup race-condition?)", ifin);
+        EVDebug(mod, 2, "unknown ifindex %u (startup race-condition?)", ifin);
 	freeExtendedElements(ext_elems);
         return;
       }
@@ -441,11 +441,11 @@ extern "C" {
 	if(nlh->nlmsg_type == NLMSG_ERROR){
 	  struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
 	  if(err_msg->error == 0) {
-	    myDebug(1, "received Netlink ACK");
+	    EVDebug(mod, 1, "received Netlink ACK");
 	  }
 	  else {
 	    // TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
-	    myDebug(1, "psample state %u: error in netlink message: %d : %s",
+	    EVDebug(mod, 1, "state %u: error in netlink message: %d : %s",
 		    mdata->state,
 		    err_msg->error,
 		    strerror(-err_msg->error));
@@ -459,7 +459,7 @@ extern "C" {
 
     // This should have advanced the state past GET_FAMILY
     if(mdata->state == HSP_PSAMPLE_STATE_GET_FAMILY) {
-      myDebug(1, "psample: failed to get family details - wait before trying again");
+      EVDebug(mod, 1, "failed to get family details - wait before trying again");
       mdata->state = HSP_PSAMPLE_STATE_WAIT;
       mdata->retry_countdown = HSP_PSAMPLE_WAIT_RETRY_S;
     }
