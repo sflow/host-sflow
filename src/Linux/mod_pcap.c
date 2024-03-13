@@ -94,18 +94,18 @@ extern "C" {
 	  u_char mac_s[13], mac_d[13];
 	  printHex(macsrc.mac, 6, mac_s, 13, NO);
 	  printHex(macdst.mac, 6, mac_d, 13, NO);
-	  myLog(LOG_INFO, "PCAP: macsrc=%s, macdst=%s", mac_s, mac_d);
+	  EVDebug(mod, 0, "macsrc=%s, macdst=%s", mac_s, mac_d);
 	  if(srcdev) {
-	    myLog(LOG_INFO, "PCAP: srcdev=%s(%u)(peer=%u)",
-		  srcdev->deviceName,
-		  srcdev->ifIndex,
-		  srcdev->peer_ifIndex);
+	    EVDebug(mod, 0, "srcdev=%s(%u)(peer=%u)",
+		    srcdev->deviceName,
+		    srcdev->ifIndex,
+		    srcdev->peer_ifIndex);
 	  }
 	  if(dstdev) {
-	    myLog(LOG_INFO, "PCAP: dstdev=%s(%u)(peer=%u)",
-		  dstdev->deviceName,
-		  dstdev->ifIndex,
-		  dstdev->peer_ifIndex);
+	    EVDebug(mod, 0, "dstdev=%s(%u)(peer=%u)",
+		    dstdev->deviceName,
+		    dstdev->ifIndex,
+		    dstdev->peer_ifIndex);
 	  }
 	}
       }
@@ -171,7 +171,7 @@ extern "C" {
 			      readPackets_pcap_cb,
 			      (u_char *)bpfs);
     if(batch == -1) {
-      myLog(LOG_ERR, "pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
+      myLog(LOG_ERR, "pcap: pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
       // may get here if the interface was removed
       tap_close(mod, bpfs);
     }
@@ -216,12 +216,10 @@ extern "C" {
     return ver;
   }
 
-  static int setKernelSampling(HSP *sp, BPFSoc *bpfs, int fd)
+  static int setKernelSampling(EVMod *mod, BPFSoc *bpfs, int fd)
   {
-    if(getDebug()) {
-      myLog(LOG_INFO, "PCAP: setKernelSampling() kernel version (as int) == %"PRIu64,
-	    kernelVer64(sp));
-    }
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    EVDebug(mod, 1, "setKernelSampling() kernel version (as int) == %"PRIu64, kernelVer64(sp));
 
     if(kernelVer64(sp) < 3019000L) {
       // kernel earlier than 3.19 == not new enough.
@@ -230,7 +228,7 @@ extern "C" {
       // have come in before 3.19,  but this is the
       // earliest version that I have tested on
       // successfully.
-      myLog(LOG_ERR, "PCAP: warning: kernel too old for BPF sampling. Fall back on user-space sampling.");
+      EVDebug(mod, 0, "warning: kernel too old for BPF sampling. Fall back on user-space sampling.");
       return NO;
     }
 
@@ -244,7 +242,7 @@ extern "C" {
 
     // overwrite the sampling-rate
     code[1].k = bpfs->samplingRate;
-    myDebug(1, "PCAP: sampling rate set to %u for dev=%s", code[1].k, bpfs->deviceName);
+    EVDebug(mod, 1, "sampling rate set to %u for dev=%s", code[1].k, bpfs->deviceName);
     struct sock_fprog bpf = {
       .len = 5, // ARRAY_SIZE(code),
       .filter = code,
@@ -252,15 +250,15 @@ extern "C" {
 
     // install the sock_filter directly, rather than using pcap_setfilter()
     int status = setsockopt(fd, SOL_SOCKET, SO_ATTACH_FILTER, &bpf, sizeof(bpf));
-    myDebug(1, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d", status);
+    EVDebug(mod, 1, "setsockopt (SO_ATTACH_FILTER) status=%d", status);
     if(status == -1) {
-      myLog(LOG_ERR, "PCAP: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
+      myLog(LOG_ERR, "pcap: setsockopt (SO_ATTACH_FILTER) status=%d : %s", status, strerror(errno));
       return NO;
     }
 
     // success - now we don't need to sub-sample in user-space
     bpfs->subSamplingRate = 1;
-    myDebug(1, "PCAP: kernel sampling OK");
+    EVDebug(mod, 1, "kernel sampling OK");
     return YES;
   }
 
@@ -309,41 +307,41 @@ extern "C" {
 
     // create pcap
     if((bpfs->pcap = pcap_create(bpfs->deviceName, bpfs->pcap_err)) == NULL) {
-      myLog(LOG_ERR, "PCAP: device %s open failed: %s", bpfs->deviceName, bpfs->pcap_err);
+      myLog(LOG_ERR, "pcap: device %s open failed: %s", bpfs->deviceName, bpfs->pcap_err);
       return;
     }
 
     // immediate mode
     if(kernelVer64(sp) < 3019000L) {
-      myDebug(1, "PCAP: kernel too old for BPF sampling, so not setting immediate mode");
+      EVDebug(mod, 1, "kernel too old for BPF sampling, so not setting immediate mode");
     }
     else if(pcap_set_immediate_mode(bpfs->pcap, YES) != 0) {
-      myLog(LOG_ERR, "PCAP: pcap_set_immediate_mode(%s) failed", bpfs->deviceName);
+      myLog(LOG_ERR, "pcap: pcap_set_immediate_mode(%s) failed", bpfs->deviceName);
     }
 
     // snaplen
     if(pcap_set_snaplen(bpfs->pcap, sp->sFlowSettings_file->headerBytes) != 0)
-      myLog(LOG_ERR, "PCAP: pcap_set_snaplen(%s) failed", bpfs->deviceName);
+      myLog(LOG_ERR, "pcap: pcap_set_snaplen(%s) failed", bpfs->deviceName);
 
     // promiscuous mode
     if(pcap_set_promisc(bpfs->pcap, bpfs->promisc) != 0)
-      myLog(LOG_ERR, "PCAP: pcap_set_promisc(%s) failed", bpfs->deviceName);
+      myLog(LOG_ERR, "pcap: pcap_set_promisc(%s) failed", bpfs->deviceName);
 
     // read timeout
     if(pcap_set_timeout(bpfs->pcap, 0) != 0)    // indicate we are going to poll
-      myLog(LOG_ERR, "PCAP: pcap_set_timeout(%s) failed", bpfs->deviceName);
+      myLog(LOG_ERR, "pcap: pcap_set_timeout(%s) failed", bpfs->deviceName);
 
     // activate
     int status = pcap_activate(bpfs->pcap);
     if(status < 0) {
-      myLog(LOG_ERR, "PCAP: activate(%s) ERROR: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
+      myLog(LOG_ERR, "pcap: activate(%s) ERROR: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
       return;
     }
     else if(status > 0) {
-      myLog(LOG_INFO, "PCAP: activate(%s) warning: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
+      EVDebug(mod, 0, "activate(%s) warning: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
     }
 
-    myDebug(1, "PCAP: device %s opened OK", bpfs->deviceName);
+    EVDebug(mod, 1, "device %s opened OK", bpfs->deviceName);
 
     // get list of possible datalink types
     bpfs->n_dlts = pcap_list_datalinks(bpfs->pcap, &bpfs->dlts);
@@ -351,7 +349,7 @@ extern "C" {
     if(bpfs->n_dlts > 0 && bpfs->dlts) {
       for(int ii=0; ii < bpfs->n_dlts; ii++) {
 	int dlt = bpfs->dlts[ii]; 
-	myDebug(1, "PCAP: device %s offers DLT=%u (%s)",
+	EVDebug(mod, 1, "device %s offers DLT=%u (%s)",
 		bpfs->deviceName,
 		dlt,
 		pcap_datalink_val_to_name(dlt));
@@ -368,11 +366,11 @@ extern "C" {
 	  chooseDLT(bpfs, DLT_LINUX_SLL);
       // DLT_IEEE802_11
       if(bpfs->dlt == -1) {
-	myLog(LOG_ERR, "PCAP: %s has no supported datalink encapsulaton", bpfs->deviceName);
+	myLog(LOG_ERR, "pcap: %s has no supported datalink encapsulaton", bpfs->deviceName);
 	tap_close(mod, bpfs);
       }
       else {
-	myDebug(1, "PCAP: device %s selecting encapsulation=%u (%s)",
+	EVDebug(mod, 1, "device %s selecting encapsulation=%u (%s)",
 		bpfs->deviceName,
 		bpfs->dlt,
 		pcap_datalink_val_to_name(bpfs->dlt));
@@ -384,7 +382,7 @@ extern "C" {
       
       // configure BPF sampling
       if(bpfs->samplingRate > 1)
-	setKernelSampling(sp, bpfs, fd);
+	setKernelSampling(mod, bpfs, fd);
       
       // register
       bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
@@ -420,7 +418,7 @@ extern "C" {
   */
   static void addBPFSocket(EVMod *mod,  HSPPcap *pcap, SFLAdaptor *adaptor) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
-    myDebug(1, "PCAP addBPFSocket(%s) speed=%"PRIu64, adaptor->deviceName, adaptor->ifSpeed);
+    EVDebug(mod, 1, "addBPFSocket(%s) speed=%"PRIu64, adaptor->deviceName, adaptor->ifSpeed);
     BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
     UTArrayAdd(mdata->bpf_socs, bpfs);
     bpfs->module = mod;
@@ -448,7 +446,7 @@ extern "C" {
       if(pcap->dev) {
 	SFLAdaptor *adaptor = adaptorByName(sp, pcap->dev);
 	if(adaptor == NULL) {
-	  myLog(LOG_ERR, "PCAP: device %s not found", pcap->dev);
+	  myLog(LOG_ERR, "pcap: device %s not found", pcap->dev);
 	  continue;
 	}
 	addBPFSocket(mod, pcap, adaptor);
@@ -458,27 +456,27 @@ extern "C" {
 	  char sp1[20], sp2[20];
 	  printSpeed(pcap->speed_min, sp1, 20);
 	  printSpeed(pcap->speed_max, sp2, 20);
-	  myDebug(1, "PCAP: searching devices with speed %s-%s", sp1, sp2);
+	  EVDebug(mod, 1, "searching devices with speed %s-%s", sp1, sp2);
 	}
 	SFLAdaptor *adaptor;
 	UTHASH_WALK(sp->adaptorsByName, adaptor) {
- 	  myDebug(2, "PCAP: consider %s (speed=%"PRIu64")", adaptor->deviceName, adaptor->ifSpeed);
+ 	  EVDebug(mod, 2, "consider %s (speed=%"PRIu64")", adaptor->deviceName, adaptor->ifSpeed);
 	  if((adaptor->ifSpeed == pcap->speed_min && pcap->speed_max == 0)
 	     || (adaptor->ifSpeed >= pcap->speed_min
 		 && adaptor->ifSpeed <= pcap->speed_max)) {
-	    myDebug(2, "PCAP: %s speed OK", adaptor->deviceName);
+	    EVDebug(mod, 2, "%s speed OK", adaptor->deviceName);
 	    // passed the speed test,  but there may be other
 	    // reasons to reject this one:
 	    HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
 	    if(nio->bond_master) {
-	      myDebug(1, "PCAP: skip %s (bond_master)", adaptor->deviceName);
+	      EVDebug(mod, 1, "skip %s (bond_master)", adaptor->deviceName);
 	    }
 	    else if(nio->vlan != HSP_VLAN_ALL) {
-	      myDebug(1, "PCAP: skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
+	      EVDebug(mod, 1, "skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
 	    }
 	    else if(nio->devType != HSPDEV_PHYSICAL
 		    && nio->devType != HSPDEV_OTHER) {
-	      myDebug(1, "PCAP: skip %s (devType=%s)",
+	      EVDebug(mod, 1, "skip %s (devType=%s)",
 		      adaptor->deviceName,
 		      devTypeName(nio->devType));
 	    }
