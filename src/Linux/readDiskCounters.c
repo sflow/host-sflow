@@ -89,13 +89,20 @@ int remote_mount(const char *device, const char *type)
 		  /*&writes_merged,*/
 		  &sectors_written,
 		  &write_time_ms) == 9) {
+          int is_partition = 0;
+          for (int i = 0; i < strlen(devName) - 1; i++) {
+            if (isdigit(devName[i])) {
+              is_partition = 1;
+              break;
+            }
+          }
 	  gotData = YES;
 	  // report the sum over all disks - except software RAID devices and logical volumes
 	  // because that would cause double-counting.   We identify those by their
 	  // major numbers:
 	  // Software RAID = 9
 	  // Logical Vol = 253
-	  if(majorNo != 9 && majorNo != 253) {
+	  if(majorNo != 9 && majorNo != 253 && is_partition == 0) {
 	    dsk->reads += reads;
 	    total_sectors_read += sectors_read;
 	    dsk->read_time += read_time_ms;
