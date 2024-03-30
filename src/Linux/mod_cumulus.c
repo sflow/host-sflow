@@ -39,7 +39,7 @@ extern "C" {
     Called to get latest counters
   */
 
-  int readBroadcomCounters(HSP *sp, SFLBCM_tables *bcm) {
+  static int readBroadcomCounters(EVMod *mod, SFLBCM_tables *bcm) {
     uint64_t scratch64;
     uint64_t mode;
 
@@ -60,7 +60,7 @@ extern "C" {
 
     // routing tables
     if(!readOneIntFile(HSP_BCM_FILES "route_info/route/mode", &mode)) {
-      myDebug(1, "cannot read route-table mode");
+      EVDebug(mod, 1, "cannot read route-table mode");
     }
     if(mode == 1) {
       // (v4-v6, long-v6)
@@ -121,11 +121,10 @@ extern "C" {
 
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_CUMULUS *mdata = (HSP_mod_CUMULUS *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     memset(&mdata->bcmElem, 0, sizeof(mdata->bcmElem));
     mdata->bcmElem.tag = SFLCOUNTERS_BCM_TABLES;
-    if(readBroadcomCounters(sp, &mdata->bcmElem.counterBlock.bcm_tables)) {
+    if(readBroadcomCounters(mod, &mdata->bcmElem.counterBlock.bcm_tables)) {
       SFLADD_ELEMENT(cs, &mdata->bcmElem);
     }
   }
@@ -138,7 +137,8 @@ extern "C" {
   */
 
   static int execOutputLine(void *magic, char *line) {
-    myDebug(1, "execOutputLine: %s", line);
+    EVMod *mod = (EVMod *)magic;
+    EVDebug(mod, 1, "execOutputLine: %s", line);
     return YES;
   }
 
@@ -165,7 +165,7 @@ extern "C" {
       strArrayAdd(cmdline, loggrp);
 #define HSP_MAX_EXEC_LINELEN 1024
       char outputLine[HSP_MAX_EXEC_LINELEN];
-      myDebug(1, "setSamplingRate(%s) %u -> %u",
+      EVDebug(mod, 1, "setSamplingRate(%s) %u -> %u",
 	      adaptor->deviceName,
 	      niostate->sampling_n_set,
 	      niostate->sampling_n);
@@ -177,14 +177,14 @@ extern "C" {
       if(sp->psample.egress)
 	strArrayInsert(cmdline, 3, srate); // egress
       int status;
-      if(myExec(NULL, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
+      if(myExec(mod, strArray(cmdline), execOutputLine, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
 	if(WEXITSTATUS(status) != 0) {
 	  myLog(LOG_ERR, "myExec(%s) exitStatus=%d so assuming ULOG/NFLOG is 1:1",
 		HSP_CUMULUS_SWITCHPORT_CONFIG_PROG,
 		WEXITSTATUS(status));
 	}
 	else {
-	  myDebug(1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
+	  EVDebug(mod, 1, "setSamplingRate(%s) succeeded", adaptor->deviceName);
 	  // hardware or kernel sampling was successfully configured
 	  niostate->sampling_n_set = niostate->sampling_n;
 	  hw_sampling = YES;
@@ -222,7 +222,7 @@ extern "C" {
       HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(!niostate->switchPort) {
 	if(regexec(sp->cumulus.swp_regex, adaptor->deviceName, 0, NULL, 0) == 0) {
-	  myDebug(1, "new switchport detected: %s", adaptor->deviceName);
+	  EVDebug(mod, 1, "new switchport detected: %s", adaptor->deviceName);
 	  niostate->switchPort = YES;
 	}
       }

@@ -14,6 +14,50 @@ static void sfl_agent_jumpTableAdd(SFLAgent *agent, SFLSampler *sampler);
 static void sfl_agent_jumpTableRemove(SFLAgent *agent, SFLSampler *sampler);
 
 /*________________--------------------------__________________
+  ________________  SFDG datagram callbacks __________________
+  ----------------__________________________------------------
+*/
+
+static void *sfdgCB_alloc(void *magic, size_t bytes)  {
+  SFLReceiver *receiver = (SFLReceiver *)magic;
+  return sflAlloc(receiver->agent, bytes);
+}
+
+static void sfdgCB_free(void *magic, void *obj)  {
+  SFLReceiver *receiver = (SFLReceiver *)magic;
+  sflFree(receiver->agent, obj);
+}
+
+static void sfdgCB_error(void *magic, char *msg)  {
+  SFLReceiver *receiver = (SFLReceiver *)magic;
+  sfl_agent_error(receiver->agent, "SFDG", msg);
+}
+
+static uint64_t sfdgCB_now_mS(void *magic)  {
+  SFLReceiver *receiver = (SFLReceiver *)magic;
+  return sfl_agent_uptime_mS(receiver->agent);
+}
+
+static void sfdgCB_send(void *magic, struct iovec *iov, int iovcnt)  {
+  /* If we get here it's because we were not given a vector-io send function,
+     so this is where we match the old API by combining the buffers. */
+  SFLReceiver *receiver = (SFLReceiver *)magic;
+  SFLAgent *agent = receiver->agent;
+  u_char pkt[SFL_MAX_DATAGRAM_SIZE];
+  uint32_t len = 0;
+  for(uint32_t ii = 0; ii < iovcnt; ii++) {
+    size_t seglen = iov[ii].iov_len;
+    if ((len + seglen) > SFL_MAX_DATAGRAM_SIZE) {
+      sfl_agent_error(agent, "SFDG", "backwards compatibility send error");
+      return;
+    }
+    memcpy(pkt + len, iov[ii].iov_base, seglen);
+    len += seglen;
+  }
+  agent->sendFn(agent->magic, agent, agent->receivers, pkt, len);
+}
+  
+/*________________--------------------------__________________
   ________________    sfl_agent_init        __________________
   ----------------__________________________------------------
 */
@@ -41,17 +85,39 @@ void sfl_agent_init(SFLAgent *agent,
   agent->freeFn = freeFn;
   agent->errorFn = errorFn;
   agent->sendFn = sendFn;
-
-#ifdef SFLOW_DO_SOCKET  
-  if(sendFn == NULL) {
-    /* open the socket - really need one for v4 and another for v6? */
-    if((agent->receiverSocket4 = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-      sfl_agent_sysError(agent, "agent", "IPv4 socket open failed");
-    if((agent->receiverSocket6 = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1)
-      sfl_agent_sysError(agent, "agent", "IPv6 socket open failed");
-  }
-#endif
+  /* by default the callbacks from the SFDG datagram-builder come back through the agent */
+  agent->sfdg.allocFn = sfdgCB_alloc;
+  agent->sfdg.freeFn = sfdgCB_free;
+  agent->sfdg.errFn = sfdgCB_error;
+  agent->sfdg.sendFn = sfdgCB_send;
+  agent->sfdg.nowFn = sfdgCB_now_mS;
 }
+
+/*_________________---------------------------__________________
+  _________________   sfl_agent_init_sfdg_*   __________________
+  -----------------___________________________------------------
+Some datagram-builder callbacks can be overridden at init time for performance.
+*/
+
+static void reset_receiver_sfdgs(SFLAgent *agent) {
+  for(SFLReceiver *rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt)
+    sfl_receiver_init_sfdg(rcv);
+}
+    
+void sfl_agent_init_sfdg_sendFn(SFLAgent *agent, f_send_t sendFn) {
+  agent->sfdg.sendFn = sendFn;
+  reset_receiver_sfdgs(agent);
+}
+
+void sfl_agent_init_sfdg_nowFn(SFLAgent *agent, f_now_mS_t nowFn) {
+  agent->sfdg.nowFn = nowFn;
+  reset_receiver_sfdgs(agent);
+} 
+
+void sfl_agent_init_sfdg_hookFn(SFLAgent *agent, f_hook_t hookFn) {
+  agent->sfdg.hookFn = hookFn;
+  reset_receiver_sfdgs(agent);
+} 
 
 /*_________________---------------------------__________________
   _________________   sfl_agent_release       __________________
@@ -96,12 +162,6 @@ void sfl_agent_release(SFLAgent *agent)
     rcv = nextRcv;
   }
   agent->receivers = NULL;
-
-#ifdef SFLOW_DO_SOCKET
-  /* close the sockets */
-  if(agent->receiverSocket4 > 0) close(agent->receiverSocket4);
-  if(agent->receiverSocket6 > 0) close(agent->receiverSocket6);
-#endif
 }
 
 /*_________________---------------------------__________________
@@ -140,6 +200,16 @@ void sfl_agent_set_now(SFLAgent *agent, time_t now, time_t now_nS)
 }
 
 /*_________________---------------------------__________________
+  _________________  sfl_agent_get_address    __________________
+  -----------------___________________________------------------
+*/
+
+SFLAddress *sfl_agent_get_address(SFLAgent *agent)
+{
+  return &agent->myIP;
+}
+
+/*_________________---------------------------__________________
   _________________  sfl_agent_set_address    __________________
   -----------------___________________________------------------
 */
@@ -150,7 +220,11 @@ void sfl_agent_set_address(SFLAgent *agent, SFLAddress *ip)
 
   for( rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt)
     sfl_receiver_flush(rcv);
+
   agent->myIP = (*ip);
+  
+  for( rcv = agent->receivers; rcv != NULL; rcv = rcv->nxt)
+    sfl_receiver_init_sfdg(rcv);
 }
 
 /*_________________---------------------------__________________
@@ -175,6 +249,8 @@ SFLReceiver *sfl_agent_addReceiver(SFLAgent *agent)
   prev = NULL;
   rcv = (SFLReceiver *)sflAlloc(agent, sizeof(SFLReceiver));
   sfl_receiver_init(rcv, agent);
+  sfl_receiver_init_sfdg(rcv);
+
   // add to end of list - to preserve the receiver index numbers for existing receivers
  
   for(r = agent->receivers; r != NULL; prev = r, r = r->nxt);
@@ -543,13 +619,16 @@ void sfl_agent_resetReceiver(SFLAgent *agent, SFLReceiver *receiver)
     if(rcv == receiver) {
       /* now tell anyone that is using it to stop */
       for( sm = agent->samplers; sm != NULL; sm = sm->nxt)
-	if(sfl_sampler_get_sFlowFsReceiver(sm) == rcvIdx) sfl_sampler_set_sFlowFsReceiver(sm, 0);
+	if(sfl_sampler_get_sFlowFsReceiver(sm) == rcvIdx)
+	  sfl_sampler_set_sFlowFsReceiver(sm, 0);
       
       for( pl = agent->pollers; pl != NULL; pl = pl->nxt)
-	if(sfl_poller_get_sFlowCpReceiver(pl) == rcvIdx) sfl_poller_set_sFlowCpReceiver(pl, 0);
+	if(sfl_poller_get_sFlowCpReceiver(pl) == rcvIdx)
+	  sfl_poller_set_sFlowCpReceiver(pl, 0);
 
       for( nf = agent->notifiers; nf != NULL; nf = nf->nxt)
-	if(sfl_notifier_get_sFlowEsReceiver(nf) == rcvIdx) sfl_notifier_set_sFlowEsReceiver(nf, 0);
+	if(sfl_notifier_get_sFlowEsReceiver(nf) == rcvIdx)
+	  sfl_notifier_set_sFlowEsReceiver(nf, 0);
 
       break;
     }

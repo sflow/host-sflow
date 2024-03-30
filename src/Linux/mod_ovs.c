@@ -84,7 +84,7 @@ extern "C" {
 
   static void setState(EVMod *mod, EnumSFVSState state) {
     HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
-    myDebug(1, "state -> %s", SFVSStateNames[state]);
+    EVDebug(mod, 1, "state -> %s", SFVSStateNames[state]);
     mdata->state = state;
   }
 
@@ -299,18 +299,18 @@ extern "C" {
     line[varlen] = '\0';
     char *var = stripQuotes(line, SFVS_QUOTES);
     char *val = stripQuotes(line + varlen + 1, SFVS_QUOTES);
-    myDebug(1, "sFlowList> %s=%s", var, val);
+    EVDebug(mod, 1, "sFlowList> %s=%s", var, val);
     if(strcmp(var, "_uuid") == 0) {
       switch(mdata->state) {
       case SFVSSTATE_SYNC_SEARCH:
-	myDebug(1, "found sflow uuid %s", val);
+	EVDebug(mod, 1, "found sflow uuid %s", val);
 	setStr(&mdata->sflowUUID, val);
 	setState(mod, SFVSSTATE_SYNC_FOUND);
 	break;
       case SFVSSTATE_SYNC_FOUND:
       case SFVSSTATE_SYNC_DESTROY:
 	setState(mod, SFVSSTATE_SYNC_DESTROY);
-	myDebug(1, "found extra sflow uuid %s", val);
+	EVDebug(mod, 1, "found extra sflow uuid %s", val);
 	strArrayAdd(mdata->extras, val);
 	break;
       default:
@@ -377,7 +377,7 @@ extern "C" {
     char *uuid = stripQuotes(line, SFVS_QUOTES);
     if(uuid && strcmp(uuid, mdata->sflowUUID) != 0) {
       // doesn't match
-      myDebug(1, "setting sflow for bridge %s", mdata->bridge);
+      EVDebug(mod, 1, "setting sflow for bridge %s", mdata->bridge);
       addBridgeSetting(mod, "sflow", mdata->sflowUUID);
     }
     return YES;
@@ -401,7 +401,7 @@ extern "C" {
     if(sscanf(line, "name%*[\t ]:%*[\t ]%s", bridgeName) == 1) {
       // copy the bridge name
       char *br = stripQuotes(bridgeName, SFVS_QUOTES);
-      myDebug(1, "bridgeList> %s", br);
+      EVDebug(mod, 1, "bridgeList> %s", br);
       if(br && (br[0] != '\0')) {
 	setStr(&mdata->bridge, br);
 	// now run a command to check (and possible change) the bridge sFlow setting
@@ -434,7 +434,7 @@ extern "C" {
   {
     EVMod *mod = (EVMod *)magic;
     HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
-    myLog(LOG_INFO, "sumbitChanges: %s", line);
+    EVDebug(mod, 0, "sumbitChanges: %s", line);
     // if we get anything at all here, then it probably means something didn't work - but
     // return YES anway so we can log the whole error message if it spans multiple
     // lines.  Note that with the --id=@tok settings we do now see the UUID of the newly
@@ -443,7 +443,7 @@ extern "C" {
     // best we can do without making bigger changes.
     mdata->cmdFailed = YES;
     if(mdata->usingAtVar && mdata->ovs10 && mdata->usedAtVarOK == NO) {
-      myDebug(1, "command with --id=@tok failed and version is 1.0.*, so turn off --id=@tok");
+      EVDebug(mod, 1, "command with --id=@tok failed and version is 1.0.*, so turn off --id=@tok");
       mdata->useAtVar = NO;
     }
     return YES;
@@ -459,7 +459,7 @@ extern "C" {
     // this is to assume that we can use --id==@tok unless we see a very
     // specific version string:
     if(memcmp(line, "ovs-vsctl (Open vSwitch) 1.0", 28) == 0) {
-      myDebug(1, "detected ovs-vsctl version 1.0 - may turn off use of --id=@tok");
+      EVDebug(mod, 1, "detected ovs-vsctl version 1.0 - may turn off use of --id=@tok");
       mdata->ovs10 = YES;
     }
     return NO; // only want the first line
@@ -477,7 +477,7 @@ extern "C" {
     resetExtras(mod);
     char line[SFVS_MAX_LINELEN];
 
-    myDebug(1, "==== ovs-vsctl version ====");
+    EVDebug(mod, 1, "==== ovs-vsctl version ====");
     char *version_cmd[] = { SFVS_OVS_CMD, "--version", NULL};
     // don't abort if this fails: readVersion returns NO as an easy way
     // to only see the first line. (Line number should really be supplied to
@@ -491,7 +491,7 @@ extern "C" {
        || mdata->config.num_collectors == 0
        || (mdata->config.sampling_n == 0 && mdata->config.polling_secs == 0)) {
       // no config or no targets or no sampling/polling - clear everything
-      myDebug(1, "no config found: clearing all OVS sFlow config");
+      EVDebug(mod, 1, "no config found: clearing all OVS sFlow config");
       setStr(&mdata->sflowUUID, "[]");
       setState(mod, SFVSSTATE_SYNC_DESTROY);
     }
@@ -501,7 +501,7 @@ extern "C" {
       setStr(&mdata->sflowUUID, SFVS_NEW_SFLOW_ID);
       setState(mod, SFVSSTATE_SYNC_SEARCH);
     }
-    myDebug(1, "==== list sflow ====");
+    EVDebug(mod, 1, "==== list sflow ====");
     char *list_sflow_cmd[] = { SFVS_OVS_CMD, "list", "sflow", NULL };
     if(myExec((void *)mod, list_sflow_cmd, sFlowList, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
 
@@ -522,7 +522,7 @@ extern "C" {
     }
 
     // make sure every bridge is using this sFlow entry
-    myDebug(1, "==== list bridge ====");
+    EVDebug(mod, 1, "==== list bridge ====");
     char *list_bridge_cmd[] = { SFVS_OVS_CMD, "list", "bridge", NULL};
     if(myExec((void *)mod, list_bridge_cmd, bridgeList, line, SFVS_MAX_LINELEN, NULL) == NO) return NO;
 
@@ -565,7 +565,7 @@ extern "C" {
     if(mdata->tick >= 60 && mdata->state != SFVSSTATE_READCONFIG_FAILED) {
       // a minute has passed, and we are not still waiting for a valid config
       mdata->tick = 0;
-      myDebug(1, "minute passed - check sync");
+      EVDebug(mod, 1, "minute passed - check sync");
       setState(mod, SFVSSTATE_SYNC);
     }
 
@@ -604,7 +604,7 @@ extern "C" {
 
   static void evt_final(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_OVS *mdata = (HSP_mod_OVS *)mod->data;
-    myDebug(1, "graceful shutdown: turning off OVS sFlow");
+    EVDebug(mod, 1, "graceful shutdown: turning off OVS sFlow");
     mdata->config.num_collectors = 0;
     syncOVS(mod);
   }

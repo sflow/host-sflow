@@ -89,17 +89,17 @@ extern "C" {
       if(recvBytes <= 0)
 	break;
 
-      myDebug(2, "got OPX msg: %u bytes", recvBytes);
+      EVDebug(mod, 2, "got OPX msg: %u bytes", recvBytes);
 
       if(getDebug() > 2) {
 	u_char pbuf[2000];
 	printHex((u_char *)buf32, HSP_MAX_OPX_MSG_BYTES, pbuf, 2000, NO);
-	myDebug(1, "got msg: %s", pbuf);
+	EVDebug(mod, 1, "got msg: %s", pbuf);
       }
 
       // check metadata signature
       if(buf32[0] != 0xDEADBEEF) {
-	myDebug(1, "bad meta-data signature: %08X", buf32[0]);
+	EVDebug(mod, 1, "bad meta-data signature: %08X", buf32[0]);
 	continue;
       }
 
@@ -148,14 +148,14 @@ extern "C" {
       }
 
       if(ii != mdQuads) {
-	myDebug(1, "metadata consumption error");
+	EVDebug(mod, 1, "metadata consumption error");
 	continue;
       }
 
       u_char *pkt = (u_char *)&buf32[mdQuads];
       int headerLen = recvBytes - mdBytes;
       if(headerLen < 14) {
-	myDebug(1, "packet too small");
+	EVDebug(mod, 1, "packet too small");
 	continue;
       }
 
@@ -223,7 +223,7 @@ extern "C" {
     if(opxPort) {
       // TODO: should this really be "::1" and PF_INET6?  Or should we bind to both "127.0.0.1" and "::1" (cf mod_json)
       fd = UTSocketUDP("127.0.0.1", PF_INET, opxPort, HSP_OPX_RCV_BUF);
-      myDebug(1, "opx socket is %d", fd);
+      EVDebug(mod, 1, "opx socket is %d", fd);
     }
     return fd;
   }
@@ -253,12 +253,12 @@ extern "C" {
     cps_api_object_attr_add_u16(obj, BASE_SFLOW_SOCKET_ADDRESS_UDP_PORT, udpPort);
     // add "set" action to transaction
     if((status = cps_api_set(&tran,obj)) != cps_api_ret_code_OK ) {
-      myDebug(1, "CPSSetSampleUDPPort: cps_api_set failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSetSampleUDPPort: cps_api_set failed (status=%d)", status);
       goto out;
     }
     // commit
     if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK ) {
-      myDebug(1, "CPSSetSampleUDPPort: cps_api_commit failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSetSampleUDPPort: cps_api_commit failed (status=%d)", status);
       goto out;
     }
     ok = YES;
@@ -294,7 +294,7 @@ extern "C" {
     cps_api_key_from_attr_with_qual(cps_api_object_key(obj), BASE_SFLOW_ENTRY_OBJ, cps_api_qualifier_TARGET);
     // GET
     if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSSyncEntryIDs: cps_api_get failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSyncEntryIDs: cps_api_get failed (status=%d)", status);
       goto out;
     }
     ok = YES;
@@ -309,7 +309,7 @@ extern "C" {
 	SFLAdaptor *adaptor = adaptorByIndex(sp, ifIndex);
 	if(adaptor) {
 	  ADAPTOR_NIO(adaptor)->opx_id = id;
-	  myDebug(1, "interface %s ifIndex=%u cps_session_id=%u", adaptor->deviceName, ifIndex, id);
+	  EVDebug(mod, 1, "interface %s ifIndex=%u cps_session_id=%u", adaptor->deviceName, ifIndex, id);
 	}
       }
     }
@@ -345,12 +345,12 @@ extern "C" {
     cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_SAMPLING_RATE, sampling_n);
     // "create" action
     if((status = cps_api_create(&tran,obj)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSAddEntry: cps_api_create failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSAddEntry: cps_api_create failed (status=%d)", status);
       goto out;
     }
     // commit
     if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK ) {
-      myDebug(1, "CPSAddEntry: cps_api_commit failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSAddEntry: cps_api_commit failed (status=%d)", status);
       goto out;
     }
     ok = YES;
@@ -392,7 +392,7 @@ extern "C" {
       goto out;
     }
     size_t mx = cps_api_object_list_size(gp.list);
-    myDebug(1, "CPSGetEntry(%u) returned %u entries\n", id, mx);
+    EVDebug(mod, 1, "CPSGetEntry(%u) returned %u entries\n", id, mx);
     if(mx != 1)
       goto out;
     ok = YES;
@@ -446,7 +446,7 @@ extern "C" {
     }
     // commit
     if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK ) {
-      myDebug(1, "CPSDeleteEntry: cps_api_commit failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSDeleteEntry: cps_api_commit failed (status=%d)", status);
       goto out;
     }
     ok = YES;
@@ -481,11 +481,11 @@ extern "C" {
     cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_SAMPLING_RATE, sampling_n);
     // SET
     if ((status = cps_api_set(&tran, obj)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSSetEntrySamplingRate: cps_api_set failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSetEntrySamplingRate: cps_api_set failed (status=%d)", status);
       goto out;
     }
     if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSSetEntrySamplingRate: cps_api_commit failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSetEntrySamplingRate: cps_api_commit failed (status=%d)", status);
       goto out;
     }
     ok = YES;
@@ -519,11 +519,11 @@ extern "C" {
     cps_api_object_attr_add_u32(obj, BASE_SFLOW_ENTRY_DIRECTION, sampling_dirn);
     // SET
     if ((status = cps_api_set(&tran, obj)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSSetEntrySamplingDirn: cps_api_set failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSetEntrySamplingDirn: cps_api_set failed (status=%d)", status);
       goto out;
     }
     if((status = cps_api_commit(&tran)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSSetEntrySamplingDirn: cps_api_commit failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSSetEntrySamplingDirn: cps_api_commit failed (status=%d)", status);
       goto out;
     }
     ok = YES;
@@ -578,7 +578,7 @@ extern "C" {
       // with speed == 0 we can stabilize the startup.
       // Now sampling will only be configured as ports
       // are discovered or come up (or change speed).
-      myDebug(1, "setSamplingRate: do not set: %s ifSpeed==0",
+      EVDebug(mod, 1, "setSamplingRate: do not set: %s ifSpeed==0",
 	      adaptor->deviceName);
       return NO;
     }
@@ -586,7 +586,7 @@ extern "C" {
     if(niostate->switchPort == NO
        || niostate->loopback
        || niostate->bond_master) {
-      myDebug(1, "setSamplingRate: do not set: %s not switchPort component",
+      EVDebug(mod, 1, "setSamplingRate: do not set: %s not switchPort component",
 	      adaptor->deviceName);
       return NO;
     }
@@ -645,29 +645,29 @@ extern "C" {
 			 strlen(adaptor->deviceName)+1);
     // GET
     if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSPollIfState: cps_api_get failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSPollIfState: cps_api_get failed (status=%d)", status);
       goto out;
     }
     ok = YES;
     size_t mx = cps_api_object_list_size(gp.list);
-    myDebug(1, "CPSPollIfState: get returned %u results", mx);
+    EVDebug(mod, 1, "CPSPollIfState: get returned %u results", mx);
     for (size_t ix = 0 ; ix < mx ; ++ix ) {
       cps_api_object_t gobj = cps_api_object_list_get(gp.list,ix);
       cps_api_object_it_t it;
       cps_api_object_it_begin(gobj,&it);
       for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
 	uint32_t ctrid = cps_api_object_attr_id(it.attr);
-	myDebug(2, "CPSPollIfState: field id=%u", ctrid);
+	EVDebug(mod, 2, "CPSPollIfState: field id=%u", ctrid);
 	uint64_t speed;
 	switch(ctrid) {
 
 	case IF_INTERFACES_INTERFACE_ENABLED:
 	  nio->up = cps_api_object_attr_data_u32(it.attr);
-	  myDebug(1, "enabled=%u", nio->up);
+	  EVDebug(mod, 1, "enabled=%u", nio->up);
 	  break;
 
 	case IF_INTERFACES_STATE_INTERFACE_IF_INDEX:
-	  myDebug(1, "ifIndex=%u (adaptor ifIndex=%u)",
+	  EVDebug(mod, 1, "ifIndex=%u (adaptor ifIndex=%u)",
 		  cps_api_object_attr_data_u32(it.attr),
 		  adaptor->ifIndex);
 	  break;
@@ -675,13 +675,13 @@ extern "C" {
 	case IF_INTERFACES_STATE_INTERFACE_ADMIN_STATUS:
 	  et_ctrs->adminStatus = cps_api_object_attr_data_u32(it.attr);
 	  nio->et_found |= HSP_ETCTR_ADMIN;
-	  myDebug(1, "admin-status=%u", et_ctrs->adminStatus);
+	  EVDebug(mod, 1, "admin-status=%u", et_ctrs->adminStatus);
 	  break;
 
 	case IF_INTERFACES_STATE_INTERFACE_OPER_STATUS:
 	  et_ctrs->operStatus = cps_api_object_attr_data_u32(it.attr);
 	  nio->et_found |= HSP_ETCTR_OPER;
-	  myDebug(1, "oper-status=%u", et_ctrs->operStatus);
+	  EVDebug(mod, 1, "oper-status=%u", et_ctrs->operStatus);
 	  break;
 
 	case IF_INTERFACES_STATE_INTERFACE_SPEED:
@@ -691,7 +691,7 @@ extern "C" {
 	    speed *= 1000000LL;
 	  }
 	  // setting the speed may trigger a sampling-rate change
-	  myDebug(1, "ifSpeed=%"PRIu64, speed);
+	  EVDebug(mod, 1, "ifSpeed=%"PRIu64, speed);
 	  setAdaptorSpeed(sp, adaptor, speed, "mod_opx");
 	  break;
 
@@ -747,12 +747,12 @@ extern "C" {
 			 strlen(adaptor->deviceName)+1);
     // GET
     if ((status = cps_api_get(&gp)) != cps_api_ret_code_OK) {
-      myDebug(1, "CPSPollIfCounters: cps_api_get failed (status=%d)", status);
+      EVDebug(mod, 1, "CPSPollIfCounters: cps_api_get failed (status=%d)", status);
       goto out;
     }
     ok = YES;
     size_t mx = cps_api_object_list_size(gp.list);
-    myDebug(1, "CPSPollIfCounters: get returned %u results", mx);
+    EVDebug(mod, 1, "CPSPollIfCounters: get returned %u results", mx);
     for (size_t ix = 0 ; ix < mx ; ++ix ) {
       cps_api_object_t gobj = cps_api_object_list_get(gp.list,ix);
       cps_api_object_it_t it;
@@ -760,7 +760,7 @@ extern "C" {
       for ( ; cps_api_object_it_valid(&it) ; cps_api_object_it_next(&it) ) {
 	uint32_t ctrid = cps_api_object_attr_id(it.attr);
 	uint64_t ctr64 = cps_api_object_attr_data_u64(it.attr);
-	myDebug(2, "CPSPollIfCounters: %s id(%u) hex(%x) == %"PRIu64,
+	EVDebug(mod, 2, "CPSPollIfCounters: %s id(%u) hex(%x) == %"PRIu64,
 		adaptor->deviceName,
 		ctrid,
 		ctrid,
@@ -900,7 +900,7 @@ extern "C" {
     // that we are ready to go. The man page says to ignore the
     // return value,  but we'll log it anyway when debugging...
     int ans = sd_notify(0, "READY=1");
-    myDebug(1, "opx.evt_poll_config_first(): sd_notify() returned %d", ans);
+    EVDebug(mod, 1, "opx.evt_poll_config_first(): sd_notify() returned %d", ans);
   }
 
   /*_________________---------------------------__________________
@@ -943,7 +943,7 @@ extern "C" {
 
     uint64_t allocated2 = cps_api_objects_allocated();
     if(allocated2 != allocated1) {
-      myDebug(1, "evt_poll_config_changed: CPS objects not freed=%"PRIu64,
+      EVDebug(mod, 1, "evt_poll_config_changed: CPS objects not freed=%"PRIu64,
 	      allocated2 - allocated1);
       cps_api_list_stats();
     }
@@ -1002,7 +1002,7 @@ extern "C" {
 
     uint64_t allocated2 = cps_api_objects_allocated();
     if(allocated2 != allocated1) {
-      myDebug(1, "evt_poll_speed_changed: CPS objects not freed=%"PRIu64,
+      EVDebug(mod, 1, "evt_poll_speed_changed: CPS objects not freed=%"PRIu64,
 	      allocated2 - allocated1);
       cps_api_list_stats();
     }

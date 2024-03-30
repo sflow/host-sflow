@@ -682,16 +682,15 @@ extern "C" {
       sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED]++;
     }
     else {
-      SEMLOCK_DO(sp->sync_agent) {
-	sfl_poller_writeCountersSample(vm->poller, &cs);
-	sp->counterSampleQueued = YES;
-	sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
-      }
+      sfl_poller_writeCountersSample(vm->poller, &cs);
+      sp->counterSampleQueued = YES;
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
     }
   }
 
   static void agentCB_getCounters_POD_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
+    // this is a no-op, the Go program drives the counter-reporting
   }
 
   /*_________________---------------------------__________________
@@ -783,13 +782,13 @@ extern "C" {
     // remove from hash tables
     if(UTHashDel(mdata->podsByHostname, pod) == NULL) {
       myLog(LOG_ERR, "UTHashDel (podsByHostname) failed: pod %s", pod->hostname);
-      if(debug(1))
+      if(EVDebug(mod, 1, NULL))
 	podHTPrint(mdata->podsByHostname, "podsByHostname");
     }
     if(pod->cgroup_id
        && UTHashDel(mdata->podsByCgroupId, pod) == NULL) {
       myLog(LOG_ERR, "UTHashDel (podsByCgroupId) failed: pod %s", pod->hostname);
-      if(debug(1))
+      if(EVDebug(mod, 1, NULL))
 	podHTPrint(mdata->podsByCgroupId, "podsByCgroupId");
     }
 

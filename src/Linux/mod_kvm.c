@@ -19,7 +19,6 @@ extern "C" {
   typedef struct _HSP_mod_KVM {
     virConnectPtr virConn;
     UTHash *vmsByUUID;
-    UTArray *pollActions;
     SFLCounters_sample_element vnodeElem;
     int num_domains;
     uint32_t refreshVMListSecs;
@@ -37,7 +36,7 @@ extern "C" {
     HSPVMState_KVM *state = (HSPVMState_KVM *)poller->userData;
     HSPVMState *vm = (HSPVMState *)&state->vm;
     if(state == NULL) {
-      myDebug(1, "agentCB_getCounters_KVM: state==NULL");
+      EVDebug(mod, 1, "agentCB_getCounters_KVM: state==NULL");
       return;
     }
 
@@ -177,28 +176,13 @@ extern "C" {
 	adaptorsElem.counterBlock.adaptors = vm->interfaces;
 	SFLADD_ELEMENT(cs, &adaptorsElem);
 
-	SEMLOCK_DO(sp->sync_agent) {
-	  sfl_poller_writeCountersSample(poller, cs);
-	  sp->counterSampleQueued = YES;
-	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
-	}
+	sfl_poller_writeCountersSample(poller, cs);
+	sp->counterSampleQueued = YES;
+	sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
 
 	virDomainFree(domainPtr);
       }
     }
-  }
-
-  /*_________________--------------------------------------__________________
-    _________________  sflow agent callback for counters   __________________
-    -----------------______________________________________------------------
-  */
-
-  static void agentCB_getCounters_KVM_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
-  {
-    EVMod *mod = (EVMod *)poller->magic;
-    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
-    // defer, since the agent mutex is currently held and we don't want to block it
-    UTArrayAdd(mdata->pollActions, poller);
   }
 
   /*_________________---------------------------__________________
@@ -206,7 +190,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static int domain_xml_path_equal(xmlNode *node, char *nodeName, ...) {
+  static int domain_xml_path_equal(EVMod *mod, xmlNode *node, char *nodeName, ...) {
     if(node == NULL
        || node->name == NULL
        || node->type != XML_ELEMENT_NODE
@@ -231,10 +215,10 @@ extern "C" {
     return match;
   }
 
-  static char *get_xml_attr(xmlNode *node, char *attrName) {
+  static char *get_xml_attr(EVMod *mod, xmlNode *node, char *attrName) {
     for(xmlAttr *attr = node->properties; attr; attr = attr->next) {
       if(attr->name) {
-	myDebug(1, "attribute %s", attr->name);
+	EVDebug(mod, 1, "attribute %s", attr->name);
 	if(attr->children && !strcmp((char *)attr->name, attrName)) {
 	  return (char *)attr->children->content;
 	}
@@ -243,53 +227,55 @@ extern "C" {
     return NULL;
   }
 
-  static void domain_xml_interface(xmlNode *node, char **ifname, char **ifmac) {
+  static void domain_xml_interface(EVMod *mod, xmlNode *node, char **ifname, char **ifmac) {
     for(xmlNode *n = node; n; n = n->next) {
-      if(domain_xml_path_equal(n, "target", "interface", "devices", NULL)) {
-	char *dev = get_xml_attr(n, "dev");
+      if(domain_xml_path_equal(mod, n, "target", "interface", "devices", NULL)) {
+	char *dev = get_xml_attr(mod, n, "dev");
 	if(dev) {
-	  myDebug(1, "interface.dev=%s", dev);
+	  EVDebug(mod, 1, "interface.dev=%s", dev);
 	  if(ifname) *ifname = dev;
 	}
       }
-      else if(domain_xml_path_equal(n, "mac", "interface", "devices", NULL)) {
-	char *addr = get_xml_attr(n, "address");
-	myDebug(1, "interface.mac=%s", addr);
+      else if(domain_xml_path_equal(mod, n, "mac", "interface", "devices", NULL)) {
+	char *addr = get_xml_attr(mod, n, "address");
+	EVDebug(mod, 1, "interface.mac=%s", addr);
 	if(ifmac) *ifmac = addr;
       }
     }
-    if(node->children) domain_xml_interface(node->children, ifname, ifmac);
+    if(node->children)
+      domain_xml_interface(mod, node->children, ifname, ifmac);
   }
 
-  static void domain_xml_disk(xmlNode *node, char **disk_path, char **disk_dev) {
+  static void domain_xml_disk(EVMod *mod, xmlNode *node, char **disk_path, char **disk_dev) {
     for(xmlNode *n = node; n; n = n->next) {
-      if(domain_xml_path_equal(n, "source", "disk", "devices", NULL)) {
-	char *path = get_xml_attr(n, "file");
+      if(domain_xml_path_equal(mod, n, "source", "disk", "devices", NULL)) {
+	char *path = get_xml_attr(mod, n, "file");
 	if(path) {
-	  myDebug(1, "disk.file=%s", path);
+	  EVDebug(mod, 1, "disk.file=%s", path);
 	  if(disk_path) *disk_path = path;
 	}
       }
-      else if(domain_xml_path_equal(n, "target", "disk", "devices", NULL)) {
-	char *dev = get_xml_attr(n, "dev");
-	myDebug(1, "disk.dev=%s", dev);
+      else if(domain_xml_path_equal(mod, n, "target", "disk", "devices", NULL)) {
+	char *dev = get_xml_attr(mod, n, "dev");
+	EVDebug(mod, 1, "disk.dev=%s", dev);
 	if(disk_dev) *disk_dev = dev;
       }
-      else if(domain_xml_path_equal(n, "readonly", "disk", "devices", NULL)) {
-	myDebug(1, "ignoring readonly device");
+      else if(domain_xml_path_equal(mod, n, "readonly", "disk", "devices", NULL)) {
+	EVDebug(mod, 1, "ignoring readonly device");
 	*disk_path = NULL;
 	*disk_dev = NULL;
 	return;
       }
     }
-    if(node->children) domain_xml_disk(node->children, disk_path, disk_dev);
+    if(node->children) domain_xml_disk(mod, node->children, disk_path, disk_dev);
   }
 
-  static void domain_xml_node(HSP *sp, xmlNode *node, HSPVMState_KVM *state) {
+  static void domain_xml_node(EVMod *mod, xmlNode *node, HSPVMState_KVM *state) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     for(xmlNode *n = node; n; n = n->next) {
-      if(domain_xml_path_equal(n, "interface", "devices", "domain", NULL)) {
+      if(domain_xml_path_equal(mod, n, "interface", "devices", "domain", NULL)) {
 	char *ifname=NULL,*ifmac=NULL;
-	domain_xml_interface(n, &ifname, &ifmac);
+	domain_xml_interface(mod, n, &ifname, &ifmac);
 	if(ifname && ifmac) {
 	  SFLMacAddress mac;
 	  memset(&mac, 0, sizeof(mac));
@@ -308,7 +294,7 @@ extern "C" {
 		// not in global collection - add
 		// This may be a mistake since ifIndex is unknown
 		if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL)
-		  myDebug(1, "Warning: kvm adaptor overwriting adaptorsByMac");
+		  EVDebug(mod, 1, "Warning: kvm adaptor overwriting adaptorsByMac");
 	      }
 	      adaptorListAdd(state->vm.interfaces, adaptor);
 	    }
@@ -319,16 +305,18 @@ extern "C" {
 	  }
 	}
       }
-      else if(domain_xml_path_equal(n, "disk", "devices", "domain", NULL)) {
+      else if(domain_xml_path_equal(mod, n, "disk", "devices", "domain", NULL)) {
 	// need both a path and a dev before we will accept it
 	char *disk_path=NULL,*disk_dev=NULL;
-	domain_xml_disk(n, &disk_path, &disk_dev);
+	domain_xml_disk(mod, n, &disk_path, &disk_dev);
 	if(disk_path && disk_dev) {
 	  strArrayAdd(state->vm.volumes, (char *)disk_path);
 	  strArrayAdd(state->vm.disks, (char *)disk_dev);
 	}
       }
-      else if(n->children) domain_xml_node(sp, n->children, state);
+      else
+	if(n->children)
+	  domain_xml_node(mod, n->children, state);
     }
   }
 
@@ -345,7 +333,7 @@ extern "C" {
     HSPVMState_KVM *state = UTHashGet(mdata->vmsByUUID, &search);
     if(state == NULL) {
       // new vm or container
-      state = (HSPVMState_KVM *)getVM(mod, uuid, YES, sizeof(HSPVMState_KVM), VMTYPE_KVM, agentCB_getCounters_KVM_request);
+      state = (HSPVMState_KVM *)getVM(mod, uuid, YES, sizeof(HSPVMState_KVM), VMTYPE_KVM, agentCB_getCounters_KVM);
       if(state) {
 	UTHashAdd(mdata->vmsByUUID, state);
       }
@@ -355,7 +343,7 @@ extern "C" {
 
   static void removeAndFreeVM_KVM(EVMod *mod, HSPVMState_KVM *state) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
-    myDebug(1, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
+    EVDebug(mod, 1, "removeAndFreeVM: removing vm with dsIndex=%u (domId=%u)",
 	  state->vm.dsIndex,
 	  state->virDomainId);
     UTHashDel(mdata->vmsByUUID, state);
@@ -412,7 +400,7 @@ extern "C" {
 	  xmlDoc *doc = xmlParseMemory(xmlstr, strlen(xmlstr));
 	  if(doc) {
 	    xmlNode *rootNode = xmlDocGetRootElement(doc);
-	    domain_xml_node(sp, rootNode, state);
+	    domain_xml_node(mod, rootNode, state);
 	    xmlFreeDoc(doc);
 	  }
 	  free(xmlstr); // allocated by virDomainGetXMLDesc()
@@ -487,18 +475,6 @@ extern "C" {
     }
   }
 
-  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
-    // now we can execute pollActions without holding on to the semaphore
-    for(uint32_t ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {
-      SFLPoller *poller = (SFLPoller *)UTArrayAt(mdata->pollActions, ii);
-      SFL_COUNTERS_SAMPLE_TYPE cs;
-      memset(&cs, 0, sizeof(cs));
-      agentCB_getCounters_KVM((void *)mod, poller, &cs);
-    }
-    UTArrayReset(mdata->pollActions);
-  }
-
   static void evt_host_cs(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     SFL_COUNTERS_SAMPLE_TYPE *cs = *(SFL_COUNTERS_SAMPLE_TYPE **)data;
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
@@ -546,15 +522,12 @@ extern "C" {
     }
 
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_KVM, vm.uuid, UTHASH_DFLT);
-    mdata->pollActions = UTArrayNew(UTARRAY_DFLT);
-
     mdata->refreshVMListSecs = sp->kvm.refreshVMListSecs ?: sp->refreshVMListSecs;
     mdata->forgetVMSecs = sp->kvm.forgetVMSecs ?: sp->forgetVMSecs;
 
     // register call-backs
     EVBus *pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_FINAL), evt_final);
   }

@@ -37,6 +37,7 @@ extern "C" {
   */
 
   void updateBondCounters(HSP *sp, SFLAdaptor *bond) {
+    EVMod *mod = sp->rootModule;
     char procFileName[256];
     snprintf(procFileName, 256, PROCFS_STR "/net/bonding/%s", bond->deviceName);
     FILE *procFile = fopen(procFileName, "r");
@@ -83,7 +84,7 @@ extern "C" {
 	    }
 
 	    if(my_strequal(tok_var, "System Identification")) {
-	      myDebug(1, "updateBondCounters: %s system identification %s",
+	      EVDebug(mod, 1, "updateBondCounters: %s system identification %s",
 		      bond->deviceName,
 		      tok_val);
 	      char sys_mac[MAX_PROC_LINE_CHARS];
@@ -99,7 +100,7 @@ extern "C" {
 	    }
 
 	    if(my_strequal(tok_var, "Partner Mac Address")) {
-	      myDebug(1, "updateBondCounters: %s partner mac is %s",
+	      EVDebug(mod, 1, "updateBondCounters: %s partner mac is %s",
 		      bond->deviceName,
 		      tok_val);
 	      if(hexToBinary((u_char *)tok_val,bond_nio->lacp.partnerSystemID, 6) != 6) {
@@ -109,7 +110,7 @@ extern "C" {
 
 	    if(my_strequal(tok_var, "Aggregator ID")) {
 	      aggID = strtol(tok_val, NULL, 0);
-	      myDebug(1, "updateBondCounters: %s aggID %u", bond->deviceName, aggID);
+	      EVDebug(mod, 1, "updateBondCounters: %s aggID %u", bond->deviceName, aggID);
 	    }
 	  }
 
@@ -121,7 +122,7 @@ extern "C" {
 	    readingMaster = NO;
 	    currentSlave = adaptorByName(sp, tok_val);
 	    slave_nio = currentSlave ? ADAPTOR_NIO(currentSlave) : NULL;
-	    myDebug(1, "updateBondCounters: bond %s slave %s %s",
+	    EVDebug(mod, 1, "updateBondCounters: bond %s slave %s %s",
 		  bond->deviceName,
 		  tok_val,
 		  currentSlave ? "found" : "not found");
@@ -136,7 +137,7 @@ extern "C" {
 	      // marked as a switchPort):
 	      if(slave_nio->switchPort) {
 		if(!bond_nio->switchPort) {
-		  myDebug(1, "updateBondCounters: marking bond %s as switchPort",
+		  EVDebug(mod, 1, "updateBondCounters: marking bond %s as switchPort",
 			  bond->deviceName);
 		  bond_nio->switchPort = YES;
 		}
@@ -147,7 +148,7 @@ extern "C" {
 	      // monitoring on a bond interface without intending to get separate
 	      // counters for the components too.  Log as a warning when debugging.
 	      if(bond_nio->switchPort && !slave_nio->switchPort)
-		myDebug(1, "updateBondCounters: warning: bond %s slave %s not marked as switchPort",
+		EVDebug(mod, 1, "updateBondCounters: warning: bond %s slave %s not marked as switchPort",
 			bond->deviceName,
 			currentSlave->deviceName);
 	    }
@@ -262,12 +263,13 @@ extern "C" {
   */
 
   static void synthesizeBondMetaData(HSP *sp, SFLAdaptor *bond) {
+    EVMod *mod = sp->rootModule;
     uint64_t ifSpeed = 0;
     bool up = NO;
     uint32_t ifDirection = 0;
     SFLAdaptor *search_ad;
 
-    myDebug(1, "synthesizeBondMetaData: BEFORE: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+    EVDebug(mod, 1, "synthesizeBondMetaData: BEFORE: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
 	    bond->deviceName,
 	    bond->ifSpeed,
 	    bond->ifDirection,
@@ -278,7 +280,7 @@ extern "C" {
 	HSPAdaptorNIO *search_nio = ADAPTOR_NIO(search_ad);
 	if(search_nio && search_nio->lacp.attachedAggID == bond->ifIndex) {
 
-	  myDebug(1, "synthesizeBondMetaData: bond %s component %s (ifSpeed=%"PRIu64" dirn=%u up=%s)",
+	  EVDebug(mod, 1, "synthesizeBondMetaData: bond %s component %s (ifSpeed=%"PRIu64" dirn=%u up=%s)",
 		  bond->deviceName,
 		  search_ad->deviceName,
 		  search_ad->ifSpeed,
@@ -299,7 +301,7 @@ extern "C" {
     bond->ifSpeed = ifSpeed;
     bond->ifDirection = ifDirection;
 
-    myDebug(1, "synthesizeBondMetaData: AFTER: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+    EVDebug(mod, 1, "synthesizeBondMetaData: AFTER: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
 	    bond->deviceName,
 	    bond->ifSpeed,
 	    bond->ifDirection,
@@ -312,6 +314,7 @@ extern "C" {
   */
 
   static void syncSlavePolling(HSP *sp, SFLAdaptor *bond) {
+    EVMod *mod = sp->rootModule;
     HSPAdaptorNIO *bond_nio = ADAPTOR_NIO(bond);
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
@@ -323,7 +326,7 @@ extern "C" {
 	// frequency of access to th /proc/net/bonding file.
 	if(bond_nio->poller
 	   && nio->poller) {
-	  myDebug(1, "sync polling so that slave %s goes with bond %s",
+	  EVDebug(mod, 1, "sync polling so that slave %s goes with bond %s",
 		  adaptor->deviceName,
 		  bond->deviceName);
 	  sfl_poller_synchronize_polling(nio->poller, bond_nio->poller);
@@ -404,8 +407,9 @@ extern "C" {
   }
 #define SFF8472_CAL_RXPWR(x, ff) (x) = sff8472_calibration_rxpwr((x), (ff))
 
-  static void sff8472_read(SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
+  static void sff8472_read(HSP *sp, SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
   {
+    EVMod *mod = sp->rootModule;
     struct ethtool_eeprom *eeprom = NULL;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
@@ -504,7 +508,7 @@ extern "C" {
     lane->rx_power_max = (rx_power_max / 10); // uW
     lane->rx_wavelength = wavelength; // same as tx_wavelength
 
-    myDebug(1, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+    EVDebug(mod, 1, "SFP8472 %s u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
 	    lane->tx_wavelength,
 	    nio->sfp.module_temperature,
@@ -522,8 +526,9 @@ extern "C" {
       my_free(eeprom);
   }
 
-  static void sff8436_read(SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
+  static void sff8436_read(HSP *sp, SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
   {
+    EVMod *mod = sp->rootModule;
     struct ethtool_eeprom *eeprom = NULL;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
@@ -673,7 +678,7 @@ extern "C" {
       lane->rx_power_max = (rx_power_max / 10); // uW
       lane->rx_wavelength = wavelength; // same as tx_wavelength
 
-      myDebug(1, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+      EVDebug(mod, 1, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
 	    ch,
 	    lane->tx_wavelength,
@@ -702,6 +707,7 @@ extern "C" {
 
   bool accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs)
   {
+    EVMod *mod = sp->rootModule;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
     if(nio->bond_master
@@ -774,18 +780,18 @@ extern "C" {
 	      delta.pkts_in,
 	      delta.pkts_out);
 
-	if(debug(2)) {
-	  myDebug(1, "old=[%"PRIu64",%"PRIu64",%u,%u]",
+	if(EVDebug(mod, 2, NULL)) {
+	  EVDebug(mod, 1, "old=[%"PRIu64",%"PRIu64",%u,%u]",
 		  nio->last_nio.bytes_in,
 		  nio->last_nio.bytes_out,
 		  nio->last_nio.pkts_in,
 		  nio->last_nio.pkts_out);
-	  myDebug(1, "new=[%"PRIu64",%"PRIu64",%u,%u]",
+	  EVDebug(mod, 1, "new=[%"PRIu64",%"PRIu64",%u,%u]",
 		  ctrs->bytes_in,
 		  ctrs->bytes_out,
 		  ctrs->pkts_in,
 		  ctrs->pkts_out);
-	  myDebug(1, "logging backtrace...");
+	  EVDebug(mod, 1, "logging backtrace...");
 	  log_backtrace(0, NULL, getDebugOut());
 	}
 
@@ -853,7 +859,7 @@ extern "C" {
   */
 
   void updateNioCounters(HSP *sp, SFLAdaptor *filter) {
-
+    EVMod *mod = sp->rootModule;
     assert(EVCurrentBus() == sp->pollBus);
     time_t clk = sp->pollBus->now.tv_sec;
 
@@ -956,9 +962,9 @@ extern "C" {
 	      strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name)-1);
 	      ifr.ifr_data = (char *)et_stats;
 	      if(ioctl(fd, SIOCETHTOOL, &ifr) >= 0) {
-		if(getDebug() > 2) {
+		if(EVDebug(mod, 3, NULL)) {
 		  for(int xx = 0; xx < et_stats->n_stats; xx++) {
-		    myDebug(1, "ethtool counter for %s at index %d == %"PRIu64,
+		    EVDebug(mod, 1, "ethtool counter for %s at index %d == %"PRIu64,
 			    adaptor->deviceName,
 			    xx,
 			    et_stats->data[xx]);
@@ -985,8 +991,8 @@ extern "C" {
 	      // Since the host-sflow network totals do not include optical
 	      // stats,  this is not a problem.
 	      switch(niostate->modinfo_type) {
-	      case ETH_MODULE_SFF_8472: sff8472_read(adaptor, &ifr, fd); break;
-	      case ETH_MODULE_SFF_8436: sff8436_read(adaptor, &ifr, fd); break;
+	      case ETH_MODULE_SFF_8472: sff8472_read(sp, adaptor, &ifr, fd); break;
+	      case ETH_MODULE_SFF_8436: sff8436_read(sp, adaptor, &ifr, fd); break;
 	      }
 	    }
 #endif /*  ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */

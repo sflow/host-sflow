@@ -724,7 +724,8 @@ extern "C" {
   }
 
   bool EVDebug(EVMod *mod, int level, char *fmt, ...) {
-    if(mod->debugLevel >= level
+    if((mod
+	&& mod->debugLevel >= level)
        || debug(level)) {
       if(fmt) {
 	myLog2(level, NO, LOG_DEBUG, "%s:", mod->name);

@@ -96,6 +96,7 @@ extern "C" {
 #define HSP_MOD_DIR /etc/hsflowd/modules
 #endif
 #define HSP_DEFAULT_LOGBYTES "10000000" // 10MB
+#define HSP_DEFAULT_MEMLIMIT "0" // unlimited
 
 /* Numbering to avoid clash. See http://www.sflow.org/developers/dsindexnumbers.php */
 #define HSP_DEFAULT_PHYSICAL_DSINDEX 1
@@ -409,6 +410,7 @@ extern "C" {
 #define HSPEVENT_VM_COUNTER_SAMPLE "vcsample"    // (csample *) building vm counter-sample
 #define HSPEVENT_FLOW_SAMPLE "flow_sample"       // (HSPPendingSample *) building flow-sample
 #define HSPEVENT_FLOW_SAMPLE_RELEASED "flow_sample_released"  // (HSPPendingSample *) flow-sample after lookups completed
+#define HSPEVENT_XDR_SAMPLE "xdr_sample"         // fully-encoded SFDBuf
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
 #define HSPEVENT_CONFIG_LINE "config_line"       // (line)...next config line
 #define HSPEVENT_CONFIG_END "config_end"         // (n_servers *) end config lines
@@ -420,7 +422,10 @@ extern "C" {
 #define HSPEVENT_INTF_SPEED "intf_speed"         // (adaptor *) interface speed change
 #define HSPEVENT_INTFS_CHANGED "intfs_changed"   // some interface(s) changed
 #define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
-
+#define HSPEVENT_REQUEST_POLLER "request_poller" // get counter samples for a switch port
+#define HSPEVENT_FLUSH_DATAGRAM "flush_datagram" // flush datagram (e.g. on counters batch)
+#define HSPEVENT_POLL_INTERVAL "poll_interval"   // sent when actualPollingInterval changed
+  
   typedef struct _HSPPendingSample {
     SFL_FLOW_SAMPLE_TYPE *fs;
     SFLSampler *sampler;
@@ -487,6 +492,7 @@ extern "C" {
     HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED,
     HSP_TELEMETRY_EVENT_SAMPLES,
     HSP_TELEMETRY_EVENT_SAMPLES_SUPPRESSED,
+    HSP_TELEMETRY_FLOW_SAMPLES_UNKNOWN,
     HSP_TELEMETRY_NUM_COUNTERS
   } EnumHSPTelemetry;
 
@@ -501,7 +507,8 @@ extern "C" {
     "flow_samples_suppressed",
     "counter_samples_suppressed",
     "event_samples",
-    "event_samples_suppressed"
+    "event_samples_suppressed",
+    "flow_samples_unknown"
   };
 #endif
 
@@ -518,12 +525,14 @@ extern "C" {
     char *modulesPath;
     EVMod *rootModule;
     EVBus *pollBus;
+    EVBus *packetBus;
     EVEvent *evt_flow_sample;
     EVEvent *evt_flow_sample_released;
-
-    // agent
+    EVEvent *evt_flush_datagram;
+    
+    // agent (split into two sub-agents)
     SFLAgent *agent;
-    pthread_mutex_t *sync_agent;
+    SFLAgent *poll_agent;
     // main host poller
     SFLPoller *poller;
     bool counterSampleQueued;
@@ -711,6 +720,8 @@ extern "C" {
     char *logFile;
     char *logBytes;
     UTStringArray *retainRootReasons;
+    char *memLimit;
+    uint32_t memLimitBytes;
 
     // Identity
     char hostname[SFL_MAX_HOSTNAME_CHARS+1];
@@ -726,9 +737,6 @@ extern "C" {
     UTHash *adaptorsByPeerIndex;
     UTHash *adaptorsByMac;
     bool allowDeleteAdaptor;
-
-    // poll actions for tick-tock cycle
-    UTArray *pollActions;
 
     // have to poll the NIO counters fast enough to avoid 32-bit rollover
     // of the bytes counters.  On a 10Gbps interface they can wrap in
@@ -821,7 +829,6 @@ extern "C" {
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int configSwitchPorts(HSP *sp);
   int readTcpipCounters(HSP *sp, SFLHost_ip_counters *c_ip, SFLHost_icmp_counters *c_icmp, SFLHost_tcp_counters *c_tcp, SFLHost_udp_counters *c_udp);
-  void flushCounters(EVMod *mod);
 
   // sum bond counters from their components
   void setSynthesizeBondCounters(EVMod *mod, bool val);
@@ -880,7 +887,7 @@ extern "C" {
   void holdPendingSample(HSPPendingSample *ps);
   void releasePendingSample(HSP *sp, HSPPendingSample *ps);
   int decodePendingSample(HSPPendingSample *ps);
-  SFLPoller *forceCounterPolling(HSP *sp, SFLAdaptor *adaptor);
+  void forceCounterPolling(HSP *sp, SFLAdaptor *adaptor);
 
   // VM lifecycle
   HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);

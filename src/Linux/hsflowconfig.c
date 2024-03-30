@@ -631,7 +631,7 @@ extern "C" {
 	// this might mean we write a .auto file with no collectors in it,
 	// so let's hope the slave agents all do the right thing with that(!)
 	if(collector->ipAddr.type != SFLADDRESSTYPE_UNDEFINED) {
-	  char collectorStr[256];
+	  char collectorStr[HSP_MAX_LINELEN];
 	  // the evt_config_line syntax uses collector=ip/port/deviceName/namespace
 	  // and the dnsSD and SONiC modules pass config lines around that way, but here we
 	  // need to preserve the original collector=IP[ PORT] syntax so that unmodified
@@ -646,14 +646,13 @@ extern "C" {
 	     && collector->namespace == NULL) {
 	    // old syntax:  collector=IP or collector=IP PORT
 	    if(collector->udpPort == SFL_DEFAULT_COLLECTOR_PORT)
-	      sprintf(collectorStr, "collector=%s\n", ipbuf);
+	      snprintf(collectorStr, HSP_MAX_LINELEN, "collector=%s\n", ipbuf);
 	    else
-	      sprintf(collectorStr, "collector=%s %u\n", ipbuf, collector->udpPort);
+	      snprintf(collectorStr, HSP_MAX_LINELEN, "collector=%s %u\n", ipbuf, collector->udpPort);
 	  }
 	  else {
 	    // new syntax: collector=IP/PORT/DEV/NS
-	    // TODO: use snprintf or another UTStrBuf here
-	    sprintf(collectorStr, "collector=%s/%u/%s/%s\n",
+	    snprintf(collectorStr, HSP_MAX_LINELEN, "collector=%s/%u/%s/%s\n",
 		    ipbuf,
 		    collector->udpPort,
 		    collector->deviceName ?: "",
@@ -2222,7 +2221,7 @@ extern "C" {
 	  if(st->headerBytes > HSP_MAX_HEADER_BYTES)
 	    st->headerBytes = HSP_MAX_HEADER_BYTES;
 	}
-	// TODO: add datagramBytes, samplingDirection here
+	// TODO: *** add datagramBytes, samplingDirection here
 	// so they can be overridden dynamically by DNSSD, SONiC etc.
 	else {
 	  myLog(LOG_INFO, "unexpected dynamic config record <%s>=<%s>", keyBuf, valBuf);

@@ -39,7 +39,6 @@ extern "C" {
 
   typedef struct _HSP_mod_XEN {
     UTHash *vmsByUUID;
-    UTArray *pollActions;
     int num_domains;
 #ifdef XENCTRL_HAS_XC_INTERFACE
     xc_interface *xc_handle;
@@ -434,20 +433,10 @@ extern "C" {
       adaptorsElem.counterBlock.adaptors = xenstat_adaptors(mod, state->domId, &myAdaptors, HSP_MAX_VIFS);
       SFLADD_ELEMENT(cs, &adaptorsElem);
 
-      SEMLOCK_DO(sp->sync_agent) {
-	sfl_poller_writeCountersSample(poller, cs);
-	sp->counterSampleQueued = YES;
-	sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
-      }
+      sfl_poller_writeCountersSample(poller, cs);
+      sp->counterSampleQueued = YES;
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
     }
-  }
-
-  static void agentCB_getCounters_XEN_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
-  {
-    EVMod *mod = (EVMod *)poller->magic;
-    HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
-    // defer, since the agent mutex is currently held and we don't want to block it
-    UTArrayAdd(mdata->pollActions, poller);
   }
 
   /*_________________---------------------------__________________
@@ -464,7 +453,7 @@ extern "C" {
     if(state == NULL) {
       // new vm or container
       myDebug(1, "adding new Xen VM");
-      state = (HSPVMState_XEN *)getVM(mod, uuid, YES, sizeof(HSPVMState_XEN), VMTYPE_XEN, agentCB_getCounters_XEN_request);
+      state = (HSPVMState_XEN *)getVM(mod, uuid, YES, sizeof(HSPVMState_XEN), VMTYPE_XEN, agentCB_getCounters_XEN);
       if(state) {
 	UTHashAdd(mdata->vmsByUUID, state);
       }
@@ -668,18 +657,6 @@ extern "C" {
     }
   }
 
-  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_XEN *mdata = (HSP_mod_XEN *)mod->data;
-    // now we can execute pollActions without holding on to the semaphore
-    for(uint32_t ii = 0; ii < UTArrayN(mdata->pollActions); ii++) {
-      SFLPoller *poller = (SFLPoller *)UTArrayAt(mdata->pollActions, ii);
-      SFL_COUNTERS_SAMPLE_TYPE cs;
-      memset(&cs, 0, sizeof(cs));
-      agentCB_getCounters_XEN((void *)mod, poller, &cs);
-    }
-    UTArrayReset(mdata->pollActions);
-  }
-
   /*_________________---------------------------__________________
     _________________   host counter sample     __________________
     -----------------___________________________------------------
@@ -716,7 +693,6 @@ extern "C" {
     requestVNodeRole(mod, HSP_VNODE_PRIORITY_XEN);
 
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_XEN, vm.uuid, UTHASH_DFLT);
-    mdata->pollActions = UTArrayNew(UTARRAY_DFLT);
     mdata->refreshVMListSecs = sp->xen.refreshVMListSecs ?: sp->refreshVMListSecs;
     mdata->forgetVMSecs = sp->xen.forgetVMSecs ?: sp->forgetVMSecs;
 
@@ -728,7 +704,6 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_FINAL), evt_final);
   }

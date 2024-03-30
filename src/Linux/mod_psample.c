@@ -22,7 +22,9 @@ extern "C" {
 #endif
 
 #define HSP_PSAMPLE_READNL_RCV_BUF 8192
-#define HSP_PSAMPLE_READNL_BATCH 100
+#define HSP_PSAMPLE_RCVMSG_CBUFLEN 256
+#define HSP_PSAMPLE_READNL_BATCH 10
+#define HSP_PSAMPLE_MM_BATCH 16
 #define HSP_PSAMPLE_RCVBUF 8000000
 
   // Shadow the attributes in linux/psample.h so
@@ -74,6 +76,11 @@ extern "C" {
     uint32_t grp_ingress;
     uint32_t grp_egress;
     uint32_t last_grp_seq[2];
+    struct mmsghdr mmsgheader[HSP_PSAMPLE_MM_BATCH];
+    struct iovec iov[HSP_PSAMPLE_MM_BATCH];
+    char controlbuf[HSP_PSAMPLE_MM_BATCH][HSP_PSAMPLE_RCVMSG_CBUFLEN];
+    UTSockAddr peer[HSP_PSAMPLE_MM_BATCH];
+    char msgbuf[HSP_PSAMPLE_MM_BATCH][HSP_PSAMPLE_READNL_RCV_BUF];
   } HSP_mod_PSAMPLE;
 
   /*_________________---------------------------__________________
@@ -428,32 +435,63 @@ extern "C" {
   static void readNetlink_PSAMPLE(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
-    uint8_t recv_buf[HSP_PSAMPLE_READNL_RCV_BUF];
+    
     int batch = 0;
     for( ; batch < HSP_PSAMPLE_READNL_BATCH; batch++) {
-      int numbytes = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
-      if(numbytes <= 0)
-	break;
-      struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
-      while(NLMSG_OK(nlh, numbytes)){
-	if(nlh->nlmsg_type == NLMSG_DONE)
-	  break;
-	if(nlh->nlmsg_type == NLMSG_ERROR){
-	  struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
-	  if(err_msg->error == 0) {
-	    EVDebug(mod, 1, "received Netlink ACK");
-	  }
-	  else {
-	    // TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
-	    EVDebug(mod, 1, "state %u: error in netlink message: %d : %s",
-		    mdata->state,
-		    err_msg->error,
-		    strerror(-err_msg->error));
-	  }
-	  break;
+
+      // wire up my packet buffers (may only
+      // need the msg_namelen to be reset every time)
+      for(uint32_t ii = 0; ii < HSP_PSAMPLE_MM_BATCH; ii++) {
+	struct msghdr *mh = &mdata->mmsgheader[ii].msg_hdr;
+	mh->msg_control = &mdata->controlbuf[ii];
+	mh->msg_controllen = HSP_PSAMPLE_RCVMSG_CBUFLEN;
+	mh->msg_name = &mdata->peer[ii];
+	mh->msg_namelen = sizeof(mdata->peer[ii]);
+	mh->msg_iov = &mdata->iov[ii];
+	mh->msg_iovlen = 1;
+	mh->msg_flags = 0;
+	mdata->iov[ii].iov_base = mdata->msgbuf[ii];;
+	mdata->iov[ii].iov_len = HSP_PSAMPLE_READNL_RCV_BUF;
+      }
+      int flags = 0;
+      struct timespec timeout = {};
+      int cc = recvmmsg(sock->fd, mdata->mmsgheader, HSP_PSAMPLE_MM_BATCH, flags, &timeout);
+      
+      if(cc > 1)
+	EVDebug(mod, 0, "recvmmsg got %u msgs\n", cc);
+      
+      if(cc <= 0) {
+	if(errno != EAGAIN) {
+	  myLog(LOG_ERR, "recvmmsg() failed, cc=%d, %s\n", cc, strerror(errno));
 	}
-	processNetlink(mod, nlh);
-	nlh = NLMSG_NEXT(nlh, numbytes);
+	return;
+      }
+      for(int ii = 0; ii < cc; ii++) {
+	struct mmsghdr *mm = &mdata->mmsgheader[ii];      
+	int numbytes = mm->msg_len;
+	if(numbytes > 0) {
+	  struct nlmsghdr *nlh = (struct nlmsghdr*) mdata->msgbuf[ii];
+	  while(NLMSG_OK(nlh, numbytes)){
+	    if(nlh->nlmsg_type == NLMSG_DONE)
+	      break;
+	    if(nlh->nlmsg_type == NLMSG_ERROR){
+	      struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
+	      if(err_msg->error == 0) {
+		EVDebug(mod, 1, "received Netlink ACK");
+	      }
+	      else {
+		// TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
+		EVDebug(mod, 1, "state %u: error in netlink message: %d : %s",
+			mdata->state,
+			err_msg->error,
+			strerror(-err_msg->error));
+	      }
+	      break;
+	    }
+	    processNetlink(mod, nlh);
+	    nlh = NLMSG_NEXT(nlh, numbytes);
+	  }
+	}
       }
     }
 

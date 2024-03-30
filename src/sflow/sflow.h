@@ -1356,7 +1356,7 @@ typedef struct _SFLEvent_discarded_packet {
   SFLFlow_sample_element *elements;
 } SFLEvent_discarded_packet;
 
-#define SFLADD_ELEMENT(_sm, _el) do { (_el)->nxt = (_sm)->elements; (_sm)->elements = (_el); } while(0)
+#define SFLADD_ELEMENT(_sm, _el) do { (_el)->nxt = (_sm)->elements; (_sm)->elements = (_el); (_sm)->num_elements++; } while(0)
 
 /* Format of a sample datagram */
 

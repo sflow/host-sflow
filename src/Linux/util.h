@@ -247,6 +247,11 @@ extern "C" {
   int UTFileExists(char *path);
 
   // sockets
+  typedef union _UTSockAddr {
+    struct sockaddr_in v4;
+    struct sockaddr_in6 v6;
+  } UTSockAddr;
+
   void UTSocketRcvbuf(int fd, int requested);
   int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize);
   int UTUnixDomainSocket(char *path);

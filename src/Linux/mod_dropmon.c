@@ -326,8 +326,7 @@ extern "C" {
       if(my_strequal(reasonName, sflow_codes[ii].name))
 	return sflow_codes[ii].code;
     }
-    myLog(LOG_INFO, "WARNING: sFlow reason code %s not found", reasonName);
-    return -1;
+    return -1; // not found
   }
 
   /*_________________---------------------------__________________
@@ -672,10 +671,8 @@ That would allow everything to stay on the stack as it does here, which has nice
     SFL_DS_SET(search.dsi, 0, ifIndex, 0);
     SFLNotifier *notifier = UTHashGet(mdata->notifiers, &search);
     if(!notifier) {
-      SEMLOCK_DO(sp->sync_agent) {
-	notifier = sfl_agent_addNotifier(sp->agent, &search.dsi);
-	sfl_notifier_set_sFlowEsReceiver(notifier, HSP_SFLOW_RECEIVER_INDEX);
-      }
+      notifier = sfl_agent_addNotifier(sp->agent, &search.dsi);
+      sfl_notifier_set_sFlowEsReceiver(notifier, HSP_SFLOW_RECEIVER_INDEX);
       UTHashAdd(mdata->notifiers, notifier);
     }
     return notifier;
@@ -737,7 +734,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       u_char *datap = UTNLA_DATA(attr);
       int datalen = UTNLA_PAYLOAD(attr);
       
-      if(debug(4)) {
+      if(EVDebug(mod, 4, NULL)) {
 	u_char hex[1024];
 	printHex(datap, datalen, hex, 1023, YES);
 	EVDebug(mod, 4, "nla_type=%u, datalen=%u, payload=%s", attr->nla_type, datalen, hex);
@@ -945,10 +942,8 @@ That would allow everything to stay on the stack as it does here, which has nice
       SFLADD_ELEMENT(&discard, &rnElem);
     }
 
-    SEMLOCK_DO(sp->sync_agent) {
-      sfl_notifier_writeEventSample(notifier, &discard);
-      sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES]++;
-    }
+    sfl_notifier_writeEventSample(notifier, &discard);
+    sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES]++;
 
     // first successful event confirms we are up and running
     if(mdata->state == HSP_DROPMON_STATE_START)

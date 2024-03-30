@@ -28,16 +28,9 @@ extern "C" {
 #include <string.h>
 #include <sys/types.h>
 
-
-#ifdef SFLOW_DO_SOCKET
-#include <sys/socket.h>
-#include <netinet/in_systm.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#endif
-
 #include "sflow.h"
-
+#include "sflow_xdr.h"
+  
 /*
   uncomment this preprocessor flag  (or compile with -DSFL_USE_32BIT_INDEX)
   if your ds_index numbers can ever be >= 2^30-1 (i.e. >= 0x3FFFFFFF)
@@ -87,16 +80,6 @@ typedef struct _SFLDataSource_instance {
  (dsi).ds_instance = (inst); \
  } while(0)
 
-#define SFL_SAMPLECOLLECTOR_DATA_QUADS (SFL_MAX_DATAGRAM_SIZE + SFL_DATA_PAD) / sizeof(uint32_t)
-
-typedef struct _SFLSampleCollector {
-  uint32_t data[SFL_SAMPLECOLLECTOR_DATA_QUADS];
-  uint32_t *datap; /* packet fill pointer */
-  uint32_t pktlen; /* accumulated size */
-  uint32_t packetSeqNo;
-  uint32_t numSamples;
-} SFLSampleCollector;
-
 struct _SFLAgent;  /* forward decl */
 
 typedef struct _SFLReceiver {
@@ -111,11 +94,7 @@ typedef struct _SFLReceiver {
   /* public fields */
   struct _SFLAgent *agent;    /* pointer to my agent */
   /* private fields */
-  SFLSampleCollector sampleCollector;
-#ifdef SFLOW_DO_SOCKET
-  struct sockaddr_in receiver4;
-  struct sockaddr_in6 receiver6;
-#endif
+  SFDDgram *sfdg;
 } SFLReceiver;
 
 typedef struct _SFLSampler {
@@ -228,10 +207,14 @@ typedef struct _SFLAgent {
   freeFn_t freeFn;
   errorFn_t errorFn;
   sendFn_t sendFn;
-#ifdef SFLOW_DO_SOCKET
-  int receiverSocket4;
-  int receiverSocket6;
-#endif
+  struct {
+    f_alloc_t allocFn;
+    f_free_t freeFn;
+    f_err_t errFn;
+    f_now_mS_t nowFn;
+    f_send_t sendFn;
+    f_hook_t hookFn;
+  } sfdg;
 } SFLAgent;
 
 /* call this at the start with a newly created agent */
@@ -245,6 +228,13 @@ void sfl_agent_init(SFLAgent *agent,
 		    freeFn_t freeFn,
 		    errorFn_t errorFn,
 		    sendFn_t sendFn);
+
+/* call this to override the default datagram-builder send callback */
+void sfl_agent_init_sfdg_sendFn(SFLAgent *agent, f_send_t sendFn);
+/* call this to override the default datagram-builder now_mS callback */
+void sfl_agent_init_sfdg_nowFn(SFLAgent *agent, f_now_mS_t nowFn);
+/* call this to install a sample-hook datagram-builder callback */
+void sfl_agent_init_sfdg_hookFn(SFLAgent *agent, f_hook_t hookFn);
 
 /* call this to create samplers */
 SFLSampler *sfl_agent_addSampler(SFLAgent *agent, SFLDataSource_instance *pdsi);
@@ -351,6 +341,7 @@ void sfl_agent_tick(SFLAgent *agent, time_t now);
 void sfl_agent_set_now(SFLAgent *agent, time_t now_S, time_t now_nS);
 
 /* call this to change the designated sflow-agent-address */  
+SFLAddress *sfl_agent_get_address(SFLAgent *agent);
 void sfl_agent_set_address(SFLAgent *agent, SFLAddress *ip);
 
 /* use this to remap datasource index numbers on export */
@@ -373,14 +364,13 @@ void sfl_notifier_writeEventSample(SFLNotifier *notifier, SFLEvent_discarded_pac
 /* call this to deallocate resources */
 void sfl_agent_release(SFLAgent *agent);
 
-
 /* internal fns */
 
 void sfl_receiver_init(SFLReceiver *receiver, SFLAgent *agent);
+void sfl_receiver_init_sfdg(SFLReceiver *receiver);
 void sfl_sampler_init(SFLSampler *sampler, SFLAgent *agent, SFLDataSource_instance *pdsi);
 void sfl_poller_init(SFLPoller *poller, SFLAgent *agent, SFLDataSource_instance *pdsi, void *magic, getCountersFn_t getCountersFn);
 void sfl_notifier_init(SFLNotifier *notifier, SFLAgent *agent, SFLDataSource_instance *pdsi);
-
 
 void sfl_receiver_tick(SFLReceiver *receiver, time_t now);
 void sfl_poller_tick(SFLPoller *poller, time_t now);
@@ -391,6 +381,9 @@ int sfl_receiver_writeFlowSample(SFLReceiver *receiver, SFL_FLOW_SAMPLE_TYPE *fs
 int sfl_receiver_writeCountersSample(SFLReceiver *receiver, SFL_COUNTERS_SAMPLE_TYPE *cs);
 int sfl_receiver_writeEventSample(SFLReceiver *receiver, SFLEvent_discarded_packet *es);
 int sfl_receiver_writeEncoded(SFLReceiver *receiver, uint32_t samples, uint32_t *data, int packedSize);
+SFDBuf *sfl_receiver_get_SFDBuf(SFLReceiver *receiver);
+int sfl_receiver_free_SFDBuf(SFLReceiver *receiver, SFDBuf *dbuf);
+int sfl_receiver_write_SFDBuf(SFLReceiver *receiver, SFDBuf *dbuf);
 void sfl_receiver_flush(SFLReceiver *receiver);
 
 void sfl_agent_resetReceiver(SFLAgent *agent, SFLReceiver *receiver);

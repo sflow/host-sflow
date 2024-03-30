@@ -59,7 +59,7 @@ extern "C" {
 			  buf,
 			  HSP_MAX_NFLOG_MSG_BYTES);
       if(len <= 0) break;
-      if(getDebug() > 1) {
+      if(EVDebug(mod, 2, NULL)) {
 	struct nlmsghdr *msg = (struct nlmsghdr *)buf;
 	myLog(LOG_INFO, "got NFLOG msg: bytes_read=%u nlmsg_len=%u nlmsg_type=%u OK=%s",
 	      len,
@@ -68,7 +68,7 @@ extern "C" {
 	      NLMSG_OK(msg, len) ? "true" : "false");
       }
       for(struct nlmsghdr *msg = (struct nlmsghdr *)buf; NLMSG_OK(msg, len); msg=NLMSG_NEXT(msg, len)) {
-	if(getDebug() > 1) {
+	if(EVDebug(mod, 2, NULL)) {
 	  myLog(LOG_INFO, "netlink (%u bytes left) msg [len=%u type=%u flags=0x%x seq=%u pid=%u]",
 		len,
 		msg->nlmsg_len,
@@ -109,7 +109,7 @@ extern "C" {
 	    while (NFA_OK(attr, attr_len)) {
 	      if (NFA_TYPE(attr) <= NFULA_MAX) {
 		tb[NFA_TYPE(attr)-1] = attr;
-		myDebug(3, "found attr %d attr_len=%d\n", NFA_TYPE(attr), attr_len);
+		EVDebug(mod, 3, "found attr %d attr_len=%d\n", NFA_TYPE(attr), attr_len);
 	      }
 	      attr = NFA_NEXT(attr,attr_len);
 	    }
@@ -124,7 +124,7 @@ extern "C" {
 	      continue;
 	    }
 
-	    myDebug(3, "capture payload (cap_len)=%d\n", cap_len);
+	    EVDebug(mod, 3, "capture payload (cap_len)=%d\n", cap_len);
 
 	    if(--MySkipCount == 0) {
 	      /* reached zero. Set the next skip */
@@ -143,7 +143,7 @@ extern "C" {
 	      uint32_t seq = ntohl(nfnl_get_data(tb, NFULA_SEQ, uint32_t));
 	      uint32_t seq_global = ntohl(nfnl_get_data(tb, NFULA_SEQ_GLOBAL, uint32_t));
 
-	      if(getDebug() > 1) {
+	      if(EVDebug(mod, 2, NULL)) {
 		myLog(LOG_INFO, "NFLOG prefix: %s in: %u (phys=%u) out: %u (phys=%u) seq: %u seq_global: %u mark: %u\n",
 		      prefix,
 		      ifin,
@@ -231,7 +231,7 @@ extern "C" {
 
     // get the fd
     int fd = nfnl_fd(mdata->nfnl);
-    myDebug(1, "NFLOG socket fd=%d", fd);
+    EVDebug(mod, 1, "NFLOG socket fd=%d", fd);
 
     // set the socket to non-blocking
     int fdFlags = fcntl(fd, F_GETFL);

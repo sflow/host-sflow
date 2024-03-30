@@ -353,8 +353,8 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *msg, vo
   EVMod *mod = user_data;
   HSP_mod_DBUS *mdata = (HSP_mod_DBUS *)mod->data;
   mdata->dbus_rx++;
-
-  if(debug(2))
+  
+  if(EVDebug(mod, 2, NULL))
     parseDBusMessage(msg);
 
   switch(dbus_message_get_type(msg)) {

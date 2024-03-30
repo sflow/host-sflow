@@ -98,7 +98,6 @@ extern "C" {
     UTHash *vmsByUUID;
     UTHash *vmsByID;
     UTHash *vmsByCgroupId;
-    UTHash *pollActions;
     SFLCounters_sample_element vnodeElem;
     uint32_t countdownToResync;
     regex_t *service_regex;
@@ -114,6 +113,8 @@ extern "C" {
     char *cgroup_blkio;
     uint packetSamples;
   } HSP_mod_SYSTEMD;
+
+  static void getCounters_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container);
 
   /*_________________---------------------------__________________
     _________________     logging utils         __________________
@@ -166,7 +167,7 @@ extern "C" {
 	if(my_strequal(fsType, "cgroup2")) {
 	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINELEN);
 	  if(fsPath) {
-	    myDebug(1, "found cgroup2 path = %s", fsPath);
+	    EVDebug(mod, 1, "found cgroup2 path = %s", fsPath);
 	    mdata->cgroup_path = my_strdup(fsPath);
 	  }
 	}
@@ -175,19 +176,19 @@ extern "C" {
 	  char *fsPath = parseNextTok(&p, " ", NO, '\0', NO, buf, MAX_PROC_LINELEN);
 	  if(fsPath) {
 	    if(fnmatch("*/systemd", fsPath, 0) == 0) {
-	      myDebug(1, "found cgroup v1 systemd controller path = %s", fsPath);
+	      EVDebug(mod, 1, "found cgroup v1 systemd controller path = %s", fsPath);
 	      mdata->cgroup_systemd = my_strdup(fsPath);
 	    }
 	    if(fnmatch("*/cpuacct", fsPath, 0) == 0) {
-	      myDebug(1, "found cgroup v1 cpuacct controller path = %s", fsPath);
+	      EVDebug(mod, 1, "found cgroup v1 cpuacct controller path = %s", fsPath);
 	      mdata->cgroup_cpuacct = my_strdup(fsPath);
 	    }
 	    if(fnmatch("*/memory", fsPath, 0) == 0) {
-	      myDebug(1, "found cgroup v1 memory controller path = %s", fsPath);
+	      EVDebug(mod, 1, "found cgroup v1 memory controller path = %s", fsPath);
 	      mdata->cgroup_memory = my_strdup(fsPath);
 	    }
 	    if(fnmatch("*/blkio", fsPath, 0) == 0) {
-	      myDebug(1, "found cgroup v1 blkio controller path = %s", fsPath);
+	      EVDebug(mod, 1, "found cgroup v1 blkio controller path = %s", fsPath);
 	      mdata->cgroup_blkio = my_strdup(fsPath);
 	    }
 	  }
@@ -206,33 +207,31 @@ extern "C" {
   static void agentCB_getCounters_SYSTEMD_request(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     EVMod *mod = (EVMod *)magic;
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
     HSPVMState_SYSTEMD *container = (HSPVMState_SYSTEMD *)poller->userData;
-    UTHashAdd(mdata->pollActions, container);
+    getCounters_SYSTEMD(mod, container);
   }
 
   static void removeAndFreeVM_SYSTEMD(EVMod *mod, HSPVMState_SYSTEMD *container) {
     HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    if(getDebug()) {
-      myLog(LOG_INFO, "removeAndFreeVM: removing service with dsIndex=%u", container->vm.dsIndex);
-    }
+
+    EVDebug(mod, 1, "removeAndFreeVM: removing service with dsIndex=%u", container->vm.dsIndex);
 
     if(UTHashDel(mdata->vmsByID, container) == NULL) {
       myLog(LOG_ERR, "UTHashDel (vmsByID) failed: service %s", container->id);
-      if(debug(1))
+      if(EVDebug(mod, 1, NULL))
 	containerHTPrint(mdata->vmsByID, "vmsByID");
     }
 
     if(UTHashDel(mdata->vmsByUUID, container) == NULL) {
       myLog(LOG_ERR, "UTHashDel (vmsByUUID) failed: service %s", container->id);
-      if(debug(1))
+      if(EVDebug(mod, 1, NULL))
 	containerHTPrint(mdata->vmsByUUID, "vmsByUUID");
     }
 
     if(container->cgroup_id
        && UTHashDel(mdata->vmsByCgroupId, container) == NULL) {
       myLog(LOG_ERR, "UTHashDel (vmsByCgroupId) failed: service %s", container->id);
-      if(debug(1))
+      if(EVDebug(mod, 1, NULL))
 	containerHTPrint(mdata->vmsByCgroupId, "vmsByCgroupId");
     }
 
@@ -268,11 +267,11 @@ extern "C" {
 		   unit->cgroup);
 	  struct stat statBuf = {};
 	  if(stat(fName, &statBuf) != 0) {
-	    myDebug(1, "cannot get inode for cgroup %s", unit->cgroup);
+	    EVDebug(mod, 1, "cannot get inode for cgroup %s", unit->cgroup);
 	  }
 	  else {
 	    container->cgroup_id = statBuf.st_ino;
-	    myDebug(1, "Learned cgroup_id = %u for container %s (%s)",
+	    EVDebug(mod, 1, "Learned cgroup_id = %u for container %s (%s)",
 		    container->cgroup_id,
 		    container->id,
 		    fName);
@@ -367,7 +366,7 @@ extern "C" {
     sprintf(path, PROCFS_STR "/%u/stat", process->pid);
     FILE *statFile = fopen(path, "r");
     if(statFile == NULL) {
-      myDebug(2, "cannot open %s : %s", path, strerror(errno));
+      EVDebug(mod, 2, "cannot open %s : %s", path, strerror(errno));
     }
     else {
       char line[MAX_PROC_LINELEN];
@@ -422,7 +421,7 @@ extern "C" {
     sprintf(path, PROCFS_STR "/%u/statm", process->pid);
     FILE *statFile = fopen(path, "r");
     if(statFile == NULL) {
-      myDebug(2, "cannot open %s : %s", path, strerror(errno));
+      EVDebug(mod, 2, "cannot open %s : %s", path, strerror(errno));
     }
     else {
       char line[MAX_PROC_LINELEN];
@@ -470,7 +469,7 @@ extern "C" {
     sprintf(path, PROCFS_STR "/%u/io", process->pid);
     FILE *statFile = fopen(path, "r");
     if(statFile == NULL) {
-      myDebug(2, "cannot open %s : %s", path, strerror(errno));
+      EVDebug(mod, 2, "cannot open %s : %s", path, strerror(errno));
     }
     else {
       found = YES;
@@ -526,7 +525,7 @@ extern "C" {
     snprintf(statsFileName, HSP_SYSTEMD_MAX_FNAME_LEN, "%s/%s/%s", ctrlPath, cgroup, fname);
     FILE *statsFile = fopen(statsFileName, "r");
     if(statsFile == NULL) {
-      myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
+      EVDebug(mod, 2, "cannot open %s : %s", statsFileName, strerror(errno));
     }
     else {
       char line[HSP_SYSTEMD_MAX_STATS_LINELEN];
@@ -570,7 +569,7 @@ extern "C" {
 	     fname);
     FILE *statsFile = fopen(statsFileName, "r");
     if(statsFile == NULL) {
-      myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
+      EVDebug(mod, 2, "cannot open %s : %s", statsFileName, strerror(errno));
     }
     else {
       char line[HSP_SYSTEMD_MAX_STATS_LINELEN];
@@ -595,7 +594,7 @@ extern "C" {
 	     fname);
     FILE *statsFile = fopen(statsFileName, "r");
     if(statsFile == NULL) {
-      myDebug(2, "cannot open %s : %s", statsFileName, strerror(errno));
+      EVDebug(mod, 2, "cannot open %s : %s", statsFileName, strerror(errno));
     }
     else {
       char line[HSP_SYSTEMD_MAX_STATS_LINELEN];
@@ -796,11 +795,9 @@ extern "C" {
     // TODO: can we fill in capacity, allocation and available?
     SFLADD_ELEMENT(&cs, &dskElem);
 
-    SEMLOCK_DO(sp->sync_agent) {
-      sfl_poller_writeCountersSample(vm->poller, &cs);
-      sp->counterSampleQueued = YES;
-      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
-    }
+    sfl_poller_writeCountersSample(vm->poller, &cs);
+    sp->counterSampleQueued = YES;
+    sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
   }
 
   /*_________________---------------------------__________________
@@ -835,7 +832,7 @@ extern "C" {
       log_dbus_error(mod, "dbus_connection_send");
     }
     else {
-      myDebug(1, "SYSTEMD dbus method %s serial=%u", method, serial);
+      EVDebug(mod, 1, "SYSTEMD dbus method %s serial=%u", method, serial);
       // register the handler
       HSPDBusRequest *req = (HSPDBusRequest *)my_calloc(sizeof(HSPDBusRequest));
       req->serial = serial;
@@ -921,7 +918,7 @@ extern "C" {
     if(dbus_message_iter_init(dbm, &it)) {
       MyDBusBasicValue val;
       if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
-	myDebug(1, "UNIT CPUAccounting %u", val.bool_val);
+	EVDebug(mod, 1, "UNIT CPUAccounting %u", val.bool_val);
 	unit->cpuAccounting = val.bool_val;
       }
     }
@@ -933,7 +930,7 @@ extern "C" {
     if(dbus_message_iter_init(dbm, &it)) {
       MyDBusBasicValue val;
       if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
-	myDebug(1, "UNIT memoryAccounting %u", val.bool_val);
+	EVDebug(mod, 1, "UNIT memoryAccounting %u", val.bool_val);
 	unit->memoryAccounting = val.bool_val;
       }
     }
@@ -945,7 +942,7 @@ extern "C" {
     if(dbus_message_iter_init(dbm, &it)) {
       MyDBusBasicValue val;
       if(db_get(&it, DBUS_TYPE_BOOLEAN, &val)) {
-	myDebug(1, "UNIT BlockIOAccounting %u", val.bool_val);
+	EVDebug(mod, 1, "UNIT BlockIOAccounting %u", val.bool_val);
 	unit->blockIOAccounting = val.bool_val;
       }
     }
@@ -966,7 +963,7 @@ extern "C" {
 	 && val.str
 	 && my_strlen(val.str)
 	 && regexec(mdata->system_slice_regex, val.str, 0, NULL, 0) == 0) {
-	myDebug(1, "UNIT CGROUP[cgroup=\"%s\"]", val.str);
+	EVDebug(mod, 1, "UNIT CGROUP[cgroup=\"%s\"]", val.str);
 	if(unit->cgroup
 	   && !my_strequal(unit->cgroup, val.str)) {
 	  // cgroup name changed
@@ -990,7 +987,7 @@ extern "C" {
 		 unit->cgroup);
 	FILE *pidsFile = fopen(path, "r");
 	if(pidsFile == NULL) {
-	  myDebug(2, "cannot open %s : %s", path, strerror(errno));
+	  EVDebug(mod, 2, "cannot open %s : %s", path, strerror(errno));
 	}
 	else {
 	  char line[MAX_PROC_LINELEN];
@@ -998,7 +995,7 @@ extern "C" {
 	  int truncated;
 	  while(my_readline(pidsFile, line, MAX_PROC_LINELEN, &truncated) != EOF) {
 	    if(sscanf(line, "%"SCNu64, &pid64) == 1) {
-	      myDebug(1, "got PID=%"PRIu64, pid64);
+	      EVDebug(mod, 1, "got PID=%"PRIu64, pid64);
 	      HSPDBusProcess search = { .pid = pid64 };
 	      process = UTHashGet(unit->processes, &search);
 	      if(process)
@@ -1054,7 +1051,7 @@ extern "C" {
 	if(!unit->obj)
 	  unit->obj = my_strdup(val.str);
 
-	myDebug(1, "UNIT OBJ[obj=\"%s\"]", val.str);
+	EVDebug(mod, 1, "UNIT OBJ[obj=\"%s\"]", val.str);
 	dbusMethod(mod,
 		   handler_controlGroup,
 		   unit,
@@ -1124,7 +1121,7 @@ extern "C" {
 		unit = HSPDBusUnitNew(mod, nm.str);
 		UTHashAdd(mdata->units, unit);
 	      }
-	      myDebug(1, "UNIT[name=\"%s\" descr=\"%s\" load=\"%s\" active=\"%s\"]", nm.str, ds.str, ls.str, as.str);
+	      EVDebug(mod, 1, "UNIT[name=\"%s\" descr=\"%s\" load=\"%s\" active=\"%s\"]", nm.str, ds.str, ls.str, as.str);
 	      dbusMethod(mod,
 			 handler_getUnit,
 			 unit,
@@ -1172,7 +1169,7 @@ extern "C" {
 #endif
 
     if(UTHashN(mdata->dbusRequests)) {
-      myDebug(1, "SYSTEMD: dbusSynchronize - outstanding requests=%u", UTHashN(mdata->dbusRequests));
+      EVDebug(mod, 1, "SYSTEMD: dbusSynchronize - outstanding requests=%u", UTHashN(mdata->dbusRequests));
       struct timespec now;
       EVClockMono(&now);
       HSPDBusRequest *req;
@@ -1214,11 +1211,11 @@ extern "C" {
     // INET_DIAG lookup may have found a cgroup_id.  If so, it will be the
     // inode of the container that sent or received it. This appeared in kernel ~ 5.15 (ubuntu22).
     if(ps->cgroup_id) {
-      myDebug(2, "mod_systemd: inet_diag cgroup = %u", ps->cgroup_id);
+      EVDebug(mod, 2, "mod_systemd: inet_diag cgroup = %u", ps->cgroup_id);
       HSPVMState_SYSTEMD search = { .cgroup_id = ps->cgroup_id };
       HSPVMState_SYSTEMD *container = UTHashGet(mdata->vmsByCgroupId, &search);
       if(container) {
-	myDebug(2, "mod_systemd: cgroup_id(%u)->container(%s) dsIndex=%u",
+	EVDebug(mod, 2, "mod_systemd: cgroup_id(%u)->container(%s) dsIndex=%u",
 		ps->cgroup_id,
 		container->id,
 		container->vm.dsIndex);
@@ -1234,7 +1231,7 @@ extern "C" {
     if(src_dsIndex
        || dst_dsIndex) {
       // yes - add annotation
-      myDebug(1, "%s adding entities structure: src=%u dst=%u", mod->name, src_dsIndex, dst_dsIndex);
+      EVDebug(mod, 1, "%s adding entities structure: src=%u dst=%u", mod->name, src_dsIndex, dst_dsIndex);
       SFLFlow_sample_element *entElem = pendingSample_calloc(ps, sizeof(SFLFlow_sample_element));
       entElem->tag = SFLFLOW_EX_ENTITIES;
       if(src_dsIndex) {
@@ -1278,16 +1275,6 @@ extern "C" {
     }
   }
 
-  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP_mod_SYSTEMD *mdata = (HSP_mod_SYSTEMD *)mod->data;
-    // now we can execute pollActions without holding on to the semaphore
-    HSPVMState_SYSTEMD *container;
-    UTHASH_WALK(mdata->pollActions, container) {
-      getCounters_SYSTEMD(mod, container);
-    }
-    UTHashReset(mdata->pollActions);
-  }
-
   // obtaining a selectable file-descriptor from libdbus is not as easy
   // as it ought to be, so it turns out that polling with
   // dbus_connection_read_write_dispatch() is the easiest way to drive
@@ -1313,7 +1300,7 @@ extern "C" {
     dbpoll = YES
 #endif
     if(dbpoll) {
-      myDebug(2, "SYSTEMD deci - outstanding=%u tx=%u rx=%u", UTHashN(mdata->dbusRequests), mdata->dbus_tx, mdata->dbus_rx);
+      EVDebug(mod, 2, "SYSTEMD deci - outstanding=%u tx=%u rx=%u", UTHashN(mdata->dbusRequests), mdata->dbus_tx, mdata->dbus_rx);
       uint32_t curr_tx = mdata->dbus_tx;
       uint32_t curr_rx = mdata->dbus_rx;
       for(;;) {
@@ -1440,7 +1427,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     mdata->vmsByUUID = UTHASH_NEW(HSPVMState_SYSTEMD, vm.uuid, UTHASH_DFLT);
     mdata->vmsByID = UTHASH_NEW(HSPVMState_SYSTEMD, id, UTHASH_SKEY);
     mdata->vmsByCgroupId = UTHASH_NEW(HSPVMState_SYSTEMD, cgroup_id, UTHASH_DFLT);
-    mdata->pollActions = UTHASH_NEW(HSPVMState_SYSTEMD, id, UTHASH_IDTY);
     mdata->dbusRequests = UTHASH_NEW(HSPDBusRequest, serial, UTHASH_DFLT);
     mdata->units = UTHASH_NEW(HSPDBusUnit, name, UTHASH_SKEY);
 
@@ -1470,7 +1456,6 @@ static DBusHandlerResult dbusCB(DBusConnection *connection, DBusMessage *message
     // connection OK - so register call-backs
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_DECI), evt_deci);
-    EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
   }

@@ -176,13 +176,11 @@ Expecting something like:
     -----------------___________________________------------------
   */
 
-  static void logJSON(int debugLevel, char *msg, cJSON *obj)
+  static void logJSON(char *msg, cJSON *obj)
   {
-    if(debug(debugLevel)) {
-      char *str = cJSON_Print(obj);
-      myLog(LOG_INFO, "%s json=<%s>", msg, str);
-      my_free(str); // TODO: get this fn from cJSON hooks
-    }
+    char *str = cJSON_Print(obj);
+    myLog(LOG_INFO, "%s json=<%s>", msg, str);
+    my_free(str); // TODO: get this fn from cJSON hooks
   }
 
   /*_________________---------------------------__________________
@@ -194,7 +192,8 @@ Expecting something like:
     myDebug(3, "processEapiJSON");
     cJSON *top = cJSON_Parse(UTSTRBUF_STR(buf));
     if(top) {
-      logJSON(1, "processEapiJSON:", top);
+      if(EVDebug(mod, 1, NULL))
+	logJSON("processEapiJSON:", top);
       (*req->jsonCB)(mod, buf, top);
       cJSON_Delete(top);
     }
