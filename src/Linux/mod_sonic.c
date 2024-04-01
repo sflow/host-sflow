@@ -1123,6 +1123,9 @@ extern "C" {
 	    // A port such as "Ethernet40" can break out into 4 new ports with new oids, speeds,
 	    // and osIndex (Linux ifIndex) numbers.... but the first of these new ports still
 	    // bears the name "Ethernet40".
+	    // TODO: should the primary getPort() hash-table be key'd by prt->oid,
+	    // rather than prt->portName?  That way this would just be a new port
+	    // with a non-unique name.
 	    requestPortIfIndexDiscovery(mod, prt);
 	    signalCounterDiscontinuity(mod, prt);
 	  }
