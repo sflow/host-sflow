@@ -339,6 +339,7 @@ extern "C" {
 #define HSP_MAX_NIO_DELTA32 0x7FFFFFFF
 #define HSP_MAX_NIO_DELTA64 (uint64_t)(1.0e13)
     time_t last_update;
+    time_t poller_requested;
     uint32_t et_nctrs; // how many in total
     ETCTRFlags et_found; // bitmask of the ones we wanted
     // offsets within the ethtool stats block

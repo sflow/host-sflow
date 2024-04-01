@@ -22,9 +22,14 @@ extern "C" {
   {
     HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
     if(adaptorNIO->poller == NULL) {
-      // message this request to the pollBus
-      EVEvent *req_poller = EVGetEvent(sp->pollBus, HSPEVENT_REQUEST_POLLER);
-      EVEventTx(sp->rootModule, req_poller, &adaptor->ifIndex, sizeof(adaptor->ifIndex));
+      // Make sure we don't queue a flurry of requests by limiting to one per second
+      time_t now_mono_S = EVCurrentBus()->now.tv_sec;
+      if(adaptorNIO->poller_requested != now_mono_S) {
+	adaptorNIO->poller_requested = now_mono_S;
+	// message this request to the pollBus
+	EVEvent *req_poller = EVGetEvent(sp->pollBus, HSPEVENT_REQUEST_POLLER);
+	EVEventTx(sp->rootModule, req_poller, &adaptor->ifIndex, sizeof(adaptor->ifIndex));
+      }
     }
   }
 
@@ -48,7 +53,7 @@ extern "C" {
     if(adaptorNIO->sampler == NULL) {
       SFLDataSource_instance dsi;
       SFL_DS_SET(dsi, 0, adaptor->ifIndex, 0); // ds_class,ds_index,ds_instance
-      // add sampler
+      // add sampler to packet-bus agent
       adaptorNIO->sampler = sfl_agent_addSampler(sp->agent, &dsi);
       sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
       // TODO: adapt if headerBytes changes dynamically in config settings - broadcast event?
