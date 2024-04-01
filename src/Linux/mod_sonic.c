@@ -1108,6 +1108,8 @@ extern "C" {
 	  else if(!my_strequal(prt->oid, p_oid->str)) {
 	    // OID changed under our feet
 	    setStr(&prt->oid, p_oid->str);
+	    // Reset the port osIndex to update for the new values
+	    prt->osIndex = HSP_SONIC_IFINDEX_UNDEFINED;
 	    signalCounterDiscontinuity(mod, prt);
 	  }
 	  if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
