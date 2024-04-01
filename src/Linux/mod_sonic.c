@@ -1074,6 +1074,15 @@ extern "C" {
     }
   }
 
+  static void requestPortIfIndexDiscovery(EVMod *mod, HSPSonicPort *prt) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    if(prt->unmappedPort == NO) {
+      // queue it for ifIndex discovery
+      UTArrayPush(mdata->unmappedPorts, prt);
+      prt->unmappedPort = YES;
+    }
+  }
+
   static void db_portNamesCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
@@ -1106,14 +1115,18 @@ extern "C" {
 	  else if(!my_strequal(prt->oid, p_oid->str)) {
 	    // OID changed under our feet
 	    setStr(&prt->oid, p_oid->str);
+	    // osIndex for this port-name may have changed too. Ask for it to be remapped.
+	    // This happens on interface breakout,
+	    // as described in pull request #66 (https://github.com/sflow/host-sflow/pull/66).
+	    // A port such as "Ethernet40" can break out into 4 new ports with new oids, speeds,
+	    // and osIndex (Linux ifIndex) numbers.... but the first of these new ports still
+	    // bears the name "Ethernet40".
+	    requestPortIfIndexDiscovery(mod, prt);
 	    signalCounterDiscontinuity(mod, prt);
 	  }
 	  if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
-            if(prt->unmappedPort == NO) {
-	      // queue it for ifIndex discovery
-	      UTArrayPush(mdata->unmappedPorts, prt);
-	      prt->unmappedPort = YES;
-	    }
+	    // queue it for ifIndex discovery
+	    requestPortIfIndexDiscovery(mod, prt);
 	  }
 	  prt->mark = NO;
 	}
