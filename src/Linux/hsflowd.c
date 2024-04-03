@@ -6,7 +6,9 @@
 extern "C" {
 #endif
 
+#define HSP_TELEMETRY_NAMES 1
 #include "hsflowd.h"
+
 #include "cpu_utils.h"
 #include "cJSON.h"
 
@@ -1287,6 +1289,13 @@ extern "C" {
 #endif
   }
 
+  void log_telemetry(HSP *sp, FILE *out) {
+    FILE *outFile = out ?: stderr;
+    for(int ii = 0; ii < HSP_TELEMETRY_NUM_COUNTERS; ii++) {
+      fprintf(outFile, "%s=%"PRIu64"\n", HSPTelemetryNames[ii], sp->telemetry[ii]);
+    }
+  }
+  
   /*_________________---------------------------__________________
     _________________     signal_handler        __________________
     -----------------___________________________------------------
@@ -1313,7 +1322,8 @@ extern "C" {
       break;
     case SIGUSR1:
       myLog(LOG_INFO,"Received SIGUSR1");
-      // backtrace and memory stats only - then keep going
+      // telemtry, backtrace and memory stats only - then keep going
+      log_telemetry(sp, getDebugOut());
       log_backtrace(sig, info, getDebugOut());
 #if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 13)
       malloc_info(0, getDebugOut());
