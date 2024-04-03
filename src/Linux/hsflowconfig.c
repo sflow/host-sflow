@@ -1454,6 +1454,7 @@ extern "C" {
 	    sp->sonic.sonic = YES;
 	    sp->sonic.unixsock = YES;
 	    sp->sonic.waitReady = HSP_SONIC_DEFAULT_WAITREADY_SECS;
+	    sp->sonic.suppressOther = YES;
 	    level[++depth] = HSPOBJ_SONIC;
 	    break;
 	  case HSPTOKEN_DBUS:
@@ -1972,6 +1973,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_WAITREADY:
 	      if((tok = expectInteger32(sp, tok, &sp->sonic.waitReady, 0, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SUPPRESSOTHER:
+	      if((tok = expectONOFF(sp, tok, &sp->sonic.suppressOther)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

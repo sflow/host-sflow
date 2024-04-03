@@ -636,6 +636,7 @@ extern "C" {
       char *dbconfig;
       uint32_t waitReady; // seconds
 #define HSP_SONIC_DEFAULT_WAITREADY_SECS 180
+      bool suppressOther;
     } sonic;
     struct {
       bool nvml;

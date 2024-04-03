@@ -2069,6 +2069,7 @@ extern "C" {
   */
 
   static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingSample *ps = (HSPPendingSample *)data;
     // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
     // the SONiC ifIndex namespace. For packet samples that means:
@@ -2078,10 +2079,15 @@ extern "C" {
     // If a mapping is missing for in/out ports we have to zero it out (0 == unknown)
     uint32_t osIndex = SFL_DS_INDEX(ps->sampler->dsi);
     HSPSonicPort *prt = getPortByOsIndex(mod, osIndex);
-    if(prt == NULL || prt->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+    if(prt == NULL
+       || prt->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+      // for troubleshooting we can allow this through (untranslated) with:
+      // "sonic{suppressOther=off}"
+      if(!sp->sonic.suppressOther)
+	return;
       // block this sample from being sent out.
-      // TODO: if sample_pool is maintained upstream then it
-      // may need to be adjusted here.
+      // TODO: if sample_pool is maintained upstream then it may need to be adjusted here.
+      EVDebug(mod, 2, "suppress packet sample from non-sonic port (osIndex=%u)\n", osIndex);
       ps->suppress = YES;
     }
     else {
@@ -2114,6 +2120,7 @@ extern "C" {
   */
 
   static void evt_cntr_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingCSample *ps = (HSPPendingCSample *)data;
     // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
     // the SONiC ifIndex namespace. For interface counter samples that means:
@@ -2125,8 +2132,14 @@ extern "C" {
     // 6. Parent structure?
     uint32_t osIndex = SFL_DS_INDEX(ps->poller->dsi);
     HSPSonicPort *prt = getPortByOsIndex(mod, osIndex);
-    if(prt == NULL || prt->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+    if(prt == NULL
+       || prt->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+      // for troubleshooting we can allow this through (untranslated) with:
+      // "sonic{suppressOther=off}"
+      if(!sp->sonic.suppressOther)
+	return;
       // block this sample from being sent out
+      EVDebug(mod, 2, "suppress counter sample from non-sonic port (osIndex=%u)\n", osIndex);
       ps->suppress = YES;
     }
     else {

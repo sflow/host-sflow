@@ -2378,6 +2378,7 @@ extern "C" {
     sp->sonic.setIfAlias = YES;
     sp->sonic.setIfName = YES;
     sp->sonic.waitReady = HSP_SONIC_DEFAULT_WAITREADY_SECS;
+    sp->sonic.suppressOther = YES;
     sp->psample.psample = YES;
     sp->psample.ingress = YES;
     sp->psample.egress = YES;
