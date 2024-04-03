@@ -82,6 +82,12 @@ extern "C" {
     strArrayAdd(cmdline, adaptor->deviceName);
     strArrayAdd(cmdline, "clsact");
 
+    if(EVDebug(mod, 1, NULL)) {
+      char *cmd = strArrayStr(cmdline, "<", NULL, " ", ">");
+      EVDebug(mod, 1, "dent: addQDisc(%s) cmdLine: %s", adaptor->deviceName, cmd);
+      my_free(cmd);
+    }
+
     char outputLine[HSP_MAX_EXEC_LINELEN];
     int status=0;
     if(myExec(mod, strArray(cmdline), execOutputAddQDisc, outputLine, HSP_MAX_EXEC_LINELEN, &status)) {
@@ -201,7 +207,7 @@ extern "C" {
     snprintf(hdrBytes, HSP_MAX_TOK_LEN, "%u", sp->sFlowSettings_file->headerBytes);
     strArrayAdd(cmdline, hdrBytes);
     // TODO: not sure what the optional "index" option does here
-    if(debug(1)) {
+    if(EVDebug(mod, 1, NULL)) {
       char *cmd = strArrayStr(cmdline, "<", NULL, " ", ">");
       EVDebug(mod, 1, "dent: setRate(%s) cmdLine: %s", adaptor->deviceName, cmd);
       my_free(cmd);

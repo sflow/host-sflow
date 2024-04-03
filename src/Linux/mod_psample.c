@@ -368,6 +368,11 @@ extern "C" {
       uint32_t this_sample_n = sample_n;
       
       if(sample_n != nio->sampling_n) {
+
+	EVDebug(mod, 2, "psample sampling N (%u) != configured N (%u)\n",
+		sample_n,
+		nio->sampling_n);
+
 	if(sample_n < nio->sampling_n) {
 	  // apply sub-sampling on this interface.  We may get here if the
 	  // hardware or kernel is configured to sample at 1:N and then
