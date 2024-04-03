@@ -1191,20 +1191,22 @@ extern "C" {
              -d:  do not daemonize, and log to stdout/LOGFile (repeat for more debug details)\n\
      -D LOGFile:  debug logging goes to this file\n\
     -L LOGBytes:  max bytes in LOGFile (default is " HSP_DEFAULT_LOGBYTES ")\n\
+   -F debugCtrl:  debug logging control file (lines with <mod>=<level>)\n\
              -v:  print version number and exit\n\
              -P:  do not drop privileges (run as root)\n\
-     -p PIDFile:  specify PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
-        -u UUID:  specify UUID as unique ID for this host\n\
-  -f CONFIGFile:  specify config file (default is " HSP_DEFAULT_CONFIGFILE ")\n\
-  -l MODULESDir:  specify modules directory (default is " STRINGIFY_DEF(HSP_MOD_DIR) ")\n \
-   -c CRASHFile:  specify file to write crash info to (default is stderr)\n \
-    -M MEMLimit:  specify a max memory footprint in bytes for this process\n");
-  fprintf(stderr, "=============== More Information ============================================\n");
-  fprintf(stderr, "| sFlow standard        - http://www.sflow.org                              |\n");
-  fprintf(stderr, "| sFlowTrend (FREE)     - http://www.inmon.com/products/sFlowTrend.php      |\n");
-  fprintf(stderr, "=============================================================================\n");
-
-    exit(EXIT_FAILURE);
+     -p PIDFile:  set PID file (default is " HSP_DEFAULT_PIDFILE ")\n\
+        -u UUID:  set UUID as unique ID for this host\n\
+  -f CONFIGFile:  config file (default is " HSP_DEFAULT_CONFIGFILE ")\n\
+  -l MODULESDir:  modules directory (default is " STRINGIFY_DEF(HSP_MOD_DIR) ")\n\
+   -c CRASHFile:  file to write crash info to (default is stderr)\n\
+    -M MEMLimit:  max memory footprint in bytes for this process\n");
+  fprintf(stderr, "=============== More Information =============================\n");
+  fprintf(stderr, "| sFlow standard        - https://www.sflow.org               |\n");
+  fprintf(stderr, "| host-sFlow            - https://sflow.net                   |\n");
+  fprintf(stderr, "| sflowtool             - https://github.com/sflow/sflowtool  |\n");
+  fprintf(stderr, "| sFlow-RT              - https://sflow-rt.com                |\n");
+  fprintf(stderr, "==============================================================\n");
+  exit(EXIT_FAILURE);
   }
 
   /*_________________---------------------------__________________

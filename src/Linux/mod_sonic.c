@@ -743,7 +743,7 @@ extern "C" {
     if(ctx
        && fd >= 0
        && ctx->err == 0) {
-      EVDebug(mod, 1, "db_connectClient suceeded: fd=%d", fd);
+      EVDebug(mod, 1, "db_connectClient succeeded: fd=%d", fd);
       redisAsyncSetConnectCallback(ctx, db_connectCB);
       redisAsyncSetDisconnectCallback(ctx, db_disconnectCB);
       db->sock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, db /* magic */);
