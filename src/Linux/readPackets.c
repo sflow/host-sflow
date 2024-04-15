@@ -180,7 +180,7 @@ extern "C" {
 	bridgeModel = YES;
       SFLAdaptor *ad_in_global = adaptorByPeerIndex(sp, ad_in->ifIndex);
       if(ad_in_global) {
-	EVDebug(mod, 1, "  GlobalNS veth peer ad_in=%s(%u)",
+	EVDebug(mod, 1, "GlobalNS veth peer ad_in=%s(%u)",
 		ad_in_global->deviceName,
 		ad_in_global->ifIndex);
 	bridgeModel = YES;
@@ -192,7 +192,7 @@ extern "C" {
 	bridgeModel = YES;
       SFLAdaptor *ad_out_global = adaptorByPeerIndex(sp, ad_out->ifIndex);
       if(ad_out_global) {
-	EVDebug(mod, 1, "  GlobalNS veth peer ad_out=%s(%u)",
+	EVDebug(mod, 1, "GlobalNS veth peer ad_out=%s(%u)",
 		ad_out_global->deviceName,
 		ad_out_global->ifIndex);
 	bridgeModel = YES;

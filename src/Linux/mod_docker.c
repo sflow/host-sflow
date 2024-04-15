@@ -855,7 +855,7 @@ extern "C" {
 		  if(container->cgroup_devices)
 		    my_free(container->cgroup_devices);
 		  container->cgroup_devices = my_strdup(path);
-		  EVDebug(mod, 1, "docker: container(%s)->cgroup_devices=%s", container->name, container->cgroup_devices);
+		  EVDebug(mod, 1, "container(%s)->cgroup_devices=%s", container->name, container->cgroup_devices);
 		}
 	      }
 	    }
@@ -889,7 +889,7 @@ extern "C" {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
 
     if(mdata->currentRequests || mdata->queuedRequests || mdata->waitingRequests) {
-      EVDebug(mod, 1, "docker currentRequests=%d, queuedRequests=%d, waitingRequests=%d, generatedRequests=%d, lostRequests=%d, statsWaitRequests=%d containers=%d, names=%d, hostnames=%d",
+      EVDebug(mod, 1, "currentRequests=%d, queuedRequests=%d, waitingRequests=%d, generatedRequests=%d, lostRequests=%d, statsWaitRequests=%d containers=%d, names=%d, hostnames=%d",
 	      mdata->currentRequests,
 	      mdata->queuedRequests,
 	      mdata->waitingRequests,
@@ -902,7 +902,7 @@ extern "C" {
     }
 
     if(mdata->countdownToResync) {
-      EVDebug(mod, 1, "docker resync in %u", mdata->countdownToResync);
+      EVDebug(mod, 1, "resync in %u", mdata->countdownToResync);
       if(--mdata->countdownToResync == 0)
 	dockerSynchronize(mod);
     }
@@ -911,7 +911,7 @@ extern "C" {
 	// ebuild regex patterns periodically
 	buildRegexPatterns(mod);
 	// and check for missed containers
-	EVDebug(mod, 1, "docker container recheck");
+	EVDebug(mod, 1, "container recheck");
 	dockerContainerCapture(mod);
       }
     }
@@ -1930,7 +1930,7 @@ extern "C" {
       req->chunkLength = strtol(line, &endp, 16); // hex
       if(*endp != '\0') {
 	// failed to consume the whole string - must be an error.
-	EVDebug(mod, 1, "Docker error: <%s> for request(seqNo=%d): <%s>",
+	EVDebug(mod, 1, "error: <%s> for request(seqNo=%d): <%s>",
 		line, req->seqNo, UTSTRBUF_STR(req->request));
 	req->state = HSPDOCKERREQ_ERR;
       }
@@ -2058,7 +2058,7 @@ extern "C" {
 	      inspectContainer(mod, container);
 	    }
 	    else {
-	      EVDebug(mod, 1, "docker unexpected request type=%d", req->reqType);
+	      EVDebug(mod, 1, "unexpected request type=%d", req->reqType);
 	    }
 	  }
 	}

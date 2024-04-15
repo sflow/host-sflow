@@ -29,9 +29,9 @@ extern "C" {
   static int execOutputNoQDisc(void *magic, char *line) {
     EVMod *mod = (EVMod *)magic;
     HSP_mod_DENT *mdata = (HSP_mod_DENT *)mod->data;
-    EVDebug(mod, 1, "dent: execOutputNoQDisc: %s", line);
+    EVDebug(mod, 1, "execOutputNoQDisc: %s", line);
     if(regexec(mdata->qdisc_regex, line, 0, NULL, 0) == 0) {
-      EVDebug(mod, 1, "dent: qdisc detected: %s", line);
+      EVDebug(mod, 1, "qdisc detected: %s", line);
       return NO; // stop reading (signal that we found it)
     }
     return YES; // keep looking
@@ -66,7 +66,7 @@ extern "C" {
 
   static int execOutputAddQDisc(void *magic, char *line) {
     EVMod *mod = (EVMod *)magic;
-    EVDebug(mod, 1, "dent: execOutputAddQDisc: %s", line);
+    EVDebug(mod, 1, "execOutputAddQDisc: %s", line);
     return YES;
   }
 
@@ -84,7 +84,7 @@ extern "C" {
 
     if(EVDebug(mod, 1, NULL)) {
       char *cmd = strArrayStr(cmdline, "<", NULL, " ", ">");
-      EVDebug(mod, 1, "dent: addQDisc(%s) cmdLine: %s", adaptor->deviceName, cmd);
+      EVDebug(mod, 1, "addQDisc(%s) cmdLine: %s", adaptor->deviceName, cmd);
       my_free(cmd);
     }
 
@@ -97,7 +97,7 @@ extern "C" {
 	      WEXITSTATUS(status));
       }
       else {
-	EVDebug(mod, 1, "dent: addQDisc(%s) succeeded", adaptor->deviceName);
+	EVDebug(mod, 1, "addQDisc(%s) succeeded", adaptor->deviceName);
 	added_ok = YES;
       }
     }
@@ -118,7 +118,7 @@ extern "C" {
 
   static int execOutputDeleteFilter(void *magic, char *line) {
     EVMod *mod = (EVMod *)magic;
-    EVDebug(mod, 1, "dent: execOutputDeleteFilter: %s", line);
+    EVDebug(mod, 1, "execOutputDeleteFilter: %s", line);
     return YES;
   }
 
@@ -142,7 +142,7 @@ extern "C" {
 	      WEXITSTATUS(status));
       }
       else {
-	EVDebug(mod, 1, "dent: deleteFilter(%s) succeeded", adaptor->deviceName);
+	EVDebug(mod, 1, "deleteFilter(%s) succeeded", adaptor->deviceName);
 	deleted_ok = YES;
       }
     }
@@ -164,7 +164,7 @@ extern "C" {
 
   static int execOutputSetRate(void *magic, char *line) {
     EVMod *mod = (EVMod *)magic;
-    EVDebug(mod, 1, "dent: execOutputSetRate: %s", line);
+    EVDebug(mod, 1, "execOutputSetRate: %s", line);
     return YES;
   }
 
@@ -209,7 +209,7 @@ extern "C" {
     // TODO: not sure what the optional "index" option does here
     if(EVDebug(mod, 1, NULL)) {
       char *cmd = strArrayStr(cmdline, "<", NULL, " ", ">");
-      EVDebug(mod, 1, "dent: setRate(%s) cmdLine: %s", adaptor->deviceName, cmd);
+      EVDebug(mod, 1, "setRate(%s) cmdLine: %s", adaptor->deviceName, cmd);
       my_free(cmd);
     }
     strArrayAdd(cmdline, "continue");
@@ -223,7 +223,7 @@ extern "C" {
 	      WEXITSTATUS(status));
       }
       else {
-	EVDebug(mod, 1, "dent: setRate(%s) succeeded", adaptor->deviceName);
+	EVDebug(mod, 1, "setRate(%s) succeeded", adaptor->deviceName);
 	// hardware/kernel sampling was successfully configured
 	sampling_ok = YES;
       }
@@ -256,7 +256,7 @@ extern "C" {
       deleteFilter(mod, adaptor, egress);
     else {
       // make sure the parent qdisc is available - creating if necessary
-      EVDebug(mod, 1, "dent: setSamplingRate(%s %s) %u -> %u",
+      EVDebug(mod, 1, "setSamplingRate(%s %s) %u -> %u",
 	      adaptor->deviceName,
 	      egress ? "egress" : "ingress",
 	      niostate->sampling_n_set,
@@ -297,7 +297,7 @@ extern "C" {
       HSPAdaptorNIO *niostate = ADAPTOR_NIO(adaptor);
       if(!niostate->switchPort) {
 	if(regexec(sp->dent.swp_regex, adaptor->deviceName, 0, NULL, 0) == 0) {
-	  EVDebug(mod, 1, "dent: new switchport detected: %s", adaptor->deviceName);
+	  EVDebug(mod, 1, "new switchport detected: %s", adaptor->deviceName);
 	  niostate->switchPort = YES;
 	}
       }
