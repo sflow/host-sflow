@@ -30,7 +30,7 @@ extern "C" {
   // would need a semaphore.
   
   // Set an upper-limit on the size of any flow/counter/discard sample.
-#define SFD_MAX_SAMPLE_SIZE 1024
+#define SFD_MAX_SAMPLE_SIZE 1400
 #define SFD_MAX_SAMPLE_QUADS (SFD_MAX_SAMPLE_SIZE >> 2)
 // Set an upper limit on the number of flow/counter/discard samples in one datagram.
 #define SFD_MAX_DATAGRAM_SAMPLES 64
