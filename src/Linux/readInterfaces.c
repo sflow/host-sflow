@@ -765,7 +765,8 @@ extern "C" {
 
       // Get the flags for this interface
       if(ioctl(fd,SIOCGIFFLAGS, &ifr) < 0) {
-	myLog(LOG_ERR, "device %s Get SIOCGIFFLAGS failed : %s",
+	// Can get here if the interface was just removed under our feet.
+	myLog(LOG_INFO, "device %s Get SIOCGIFFLAGS failed : %s",
 	      devName,
 	      strerror(errno));
 	continue;
@@ -788,7 +789,7 @@ extern "C" {
       u_char macBytes[6];
       int gotMac = NO;
       if(ioctl(fd,SIOCGIFHWADDR, &ifr) < 0) {
-	myLog(LOG_ERR, "device %s Get SIOCGIFHWADDR failed : %s",
+	myLog(LOG_INFO, "device %s Get SIOCGIFHWADDR failed : %s",
 	      devName,
 	      strerror(errno));
       }
