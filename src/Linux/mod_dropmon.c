@@ -72,7 +72,7 @@ extern "C" {
   
 #endif /* HSP_REPLICATE_DROPMON_DEFS */		      
   
-#define HSP_DROPMON_READNL_RCV_BUF 8192
+#define HSP_DROPMON_READNL_RCV_BUF 16384
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000
 #define HSP_DROPMON_QUEUE 1000 // seems to be default (in kernel net/core/drop_monitor.c)

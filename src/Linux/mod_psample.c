@@ -21,10 +21,10 @@ extern "C" {
 #define SOL_NETLINK 270
 #endif
 
-#define HSP_PSAMPLE_READNL_RCV_BUF 8192
+#define HSP_PSAMPLE_READNL_RCV_BUF 16384
 #define HSP_PSAMPLE_RCVMSG_CBUFLEN 256
 #define HSP_PSAMPLE_READNL_BATCH 10
-#define HSP_PSAMPLE_MM_BATCH 16
+#define HSP_PSAMPLE_MM_BATCH 8
 #define HSP_PSAMPLE_RCVBUF 8000000
 
   // Shadow the attributes in linux/psample.h so
