@@ -68,15 +68,24 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  static bool addLocalIP(UTHash *ht, SFLAddress *addr, char *dev) {
+  static bool addLocalIP(HSP *sp, UTHash *ht, SFLAddress *addr, char *dev) {
     HSPLocalIP searchIP = { .ipAddr = *addr };
-    if(UTHashGet(ht, &searchIP) == NULL) {
-      HSPLocalIP *lip = localIPNew(addr, dev);
+    HSPLocalIP *lip = UTHashGet(ht, &searchIP);
+    bool added = NO;
+    if(lip == NULL) {
+      lip = localIPNew(addr, dev);
       UTHashAdd(ht, lip);
       lip->discoveryIndex = UTHashN(ht);
-      return YES;
+      added = YES;
     }
-    return NO;
+    else {
+      // keep the set of all devs this address was seen on
+      // in case one of them is the preferred one for agent
+      // address selection.
+      if(!strArrayContains(lip->devs, dev))
+	strArrayAdd(lip->devs, dev);
+    }
+    return added;
   }
 
   static void freeLocalIPs(UTHash *ht) {
@@ -86,34 +95,6 @@ extern "C" {
     UTHashFree(ht);
   }
 
-
-/*________________---------------------------__________________
-  ________________  setAddressPriorities     __________________
-  ----------------___________________________------------------
-  Ideally we would do this as we go along,  but since the vlan
-  info is spliced in separately we have to wait for that and
-  then set the priorities for the whole list.
-*/
-  static void setAddressPriorities(HSP *sp, UTHash *addrHT)
-  {
-    EVMod *mod = sp->rootModule;
-    EVDebug(mod, 1, "setAddressPriorities");
-    if(addrHT) {
-      HSPLocalIP *lip;
-      UTHASH_WALK(addrHT, lip) {
-	SFLAdaptor *adaptor = adaptorByName(sp, lip->dev);
-	if(adaptor) {
-	  HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-	  if(adaptorNIO) {
-	    lip->ipPriority = agentAddressPriority(sp,
-						   &lip->ipAddr,
-						   adaptorNIO->vlan,
-						   adaptorNIO->loopback);
-	  }
-	}
-      }
-    }
-  }
 
   /*________________---------------------------__________________
     ________________     readL3Addresses       __________________
@@ -192,7 +173,7 @@ extern "C" {
       if(addrHT) {
 	char ipbuf[51];
 	EVDebug(mod, 1, "readL3Addresses: found=%s\n", SFLAddress_print(&addr, ipbuf, 50));
-	if(addLocalIP(addrHT, &addr, ifa->ifa_name))
+	if(addLocalIP(sp, addrHT, &addr, ifa->ifa_name))
 	  addresses_added++;
       }
     }
@@ -247,7 +228,7 @@ extern "C" {
 	      SFLAddress v6addr;
 	      v6addr.type = SFLADDRESSTYPE_IP_V6;
 	      if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
-		if(addLocalIP(addrHT, &v6addr, adaptor->deviceName))
+		if(addLocalIP(sp, addrHT, &v6addr, adaptor->deviceName))
 		  addresses_added++;
 	      }
 	    }
@@ -881,7 +862,7 @@ extern "C" {
 	  adaptorNIO->ipAddr.type = SFLADDRESSTYPE_IP_V4;
 	  adaptorNIO->ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
 	  // add to localIP hash too
-	  addLocalIP(newLocalIP, &adaptorNIO->ipAddr, adaptor->deviceName);
+	  addLocalIP(sp, newLocalIP, &adaptorNIO->ipAddr, adaptor->deviceName);
 	}
 	//else if (ifr.ifr_addr.sa_family == AF_INET6) {
 	// not sure this ever happens - on a linux system IPv6 addresses
@@ -931,12 +912,6 @@ extern "C" {
   // sweep for additional layer3 addresses
   readL3Addresses(sp, newLocalIP, newLocalIP6);
   readIPv6Addresses(sp, newLocalIP6);
-
-  // now that we have the evidence gathered together, we can
-  // set the L3 address priorities (used for auto-selecting
-  // the sFlow-agent-address if requrired to by the config.
-  setAddressPriorities(sp, newLocalIP);
-  setAddressPriorities(sp, newLocalIP6);
 
   if(p_added) *p_added = ad_added;
   if(p_removed) *p_removed = ad_removed;

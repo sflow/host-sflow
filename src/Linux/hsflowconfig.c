@@ -1108,48 +1108,90 @@ extern "C" {
   }
 
 
-  static bool priorityHigher(HSP *sp, HSPLocalIP *localIP, HSPLocalIP *challenger, char *dev) {
+/*________________---------------------------__________________
+  ________________  setAddressPriorities     __________________
+  ----------------___________________________------------------
+*/
+
+  static void setAddressPriorities(HSP *sp, UTHash *addrHT) {
+    myDebug(2, "setAddressPriorities");
+    if(addrHT) {
+      HSPLocalIP *lip;
+      UTHASH_WALK(addrHT, lip) {
+	lip->ipPriority = 0;
+	lip->minIfIndex = 0xFFFFFFFF;
+	lip->minSelectionPriority = 0xFFFFFFFF;
+	for(uint32_t ii=0; ii<strArrayN(lip->devs); ii++) {
+	  char *dev = strArrayAt(lip->devs, ii);
+	  SFLAdaptor *adaptor = adaptorByName(sp, dev);
+	  if(adaptor) {
+	    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+	    if(adaptorNIO) {
+	      uint32_t priority = agentAddressPriority(sp,
+						       &lip->ipAddr,
+						       adaptorNIO->vlan,
+						       adaptorNIO->loopback);
+	      // remember the highest priority score (and which dev it was)
+	      if(priority > lip->ipPriority) {
+		lip->ipPriority = priority;
+		lip->priorityDev = ii;
+	      }
+	      // for SONiC tie-breaker: lowest non-zero selectionPriority seen
+	      if(adaptorNIO->selectionPriority
+		 && adaptorNIO->selectionPriority < lip->minSelectionPriority)
+		lip->minSelectionPriority = adaptorNIO->selectionPriority;
+	      // for tie-breaker: lowest ifIndex seen
+	      if(adaptor->ifIndex < lip->minIfIndex)
+		lip->minIfIndex = adaptor->ifIndex;
+
+	      char ipbuf[51];
+	      myDebug(2, "setAddressPriorities: ip=%s discoveryIdx=%u dev=%s priority=%u minIfIndex=%u minSONiCPriority=%u",
+		      SFLAddress_print(&lip->ipAddr, ipbuf, 50),
+		      lip->discoveryIndex,
+		      dev,
+		      lip->ipPriority,
+		      lip->minIfIndex,
+		      lip->minSelectionPriority);
+	    }
+	  }
+	}
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________      priorityHigher       __________________
+    -----------------___________________________------------------
+  */
+
+  static bool priorityHigher(HSP *sp, HSPLocalIP *localIP, HSPLocalIP *challenger, char *peggedDev) {
     if(localIP == NULL)
       return YES;
     int pri_local = localIP->ipPriority;
     int pri_challenge = challenger->ipPriority;
-    if(dev) {
-      if(my_strequal(dev, challenger->dev))
+    if(peggedDev) {
+      char ipbuf[51];
+      if(strArrayContains(challenger->devs, peggedDev)) {
 	pri_challenge += IPSP_NUM_PRIORITIES;
-      if(my_strequal(dev, localIP->dev))
+	myDebug(2, "%s boosted (dev=%s)", SFLAddress_print(&challenger->ipAddr, ipbuf, 50), peggedDev);
+      }
+      if(strArrayContains(localIP->devs, peggedDev)) {
 	pri_local += IPSP_NUM_PRIORITIES;
+	myDebug(2, "%s boosted (dev=%s)", SFLAddress_print(&localIP->ipAddr, ipbuf, 50), peggedDev);
+      }
     }
     if(pri_challenge < pri_local)
       return NO;
     if(pri_challenge > pri_local)
       return YES;
-    SFLAdaptor *adaptor1 = adaptorByName(sp, localIP->dev);
-    if(adaptor1 == NULL)
+    // tiebreaker (1) : SONiC selectionPriority (lower number wins)
+    if(challenger->minSelectionPriority < localIP->minSelectionPriority)
       return YES;
-    SFLAdaptor *adaptor2 = adaptorByName(sp, challenger->dev);
-    if(adaptor2 == NULL)
-      return NO;
-    // if these addresses are on the same interface, take the one we found first
-    if(adaptor1->ifIndex == adaptor2->ifIndex)
-      return (challenger->discoveryIndex < localIP->discoveryIndex);
-    // do we have selection priority numbers? (e.g. in SONiC the Linux
-    // ifIndex numbers can reorder on a warm boot, so priority numbers
-    // are supplied to adaptors to help stabilize this selection).
-    HSPAdaptorNIO *adaptorNIO1 = ADAPTOR_NIO(adaptor1);
-    HSPAdaptorNIO *adaptorNIO2 = ADAPTOR_NIO(adaptor2);
-    uint32_t priority1 = 0xFFFFFFFF;
-    uint32_t priority2 = 0xFFFFFFFF;
-    if(adaptorNIO1)
-      priority1 = adaptorNIO1->selectionPriority;
-    if(adaptorNIO2)
-      priority2 = adaptorNIO2->selectionPriority;
-    if(priority1 != priority2) {
-      // At least one of these was given a selectionPriority
-      return (priority2 < priority1); // lower number wins
-    }
-    // otherwise take the one whose interface has the lower ifIndex
-    return (adaptor2->ifIndex > 0
-	    && adaptor2->ifIndex < adaptor1->ifIndex);
+    // tiebreaker (2) : lower ifIndex
+    if(challenger->minIfIndex < localIP->minIfIndex)
+      return YES;
+    // tiebreaker (3) : discovery order
+    return (challenger->discoveryIndex < localIP->discoveryIndex);
   }
 
   /*_________________---------------------------__________________
@@ -1165,6 +1207,10 @@ extern "C" {
     SFLAdaptor *selectedAdaptor = NULL;
 
     myDebug(1, "selectAgentAddress");
+    
+    // set base priority (and tiebreaker) info for all known local addresses
+    setAddressPriorities(sp, sp->localIP);
+    setAddressPriorities(sp, sp->localIP6);
 
     // see if config specifies ip or adaptor
     if(st
@@ -1209,18 +1255,25 @@ extern "C" {
       char *peggedDev = selectedAdaptor ? selectedAdaptor->deviceName : NULL;
       HSPLocalIP *selectedLocalIP = NULL;
       HSPLocalIP *lip;
+      char ipbuf[51];
       UTHASH_WALK(sp->localIP, lip) {
-	if(priorityHigher(sp, selectedLocalIP, lip, peggedDev))
+	if(priorityHigher(sp, selectedLocalIP, lip, peggedDev)) {
+	  myDebug(2, "%s preferred", SFLAddress_print(&lip->ipAddr, ipbuf, 50));
 	  selectedLocalIP = lip;
+	}
       }
       UTHASH_WALK(sp->localIP6, lip) {
-	if(priorityHigher(sp, selectedLocalIP, lip, peggedDev))
+	if(priorityHigher(sp, selectedLocalIP, lip, peggedDev)) {
+	  myDebug(2, "%s preferred", SFLAddress_print(&lip->ipAddr, ipbuf, 50));
 	  selectedLocalIP = lip;
+	}
       }
       if(selectedLocalIP) {
 	// picked one.  Fill in ip and adaptor
 	ip = &selectedLocalIP->ipAddr;
-	selectedAdaptor = adaptorByName(sp, selectedLocalIP->dev);
+	char *selectedDev = strArrayAt(selectedLocalIP->devs, selectedLocalIP->priorityDev);
+	if(selectedDev)
+	  selectedAdaptor = adaptorByName(sp, selectedDev);
       }
     }
 

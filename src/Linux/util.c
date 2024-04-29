@@ -688,6 +688,10 @@ extern "C" {
     return -1;
   }
 
+  bool strArrayContains(UTStringArray *ar, char *str) {
+    return (strArrayIndexOf(ar, str) >= 0);
+  }
+
   static int isSeparator(char ch, char *separators) {
     if(separators == NULL) return NO;
     for(char *sep = separators; (*sep) != '\0'; sep++)

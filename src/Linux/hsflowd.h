@@ -280,9 +280,12 @@ extern "C" {
 
   typedef struct _HSPLocalIP {
     SFLAddress ipAddr;
-    char *dev;
+    UTStringArray *devs;
     EnumIPSelectionPriority ipPriority;
+    uint32_t priorityDev;
     uint32_t discoveryIndex;
+    uint32_t minIfIndex;
+    uint32_t minSelectionPriority;
   } HSPLocalIP;
 
   typedef struct _HSP_ethtool_counters {

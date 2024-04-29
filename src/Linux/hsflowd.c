@@ -334,13 +334,13 @@ extern "C" {
   HSPLocalIP *localIPNew(SFLAddress *ipAddr, char *dev) {
     HSPLocalIP *lip = my_calloc(sizeof(HSPLocalIP));
     lip->ipAddr = *ipAddr;
-    lip->dev = my_strdup(dev);
+    lip->devs = strArrayNew();
     th_n_localIPs++;
     return lip;
   }
 
   void localIPFree(HSPLocalIP *lip) {
-    my_free(lip->dev);
+    strArrayFree(lip->devs);
     my_free(lip);
     th_n_localIPs--;
   }

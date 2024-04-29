@@ -185,6 +185,7 @@ extern "C" {
   char *strArrayStr(UTStringArray *ar, char *start, char *quote, char *delim, char *end);
   int strArrayEqual(UTStringArray *ar1, UTStringArray *ar2);
   int strArrayIndexOf(UTStringArray *ar, char *str);
+  bool strArrayContains(UTStringArray *ar, char *str);
 
   // obj array
   typedef struct _UTArray {
