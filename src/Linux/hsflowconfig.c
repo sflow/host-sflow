@@ -1184,13 +1184,16 @@ extern "C" {
       return NO;
     if(pri_challenge > pri_local)
       return YES;
-    // tiebreaker (1) : SONiC selectionPriority (lower number wins)
-    if(challenger->minSelectionPriority < localIP->minSelectionPriority)
-      return YES;
-    // tiebreaker (2) : lower ifIndex
-    if(challenger->minIfIndex < localIP->minIfIndex)
-      return YES;
-    // tiebreaker (3) : discovery order
+
+    // tiebreaker (1) : lower SONiC selectionPriority wins
+    if(challenger->minSelectionPriority != localIP->minSelectionPriority)
+      return (challenger->minSelectionPriority < localIP->minSelectionPriority);
+
+    // tiebreaker (2) : lower ifIndex wins
+    if(challenger->minIfIndex != localIP->minIfIndex)
+      return (challenger->minIfIndex < localIP->minIfIndex);
+
+    // tiebreaker (3) : discovered first wins
     return (challenger->discoveryIndex < localIP->discoveryIndex);
   }
 
