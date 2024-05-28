@@ -1947,13 +1947,15 @@ extern "C" {
     if(mdata->state < HSP_SONIC_STATE_DISCOVER)
       return; // this can happen if we lose the redis connection and go back
 
-    EVDebug(mod, 1, "pollCounters(adaptor=%s)", adaptor->deviceName);
-
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-
+    
+    EVDebug(mod, 1, "pollCounters(adaptor=%s, alias=%s)",
+	    adaptor->deviceName,
+	    nio->deviceAlias ?: "<none>");
+    
     if(nio->loopback)
       return;
-
+    
     if(nio->bond_master) {
       // trigger synthesizeBondMetaData
       accumulateNioCounters(sp, adaptor, NULL, NULL);
@@ -1961,6 +1963,10 @@ extern "C" {
     }
 
     HSPSonicPort *prt = getPort(mod, adaptor->deviceName, NO);
+    if(prt == NULL
+       && nio->deviceAlias)
+      prt = getPort(mod, nio->deviceAlias, NO);
+
     if(prt) {
       // OK to queue 4 requests on the TCP connection, and ordering
       // is preserved, so can just ask for state-refresh and counters
