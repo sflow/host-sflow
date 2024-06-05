@@ -1079,32 +1079,31 @@ extern "C" {
   static void db_getIfIndexMap(EVMod *mod, HSPSonicPort *prt) {
     HSPSonicDBTable *dbTab = getDBTable(mod, HSP_SONIC_DB_STATE_NAME);
     if(db_selectTab(dbTab)) {
-      EVDebug(mod, 1, "db_getIfIndexMap()");
+      EVDebug(mod, 1, "db_getIfIndexMap(%s)", prt->portName);
       int status = redisAsyncCommand(dbTab->dbClient->ctx,
 				     db_ifIndexMapCB,
 				     prt,
 				     "HGETALL PORT_INDEX_TABLE%s%s", dbTab->separator, prt->portName);
-      EVDebug(mod, 1, "db_getIfIndexMap() returned %d", status);
+      EVDebug(mod, 1, "db_getIfIndexMap(%s) returned %d", prt->portName, status);
     }
   }
     
   static void resubmitUnsyncedPorts(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     HSPSonicPort *prt;
+    EVDebug(mod, 1, "resubmitUnsyncedPorts()");
     UTHASH_WALK(mdata->portsByName, prt) {
-      if(!prt->adaptorSync)
+      if(!prt->adaptorSync) {
 	requestPortIfIndexDiscovery(mod, prt);
+      }
     }
   }
 
   static bool mapPorts(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    // First sweep to see if we still have any unsync'd ports that we need to resubmit,
-    // which can happen if we were waiting for hsflowd to discover them.
-    resubmitUnsyncedPorts(mod);
-    
     // kick off just one - starts a chain reaction if there are more.
     // Gets the ifIndex and Linux (OS) ifIndex
+    EVDebug(mod, 1, "mapPorts() unmappedPorts=%u", UTArrayN(mdata->unmappedPorts));
     HSPSonicPort *prt = UTArrayPop(mdata->unmappedPorts);
     if(prt) {
       prt->unmappedPort = NO;
@@ -1144,6 +1143,9 @@ extern "C" {
 
   static void requestPortIfIndexDiscovery(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    EVDebug(mod, 1, "requestPortIfIndexDiscovery(%s) unmapped=%s",
+	    prt->portName,
+	    prt->unmappedPort ? "YES":"NO");
     if(prt->unmappedPort == NO) {
       // queue it for ifIndex discovery
       UTArrayPush(mdata->unmappedPorts, prt);
@@ -2029,6 +2031,9 @@ extern "C" {
       break;
     case HSP_SONIC_STATE_DISCOVER_MAPPING:
       // learn mapping to native Linux ifIndex numbers
+      // First sweep to see if we still have any unsync'd ports that we need to resubmit,
+      // which can happen if we were waiting for hsflowd to discover them.
+      resubmitUnsyncedPorts(mod);
       if(!mapPorts(mod))
 	mdata->state = HSP_SONIC_STATE_DISCOVER_LAGS;
       break;
@@ -2037,8 +2042,10 @@ extern "C" {
       break;
     case HSP_SONIC_STATE_RUN:
       // check for new ports
-      if(!discoverNewPorts(mod))
+      if(!discoverNewPorts(mod)) {
+	resubmitUnsyncedPorts(mod);
 	mapPorts(mod);
+      }
       syncSwitchPorts(mod);
       discoverNewCollectors(mod);
       break;
