@@ -277,7 +277,7 @@ extern "C" {
 
   static bool portSyncToAdaptor(EVMod *mod, HSPSonicPort *prt, bool sync) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    if(prt->adaptorSync == NO) {
+    if(sync != prt->adaptorSync) {
       SFLAdaptor *adaptor = portGetAdaptor(mod, prt);
       if(adaptor) {
 	if(setPortAlias(mod, prt, sync))
@@ -287,10 +287,15 @@ extern "C" {
 	if(setSwitchPort(mod, prt, sync))
 	  mdata->changedSwitchPorts = YES;
 	// remember that we did this successfully
-	prt->adaptorSync = YES;
+	EVDebug(mod, 2, "portSyncToAdaptor: %s %s adaptor(ifIndex=%u)",
+		prt->portName,
+		sync ? "synced to" : "unsynced from",
+		adaptor->ifIndex);
+	prt->adaptorSync = sync;
       }
     }
-    return prt->adaptorSync;
+    // return success or failure
+    return (prt->adaptorSync == sync);
   }
   
   static void printLags(EVMod *mod) {
@@ -1049,12 +1054,16 @@ extern "C" {
 			prt->osIndex,
 			idx);
 		UTHashDel(mdata->portsByOsIndex, prt);
+		// try to gracefully disassociate from the old one
 		if(portSyncToAdaptor(mod, prt, NO) == NO) {
-		  EVDebug(mod, 1, "db_ifIndexMapCB %s unable to unsync from adaptor osIndex=%u\n",
+		  // but if that fails then force it
+		  EVDebug(mod, 1, "db_ifIndexMapCB %s force unsync from adaptor osIndex=%u\n",
 			  prt->portName,
 			  prt->osIndex);
+		  prt->adaptorSync = NO;
 		}
 	      }
+	      // now associate with the new one
 	      prt->osIndex = idx;
 	      UTHashAdd(mdata->portsByOsIndex, prt);
 	      if(portSyncToAdaptor(mod, prt, YES) == NO) {
@@ -1143,10 +1152,8 @@ extern "C" {
 
   static void requestPortIfIndexDiscovery(EVMod *mod, HSPSonicPort *prt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    EVDebug(mod, 1, "requestPortIfIndexDiscovery(%s) unmapped=%s",
-	    prt->portName,
-	    prt->unmappedPort ? "YES":"NO");
-    if(prt->unmappedPort) {
+    if(!prt->unmappedPort) {
+      EVDebug(mod, 1, "requestPortIfIndexDiscovery: queue %s for discovery", prt->portName);
       // queue it for ifIndex discovery
       UTArrayPush(mdata->unmappedPorts, prt);
       prt->unmappedPort = YES;
