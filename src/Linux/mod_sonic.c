@@ -270,9 +270,14 @@ extern "C" {
 
   static SFLAdaptor *portGetAdaptor(EVMod *mod, HSPSonicPort *prt) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED)
-      return NULL;
-    return adaptorByIndex(sp, prt->osIndex);
+    //if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED)
+    //  return NULL;
+    SFLAdaptor *adaptor = adaptorByIndex(sp, prt->osIndex);
+    if(adaptor == NULL)
+      adaptor = adaptorByName(sp, prt->portName);
+    if(adaptor == NULL)
+      adaptor = adaptorByAlias(sp, prt->portName);
+    return adaptor;
   }
 
   static bool portSyncToAdaptor(EVMod *mod, HSPSonicPort *prt, bool sync) {
@@ -997,7 +1002,7 @@ extern "C" {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
       if(nio
 	 && (nio->switchPort != flag)) {
-	EVDebug(mod, 1, "setting port %s switchPort flag from %u to %u\n",
+	EVDebug(mod, 1, "setting port %s switchPort flag from %u to %u",
 		prt->portName,
 		nio->switchPort,
 		flag);
@@ -1346,7 +1351,10 @@ extern "C" {
 	redisReply *c_name = reply->element[ii];
 	redisReply *c_val = reply->element[ii + 1];
 	if(c_name->type == REDIS_REPLY_STRING) {
-	  EVDebug(mod, 1, "portCounters: %s=%s", c_name->str, db_replyStr(c_val, db->replyBuf, YES));
+	  EVDebug(mod, 2, "portCounters: %s %s=%s",
+		  prt->portName,
+		  c_name->str,
+		  db_replyStr(c_val, db->replyBuf, YES));
 
 	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_IFIN_UCASTS))
 	    prt->ctrs.pkts_in = db_getU32(c_val);

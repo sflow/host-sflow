@@ -2314,7 +2314,7 @@ extern "C" {
 		    SFL_MAX_OSRELEASE_CHARS);
 
     // Helpful for version to be in every debug log.
-    myLog(LOG_INFO, "%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
+    myLog(LOG_INFO, "%s version %s", argv[0], STRINGIFY_DEF(HSP_VERSION));
     
     // some modules can be triggered to load even if they are not
     // explicitly in the config file - but do this before we read
