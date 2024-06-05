@@ -270,13 +270,13 @@ extern "C" {
 
   static SFLAdaptor *portGetAdaptor(EVMod *mod, HSPSonicPort *prt) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    //if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED)
-    //  return NULL;
+    if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED)
+      return NULL;
     SFLAdaptor *adaptor = adaptorByIndex(sp, prt->osIndex);
-    if(adaptor == NULL)
-      adaptor = adaptorByName(sp, prt->portName);
-    if(adaptor == NULL)
-      adaptor = adaptorByAlias(sp, prt->portName);
+    //if(adaptor == NULL)
+    //  adaptor = adaptorByName(sp, prt->portName);
+    //if(adaptor == NULL)
+    //  adaptor = adaptorByAlias(sp, prt->portName);
     return adaptor;
   }
 
