@@ -1146,7 +1146,7 @@ extern "C" {
     EVDebug(mod, 1, "requestPortIfIndexDiscovery(%s) unmapped=%s",
 	    prt->portName,
 	    prt->unmappedPort ? "YES":"NO");
-    if(prt->unmappedPort == NO) {
+    if(prt->unmappedPort) {
       // queue it for ifIndex discovery
       UTArrayPush(mdata->unmappedPorts, prt);
       prt->unmappedPort = YES;
