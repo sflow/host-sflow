@@ -1063,7 +1063,10 @@ extern "C" {
 		  prt->adaptorSync = NO;
 		}
 	      }
-	      // now associate with the new one
+	    }
+	    if(!prt->adaptorSync) {
+	      // now associate with the new one. Get here if the osIndex changes, or if
+	      // underlying Linux interface was not discovered yet the last time we were here.
 	      prt->osIndex = idx;
 	      UTHashAdd(mdata->portsByOsIndex, prt);
 	      if(portSyncToAdaptor(mod, prt, YES) == NO) {
