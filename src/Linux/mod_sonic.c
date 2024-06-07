@@ -73,6 +73,17 @@ extern "C" {
     HSP_SONIC_STATE_DISCOVER_LAGS,
     HSP_SONIC_STATE_RUN } EnumSonicState;
 
+  static const char *SonicStateNames[] = {
+    "INIT",
+    "CONNECT",
+    "WAIT_READY"
+    "CONNECTED",
+    "DISCOVER",
+    "DISCOVER_MAPPING",
+    "DISCOVER_LAGS",
+    "RUN"
+  };
+  
   typedef struct _HSPSonicCollector {
     char *collectorName;
     bool mark:1;
@@ -246,6 +257,19 @@ extern "C" {
       break;
     }
     return ans64;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    setSonicState          __________________
+    -----------------___________________________------------------
+  */
+  
+  static void setSonicState(EVMod *mod, EnumSonicState st) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    EVDebug(mod, 1, "state %s -> %s",
+	    SonicStateNames[mdata->state],
+	    SonicStateNames[st]);
+    mdata->state = st;
   }
 
   /*_________________---------------------------__________________
@@ -716,7 +740,7 @@ extern "C" {
     if(status == REDIS_OK) {
       db->connected = YES;
       if(db_allConnected(db->mod)) {
-	mdata->state = HSP_SONIC_STATE_WAIT_READY;
+	setSonicState(db->mod, HSP_SONIC_STATE_WAIT_READY);
 	mdata->waitReadyStart = mdata->pollBus->now.tv_sec;
       }
     }
@@ -728,7 +752,7 @@ extern "C" {
     EVDebug(db->mod, 1, "db_disconnectCB: status= %d", status);
     db->connected = NO;
     mdata->system_ready = NO;
-    mdata->state = HSP_SONIC_STATE_CONNECT;
+    setSonicState(db->mod, HSP_SONIC_STATE_CONNECT);
   }
 
   static bool db_connectClient(EVMod *mod, HSPSonicDBClient *db) {
@@ -848,7 +872,6 @@ extern "C" {
   {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
     EVMod *mod = db->mod;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
     EVDebug(mod, 1, "db_authCB: %s reply=%s",
 	    db->dbInstance,
@@ -858,7 +881,7 @@ extern "C" {
       EVDebug(mod, 1, "db_authCB ERROR calling redisAsyncFree() to disconnect");
       redisAsyncFree(db->ctx);
       EVDebug(mod, 1, "resetting state to CONNECT");
-      mdata->state = HSP_SONIC_STATE_CONNECT;
+      setSonicState(mod, HSP_SONIC_STATE_CONNECT);
     }
   }
 
@@ -1118,7 +1141,8 @@ extern "C" {
 
   static bool mapPorts(EVMod *mod) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    // kick off just one - starts a chain reaction if there are more.
+    // kick off just one - starts a chain reaction if there are more
+    // because db_ifIndexMapCB() calls back here.
     // Gets the ifIndex and Linux (OS) ifIndex
     EVDebug(mod, 1, "mapPorts() unmappedPorts=%u", UTArrayN(mdata->unmappedPorts));
     HSPSonicPort *prt = UTArrayPop(mdata->unmappedPorts);
@@ -1139,6 +1163,15 @@ extern "C" {
       mdata->changedPortAlias = NO;
       mdata->changedPortPriority = NO;
     }
+
+    // Completed this pass on mapping ports. We may not have
+    // sucessfully mapped all of them to Linux osIndex, but
+    // we don't want a single unmapped port to hold
+    // up the state machine. It's likely to be something like
+    // "CPU" anyway, and not a LAG component or port that we
+    // will want to poll counters for.
+    if(mdata->state == HSP_SONIC_STATE_DISCOVER_MAPPING)
+      setSonicState(mod, HSP_SONIC_STATE_DISCOVER_LAGS);
 
     return NO; // done with mapping ports
   }
@@ -1218,7 +1251,7 @@ extern "C" {
       }
     }
     deleteMarkedPorts(mod);
-    mdata->state = HSP_SONIC_STATE_DISCOVER_MAPPING;
+    setSonicState(mod, HSP_SONIC_STATE_DISCOVER_MAPPING);
   }
 
   static void db_getPortNames(EVMod *mod) {
@@ -1429,7 +1462,6 @@ extern "C" {
   {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
     EVMod *mod = db->mod;
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     redisReply *reply = (redisReply *)magic;
     char *sep = (char *)req_magic;
 
@@ -1464,7 +1496,7 @@ extern "C" {
       compileLags(mod);
     }
   LAG_DISCOVERY_DONE:
-    mdata->state = HSP_SONIC_STATE_RUN;
+    setSonicState(mod, HSP_SONIC_STATE_RUN);
   }
 
   static void db_getLagInfo(EVMod *mod) {
@@ -1713,7 +1745,7 @@ extern "C" {
     // but we can also get here later from dbEvt_sFlowCollectorOp() where we might be
     // in another state such as HSP_SONIC_STATE_RUN.
     if(mdata->state == HSP_SONIC_STATE_CONNECTED)
-      mdata->state = HSP_SONIC_STATE_DISCOVER;
+      setSonicState(mod, HSP_SONIC_STATE_DISCOVER);
   }
 
   static void db_getCollectorNames(EVMod *mod) {
@@ -1766,7 +1798,7 @@ extern "C" {
     }
     if(system_ready
        && mdata->state == HSP_SONIC_STATE_WAIT_READY)
-      mdata->state = HSP_SONIC_STATE_CONNECTED;
+      setSonicState(mod, HSP_SONIC_STATE_CONNECTED);
   }
 
   static void db_getSystemReady(EVMod *mod) {
@@ -1942,7 +1974,7 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     // need to refresh oid-mapping
     if(mdata->state == HSP_SONIC_STATE_RUN)
-      mdata->state = HSP_SONIC_STATE_DISCOVER;
+      setSonicState(mod, HSP_SONIC_STATE_DISCOVER);
   }
 
   /*_________________---------------------------__________________
@@ -2011,7 +2043,7 @@ extern "C" {
       // but now we start with no config (like DNS-SD)
       // so get things started here after a polite
       // startup delay of one tick:
-      mdata->state = HSP_SONIC_STATE_CONNECT;
+      setSonicState(mod, HSP_SONIC_STATE_CONNECT);
       break;
     case HSP_SONIC_STATE_CONNECT:
       // got config - try to connect
@@ -2028,7 +2060,7 @@ extern "C" {
 	}
 	else {
 	  EVDebug(mod, 1, "sonic: waitReady timeout after %u seconds", waiting);
-	  mdata->state = HSP_SONIC_STATE_CONNECTED;
+	  setSonicState(mod, HSP_SONIC_STATE_CONNECTED);
 	}
       }
       break;
@@ -2045,6 +2077,8 @@ extern "C" {
       // learn dynamic port->oid mappings
       // we can jump back here from HSP_SONIC_STATE_RUN if we
       // are notified that the interfaces have changed.
+      // TODO: what if only the SONiC port name has changed? Do we need to
+      // subscribe to changes in that table and jump back here for that too?
       db_getPortNames(mod);
       break;
     case HSP_SONIC_STATE_DISCOVER_MAPPING:
@@ -2052,19 +2086,20 @@ extern "C" {
       // First sweep to see if we still have any unsync'd ports that we need to resubmit,
       // which can happen if we were waiting for hsflowd to discover them.
       resubmitUnsyncedPorts(mod);
-      if(!mapPorts(mod))
-	mdata->state = HSP_SONIC_STATE_DISCOVER_LAGS;
+      mapPorts(mod);
       break;
     case HSP_SONIC_STATE_DISCOVER_LAGS:
       db_getLagInfo(mod);
       break;
     case HSP_SONIC_STATE_RUN:
       // check for new ports
-      if(!discoverNewPorts(mod)) {
-	resubmitUnsyncedPorts(mod);
-	mapPorts(mod);
-      }
+      discoverNewPorts(mod);
+      // check for any that are not synced to Linux osIndex
+      resubmitUnsyncedPorts(mod);
+      mapPorts(mod);
+      // sync with hsflowd "switchPort" designation to schedule polling
       syncSwitchPorts(mod);
+      // a new collector might be added at any time too
       discoverNewCollectors(mod);
       break;
     }
