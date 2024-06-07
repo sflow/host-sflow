@@ -77,7 +77,7 @@ extern "C" {
   static const char *SonicStateNames[] = {
     "INIT",
     "CONNECT",
-    "WAIT_READY"
+    "WAIT_READY",
     "CONNECTED",
     "DISCOVER",
     "DISCOVER_MAPPING",
