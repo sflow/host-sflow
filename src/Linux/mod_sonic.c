@@ -71,7 +71,8 @@ extern "C" {
     HSP_SONIC_STATE_DISCOVER,
     HSP_SONIC_STATE_DISCOVER_MAPPING,
     HSP_SONIC_STATE_DISCOVER_LAGS,
-    HSP_SONIC_STATE_RUN } EnumSonicState;
+    HSP_SONIC_STATE_RUN
+  } EnumSonicState;
 
   static const char *SonicStateNames[] = {
     "INIT",
@@ -266,9 +267,13 @@ extern "C" {
   
   static void setSonicState(EVMod *mod, EnumSonicState st) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    EVDebug(mod, 1, "state %s -> %s",
-	    SonicStateNames[mdata->state],
-	    SonicStateNames[st]);
+    assert(mdata->state >= HSP_SONIC_STATE_INIT
+	   && mdata->state <= HSP_SONIC_STATE_RUN);
+    assert(st >= HSP_SONIC_STATE_INIT
+	   && st <= HSP_SONIC_STATE_RUN);
+    char *from = (char *)SonicStateNames[mdata->state];
+    char *to = (char *)SonicStateNames[st];
+    EVDebug(mod, 1, "state %s -> %s", from, to);
     mdata->state = st;
   }
 
