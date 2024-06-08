@@ -369,7 +369,7 @@ extern "C" {
       
       if(sample_n != nio->sampling_n) {
 
-	EVDebug(mod, 2, "psample sampling N (%u) != configured N (%u)\n",
+	EVDebug(mod, 2, "psample sampling N (%u) != configured N (%u)",
 		sample_n,
 		nio->sampling_n);
 
