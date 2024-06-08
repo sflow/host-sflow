@@ -41,8 +41,8 @@ extern "C" {
 
   static void readNetlinkCB(EVMod *mod, EVSocket *soc, void *magic) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    char buf[4096];
-    int rc = recv(soc->fd, buf, 4096, 0);
+    char buf[65536];
+    int rc = recv(soc->fd, buf, 65536, 0);
     if (rc < 0) {
       EVDebug(mod, 1, "readNetlinkCB failed: %s", strerror(errno));
     }
