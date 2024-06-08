@@ -299,20 +299,34 @@ extern "C" {
 
   static SFLAdaptor *portGetAdaptor(EVMod *mod, HSPSonicPort *prt) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    // We used to map only by prt->osIndex, but now that mod_nlroute
+    // Used to map only by prt->osIndex, but now that mod_nlroute
     // reads NETLINK_ROUTE and populates the IFLA_IFALIAS fields
     // for the Linux ports we can be more direct about looking up
     // Linux ports by the SONiC port name, and only fall back on
     // the osIndex lookup if there is no match.
-    SFLAdaptor *adaptor = NULL;
-    if(adaptor == NULL)
-      adaptor = adaptorByName(sp, prt->portName);
-    if(adaptor == NULL)
-      adaptor = adaptorByAlias(sp, prt->portName);
-    if(adaptor == NULL
-       && prt->osIndex != HSP_SONIC_IFINDEX_UNDEFINED)
+
+    // Try by ifName
+    SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
+    if(adaptor) {
+      EVDebug(mod, 3, "portGetAdaptor(%s) found by name", prt->portName);
+      return adaptor;
+    }
+    // Try by prt->osIndex
+    if(prt->osIndex != HSP_SONIC_IFINDEX_UNDEFINED) {
       adaptor = adaptorByIndex(sp, prt->osIndex);
-    return adaptor;
+      if(adaptor) {
+	EVDebug(mod, 3, "portGetAdaptor(%s) found by osIndex(%u)", prt->portName, prt->osIndex);
+	return adaptor;
+      }
+    }
+    // Try by alias (populated by mod_nlroute or by setPortAlias() here)
+    adaptor = adaptorByAlias(sp, prt->portName);
+    if(adaptor) {
+      EVDebug(mod, 3, "portGetAdaptor(%s) found by alias", prt->portName);
+      return adaptor;
+    }
+    // not found - may have to wait for discovery step
+    return NULL;
   }
 
   static bool portSyncToAdaptor(EVMod *mod, HSPSonicPort *prt, bool sync) {
