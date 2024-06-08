@@ -1,7 +1,7 @@
 Summary: host sFlow daemon
 Name: hsflowd
-Version: 2.1.04
-Release: 7
+Version: 2.1.05
+Release: 1
 License: http://sflow.net/license.html
 Group: Applications/Internet
 URL: http://sflow.net
