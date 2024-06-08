@@ -1870,6 +1870,11 @@ extern "C" {
     db_getCollectorNames(mod);
   }
 
+  static void dbEvt_indexOp(EVMod *mod, char *key, char *op) {
+    EVDebug(mod, 1, "dbEvt_indexOp: %s (%s)", key, op);
+    // TODO: re-read osIndex details?
+  }
+
   static void dbEvt_subscribeCB(redisAsyncContext *ctx, void *magic, void *req_magic)
   {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
@@ -1913,6 +1918,15 @@ extern "C" {
 	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW|global*", dbEvt_sflowOp, db);
 	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW_COLLECTOR*", dbEvt_sflowCollectorOp, db);
 	// dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:SFLOW_SESSION*", dbEvt_sflowInterfaceOp, db);
+      }
+    }
+    // While the port index table is in the STATE db
+    HSPSonicDBTable *stateTab = getDBTable(mod, HSP_SONIC_DB_STATE_NAME);
+    if(stateTab) {
+      HSPSonicDBClient *db = stateTab->evtClient;
+      if(db
+	 && db->sock) {
+	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@4__:PORT_INDEX_TABLE*", dbEvt_indexOp, db);
       }
     }
   }
