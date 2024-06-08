@@ -59,6 +59,9 @@ extern "C" {
 
   int UTNLGeneric_send(int sockfd, uint32_t mod_id, int type, int cmd, int req_type, void *req, int req_len, uint32_t seqNo);
 
+  int UTNLRoute_open(uint32_t mod_id);
+  int UTNLRoute_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint field, uint32_t seqNo);
+
   // linux/netlink.h defines struct nlattr but doesn't provide the walking macros NLA_OK, NLA_NEXT.
   // rtnetlink.h provides RTA_OK, RTA_NEXT macros.
   // nfnetlink_compat.h provides NFA_OK, NFA_NEXT macros.

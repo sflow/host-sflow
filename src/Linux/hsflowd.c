@@ -2375,7 +2375,7 @@ extern "C" {
 
 #ifdef HSP_LOAD_SONIC
     // SONIC should be compiled with "make deb FEATURES="SONIC"
-    myLog(LOG_INFO, "autoload SONIC, PSAMPLE and DROPMON modules");
+    myLog(LOG_INFO, "autoload SONIC, PSAMPLE, DROPMON and NLROUTE modules");
     sp->sonic.sonic = YES;
     sp->sonic.unixsock = YES;
     sp->sonic.setIfAlias = YES;
@@ -2398,6 +2398,8 @@ extern "C" {
     sp->dropmon.rn = YES;
     sp->dropmon.hw = NO;
     sp->dropmon.hw_passive = YES;
+    // nlroute reads extra info from NETLINK_ROUTE
+    sp->nlroute.nlroute = YES;
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN
@@ -2549,6 +2551,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_systemd", sp->modulesPath);
     if(sp->eapi.eapi)
       EVLoadModule(sp->rootModule, "mod_eapi", sp->modulesPath);
+    if(sp->nlroute.nlroute)
+      EVLoadModule(sp->rootModule, "mod_nlroute", sp->modulesPath);
 
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
 

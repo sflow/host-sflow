@@ -707,6 +707,9 @@ extern "C" {
     struct {
       bool eapi;
     } eapi;
+    struct {
+      bool nlroute;
+    } nlroute;
 
     // hardware sampling flag
     bool hardwareSampling;
@@ -794,7 +797,6 @@ extern "C" {
     int config_shake_countdown;
 
     uint64_t telemetry[HSP_TELEMETRY_NUM_COUNTERS];
-
   } HSP;
 
   // expose some config parser fns

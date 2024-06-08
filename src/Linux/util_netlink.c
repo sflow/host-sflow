@@ -241,6 +241,64 @@ extern "C" {
   }
 
 
+  /*_________________---------------------------__________________
+    _________________    UTNLRoute_open         __________________
+    -----------------___________________________------------------
+  */
+
+  int UTNLRoute_open(uint32_t mod_id) {
+    int nl_sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
+    if(nl_sock < 0) {
+      myLog(LOG_ERR, "UTNLRoute_open: open failed: %s", strerror(errno));
+      return -1;
+    }
+
+    // bind to a suitable id
+    struct sockaddr_nl sa = {
+      .nl_family = AF_NETLINK,
+      .nl_pid = getpid()  /* UTNLGeneric_pid(mod_id) */
+    };
+    if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+      myLog(LOG_ERR, "UTNLRoute_open: bind failed: %s", strerror(errno));
+
+    setNonBlocking(nl_sock);
+    setCloseOnExec(nl_sock);
+    return nl_sock;
+  }
+
+  /*_________________---------------------------__________________
+    _________________      UTNLRoute_send       __________________
+    -----------------___________________________------------------
+  */
+
+  int UTNLRoute_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint field, uint32_t seqNo) {
+    struct nlmsghdr nlh = { };
+    struct ifinfomsg inf = { };
+    struct rtattr rta = { };
+
+    nlh.nlmsg_len = NLMSG_LENGTH(sizeof(inf));
+    nlh.nlmsg_flags = NLM_F_REQUEST;
+    nlh.nlmsg_type = RTM_GETLINK;
+    nlh.nlmsg_seq = seqNo;
+    nlh.nlmsg_pid = UTNLGeneric_pid(mod_id);
+    inf.ifi_family = AF_UNSPEC;
+    inf.ifi_index = ifIndex;
+    inf.ifi_change = 0xffffffff;
+    rta.rta_type = field;
+    rta.rta_len = RTA_LENGTH(sizeof(field));
+
+    struct iovec iov[3] = {
+      { .iov_base = &nlh,  .iov_len = sizeof(nlh) },
+      { .iov_base = &inf,  .iov_len = sizeof(inf) },
+      { .iov_base = &rta,  .iov_len = sizeof(rta) },
+    };
+
+    struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
+    struct msghdr msg = { .msg_name = &sa, .msg_namelen = sizeof(sa), .msg_iov = iov, .msg_iovlen = 3 };
+    return sendmsg(sockfd, &msg, 0);
+  }
+
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif

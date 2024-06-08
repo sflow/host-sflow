@@ -77,7 +77,8 @@ extern "C" {
     HSPOBJ_DBUS,
     HSPOBJ_SYSTEMD,
     HSPOBJ_EAPI,
-    HSPOBJ_PORT
+    HSPOBJ_PORT,
+    HSPOBJ_NLROUTE
   } EnumHSPObject;
 
   static const char *HSPObjectNames[] = {
@@ -107,7 +108,8 @@ extern "C" {
     "dbus",
     "systemd",
     "eapi",
-    "port"
+    "port",
+    "nlroute"
   };
 
   static void copyApplicationSettings(HSPSFlowSettings *from, HSPSFlowSettings *to);
@@ -1528,6 +1530,11 @@ extern "C" {
 	    sp->eapi.eapi = YES;
 	    level[++depth] = HSPOBJ_EAPI;
 	    break;
+	  case HSPTOKEN_NLROUTE:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->nlroute.nlroute = YES;
+	    level[++depth] = HSPOBJ_NLROUTE;
+	    break;
 	  case HSPTOKEN_SAMPLING:
 	  case HSPTOKEN_PACKETSAMPLINGRATE:
 	    if((tok = expectInteger32(sp, tok, &sp->sFlowSettings_file->samplingRate, 0, HSP_MAX_SAMPLING_N)) == NULL) return NO;
@@ -2114,6 +2121,17 @@ extern "C" {
 	  break;
 
 	case HSPOBJ_EAPI:
+	  {
+	    switch(tok->stok) {
+	    default:
+	      unexpectedToken(sp, tok, level[depth]);
+	      return NO;
+	      break;
+	    }
+	  }
+	  break;
+
+	case HSPOBJ_NLROUTE:
 	  {
 	    switch(tok->stok) {
 	    default:
