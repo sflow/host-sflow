@@ -299,13 +299,19 @@ extern "C" {
 
   static SFLAdaptor *portGetAdaptor(EVMod *mod, HSPSonicPort *prt) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    if(prt->osIndex == HSP_SONIC_IFINDEX_UNDEFINED)
-      return NULL;
-    SFLAdaptor *adaptor = adaptorByIndex(sp, prt->osIndex);
-    //if(adaptor == NULL)
-    //  adaptor = adaptorByName(sp, prt->portName);
-    //if(adaptor == NULL)
-    //  adaptor = adaptorByAlias(sp, prt->portName);
+    // We used to map only by prt->osIndex, but now that mod_nlroute
+    // reads NETLINK_ROUTE and populates the IFLA_IFALIAS fields
+    // for the Linux ports we can be more direct about looking up
+    // Linux ports by the SONiC port name, and only fall back on
+    // the osIndex lookup if there is no match.
+    SFLAdaptor *adaptor = NULL;
+    if(adaptor == NULL)
+      adaptor = adaptorByName(sp, prt->portName);
+    if(adaptor == NULL)
+      adaptor = adaptorByAlias(sp, prt->portName);
+    if(adaptor == NULL
+       && prt->osIndex != HSP_SONIC_IFINDEX_UNDEFINED)
+      adaptor = adaptorByIndex(sp, prt->osIndex);
     return adaptor;
   }
 
@@ -1090,7 +1096,7 @@ extern "C" {
 		// try to gracefully disassociate from the old one
 		if(portSyncToAdaptor(mod, prt, NO) == NO) {
 		  // but if that fails then force it
-		  EVDebug(mod, 1, "db_ifIndexMapCB %s force unsync from adaptor osIndex=%u\n",
+		  EVDebug(mod, 1, "db_ifIndexMapCB %s force unsync from adaptor osIndex=%u",
 			  prt->portName,
 			  prt->osIndex);
 		  prt->adaptorSync = NO;
@@ -1108,7 +1114,7 @@ extern "C" {
 		// and an old one disappears.  We can get here before hsflowd has found the
 		// new adaptor.  This is why we check this again in the code that runs on
 		// HSPEVENT_INTFS_CHANGED.
-		EVDebug(mod, 1, "db_ifIndexMapCB %s unable to sync to adaptor osIndex=%u\n",
+		EVDebug(mod, 1, "db_ifIndexMapCB %s unable to sync to adaptor osIndex=%u",
 			prt->portName,
 			prt->osIndex);
 	      }
@@ -2158,7 +2164,7 @@ extern "C" {
 	return;
       // block this sample from being sent out.
       // TODO: if sample_pool is maintained upstream then it may need to be adjusted here.
-      EVDebug(mod, 2, "suppress packet sample from non-sonic port (osIndex=%u)\n", osIndex);
+      EVDebug(mod, 2, "suppress packet sample from non-sonic port (osIndex=%u)", osIndex);
       ps->suppress = YES;
     }
     else {
@@ -2210,7 +2216,7 @@ extern "C" {
       if(!sp->sonic.suppressOther)
 	return;
       // block this sample from being sent out
-      EVDebug(mod, 2, "suppress counter sample from non-sonic port (osIndex=%u)\n", osIndex);
+      EVDebug(mod, 2, "suppress counter sample from non-sonic port (osIndex=%u)", osIndex);
       ps->suppress = YES;
     }
     else {
