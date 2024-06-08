@@ -41,7 +41,6 @@ extern "C" {
 
   static void readNetlinkCB(EVMod *mod, EVSocket *soc, void *magic) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    EVDebug(mod, 1, "readNL()");
     char buf[4096];
     int rc = recv(soc->fd, buf, 4096, 0);
     if (rc < 0) {
@@ -59,7 +58,9 @@ extern "C" {
 	  if(rta->rta_type == IFLA_IFALIAS) {
 	    char *ifAlias = RTA_DATA(rta);
 	    bool changed = setAdaptorAlias(sp, ad, ifAlias, "netlink");
-	    EVDebug(mod, 1, "adaptor alias %s (changed=%s)", ifAlias, changed ? "YES":"NO");
+	    if(changed) {
+	      EVDebug(mod, 1, "adaptor %s set alias %s", ad->deviceName, ifAlias);
+	    }
 	  }
 	  rta = RTA_NEXT(rta, len);
 	}
