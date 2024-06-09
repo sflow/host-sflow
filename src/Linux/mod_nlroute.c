@@ -19,7 +19,22 @@ extern "C" {
   typedef struct _HSP_mod_NLROUTE {
     EVSocket *nlSoc;
     uint32_t seqNo;
+    UTArray *requestQ;
+    uint32_t changes;
   } HSP_mod_NLROUTE;
+
+  /*_________________---------------------------__________________
+    _________________    sendNextRequest        __________________
+    -----------------___________________________------------------
+  */
+
+  static void sendNextRequest(EVMod *mod) {
+    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    if(UTArrayN(mdata->requestQ)) {
+      intptr_t ifIndex = (intptr_t)UTArrayPop(mdata->requestQ);
+      UTNLRoute_send(mdata->nlSoc->fd, mod->id, ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+    }
+  }
 
   /*_________________---------------------------__________________
     _________________    evt_intf_read          __________________
@@ -30,9 +45,16 @@ extern "C" {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
     SFLAdaptor *ad = NULL;
     memcpy(&ad, data, dataLen);
-    UTNLRoute_send(mdata->nlSoc->fd, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+    // only need the ifIndex (so it's OK if adaptor is deleted before we query)
+    intptr_t ifIndex = ad->ifIndex;
+    UTArrayPush(mdata->requestQ, (void *)ifIndex);
+    // if this was the first one in a sequence then send
+    if(UTArrayN(mdata->requestQ) == 1)
+      sendNextRequest(mod);
+    // TODO: If one is ever lost then we'll flush them all through next time, so I don't
+    // think we need extra checks?  Maybe we should subscribe to the start-of-readInterfaces
+    // event so we can make sure the requestQ is empty then?
   }
-    
 
   /*_________________---------------------------__________________
     _________________    readNetlinkCB          __________________
@@ -40,6 +62,7 @@ extern "C" {
   */
 
   static void readNetlinkCB(EVMod *mod, EVSocket *soc, void *magic) {
+    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     char buf[65536];
     int rc = recv(soc->fd, buf, 65536, 0);
@@ -60,12 +83,26 @@ extern "C" {
 	    bool changed = setAdaptorAlias(sp, ad, ifAlias, "netlink");
 	    if(changed) {
 	      EVDebug(mod, 1, "adaptor %s set alias %s", ad->deviceName, ifAlias);
+	      mdata->changes++;
 	    }
 	  }
 	  rta = RTA_NEXT(rta, len);
 	}
       }
     }
+    sendNextRequest(mod);
+  }
+  /*_________________---------------------------__________________
+    _________________    evt_tick               __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    EVDebug(mod, 1, "seqNo=%u, changes=%u, requestQ depth=%u",
+	    mdata->seqNo,
+	    mdata->changes,
+	    UTArrayN(mdata->requestQ));
   }
   
   /*_________________---------------------------__________________
@@ -76,11 +113,13 @@ extern "C" {
   void mod_nlroute(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_NLROUTE));
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    mdata->requestQ = UTArrayNew(UTARRAY_DFLT);
     EVBus *pollBus = EVCurrentBus();
     // open netlink socket while we still have root privileges
     int nl_sock = UTNLRoute_open(mod->id);
     mdata->nlSoc = EVBusAddSocket(mod, pollBus, nl_sock, readNetlinkCB, NULL);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTF_READ), evt_intf_read);
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
   }
 
 #if defined(__cplusplus)
