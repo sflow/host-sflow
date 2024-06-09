@@ -389,7 +389,8 @@ extern "C" {
 	  // Setting switchPort here is likely redundant because any port
 	  // discovered with an osIndex is marked as a switchPort, but keep
 	  // it in just in case LAGs are ever treated differently.
-	  setSwitchPort(mod, prt, YES);
+	  if(setSwitchPort(mod, prt, YES))
+	    mdata->changedSwitchPorts = YES;
 	  for(int cc=0; cc < strArrayN(prt->components); cc++) {
 	    char *c_name = strArrayAt(prt->components, cc);
 	    HSPSonicPort *c_prt = getPort(mod, c_name, NO);
@@ -398,7 +399,8 @@ extern "C" {
 	      // are not already marked as such. The sFlow standard
 	      // requires that counter-samples are sent for both the LAG
 	      // and all its components.
-	      setSwitchPort(mod, c_prt, YES);
+	      if(setSwitchPort(mod, c_prt, YES))
+		mdata->changedSwitchPorts = YES;
 	      SFLAdaptor *c_adaptor = portGetAdaptor(mod, c_prt);
 	      if(c_adaptor) {
 		HSPAdaptorNIO *c_nio = ADAPTOR_NIO(c_adaptor);
