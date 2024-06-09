@@ -19,7 +19,10 @@ extern "C" {
   typedef struct _HSP_mod_NLROUTE {
     EVSocket *nlSoc;
     uint32_t seqNo;
-    UTArray *requestQ;
+    uint32_t readCount;
+    uint32_t readCountStart;
+    bool sweeping;
+    uint32_t cursor;
     uint32_t changes;
   } HSP_mod_NLROUTE;
 
@@ -28,12 +31,16 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void sendNextRequest(EVMod *mod) {
+  static bool sendNextRequest(EVMod *mod) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    if(UTArrayN(mdata->requestQ)) {
-      intptr_t ifIndex = (intptr_t)UTArrayPop(mdata->requestQ);
-      UTNLRoute_send(mdata->nlSoc->fd, mod->id, ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    SFLAdaptor *ad = UTHashNext(sp->adaptorsByIndex, &mdata->cursor);
+    if(ad) {
+      UTNLRoute_send(mdata->nlSoc->fd, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+      return YES;
     }
+    mdata->sweeping = NO;
+    return NO;
   }
 
   /*_________________---------------------------__________________
@@ -43,17 +50,7 @@ extern "C" {
 
   static void evt_intf_read(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    SFLAdaptor *ad = NULL;
-    memcpy(&ad, data, dataLen);
-    // Make sure we don't get queue build-up here
-    if(UTArrayN(mdata->requestQ) > UTHashN(sp->adaptorsByIndex)) {
-      EVDebug(mod, 1, "evt_intf_read: not queueing new request");
-      return;
-    }
-    // only need the ifIndex (so it's OK if adaptor is deleted before we query)
-    intptr_t ifIndex = ad->ifIndex;
-    UTArrayPush(mdata->requestQ, (void *)ifIndex);
+    mdata->readCount++;
   }
 
   /*_________________---------------------------__________________
@@ -89,8 +86,10 @@ extern "C" {
 	  rta = RTA_NEXT(rta, len);
 	}
       }
+      // If we complete a transaction successfully, we can submit another right away?
+      // Don't do this - may run too hot. Allow deci-tick batch to regulate.
+      // sendNextRequest(mod);
     }
-    // sendNextRequest(mod);
   }
   
   /*_________________---------------------------__________________
@@ -99,20 +98,37 @@ extern "C" {
   */
 
   static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    sendNextRequest(mod);
+    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    if(mdata->sweeping) {
+      for(uint32_t batch = 0; batch < 5; batch++) {
+	if(sendNextRequest(mod) == NO)
+	  break;
+      }
+    }
   }
 
   /*_________________---------------------------__________________
-    _________________    evt_tick               __________________
+    _________________    evt_tock               __________________
     -----------------___________________________------------------
   */
 
-  static void evt_tick(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+  static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    EVDebug(mod, 1, "seqNo=%u, changes=%u, requestQ depth=%u",
+    if(mdata->readCount != mdata->readCountStart
+       && mdata->sweeping == NO) {
+      // start a new sweep of the interfaces
+      EVDebug(mod, 1, "evt_tock: start new sweep");
+      mdata->readCountStart = mdata->readCount;
+      mdata->cursor = 0;
+      mdata->sweeping = YES;
+    }
+    EVDebug(mod, 1, "readCount=%u, readCountStart=%u, seqNo=%u, changes=%u, cursor=%u, sweeping=%u",
+	    mdata->readCount,
+	    mdata->readCountStart,
 	    mdata->seqNo,
 	    mdata->changes,
-	    UTArrayN(mdata->requestQ));
+	    mdata->cursor,
+	    mdata->sweeping);
   }
   
   /*_________________---------------------------__________________
@@ -123,14 +139,13 @@ extern "C" {
   void mod_nlroute(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_NLROUTE));
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    mdata->requestQ = UTArrayNew(UTARRAY_DFLT);
     EVBus *pollBus = EVCurrentBus();
     // open netlink socket while we still have root privileges
     int nl_sock = UTNLRoute_open(mod->id);
     mdata->nlSoc = EVBusAddSocket(mod, pollBus, nl_sock, readNetlinkCB, NULL);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTF_READ), evt_intf_read);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick); // logging
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_DECI), evt_deci); // sending requests
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock); // trigger sweep
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_DECI), evt_deci); // batch requests
   }
 
 #if defined(__cplusplus)

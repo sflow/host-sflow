@@ -301,7 +301,8 @@ extern "C" {
   void *UTHashDel(UTHash *oh, void *obj);
   void *UTHashDelKey(UTHash *oh, void *obj);
   void UTHashReset(UTHash *oh);
-   uint32_t UTHashN(UTHash *oh);
+  uint32_t UTHashN(UTHash *oh);
+  void *UTHashNext(UTHash *oh, uint32_t *pCursor);
 
 #define UTHASH_DBIN (void *)-1
 

@@ -1854,6 +1854,25 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     my_free(oh);
   }
 
+  // Cursor walk. Start from 0.
+  // Ordering will be scrambled if HT grows.
+  void *UTHashNext(UTHash *oh, uint32_t *pCursor) {
+    uint32_t csr = *pCursor;
+    // start search in next slot
+    csr++;
+    // skip over NULLs and DBINS
+    while(csr < oh->cap
+	  && (oh->bins[csr] == UTHASH_DBIN
+	      || oh->bins[csr] == NULL))
+      csr++;
+    // check for end (can also be off-end if HT was reset)
+    if(csr >= oh->cap)
+      return NULL;
+    // advance cursor, return obj
+    *pCursor = csr;
+    return oh->bins[csr];
+  }
+  
   /*_________________---------------------------__________________
     _________________   socket handling         __________________
     -----------------___________________________------------------
