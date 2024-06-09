@@ -261,6 +261,7 @@ extern "C" {
     if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0)
       myLog(LOG_ERR, "UTNLRoute_open: bind failed: %s", strerror(errno));
 
+    UTSocketRcvbuf(nl_sock, 1000000); // increase kernel buffer space to avoid ENOBUFS
     setNonBlocking(nl_sock);
     setCloseOnExec(nl_sock);
     return nl_sock;

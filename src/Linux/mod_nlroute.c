@@ -43,17 +43,17 @@ extern "C" {
 
   static void evt_intf_read(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     SFLAdaptor *ad = NULL;
     memcpy(&ad, data, dataLen);
+    // Make sure we don't get queue build-up here
+    if(UTArrayN(mdata->requestQ) > UTHashN(sp->adaptorsByIndex)) {
+      EVDebug(mod, 1, "evt_intf_read: not queueing new request");
+      return;
+    }
     // only need the ifIndex (so it's OK if adaptor is deleted before we query)
     intptr_t ifIndex = ad->ifIndex;
     UTArrayPush(mdata->requestQ, (void *)ifIndex);
-    // if this was the first one in a sequence then send
-    if(UTArrayN(mdata->requestQ) == 1)
-      sendNextRequest(mod);
-    // TODO: If one is ever lost then we'll flush them all through next time, so I don't
-    // think we need extra checks?  Maybe we should subscribe to the start-of-readInterfaces
-    // event so we can make sure the requestQ is empty then?
   }
 
   /*_________________---------------------------__________________
@@ -90,8 +90,18 @@ extern "C" {
 	}
       }
     }
+    // sendNextRequest(mod);
+  }
+  
+  /*_________________---------------------------__________________
+    _________________    evt_deci               __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     sendNextRequest(mod);
   }
+
   /*_________________---------------------------__________________
     _________________    evt_tick               __________________
     -----------------___________________________------------------
@@ -119,7 +129,8 @@ extern "C" {
     int nl_sock = UTNLRoute_open(mod->id);
     mdata->nlSoc = EVBusAddSocket(mod, pollBus, nl_sock, readNetlinkCB, NULL);
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTF_READ), evt_intf_read);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick);
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TICK), evt_tick); // logging
+    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_DECI), evt_deci); // sending requests
   }
 
 #if defined(__cplusplus)
