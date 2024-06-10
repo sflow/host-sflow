@@ -699,7 +699,6 @@ extern "C" {
 
   static void addEventClients(EVMod *mod) {
     // add separate client connections for events.
-    // Currently we only need one, for the CONFIG_DB table.
     HSPSonicDBTable *configTab = getDBTable(mod, HSP_SONIC_DB_CONFIG_NAME);
     if(configTab
        && configTab->dbClient) {
@@ -708,6 +707,15 @@ extern "C" {
 				   configTab->dbClient->port,
 				   configTab->dbClient->unixSocketPath,
 				   configTab->dbClient->passPath);
+    }
+    HSPSonicDBTable *stateTab = getDBTable(mod, HSP_SONIC_DB_STATE_NAME);
+    if(stateTab
+       && stateTab->dbClient) {
+      stateTab->evtClient = addDB(mod, HSP_SONIC_DB_STATE_NAME HSP_SONIC_DB_EVENT_SUFFIX,
+				  stateTab->dbClient->hostname,
+				  stateTab->dbClient->port,
+				  stateTab->dbClient->unixSocketPath,
+				  stateTab->dbClient->passPath);
     }
   }
 
