@@ -322,6 +322,8 @@ extern "C" {
     bool loopback:1;
     bool bond_master:1;
     bool bond_slave:1;
+    bool bond_master_2:1; // experimental - for SONiC LAG
+    bool bond_slave_2:1;  // experimental - for SONiC LAG
     bool switchPort:1;
     bool opxPort:1;
     bool vm_or_container:1;

@@ -514,7 +514,8 @@ extern "C" {
 	  if((adaptorNIO->et_last.operStatus & 1)) ifStatus |= SFLSTATUS_OPER_UP;
 	}
 
-	if(adaptorNIO->bond_master) {
+	if(adaptorNIO->bond_master
+	   || adaptorNIO->bond_master_2) {
 	  EVDebug(mod, 1, "bond interface status: %s=%u (ifSpeed=%"PRIu64" dirn=%u et_found=%u up=%u)",
 		  adaptor->deviceName,
 		  ifStatus,
@@ -581,8 +582,8 @@ extern "C" {
 	// (used to send for bond-master too,  but that
 	// was a mis-reading of the standard).
 	SFLCounters_sample_element lacp_elem = { 0 };
-	if(/*adaptorNIO->bond_master
-	     ||*/ adaptorNIO->bond_slave) {
+	if(adaptorNIO->bond_slave
+	   || adaptorNIO->bond_slave_2) {
 	  updateBondCounters(sp, adaptor);
 	  lacp_elem.tag = SFLCOUNTERS_LACP;
 	  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
@@ -2400,6 +2401,7 @@ extern "C" {
     sp->dropmon.hw_passive = YES;
     // nlroute reads extra info from NETLINK_ROUTE
     sp->nlroute.nlroute = YES;
+    sp->nlroute.limit = HSP_DEFAULT_NLROUTE_LIMIT;
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN

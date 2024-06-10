@@ -23,7 +23,8 @@ extern "C" {
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-      if(nio->bond_slave
+      if((nio->bond_slave
+	  || nio->bond_slave_2)
 	 && nio != aggregator_slave_nio
 	 && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
 	memcpy(nio->lacp.actorSystemID, aggregator_slave_nio->lacp.actorSystemID, 6);
@@ -250,8 +251,10 @@ extern "C" {
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       assert(adaptor);
-      assert(ADAPTOR_NIO(adaptor) != NULL);
-      if(ADAPTOR_NIO(adaptor)->bond_master)
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      assert(nio != NULL);
+      if(nio->bond_master
+	 || nio->bond_master_2)
 	updateBondCounters(sp, adaptor);
     }
   }
@@ -319,7 +322,8 @@ extern "C" {
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-      if(nio->bond_slave
+      if((nio->bond_slave
+	  || nio->bond_slave_2)
 	 && nio->lacp.attachedAggID == bond_nio->lacp.attachedAggID) {
 	// put the slave on the same polling schedule as the master.
 	// This isn't strictly necessary, but it will reduce the
@@ -338,7 +342,9 @@ extern "C" {
   void syncBondPolling(HSP *sp) {
     SFLAdaptor *adaptor;
     UTHASH_WALK(sp->adaptorsByIndex, adaptor) {
-      if(ADAPTOR_NIO(adaptor)->bond_master)
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+      if(nio->bond_master
+	 || nio->bond_master_2)
 	syncSlavePolling(sp, adaptor);
     }
   }
@@ -710,7 +716,8 @@ extern "C" {
     EVMod *mod = sp->rootModule;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
-    if(nio->bond_master
+    if((nio->bond_master
+	|| nio->bond_master_2)
        && sp->synthesizeBondCounters) {
       // If we are synthezizing bond counters from their components, then we
       // ignore anything that we are offered for bond counters here,  but we
@@ -822,7 +829,8 @@ extern "C" {
       ET_ACCUMULATE(nio, bcasts_in);
       ET_ACCUMULATE(nio, bcasts_out);
       
-      if(nio->bond_slave
+      if((nio->bond_slave
+	  || nio->bond_slave_2)
 	 && sp->synthesizeBondCounters) {
 	// pour these deltas into the bond totals too
 	SFLAdaptor *bond = adaptorByIndex(sp, nio->lacp.attachedAggID);
@@ -1036,7 +1044,8 @@ extern "C" {
 	  if(devFilter == NULL && (niostate->up == NO
 				   || niostate->vlan != HSP_VLAN_ALL
 				   || niostate->loopback
-				   || niostate->bond_master)) {
+				   || niostate->bond_master
+				   || niostate->bond_master_2)) {
 	    continue;
 	  }
 

@@ -376,8 +376,8 @@ extern "C" {
 	if(adaptor) {
 	  prt->ifIndex = adaptor->ifIndex;
 	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	  nio->bond_master = YES;
-	  nio->bond_slave = NO;
+	  nio->bond_master_2 = YES;
+	  nio->bond_slave_2 = NO;
 	  nio->lacp.portState.v.actorAdmin = prt->adminUp ? 2 : 0;
 	  nio->lacp.portState.v.actorOper = prt->operUp ? 2 : 0;
 	  nio->lacp.portState.v.partnerAdmin = prt->adminUp ? 2 : 0; // questionable assumption
@@ -407,8 +407,11 @@ extern "C" {
 		c_nio->lacp.attachedAggID = adaptor->ifIndex;
 		memcpy(c_nio->lacp.actorSystemID, nio->lacp.actorSystemID, 6);
 		memcpy(c_nio->lacp.partnerSystemID, nio->lacp.partnerSystemID, 6);
-		c_nio->bond_master = NO;
-		c_nio->bond_slave = YES;
+		c_nio->bond_master_2 = NO;
+		c_nio->bond_slave_2 = YES;
+		// TODO: do we need to indicate that we have taken over these flags
+		// so that readInterfaces does not reset them again right away?
+		c_nio->bond_override = YES;
 		c_nio->lacp.portState.v.actorAdmin = c_prt->adminUp ? 2 : 0;
 		c_nio->lacp.portState.v.actorOper = c_prt->operUp ? 2 : 0;
 		c_nio->lacp.portState.v.partnerAdmin = c_prt->adminUp ? 2 : 0; // questionable assumption
@@ -433,8 +436,8 @@ extern "C" {
       SFLAdaptor *adaptor = portGetAdaptor(mod, prt);
       if(adaptor) {
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	nio->bond_master = NO;
-	nio->bond_slave = NO;
+	nio->bond_master_2 = NO;
+	nio->bond_slave_2 = NO;
       }
       if(prt->components) {
 	strArrayFree(prt->components);
@@ -1507,7 +1510,8 @@ extern "C" {
 	  char *pcmem = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
 	  if(my_strequal(pcmem, "PORTCHANNEL_MEMBER")) {
 	    char *lagName = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
-	    // This may add the port as a port with no oid
+	    // This may add the port as a port with no oid (and no osIndex lookup) so that
+	    // might not be the best way to handle it.
 	    HSPSonicPort *lagPort = getPort(mod, lagName, YES);
 	    if(lagPort->components == NULL)
 	      lagPort->components = strArrayNew();
@@ -2049,7 +2053,7 @@ extern "C" {
     if(nio->loopback)
       return;
     
-    if(nio->bond_master) {
+    if(nio->bond_master_2) {
       // trigger synthesizeBondMetaData
       accumulateNioCounters(sp, adaptor, NULL, NULL);
       return;
@@ -2061,6 +2065,12 @@ extern "C" {
       prt = getPort(mod, nio->deviceAlias, NO);
 
     if(prt) {
+      if(prt->components) {
+	// get here if SONiC portChannel is not recognzied asb ond master?  If it
+	// has been then its counters would have been automatically synthesized,
+	// so we may want to find a way to do that.
+	EVDebug(mod, 1, "SONiC LAG %s not marked as bond master?", prt->portName);
+      }
       // OK to queue 4 requests on the TCP connection, and ordering
       // is preserved, so can just ask for state-refresh and counters
       // together:
@@ -2180,6 +2190,9 @@ extern "C" {
 	  HSPAdaptorNIO *nio = ADAPTOR_NIO(ad);
 	  if(nio->deviceAlias)
 	    prt = getPort(mod, nio->deviceAlias, NO);
+	}
+	if(prt == NULL) {
+	  EVDebug(mod, 1, "getPortByOSIndex: no SONiC port for osIndex=%u (%s)", osIndex, ad->deviceName);
 	}
       }
     }
