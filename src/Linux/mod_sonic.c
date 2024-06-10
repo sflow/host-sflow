@@ -376,8 +376,11 @@ extern "C" {
 	if(adaptor) {
 	  prt->ifIndex = adaptor->ifIndex;
 	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+
 	  nio->bond_master_2 = YES;
 	  nio->bond_slave_2 = NO;
+	  nio->changed_external = YES;
+
 	  nio->lacp.portState.v.actorAdmin = prt->adminUp ? 2 : 0;
 	  nio->lacp.portState.v.actorOper = prt->operUp ? 2 : 0;
 	  nio->lacp.portState.v.partnerAdmin = prt->adminUp ? 2 : 0; // questionable assumption
@@ -407,11 +410,11 @@ extern "C" {
 		c_nio->lacp.attachedAggID = adaptor->ifIndex;
 		memcpy(c_nio->lacp.actorSystemID, nio->lacp.actorSystemID, 6);
 		memcpy(c_nio->lacp.partnerSystemID, nio->lacp.partnerSystemID, 6);
+
 		c_nio->bond_master_2 = NO;
 		c_nio->bond_slave_2 = YES;
-		// TODO: do we need to indicate that we have taken over these flags
-		// so that readInterfaces does not reset them again right away?
-		c_nio->bond_override = YES;
+		c_nio->changed_external = YES;
+
 		c_nio->lacp.portState.v.actorAdmin = c_prt->adminUp ? 2 : 0;
 		c_nio->lacp.portState.v.actorOper = c_prt->operUp ? 2 : 0;
 		c_nio->lacp.portState.v.partnerAdmin = c_prt->adminUp ? 2 : 0; // questionable assumption
@@ -438,6 +441,7 @@ extern "C" {
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 	nio->bond_master_2 = NO;
 	nio->bond_slave_2 = NO;
+	nio->changed_external = YES;
       }
       if(prt->components) {
 	strArrayFree(prt->components);
