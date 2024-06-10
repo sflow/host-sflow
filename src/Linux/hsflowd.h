@@ -335,6 +335,8 @@ extern "C" {
     bool ethtool_GSTATS:1;
     bool procNetDev:1;
     bool changed_speed:1;
+    bool changed_alias:1;
+    bool changed_external:1; // something was changed by a module
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
@@ -424,7 +426,9 @@ extern "C" {
 #define HSPEVENT_CONFIG_CHANGED "config_changed" // new config
 #define HSPEVENT_CONFIG_SHAKE "config_shake"     // handkshake before done
 #define HSPEVENT_CONFIG_DONE "config_done"       // after new config
+#define HSPEVENT_INTFS_START "intfs_start"       // start reading interfaces
 #define HSPEVENT_INTF_READ "intf_read"           // (adaptor *) reading interface
+#define HSPEVENT_INTFS_END "intfs_end"           // end reading interfaces
 #define HSPEVENT_INTF_SPEED "intf_speed"         // (adaptor *) interface speed change
 #define HSPEVENT_INTFS_CHANGED "intfs_changed"   // some interface(s) changed
 #define HSPEVENT_UPDATE_NIO "update_nio"         // (adaptor *) nio counter refresh
