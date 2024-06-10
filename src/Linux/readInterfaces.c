@@ -700,6 +700,10 @@ extern "C" {
   int readInterfaces(HSP *sp, bool full_discovery,  uint32_t *p_added, uint32_t *p_removed, uint32_t *p_cameup, uint32_t *p_wentdown, uint32_t *p_changed)
   {
     EVMod *mod = sp->rootModule;
+
+    if(full_discovery)
+      EVEventTxAll(mod, HSPEVENT_INTFS_START, NULL, 0);
+
     uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
 
   // keep v4 and v6 separate to simplify HT logic
@@ -877,6 +881,15 @@ extern "C" {
 	// (and influence ethtool data-gathering).  We broadcast this
 	// but it only really makes sense to receive it on the POLL_BUS
 	EVEventTxAll(sp->rootModule, HSPEVENT_INTF_READ, &adaptor, sizeof(adaptor));
+	if(adaptorNIO->changed_external) {
+	  // notice the change here, then reset it
+	  // for the next cycle.  So any external change
+	  // between now and then will be noticed.
+	  ad_changed++;
+	  adaptorNIO->changed_external = NO;
+	}
+	// TODO: need flag in adaptor to indicate that something changed - so we
+	// can increment ad_changed here.
 	// use ethtool to get info about direction/speed, peer_ifIndex and more
 	if(read_ethtool_info(sp, &ifr, fd, adaptor) == YES) {
 	  ad_changed++;
@@ -928,6 +941,9 @@ extern "C" {
     freeLocalIPs(oldLocalIP);
   if(oldLocalIP6)
     freeLocalIPs(oldLocalIP6);
+
+  if(full_discovery)
+      EVEventTxAll(mod, HSPEVENT_INTFS_END, NULL, 0);
 
   return sp->adaptorsByName->entries;
 }

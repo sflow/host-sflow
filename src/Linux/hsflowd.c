@@ -283,7 +283,6 @@ extern "C" {
     bool changed = (speed != adaptor->ifSpeed);
     adaptor->ifSpeed = speed;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-    nio->changed_speed = changed;
     myDebug(1, "setAdaptorSpeed(%s): %s ifSpeed == %"PRIu64" (changed=%s)",
 	    method,
 	    adaptor->deviceName,
@@ -291,6 +290,7 @@ extern "C" {
 	    changed ? "YES":"NO");
     if(changed
        && sp->rootModule) {
+      nio->changed_speed = nio->changed_external = YES;
       EVEventTxAll(sp->rootModule, HSPEVENT_INTF_SPEED, &adaptor, sizeof(adaptor));
     }
     return changed;
@@ -305,8 +305,10 @@ extern "C" {
 	    nio->deviceAlias ?: "NULL",
 	    alias ?: "NULL",
 	    changed ? "YES":"NO");
-    if(changed)
+    if(changed) {
       setStr(&nio->deviceAlias, alias);
+      nio->changed_alias = nio->changed_external = YES;
+    }
     return changed;
   }
 

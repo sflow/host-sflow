@@ -23,8 +23,6 @@ extern "C" {
     int nl_sock;
     EVSocket *evSoc;
     uint32_t seqNo;
-    uint32_t readCount;
-    uint32_t readCountStart;
     bool sweeping;
     uint32_t cursor;
     uint32_t changes;
@@ -76,6 +74,11 @@ extern "C" {
 	  if(changed) {
 	    EVDebug(mod, 1, "adaptor %s set alias %s", ad->deviceName, alias);
 	    mdata->changes++;
+	    // TODO: send HSPEVENT_INTFS_CHANGED here? For example,  may need
+	    // to trigger another agent-address election.  Would be better for
+	    // readInterfaces() to be told and have it raise that event at
+	    // the end, though.  What is the mechanism?  Do we need a flag in
+	    // nio?
 	  }
 	}
       }
@@ -94,30 +97,42 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________    evt_intf_read          __________________
     -----------------___________________________------------------
+    Only used when there is no rate-limit
   */
 
   static void evt_intf_read(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    mdata->readCount++;
-    if(mdata->deciBatch) {
-      // rate limt is set. Sweep will be triggered by readCount.
+    // make the request sychronously right here and now
+    SFLAdaptor *ad = NULL;
+    if(dataLen == sizeof(ad)) {
+      memcpy(&ad, data, dataLen);
+      // send request
+      UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+      // block here to recv immediately
+      readAlias(mod);
     }
-    else {
-      // make the request sychronously right here and now
-      SFLAdaptor *ad = NULL;
-      if(dataLen == sizeof(ad)) {
-	memcpy(&ad, data, dataLen);
-	// send request
-	UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
-	// block here to recv immediately
-	readAlias(mod);
-      }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    evt_intfs_end          __________________
+    -----------------___________________________------------------
+    Only used when rate-limit is set
+  */
+
+  static void evt_intfs_end(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    if(mdata->sweeping == NO) {
+      // start a new sweep of the interfaces
+      EVDebug(mod, 1, "start new sweep");
+      mdata->cursor = 0;
+      mdata->sweeping = YES;
     }
   }
   
   /*_________________---------------------------__________________
     _________________    evt_deci               __________________
     -----------------___________________________------------------
+    Only used when rate-limit is set
   */
 
   static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
@@ -129,31 +144,22 @@ extern "C" {
       }
     }
   }
-
+  
   /*_________________---------------------------__________________
     _________________    evt_tock               __________________
     -----------------___________________________------------------
+    Only used when rate-limit is set
   */
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    if(mdata->readCount != mdata->readCountStart
-       && mdata->sweeping == NO) {
-      // start a new sweep of the interfaces
-      EVDebug(mod, 1, "evt_tock: start new sweep");
-      mdata->readCountStart = mdata->readCount;
-      mdata->cursor = 0;
-      mdata->sweeping = YES;
-    }
-    EVDebug(mod, 1, "readCount=%u, readCountStart=%u, seqNo=%u, changes=%u, cursor=%u, sweeping=%u",
-	    mdata->readCount,
-	    mdata->readCountStart,
+    EVDebug(mod, 1, "seqNo=%u, changes=%u, cursor=%u, sweeping=%u",
 	    mdata->seqNo,
 	    mdata->changes,
 	    mdata->cursor,
 	    mdata->sweeping);
   }
-  
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -170,14 +176,15 @@ extern "C" {
       mdata->deciBatch = sp->nlroute.limit / 10;
       if (mdata->deciBatch == 0)
 	mdata->deciBatch = 1;
-      EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock); // trigger sweep
+      EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTFS_END), evt_intfs_end); // trigger sweep
       EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_DECI), evt_deci); // batch requests
+      EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock); // logging
     }
     else {
       // no rate limit => will read immediately
       mdata->nl_sock = UTNLRoute_open(mod->id, NO, 1000000); // blocking socket
+      EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTF_READ), evt_intf_read);
     }
-    EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTF_READ), evt_intf_read);
   }
 
 #if defined(__cplusplus)
