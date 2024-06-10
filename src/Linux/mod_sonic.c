@@ -1907,10 +1907,11 @@ extern "C" {
     }
   }
 
-  static void dbEvt_subscribePattern(EVMod *mod, char *pattern, opCBFn opCB, HSPSonicDBClient *db) {
+  static void dbEvt_subscribePattern(EVMod *mod, char *pattern, opCBFn opCB, HSPSonicDBTable *dbTab) {
+    HSPSonicDBClient *db = dbTab->evtClient;
 #define HSP_SONIC_SUBSCRIBE_LEN 256
     char requestPattern[HSP_SONIC_SUBSCRIBE_LEN];
-    snprintf(requestPattern, HSP_SONIC_SUBSCRIBE_LEN, pattern, db->dbNo);
+    snprintf(requestPattern, HSP_SONIC_SUBSCRIBE_LEN, pattern, dbTab->id);
     int status = redisAsyncCommand(db->ctx,
 				   dbEvt_subscribeCB,
 				   opCB,
@@ -1927,10 +1928,10 @@ extern "C" {
       HSPSonicDBClient *db = configTab->evtClient;
       if(db
 	 && db->sock) {
-	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:PORTCHANNEL_MEMBER*", dbEvt_lagOp, db);
-	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:SFLOW|global*", dbEvt_sflowOp, db);
-	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:SFLOW_COLLECTOR*", dbEvt_sflowCollectorOp, db);
-	// dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:SFLOW_SESSION*", dbEvt_sflowInterfaceOp, db);
+	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:PORTCHANNEL_MEMBER*", dbEvt_lagOp, configTab);
+	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:SFLOW|global*", dbEvt_sflowOp, configTab);
+	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:SFLOW_COLLECTOR*", dbEvt_sflowCollectorOp, configTab);
+	// dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:SFLOW_SESSION*", dbEvt_sflowInterfaceOp, configTab);
       }
     }
     // While the port index table is in the STATE db
@@ -1939,7 +1940,7 @@ extern "C" {
       HSPSonicDBClient *db = stateTab->evtClient;
       if(db
 	 && db->sock) {
-	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:PORT_INDEX_TABLE*", dbEvt_indexOp, db);
+	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:PORT_INDEX_TABLE*", dbEvt_indexOp, stateTab);
       }
     }
   }
