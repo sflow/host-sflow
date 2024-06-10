@@ -1890,7 +1890,19 @@ extern "C" {
 
   static void dbEvt_indexOp(EVMod *mod, char *key, char *op) {
     EVDebug(mod, 1, "dbEvt_indexOp: %s (%s)", key, op);
-    // TODO: re-read osIndex details?
+    // key will take the form "__keyspace@6__:PORT_INDEX_TABLE|Ethernet100"
+    // so we can extract the portName like this:
+    char buf[HSP_SONIC_MAX_PORTNAME_LEN];
+    char *p = key;
+    char *sep = "|"; // TODO: get from dbTable->separator
+    parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN); // ignore table token
+    char *portName = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
+    if(portName) {
+      EVDebug(mod, 1, "PORT_INDEX_TABLE changed entry for: %s", portName);
+      HSPSonicPort *prt = getPort(mod, portName, NO);
+      if(prt)
+	requestPortIfIndexDiscovery(mod, prt);
+    }
   }
 
   static void dbEvt_subscribeCB(redisAsyncContext *ctx, void *magic, void *req_magic)
