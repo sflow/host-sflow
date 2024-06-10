@@ -1900,8 +1900,10 @@ extern "C" {
     if(portName) {
       EVDebug(mod, 1, "PORT_INDEX_TABLE changed entry for: %s", portName);
       HSPSonicPort *prt = getPort(mod, portName, NO);
-      if(prt)
+      if(prt) {
+	EVDebug(mod, 1, "port %s found - requesting ifInfex discovery", prt->portName);
 	requestPortIfIndexDiscovery(mod, prt);
+      }
     }
   }
 
