@@ -2166,7 +2166,24 @@ extern "C" {
   static HSPSonicPort *getPortByOsIndex(EVMod *mod, uint32_t osIndex) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     HSPSonicPort search = { .osIndex = osIndex };
-    return UTHashGet(mdata->portsByOsIndex, &search);
+    HSPSonicPort *prt = UTHashGet(mdata->portsByOsIndex, &search);
+    // Allow this mapping if the adaptor for this ifIndex can find
+    // the sonic port by deviceName or deviceAlias. This should
+    // allow counter-samples from PortChannel interfaces to be
+    // allowed through even if redis is not supplying the osIndex.
+    if(prt == NULL) {
+      HSP *sp = (HSP *)EVROOTDATA(mod);
+      SFLAdaptor *ad = adaptorByIndex(sp, osIndex);
+      if(ad) {
+	HSPSonicPort *prt = getPort(mod, ad->deviceName, NO);
+	if(prt == NULL) {
+	  HSPAdaptorNIO *nio = ADAPTOR_NIO(ad);
+	  if(nio->deviceAlias)
+	    prt = getPort(mod, nio->deviceAlias, NO);
+	}
+      }
+    }
+    return prt;
   }
 
   /*_________________---------------------------__________________

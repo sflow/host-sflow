@@ -246,7 +246,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  int UTNLRoute_open(uint32_t mod_id) {
+  int UTNLRoute_open(uint32_t mod_id, bool nonBlocking, size_t bufferSize) {
     int nl_sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
     if(nl_sock < 0) {
       myLog(LOG_ERR, "UTNLRoute_open: open failed: %s", strerror(errno));
@@ -261,8 +261,12 @@ extern "C" {
     if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0)
       myLog(LOG_ERR, "UTNLRoute_open: bind failed: %s", strerror(errno));
 
-    UTSocketRcvbuf(nl_sock, 1000000); // increase kernel buffer space to avoid ENOBUFS
-    setNonBlocking(nl_sock);
+    // Depending on how this socket is used it may be necessary to increase
+    // the allocated kernel buffer space to avoid ENOBUFS errors.
+    if(bufferSize)
+      UTSocketRcvbuf(nl_sock, bufferSize);
+    if(nonBlocking)
+      setNonBlocking(nl_sock);
     setCloseOnExec(nl_sock);
     return nl_sock;
   }
@@ -297,6 +301,44 @@ extern "C" {
     struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
     struct msghdr msg = { .msg_name = &sa, .msg_namelen = sizeof(sa), .msg_iov = iov, .msg_iovlen = 3 };
     return sendmsg(sockfd, &msg, 0);
+  }
+
+  /*_________________---------------------------__________________
+    _________________      UTNLRoute_recv       __________________
+    -----------------___________________________------------------
+  */
+
+  int UTNLRoute_recv(int sockfd, uint field, uint32_t *pIfIndex, char *resultBuf, uint *pResultLen) {
+    uint8_t recv_buf[HSP_READNL_RCV_BUF];
+    int rc;
+  try_again:
+    rc = recv(sockfd, recv_buf, HSP_READNL_RCV_BUF, 0);
+    if(rc < 0) {
+      if(errno == EAGAIN || errno == EINTR)
+	goto try_again;
+    }
+    if (rc > 0) {
+      struct nlmsghdr *recv_hdr = (struct nlmsghdr*)recv_buf;
+      struct ifinfomsg *infomsg = NLMSG_DATA(recv_hdr);
+      // report the ifIndex that was found
+      *pIfIndex = infomsg->ifi_index;
+      struct rtattr *rta = IFLA_RTA(infomsg);
+      int len = recv_hdr->nlmsg_len;
+      // this only writes into resultBuf if field is found
+      while (RTA_OK(rta, len)){
+	if(rta->rta_type == field) {
+	  char *res = RTA_DATA(rta);
+	  uint res_len = RTA_PAYLOAD(rta);
+	  if(res_len > *pResultLen)
+	    res_len = *pResultLen; // truncate if result buffer too short
+	  else
+	    *pResultLen = res_len;
+	  memcpy(resultBuf, res, res_len);
+	}
+	rta = RTA_NEXT(rta, len);
+      }
+    }
+    return rc;
   }
 
 

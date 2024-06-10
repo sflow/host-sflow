@@ -1533,6 +1533,7 @@ extern "C" {
 	  case HSPTOKEN_NLROUTE:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->nlroute.nlroute = YES;
+	    sp->nlroute.limit = HSP_DEFAULT_NLROUTE_LIMIT;
 	    level[++depth] = HSPOBJ_NLROUTE;
 	    break;
 	  case HSPTOKEN_SAMPLING:
@@ -2134,6 +2135,9 @@ extern "C" {
 	case HSPOBJ_NLROUTE:
 	  {
 	    switch(tok->stok) {
+	    case HSPTOKEN_LIMIT:
+	      if((tok = expectInteger32(sp, tok, &sp->nlroute.limit, 0, HSP_MAX_NLROUTE_LIMIT)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

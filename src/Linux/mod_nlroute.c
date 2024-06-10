@@ -16,14 +16,19 @@ extern "C" {
 
 #include "util_netlink.h"
 
+  // module to read NETLINK_ROUTE
+  // initally just to pull in IFLA_IFALIAS
+
   typedef struct _HSP_mod_NLROUTE {
-    EVSocket *nlSoc;
+    int nl_sock;
+    EVSocket *evSoc;
     uint32_t seqNo;
     uint32_t readCount;
     uint32_t readCountStart;
     bool sweeping;
     uint32_t cursor;
     uint32_t changes;
+    uint32_t deciBatch;
   } HSP_mod_NLROUTE;
 
   /*_________________---------------------------__________________
@@ -36,11 +41,54 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFLAdaptor *ad = UTHashNext(sp->adaptorsByIndex, &mdata->cursor);
     if(ad) {
-      UTNLRoute_send(mdata->nlSoc->fd, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+      UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
       return YES;
     }
     mdata->sweeping = NO;
     return NO;
+  }
+
+  /*_________________---------------------------__________________
+    _________________        readAlias          __________________
+    -----------------___________________________------------------
+  */
+
+  static void readAlias(EVMod *mod) {
+    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    uint32_t ifIndex = 0;
+    char alias[HSP_READNL_RCV_BUF+1];
+    uint aliasLen = HSP_READNL_RCV_BUF;
+    alias[0] = '\0';
+    int rc = UTNLRoute_recv(mdata->nl_sock, IFLA_IFALIAS, &ifIndex, alias, &aliasLen);
+    if (rc <= 0) {
+      EVDebug(mod, 1, "UTNLRoute_recv() failed: rc=%d : %s", rc, strerror(errno));
+    }
+    else {
+      EVDebug(mod, 3, "UTNLRoute_recv() ifIndex=%u, aliasLen=%u", ifIndex, aliasLen);
+      if(alias[0] != '\0'
+	 && aliasLen > 0) {
+	alias[aliasLen] = '\0'; // make sure the string is terminated
+	EVDebug(mod, 1, "UTNLRoute_recv() ifIndex=%u, alias=%s", ifIndex, alias);
+	SFLAdaptor *ad = adaptorByIndex(sp, ifIndex);
+	if(ad) {
+	  bool changed = setAdaptorAlias(sp, ad, alias, "netlink");
+	  if(changed) {
+	    EVDebug(mod, 1, "adaptor %s set alias %s", ad->deviceName, alias);
+	    mdata->changes++;
+	  }
+	}
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    readNetlinkCB          __________________
+    -----------------___________________________------------------
+  */
+
+  static void readNetlinkCB(EVMod *mod, EVSocket *soc, void *magic) {
+    readAlias(mod);
   }
 
   /*_________________---------------------------__________________
@@ -51,44 +99,19 @@ extern "C" {
   static void evt_intf_read(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
     mdata->readCount++;
-  }
-
-  /*_________________---------------------------__________________
-    _________________    readNetlinkCB          __________________
-    -----------------___________________________------------------
-  */
-
-  static void readNetlinkCB(EVMod *mod, EVSocket *soc, void *magic) {
-    HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
-    char buf[65536];
-    int rc = recv(soc->fd, buf, 65536, 0);
-    if (rc < 0) {
-      EVDebug(mod, 1, "readNetlinkCB failed: %s", strerror(errno));
+    if(mdata->deciBatch) {
+      // rate limt is set. Sweep will be triggered by readCount.
     }
     else {
-      struct nlmsghdr *recv_hdr = (struct nlmsghdr*)buf;
-      struct ifinfomsg *infomsg = NLMSG_DATA(recv_hdr);
-      uint32_t ifIndex = infomsg->ifi_index;
-      SFLAdaptor *ad = adaptorByIndex(sp, ifIndex);
-      if(ad) {
-	struct rtattr *rta = IFLA_RTA(infomsg);
-	int len = recv_hdr->nlmsg_len;
-	while (RTA_OK(rta, len)){
-	  if(rta->rta_type == IFLA_IFALIAS) {
-	    char *ifAlias = RTA_DATA(rta);
-	    bool changed = setAdaptorAlias(sp, ad, ifAlias, "netlink");
-	    if(changed) {
-	      EVDebug(mod, 1, "adaptor %s set alias %s", ad->deviceName, ifAlias);
-	      mdata->changes++;
-	    }
-	  }
-	  rta = RTA_NEXT(rta, len);
-	}
+      // make the request sychronously right here and now
+      SFLAdaptor *ad = NULL;
+      if(dataLen == sizeof(ad)) {
+	memcpy(&ad, data, dataLen);
+	// send request
+	UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+	// block here to recv immediately
+	readAlias(mod);
       }
-      // If we complete a transaction successfully, we can submit another right away?
-      // Don't do this - may run too hot. Allow deci-tick batch to regulate.
-      // sendNextRequest(mod);
     }
   }
   
@@ -100,7 +123,7 @@ extern "C" {
   static void evt_deci(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
     if(mdata->sweeping) {
-      for(uint32_t batch = 0; batch < 5; batch++) {
+      for(uint32_t batch = 0; batch < mdata->deciBatch; batch++) {
 	if(sendNextRequest(mod) == NO)
 	  break;
       }
@@ -139,13 +162,22 @@ extern "C" {
   void mod_nlroute(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_NLROUTE));
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     EVBus *pollBus = EVCurrentBus();
-    // open netlink socket while we still have root privileges
-    int nl_sock = UTNLRoute_open(mod->id);
-    mdata->nlSoc = EVBusAddSocket(mod, pollBus, nl_sock, readNetlinkCB, NULL);
+    if(sp->nlroute.limit) {
+      mdata->nl_sock = UTNLRoute_open(mod->id, YES, 1000000); // non-blocking socket
+      mdata->evSoc = EVBusAddSocket(mod, pollBus, mdata->nl_sock, readNetlinkCB, NULL);
+      mdata->deciBatch = sp->nlroute.limit / 10;
+      if (mdata->deciBatch == 0)
+	mdata->deciBatch = 1;
+      EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock); // trigger sweep
+      EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_DECI), evt_deci); // batch requests
+    }
+    else {
+      // no rate limit => will read immediately
+      mdata->nl_sock = UTNLRoute_open(mod->id, NO, 1000000); // blocking socket
+    }
     EVEventRx(mod, EVGetEvent(pollBus, HSPEVENT_INTF_READ), evt_intf_read);
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_TOCK), evt_tock); // trigger sweep
-    EVEventRx(mod, EVGetEvent(pollBus, EVEVENT_DECI), evt_deci); // batch requests
   }
 
 #if defined(__cplusplus)
