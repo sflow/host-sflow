@@ -1507,12 +1507,11 @@ extern "C" {
 	if(elem->type == REDIS_REPLY_STRING) {
 	  char *p = elem->str;
 #define HSP_SONIC_MAX_PORTNAME_LEN 512
-	  char buf[HSP_SONIC_MAX_PORTNAME_LEN];
-	  char *pcmem = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
+	  char buf_lag[HSP_SONIC_MAX_PORTNAME_LEN];
+	  // expect e.g.: "PORTCHANNEL_MEMBER|PortChannel502|Ethernet60"
+	  char *pcmem = parseNextTok(&p, sep, YES, 0, NO, buf_lag, HSP_SONIC_MAX_PORTNAME_LEN);
 	  if(my_strequal(pcmem, "PORTCHANNEL_MEMBER")) {
-	    char *lagName = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
-	    // This may add the port as a port with no oid (and no osIndex lookup) so that
-	    // might not be the best way to handle it.
+	    char *lagName = parseNextTok(&p, sep, YES, 0, NO, buf_lag, HSP_SONIC_MAX_PORTNAME_LEN);
 	    HSPSonicPort *lagPort = getPort(mod, lagName, YES);
 	    if(lagPort->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED
 	       && mdata->portChannelPattern) {
@@ -1526,10 +1525,18 @@ extern "C" {
 	      }
 	    }
 	    if(lagPort->osIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+	      // TODO: look up by deviceName - we may someday have
+	      // to look this up by IFLA_IFALIAS as a fall back,
+	      // but for now this does not seem necessary.
 	      SFLAdaptor *adaptor = adaptorByName(sp, lagName);
 	      if(adaptor) {
 		lagPort->osIndex = adaptor->ifIndex;
+		// add to portsByOsIndex so we can accept counter samples.
+		// This way we can allow accumulateNioCounters() to do all
+		// the delta-accumulation and combining of LAG counters just
+		// as if the relationship was captured in /proc/net/bonding.
 		UTHashAdd(mdata->portsByOsIndex, lagPort);
+		// mark as sync'd
 		lagPort->adaptorSync = YES;
 		EVDebug(mod, 1, "LAG %s found Linux osIndex=%u", lagName, lagPort->osIndex);
 	      }
@@ -1539,7 +1546,8 @@ extern "C" {
 	    }
 	    if(lagPort->components == NULL)
 	      lagPort->components = strArrayNew();
-	    char *member = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
+	    char buf_mem[HSP_SONIC_MAX_PORTNAME_LEN];
+	    char *member = parseNextTok(&p, sep, YES, 0, NO, buf_mem, HSP_SONIC_MAX_PORTNAME_LEN);
 	    if(member) {
 	      EVDebug(mod, 1, "getLagInfoCB: port %s is member of port-channel %s", member, lagName);
 	      strArrayAdd(lagPort->components, member);
