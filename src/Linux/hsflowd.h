@@ -417,6 +417,7 @@ extern "C" {
 #define HSPEVENT_INTF_COUNTER_SAMPLE "icsample"  // (csample *) building intf counter-sample
 #define HSPEVENT_VM_COUNTER_SAMPLE "vcsample"    // (csample *) building vm counter-sample
 #define HSPEVENT_FLOW_SAMPLE "flow_sample"       // (HSPPendingSample *) building flow-sample
+#define HSPEVENT_INTF_EVENT_SAMPLE "evsample"    // (discard *) building event-sample
 #define HSPEVENT_FLOW_SAMPLE_RELEASED "flow_sample_released"  // (HSPPendingSample *) flow-sample after lookups completed
 #define HSPEVENT_XDR_SAMPLE "xdr_sample"         // fully-encoded SFDBuf
 #define HSPEVENT_CONFIG_START "config_start"     // begin config lines
@@ -490,6 +491,12 @@ extern "C" {
     SFLPoller *poller;
     bool suppress:1;
   } HSPPendingCSample;
+
+  typedef struct _HSPPendingEvtSample {
+    SFLEvent_discarded_packet *discard;
+    SFLNotifier *notifier;
+    bool suppress:1;
+  } HSPPendingEvtSample;
 
   typedef enum {
     HSP_TELEMETRY_FLOW_SAMPLES=0,

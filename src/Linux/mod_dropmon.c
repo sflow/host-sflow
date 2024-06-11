@@ -137,6 +137,7 @@ extern "C" {
     uint32_t ignoredDrops_rn;
     uint32_t totalDrops_thisTick; // for threshold
     bool dropmon_disabled;
+    EVEvent *evt_intf_es;
   } HSP_mod_DROPMON;
 
 
@@ -942,8 +943,16 @@ That would allow everything to stay on the stack as it does here, which has nice
       SFLADD_ELEMENT(&discard, &rnElem);
     }
 
-    sfl_notifier_writeEventSample(notifier, &discard);
-    sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES]++;
+    HSPPendingEvtSample es = { .notifier = notifier, .discard = &discard };
+    if(mdata->evt_intf_es)
+      EVEventTx(mod, mdata->evt_intf_es, &es, sizeof(es));
+    if(es.suppress) {
+      sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES_SUPPRESSED]++;
+    }
+    else {
+      sfl_notifier_writeEventSample(notifier, &discard);
+      sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES]++;
+    }
 
     // first successful event confirms we are up and running
     if(mdata->state == HSP_DROPMON_STATE_START)
@@ -1234,6 +1243,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_DECI), evt_deci);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_FINAL), evt_final);
+    mdata->evt_intf_es = EVGetEvent(mdata->packetBus, HSPEVENT_INTF_EVENT_SAMPLE);
   }
 
 #if defined(__cplusplus)

@@ -2323,6 +2323,58 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________       evt_flow_sample     __________________
+    -----------------___________________________------------------
+   packet bus
+  */
+
+  static void evt_discard_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSPPendingEvtSample *ps = (HSPPendingEvtSample *)data;
+    // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
+    // the SONiC ifIndex namespace.
+    HSPSonicPort *prt = NULL;
+    uint32_t dsClass = ps->discard->ds_class;
+    uint32_t osIndex = ps->discard->ds_index;
+    if(ps->discard->ds_class == SFL_DSCLASS_IFINDEX)
+      prt = getPortByOsIndex(mod, osIndex);
+    if(prt == NULL
+       || prt->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+      // for troubleshooting we can allow this through (untranslated) with:
+      // "sonic{suppressOther=off}"
+      if(!sp->sonic.suppressOther)
+	return;
+      // Unfortunately we might suppress useful discard events that were associated with,
+      // say, VLAN interfaces or the docker bridge here.  So rather than suppress them
+      // altogether, translate them as coming from dataSource 0:0x3FFFFFFF, meaning "internal"
+      EVDebug(mod, 2, "discard sample from non-sonic port (class=%u, osIndex=%u)", dsClass, osIndex);
+      // ps->suppress = YES;
+    }
+    
+    uint32_t dsIndexAlias = prt ? prt->ifIndex : SFL_INTERNAL_INTERFACE;
+    // fix datasource
+    sfl_notifier_set_dsAlias(ps->notifier, dsIndexAlias);
+    // fix in/out
+    if(ps->discard->input
+       && ps->discard->input != SFL_INTERNAL_INTERFACE) {
+      // translate, or mark unknown
+      HSPSonicPort *in = getPortByOsIndex(mod, ps->discard->input);
+      ps->discard->input = (in && in->ifIndex != HSP_SONIC_IFINDEX_UNDEFINED)
+	? in->ifIndex
+	: 0;
+    }
+    if(ps->discard->output
+       && ps->discard->output != SFL_INTERNAL_INTERFACE
+       && (ps->discard->output & 0x80000000) == 0) {
+      // translate, or mark unknown
+      HSPSonicPort *out = getPortByOsIndex(mod, ps->discard->output);
+      ps->discard->output = (out && out->ifIndex != HSP_SONIC_IFINDEX_UNDEFINED)
+	? out->ifIndex
+	: 0;
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________       evt_cntr_sample     __________________
     -----------------___________________________------------------
   */
@@ -2454,6 +2506,7 @@ extern "C" {
 
     // intercept samples before they go out so we can rewrite ifindex numbers
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTF_EVENT_SAMPLE), evt_discard_sample);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_COUNTER_SAMPLE), evt_cntr_sample);
   }
 
