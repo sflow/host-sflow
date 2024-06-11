@@ -253,8 +253,9 @@ extern "C" {
       assert(adaptor);
       HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
       assert(nio != NULL);
-      if(nio->bond_master
-	 || nio->bond_master_2)
+      // only call updateBondCounters if Linux knows it is a bond
+      // (do not call it if only nio->bond_master_2 is set)
+      if(nio->bond_master)
 	updateBondCounters(sp, adaptor);
     }
   }
@@ -835,6 +836,9 @@ extern "C" {
 	// pour these deltas into the bond totals too
 	SFLAdaptor *bond = adaptorByIndex(sp, nio->lacp.attachedAggID);
 	if(bond) {
+	  EVDebug(mod, 1, "accumulateNioCounters: pour from %s into %s",
+		  adaptor->deviceName,
+		  bond->deviceName);
 	  HSPAdaptorNIO *bond_nio = ADAPTOR_NIO(bond);
 	  bond_nio->last_update = sp->pollBus->now.tv_sec;
 	  NIO_ACCUMULATE(bond_nio, bytes_in);

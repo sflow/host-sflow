@@ -362,7 +362,6 @@ extern "C" {
 	my_free(details);
 	SFLAdaptor *adaptor = portGetAdaptor(mod, prt);
 	if(adaptor) {
-	  prt->ifIndex = adaptor->ifIndex;
 	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
 	  nio->bond_master_2 = YES;
@@ -1530,6 +1529,7 @@ extern "C" {
 	      SFLAdaptor *adaptor = adaptorByName(sp, lagName);
 	      if(adaptor) {
 		lagPort->osIndex = adaptor->ifIndex;
+		UTHashAdd(mdata->portsByOsIndex, lagPort);
 		lagPort->adaptorSync = YES;
 		EVDebug(mod, 1, "LAG %s found Linux osIndex=%u", lagName, lagPort->osIndex);
 	      }
