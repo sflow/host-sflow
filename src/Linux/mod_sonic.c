@@ -174,6 +174,7 @@ extern "C" {
     EVEvent *configEndEvent;
     uint32_t portChannelBaseIndex;
     regex_t *portChannelPattern;
+    char *stateTabSeparator;
   } HSP_mod_SONIC;
 
   static void db_ping(EVMod *mod, HSPSonicDBClient *db);
@@ -1352,8 +1353,6 @@ extern "C" {
 		prt->osIndex);
       }
       else {
-	// TODO: readVlans
-	// TODO: read bond state (may need the nio->bond flag right away)
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 	if(nio)
 	  nio->up = prt->operUp;
@@ -1525,9 +1524,8 @@ extern "C" {
 	      }
 	    }
 	    if(lagPort->osIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
-	      // TODO: look up by deviceName - we may someday have
-	      // to look this up by IFLA_IFALIAS as a fall back,
-	      // but for now this does not seem necessary.
+	      // look up LAG by deviceName
+	      // Note: may someday have to look this up by IFLA_IFALIAS too.
 	      SFLAdaptor *adaptor = adaptorByName(sp, lagName);
 	      if(adaptor) {
 		lagPort->osIndex = adaptor->ifIndex;
@@ -1909,12 +1907,13 @@ extern "C" {
   }
 
   static void dbEvt_indexOp(EVMod *mod, char *key, char *op) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     EVDebug(mod, 1, "dbEvt_indexOp: %s (%s)", key, op);
     // key will take the form "__keyspace@6__:PORT_INDEX_TABLE|Ethernet100"
     // so we can extract the portName like this:
     char buf[HSP_SONIC_MAX_PORTNAME_LEN];
     char *p = key;
-    char *sep = "|"; // TODO: get from dbTable->separator
+    char *sep = mdata->stateTabSeparator;
     parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN); // ignore table token
     char *portName = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
     if(portName) {
@@ -1962,6 +1961,7 @@ extern "C" {
   }
 
   static void dbEvt_subscribe(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     EVDebug(mod, 1, "dbEvt_subscribe");
     // SFLOW and LAG settings are in the CONFIG_DB table, whose events client
     // was added in addEventClients(), so it should be available to us here:
@@ -1980,6 +1980,8 @@ extern "C" {
     HSPSonicDBTable *stateTab = getDBTable(mod, HSP_SONIC_DB_STATE_NAME);
     if(stateTab) {
       HSPSonicDBClient *db = stateTab->evtClient;
+      // have to remember this separator here because it is not so easy to pass to callback
+      setStr(&mdata->stateTabSeparator, stateTab->separator);
       if(db
 	 && db->sock) {
 	dbEvt_subscribePattern(mod,  "psubscribe __keyspace@%u__:PORT_INDEX_TABLE*", dbEvt_indexOp, stateTab);
@@ -2191,14 +2193,15 @@ extern "C" {
       // learn dynamic port->oid mappings
       // we can jump back here from HSP_SONIC_STATE_RUN if we
       // are notified that the interfaces have changed.
-      // TODO: what if only the SONiC port name has changed? Do we need to
-      // subscribe to changes in that table and jump back here for that too?
       db_getPortNames(mod);
       break;
     case HSP_SONIC_STATE_DISCOVER_MAPPING:
       // learn mapping to native Linux ifIndex numbers
-      // First sweep to see if we still have any unsync'd ports that we need to resubmit,
-      // which can happen if we were waiting for hsflowd to discover them.
+      // First sweep to see if we still have any unsync'd ports
+      // that we need to resubmit, which can happen if we were
+      // waiting for hsflowd to discover them.
+      // Might see ports like "CPU" appearing here, if they
+      // are in the PORT_TABLE but do not appear in the PORT_INDEX_TABLE.
       resubmitUnsyncedPorts(mod);
       mapPorts(mod);
       break;
@@ -2288,7 +2291,10 @@ extern "C" {
       if(!sp->sonic.suppressOther)
 	return;
       // block this sample from being sent out.
-      // TODO: if sample_pool is maintained upstream then it may need to be adjusted here.
+      // Note: if sample_pool is maintained upstream then it may need
+      // to be adjusted if this happens a lot... but that would imply
+      // a lot of PSAMPLE activity that SONiC has no knowledge of,  or
+      // a systematic problem with the adaptorSync.
       EVDebug(mod, 2, "suppress packet sample from non-sonic port (osIndex=%u)", osIndex);
       ps->suppress = YES;
     }
