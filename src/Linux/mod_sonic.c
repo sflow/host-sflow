@@ -1530,6 +1530,7 @@ extern "C" {
 	      SFLAdaptor *adaptor = adaptorByName(sp, lagName);
 	      if(adaptor) {
 		lagPort->osIndex = adaptor->ifIndex;
+		lagPort->adaptorSync = YES;
 		EVDebug(mod, 1, "LAG %s found Linux osIndex=%u", lagName, lagPort->osIndex);
 	      }
 	      else {
