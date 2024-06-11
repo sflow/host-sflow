@@ -2401,9 +2401,6 @@ extern "C" {
     sp->dropmon.rn = YES;
     sp->dropmon.hw = NO;
     sp->dropmon.hw_passive = YES;
-    // nlroute reads extra info from NETLINK_ROUTE
-    sp->nlroute.nlroute = YES;
-    sp->nlroute.limit = HSP_DEFAULT_NLROUTE_LIMIT;
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN
