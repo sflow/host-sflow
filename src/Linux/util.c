@@ -2011,12 +2011,14 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   }
 
   int UTRegexExtractInt(regex_t *rx, char *str, int nvals, int *val1, int *val2, int *val3) {
-    assert(nvals > 0 && nvals <= 3);
     regmatch_t valMatch[4];
     if(regexec(rx, str, nvals+1, valMatch, 0) == 0) {
-      if(nvals >= 1) *val1 = extract_int(str, valMatch[1].rm_so, valMatch[1].rm_eo);
-      if(nvals >= 2) *val2 = extract_int(str, valMatch[2].rm_so, valMatch[2].rm_eo);
-      if(nvals >= 3) *val3 = extract_int(str, valMatch[3].rm_so, valMatch[3].rm_eo);
+      if(val1
+	 && nvals >= 1) *val1 = extract_int(str, valMatch[1].rm_so, valMatch[1].rm_eo);
+      if(val2
+	 && nvals >= 2) *val2 = extract_int(str, valMatch[2].rm_so, valMatch[2].rm_eo);
+      if(val3
+	 && nvals >= 3) *val3 = extract_int(str, valMatch[3].rm_so, valMatch[3].rm_eo);
       return YES;
     }
     return NO;

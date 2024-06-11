@@ -61,6 +61,10 @@ extern "C" {
 #define HSP_SONIC_DEFAULT_POLLING_INTERVAL 20
 #define HSP_SONIC_MIN_POLLING_INTERVAL 5
 
+#define HSP_SONIC_DEFAULT_PORTCHANNEL_BASEINDEX 1000
+#define HSP_SONIC_PORTCHANNEL_BASEINDEX_ENVVAR "SONIC_PORTCHANNEL_BASEINDEX"
+#define HSP_SONIC_PORTCHANNEL_RE "^PortChannel([0-9]+)$"
+
 #define ISEVEN(i) (((i) & 1) == 0)
 
   typedef enum {
@@ -168,6 +172,8 @@ extern "C" {
     EVEvent *configStartEvent;
     EVEvent *configEvent;
     EVEvent *configEndEvent;
+    uint32_t portChannelBaseIndex;
+    regex_t *portChannelPattern;
   } HSP_mod_SONIC;
 
   static void db_ping(EVMod *mod, HSPSonicDBClient *db);
@@ -299,31 +305,13 @@ extern "C" {
 
   static SFLAdaptor *portGetAdaptor(EVMod *mod, HSPSonicPort *prt) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    // Used to map only by prt->osIndex, but now that mod_nlroute
-    // reads NETLINK_ROUTE and populates the IFLA_IFALIAS fields
-    // for the Linux ports we can be more direct about looking up
-    // Linux ports by the SONiC port name, and only fall back on
-    // the osIndex lookup if there is no match.
-
-    // Try by ifName
-    SFLAdaptor *adaptor = adaptorByName(sp, prt->portName);
-    if(adaptor) {
-      EVDebug(mod, 3, "portGetAdaptor(%s) found by name", prt->portName);
-      return adaptor;
-    }
-    // Try by prt->osIndex
+    // lookup is by prt->osIndex only
     if(prt->osIndex != HSP_SONIC_IFINDEX_UNDEFINED) {
-      adaptor = adaptorByIndex(sp, prt->osIndex);
+      SFLAdaptor *adaptor = adaptorByIndex(sp, prt->osIndex);
       if(adaptor) {
 	EVDebug(mod, 3, "portGetAdaptor(%s) found by osIndex(%u)", prt->portName, prt->osIndex);
 	return adaptor;
       }
-    }
-    // Try by alias (populated by mod_nlroute or by setPortAlias() here)
-    adaptor = adaptorByAlias(sp, prt->portName);
-    if(adaptor) {
-      EVDebug(mod, 3, "portGetAdaptor(%s) found by alias", prt->portName);
-      return adaptor;
     }
     // not found - may have to wait for discovery step
     return NULL;
@@ -1504,6 +1492,8 @@ extern "C" {
   {
     HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
     EVMod *mod = db->mod;
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     redisReply *reply = (redisReply *)magic;
     char *sep = (char *)req_magic;
 
@@ -1525,6 +1515,27 @@ extern "C" {
 	    // This may add the port as a port with no oid (and no osIndex lookup) so that
 	    // might not be the best way to handle it.
 	    HSPSonicPort *lagPort = getPort(mod, lagName, YES);
+	    if(lagPort->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED
+	       && mdata->portChannelPattern) {
+	      int lagNo = -1;
+	      if(UTRegexExtractInt(mdata->portChannelPattern, lagName, 1, &lagNo, NULL, NULL)) {
+		lagPort->ifIndex = mdata->portChannelBaseIndex + lagNo;
+		EVDebug(mod, 1, "Extracted LAG number %u from \"%s\" => inferring SONiC ifIndex=%u",
+			lagName,
+			lagNo,
+			lagPort->ifIndex);
+	      }
+	    }
+	    if(lagPort->osIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+	      SFLAdaptor *adaptor = adaptorByName(sp, lagName);
+	      if(adaptor) {
+		lagPort->osIndex = adaptor->ifIndex;
+		EVDebug(mod, 1, "LAG %s found Linux osIndex=%u", lagName, lagPort->osIndex);
+	      }
+	      else {
+		EVDebug(mod, 1, "LAG %s not mapped to Linux osIndex", lagName);
+	      }
+	    }
 	    if(lagPort->components == NULL)
 	      lagPort->components = strArrayNew();
 	    char *member = parseNextTok(&p, sep, YES, 0, NO, buf, HSP_SONIC_MAX_PORTNAME_LEN);
@@ -2096,9 +2107,7 @@ extern "C" {
 
     if(prt) {
       if(prt->components) {
-	// get here if SONiC portChannel is not recognzied asb ond master?  If it
-	// has been then its counters would have been automatically synthesized,
-	// so we may want to find a way to do that.
+	// get here if SONiC portChannel is not recognzied as bond master?
 	EVDebug(mod, 1, "SONiC LAG %s not marked as bond master?", prt->portName);
       }
       // OK to queue 4 requests on the TCP connection, and ordering
@@ -2107,6 +2116,21 @@ extern "C" {
       db_getPortState(mod, prt);
       db_getPortCounters(mod, prt);
     }
+  }
+
+  /*_________________---------------------------__________________
+    _________________   buildRegexPatterns      __________________
+    -----------------___________________________------------------
+  */
+
+  static void buildRegexPatterns(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    if(mdata->portChannelPattern) {
+      // rebuild regex so it can clean up memory usage
+      regfree(mdata->portChannelPattern);
+      my_free(mdata->portChannelPattern);
+    }
+    mdata->portChannelPattern = UTRegexCompile(HSP_SONIC_PORTCHANNEL_RE);
   }
 
   /*_________________---------------------------__________________
@@ -2185,6 +2209,8 @@ extern "C" {
       break;
     }
 
+    if((EVCurrentBus()->now.tv_sec % 10) == 0)
+      buildRegexPatterns(mod);
   }
 
   /*_________________---------------------------__________________
@@ -2336,6 +2362,25 @@ extern "C" {
   }
   
   /*_________________---------------------------__________________
+    _________________  initPortChannelBaseIndex __________________
+    -----------------___________________________------------------
+  */
+
+  static void initPortChannelBaseIndex(EVMod *mod) {
+    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
+    mdata->portChannelBaseIndex = HSP_SONIC_DEFAULT_PORTCHANNEL_BASEINDEX;
+    char *pcbi = getenv(HSP_SONIC_PORTCHANNEL_BASEINDEX_ENVVAR);
+    if(pcbi) {
+      uint32_t baseIdx = strtol(pcbi, NULL, 0);
+      EVDebug(mod, 1, "ENV \"%s\" overriding portchannel base-index from %u to %u",
+	      STRINGIFY_DEF(HSP_SONIC_PORTCHANNEL_BASEINDEX_ENVVAR),
+	      mdata->portChannelBaseIndex,
+	      baseIdx);
+      mdata->portChannelBaseIndex = baseIdx;
+    }
+  }
+  
+  /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
   */
@@ -2356,6 +2401,8 @@ extern "C" {
     mdata->newCollectors = UTArrayNew(UTARRAY_PACK);
     // retainRootRequest(mod, "Needed to call out to OPX scripts (PYTHONPATH)");
     agentDeviceStrictRequest(mod, "may be SONiC CLI setting");
+    initPortChannelBaseIndex(mod);
+    buildRegexPatterns(mod);
 
 #ifdef HSP_SONIC_TEST_REDISONLY
     // don't allow readInterfaces to destroy 'imaginary'
