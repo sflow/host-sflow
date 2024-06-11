@@ -908,7 +908,7 @@ extern "C" {
     }
     if(mdata->countdownToRecheck) {
       if(--mdata->countdownToRecheck == 0) {
-	// ebuild regex patterns periodically
+	// rebuild regex patterns periodically
 	buildRegexPatterns(mod);
 	// and check for missed containers
 	EVDebug(mod, 1, "container recheck");
