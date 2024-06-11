@@ -1521,8 +1521,8 @@ extern "C" {
 	      if(UTRegexExtractInt(mdata->portChannelPattern, lagName, 1, &lagNo, NULL, NULL)) {
 		lagPort->ifIndex = mdata->portChannelBaseIndex + lagNo;
 		EVDebug(mod, 1, "Extracted LAG number %u from \"%s\" => inferring SONiC ifIndex=%u",
-			lagName,
 			lagNo,
+			lagName,
 			lagPort->ifIndex);
 	      }
 	    }
