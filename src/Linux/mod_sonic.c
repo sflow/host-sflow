@@ -1424,7 +1424,7 @@ extern "C" {
       EVDebug(mod, 1, "db_getIfIndexMapNames");
       int status = redisAsyncCommand(dbTab->dbClient->ctx,
 				     db_ifIndexMapNamesCB,
-				     NULL,
+				     dbTab->separator,
 				     "KEYS PORT_INDEX_TABLE%s*", dbTab->separator);
       EVDebug(mod, 1, "db_getIfIndexMapNames returned %d", status);
     }
