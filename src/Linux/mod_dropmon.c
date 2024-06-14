@@ -915,6 +915,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     discard.drops = mdata->noQuota;
 
     // look up notifier
+    // TODO: consider having just one datasource for this (0:0)
     SFLNotifier *notifier = getSFlowNotifier(mod, discard.input);
 
     // enforce notifier limit on header size
