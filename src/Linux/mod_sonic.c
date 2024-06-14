@@ -1740,7 +1740,7 @@ extern "C" {
       compileLags(mod);
     }
   LAG_DISCOVERY_DONE:
-    setSonicState(mod, HSP_SONIC_STATE_RUN);
+    setSonicState(mod, HSP_SONIC_STATE_SYNC_CONFIG);
   }
 
   static void db_getLagInfo(EVMod *mod) {
