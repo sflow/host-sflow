@@ -384,8 +384,7 @@ extern "C" {
   }
   
   static SFLAdaptor *portGetAdaptor(EVMod *mod, HSPSonicPort *prt) {
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
-    HSPSonicIdxMap *idxm = UTHashGet(mdata->idxMapByName, prt->portName);
+    HSPSonicIdxMap *idxm = getIdxMap(mod, prt->portName, NO);
     if(idxm)
       return idxMapGetAdaptor(mod, idxm);
     return NULL;
@@ -1133,7 +1132,7 @@ extern "C" {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     if(sp->sonic.setIfAlias) {
-      HSPSonicIdxMap *idxm = UTHashGet(mdata->idxMapByName, prt->portName);
+      HSPSonicIdxMap *idxm = getIdxMap(mod, prt->portName, NO);
       if(idxm) {
 	SFLAdaptor *adaptor = idxMapGetAdaptor(mod, idxm);
 	if(adaptor) {
@@ -1212,10 +1211,9 @@ extern "C" {
   */
 
   static bool portSyncToAdaptor(EVMod *mod, HSPSonicPort *prt, bool sync) {
-    HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     bool changed = NO;
-    HSPSonicIdxMap *idxm = UTHashGet(mdata->idxMapByName, prt->portName);
+    HSPSonicIdxMap *idxm = getIdxMap(mod, prt->portName, NO);
     if(idxm) {
       SFLAdaptor *adaptor = idxMapGetAdaptor(mod, idxm);
       if(adaptor) {
@@ -1691,7 +1689,7 @@ extern "C" {
 	  if(my_strequal(tabName, "PORTCHANNEL_MEMBER")) {
 	    HSPSonicLAG *lag = getLAG(mod, lagName, YES);
 	    // first check the PORT_INDEX_TABLE in case there is an entry there
-	    HSPSonicIdxMap *idxm = UTHashGet(mdata->idxMapByName, lagName);
+	    HSPSonicIdxMap *idxm = getIdxMap(mod, lagName, NO);
 	    if(idxm) {
 	      EVDebug(mod, 1, "found lag %s in PORT_INDEX_TABLE: ifIndex=%u, osIndex=%u",
 		      lagName,
