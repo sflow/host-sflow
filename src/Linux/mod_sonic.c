@@ -2512,7 +2512,7 @@ extern "C" {
     HSPSonicIdxMap *idxm = NULL;
     uint32_t dsClass = ps->discard->ds_class;
     uint32_t osIndex = ps->discard->ds_index;
-    if(ds_class == SFL_DSCLASS_IFINDEX
+    if(dsClass == SFL_DSCLASS_IFINDEX
        && osIndex != 0) {
       idxm = getIdxMapByOsIndex(mod, osIndex);
       if(idxm == NULL
