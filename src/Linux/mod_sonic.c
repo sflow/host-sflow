@@ -2512,19 +2512,21 @@ extern "C" {
     HSPSonicIdxMap *idxm = NULL;
     uint32_t dsClass = ps->discard->ds_class;
     uint32_t osIndex = ps->discard->ds_index;
-    if(ps->discard->ds_class == SFL_DSCLASS_IFINDEX)
+    if(ds_class == SFL_DSCLASS_IFINDEX
+       && osIndex != 0) {
       idxm = getIdxMapByOsIndex(mod, osIndex);
-    if(idxm == NULL
-       || idxm->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
-      // for troubleshooting we can allow this through (untranslated) with:
-      // "sonic{suppressOther=off}"
-      if(!sp->sonic.suppressOther)
-	return;
-      // Rather than suppress useful discard events that were associated with interfaces
-      // that are not represented in the PORT_INDEX_TABLE, we will simply translate them
-      // as coming from dataSource 0:0 meaning "whole agent"
-      EVDebug(mod, 2, "received discard sample from non-sonic port (class=%u, osIndex=%u)", dsClass, osIndex);
-      // ps->suppress = YES;
+      if(idxm == NULL
+	 || idxm->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
+	// for troubleshooting we can allow this through (untranslated) with:
+	// "sonic{suppressOther=off}"
+	if(!sp->sonic.suppressOther)
+	  return;
+	// Rather than suppress useful discard events that were associated with interfaces
+	// that are not represented in the PORT_INDEX_TABLE, we will simply translate them
+	// as coming from dataSource 0:0 meaning "whole agent"
+	EVDebug(mod, 2, "received discard sample from non-sonic port (class=%u, osIndex=%u)", dsClass, osIndex);
+	// ps->suppress = YES;
+      }
     }
     
     uint32_t dsIndexAlias = idxm ? idxm->ifIndex : 0;

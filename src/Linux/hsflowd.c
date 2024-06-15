@@ -281,17 +281,17 @@ extern "C" {
   bool setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method)
   {
     bool changed = (speed != adaptor->ifSpeed);
-    adaptor->ifSpeed = speed;
-    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-    myDebug(1, "setAdaptorSpeed(%s): %s ifSpeed == %"PRIu64" (changed=%s)",
-	    method,
-	    adaptor->deviceName,
-	    speed,
-	    changed ? "YES":"NO");
-    if(changed
-       && sp->rootModule) {
+    if(changed) {
+      myDebug(1, "setAdaptorSpeed(%s): %s ifSpeed %"PRIu64" -> %"PRIu64,
+	      method,
+	      adaptor->deviceName,
+	      adaptor->ifSpeed,
+	      speed);
+      adaptor->ifSpeed = speed;
+      HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
       nio->changed_speed = nio->changed_external = YES;
-      EVEventTxAll(sp->rootModule, HSPEVENT_INTF_SPEED, &adaptor, sizeof(adaptor));
+      if(sp->rootModule)
+	EVEventTxAll(sp->rootModule, HSPEVENT_INTF_SPEED, &adaptor, sizeof(adaptor));
     }
     return changed;
   }
@@ -300,29 +300,30 @@ extern "C" {
   {
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     bool changed = !my_strequal(nio->deviceAlias, alias);
-    myDebug(1, "setAdaptorAlias(%s): %s alias == %s (changed=%s)",
-	    method,
-	    nio->deviceAlias ?: "NULL",
-	    alias ?: "NULL",
-	    changed ? "YES":"NO");
     if(changed) {
+      myDebug(1, "setAdaptorAlias(%s): %s alias %s -> %s",
+	      method,
+	      adaptor->deviceName,
+	      nio->deviceAlias ?: "NULL",
+	      alias ?: "NULL");
       setStr(&nio->deviceAlias, alias);
       nio->changed_alias = nio->changed_external = YES;
     }
     return changed;
   }
-
+  
   bool setAdaptorSelectionPriority(HSP *sp, SFLAdaptor *adaptor, uint32_t priority, char *method)
   {
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-    bool changed = nio->selectionPriority != priority;
-    myDebug(1, "setAdaptorSelectionPriority(%s): %s %u -> %u (changed=%s)",
-	    method,
-	    adaptor->deviceName,
-	    nio->selectionPriority,
-	    priority,
-	    changed ? "YES":"NO");
-    nio->selectionPriority = priority;
+    bool changed = (nio->selectionPriority != priority);
+    if(changed) {
+      myDebug(1, "setAdaptorSelectionPriority(%s): %s %u -> %u (changed=%s)",
+	      method,
+	      adaptor->deviceName,
+	      nio->selectionPriority,
+	      priority);
+      nio->selectionPriority = priority;
+    }
     return changed;
   }
 
