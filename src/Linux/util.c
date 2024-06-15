@@ -1858,19 +1858,23 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   // Ordering will be scrambled if HT grows.
   void *UTHashNext(UTHash *oh, uint32_t *pCursor) {
     uint32_t csr = *pCursor;
-    // start search in next slot
-    csr++;
     // skip over NULLs and DBINS
     while(csr < oh->cap
 	  && (oh->bins[csr] == UTHASH_DBIN
 	      || oh->bins[csr] == NULL))
       csr++;
     // check for end (can also be off-end if HT was reset)
-    if(csr >= oh->cap)
+    if(csr >= oh->cap) {
+      // don't advance cursor any further
+      *pCursor = csr;
       return NULL;
-    // advance cursor, return obj
-    *pCursor = csr;
-    return oh->bins[csr];
+    }
+    else {
+      void *obj = oh->bins[csr];
+      // advance cursor
+      *pCursor = csr + 1;
+      return obj;
+    }
   }
   
   /*_________________---------------------------__________________
