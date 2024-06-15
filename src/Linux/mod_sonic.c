@@ -1310,9 +1310,9 @@ extern "C" {
 			idxm->ifIndex,
 			ifIndex);
 		signalCounterDiscontinuity(mod, idxm);
+		mdata->changedPortIndex = YES; // triggers rediscovery
 	      }
 	      idxm->ifIndex = ifIndex;
-	      mdata->changedPortIndex = YES; // triggers rediscovery
 	    }
 	    // update osIndex
 	    if(idxm->osIndex != osIndex) {
