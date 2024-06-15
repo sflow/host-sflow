@@ -915,8 +915,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     discard.drops = mdata->noQuota;
 
     // look up notifier
-    // TODO: consider having just one datasource for this (0:0)
-    SFLNotifier *notifier = getSFlowNotifier(mod, discard.input);
+    // We can just use one datasource for this (0:0) - especially since the
+    // input and output fields may not be limited stricting to phyical ports
+    SFLNotifier *notifier = getSFlowNotifier(mod, 0);
 
     // enforce notifier limit on header size
     if (hdrElem.flowType.header.header_length > notifier->sFlowEsMaximumHeaderSize)

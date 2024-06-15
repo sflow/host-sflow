@@ -2506,33 +2506,20 @@ extern "C" {
   */
 
   static void evt_discard_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPendingEvtSample *ps = (HSPPendingEvtSample *)data;
     // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
     // the SONiC ifIndex namespace.
-    HSPSonicIdxMap *idxm = NULL;
     uint32_t dsClass = ps->discard->ds_class;
     uint32_t osIndex = ps->discard->ds_index;
+    HSPSonicIdxMap *idxm = NULL;
+    uint32_t dsIndexAlias = 0;
     if(dsClass == SFL_DSCLASS_IFINDEX
        && osIndex != 0) {
       idxm = getIdxMapByOsIndex(mod, osIndex);
-      if(idxm == NULL
-	 || idxm->ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
-	// for troubleshooting we can allow this through (untranslated) with:
-	// "sonic{suppressOther=off}"
-	if(!sp->sonic.suppressOther)
-	  return;
-	// Rather than suppress useful discard events that were associated with interfaces
-	// that are not represented in the PORT_INDEX_TABLE, we will simply translate them
-	// as coming from dataSource 0:0 meaning "whole agent"
-	EVDebug(mod, 2, "received discard sample from non-sonic port (class=%u, osIndex=%u)", dsClass, osIndex);
-	// ps->suppress = YES;
-      }
+      dsIndexAlias = idxm ? idxm->ifIndex : 0;
+      // Note that if dsIndexAlias is 0 that means "no alias"
+      sfl_notifier_set_dsAlias(ps->notifier, dsIndexAlias);
     }
-    
-    uint32_t dsIndexAlias = idxm ? idxm->ifIndex : 0;
-    // fix datasource
-    sfl_notifier_set_dsAlias(ps->notifier, dsIndexAlias);
     // fix in/out
     if(ps->discard->input
        && ps->discard->input != SFL_INTERNAL_INTERFACE) {
