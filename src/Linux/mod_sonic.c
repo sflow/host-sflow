@@ -1556,7 +1556,10 @@ extern "C" {
       return YES;
     }
     else {
-      setSonicState(mod, HSP_SONIC_STATE_DISCOVER_MAPPING);
+      // advance from DISCOVER to DISCOVER_MAPPING, but if we are in, say, the RUN
+      // state then don't do anything here. We are probably just polling counters.
+      if(mdata->state == HSP_SONIC_STATE_DISCOVER)
+	setSonicState(mod, HSP_SONIC_STATE_DISCOVER_MAPPING);
     }
     return NO;
   }
