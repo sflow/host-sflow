@@ -114,7 +114,6 @@ extern "C" {
     bool operUp:1;
     bool adminUp:1;
     bool oidChanged:1; // used to signal discontinuity (oid is key for counters)
-    uint32_t ifIndex;
     uint64_t ifSpeed;
     char *ifAlias;
     SFLHost_nio_counters ctrs;
@@ -372,7 +371,6 @@ extern "C" {
        && create) {
       prt = (HSPSonicPort *)my_calloc(sizeof(HSPSonicPort));
       prt->portName = my_strdup(portName);
-      prt->ifIndex = HSP_SONIC_IFINDEX_UNDEFINED;
       UTHashAdd(mdata->portsByName, prt);
     }
     return prt;
@@ -1161,14 +1159,14 @@ extern "C" {
     candidates are otherwise tied.
   */
   
-  static bool setPortSelectionPriority(EVMod *mod, HSPSonicPort *prt, bool setIt) {
+  static bool setPortSelectionPriority(EVMod *mod, HSPSonicIdxMap *idxm, bool setIt) {
     HSP_mod_SONIC *mdata = (HSP_mod_SONIC *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    SFLAdaptor *adaptor = portGetAdaptor(mod, prt);
+    SFLAdaptor *adaptor = idxMapGetAdaptor(mod, idxm);
     if(adaptor) {
       if(setAdaptorSelectionPriority(sp,
 				     adaptor,
-				     setIt ? prt->ifIndex : 0,
+				     setIt ? idxm->ifIndex : 0,
 				     "MOD_SONIC")) {
 	mdata->changedPortPriority = YES;
 	return YES;
@@ -1219,7 +1217,7 @@ extern "C" {
       if(adaptor) {
 	if(setPortAlias(mod, prt, sync))
 	  changed = YES;
-	if(setPortSelectionPriority(mod, prt, sync))
+	if(setPortSelectionPriority(mod, idxm, sync))
 	  changed = YES;
 	if(setSwitchPort(mod, idxm->osIndex, sync))
 	  changed = YES;
@@ -2582,7 +2580,7 @@ extern "C" {
     // see if we can get an ifIndex - but it has to be for a port or lag.
     uint32_t ifIndex = HSP_SONIC_IFINDEX_UNDEFINED;
     if(prt)
-      ifIndex = prt->ifIndex;
+      ifIndex = idxm->ifIndex;
     else if(lag)
       ifIndex = lag->ifIndex;
     if(ifIndex == HSP_SONIC_IFINDEX_UNDEFINED) {
