@@ -4,8 +4,8 @@
 HEADERS= sflow_api.h sflow_xdr.h sflow.h Makefile
 
 #OPT = -O3 -DNDEBUG
-#OPT = -g -ggdb -O2
-OPT= -g -ggdb
+OPT = -g -ggdb -O2
+#OPT= -g -ggdb
 
 CFLAGS= -D_GNU_SOURCE -DSTDC_HEADERS $(OPT) -Wall -Wcast-align
 CFLAGS += -DSFL_USE_32BIT_INDEX -Wno-unused-function
