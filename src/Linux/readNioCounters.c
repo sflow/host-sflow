@@ -270,14 +270,19 @@ extern "C" {
     EVMod *mod = sp->rootModule;
     uint64_t ifSpeed = 0;
     bool up = NO;
+    bool operUp = NO;
+    bool adminUp = NO;
     uint32_t ifDirection = 0;
+    HSPAdaptorNIO *bond_nio = ADAPTOR_NIO(bond);
     SFLAdaptor *search_ad;
 
-    EVDebug(mod, 1, "synthesizeBondMetaData: BEFORE: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+    EVDebug(mod, 1, "synthesizeBondMetaData: BEFORE: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s (oper=%u, admin=%u)",
 	    bond->deviceName,
 	    bond->ifSpeed,
 	    bond->ifDirection,
-	    up ? "UP" : "DOWN");
+	    bond_nio->up ? "UP" : "DOWN",
+	    bond_nio->et_last.operStatus,
+	    bond_nio->et_last.adminStatus);
 
     UTHASH_WALK(sp->adaptorsByIndex, search_ad) {
       if(search_ad != bond) {
@@ -295,21 +300,33 @@ extern "C" {
 	  ifSpeed += search_ad->ifSpeed;
 	  // bond is up if any slave is up
 	  if(search_nio->up) up = YES;
+	  // we also track admin and oper status in the ethtool counter block
+	  if(search_nio->et_last.operStatus)
+	    operUp = YES;
+	  if(search_nio->et_last.adminStatus)
+	    adminUp = YES;
 	  // capture ifDirection -- assume the same on all components
 	  if(search_ad->ifDirection) ifDirection = search_ad->ifDirection;
 	}
       }
     }
 
-    ADAPTOR_NIO(bond)->up = up;
+    // note that the up flag can be overwritten by readInterfaces() but the
+    // operStatus and adminStatus will take precedence in setting the ifStatus
+    // output if bond_nio->et_found has HSP_ETCTR_ADMIN and HSP_ETCTR_OPER bits set.
+    bond_nio->up = up;
+    bond_nio->et_last.operStatus = operUp;
+    bond_nio->et_last.adminStatus = adminUp;
     bond->ifSpeed = ifSpeed;
     bond->ifDirection = ifDirection;
 
-    EVDebug(mod, 1, "synthesizeBondMetaData: AFTER: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s",
+    EVDebug(mod, 1, "synthesizeBondMetaData: AFTER: bond %s (ifSpeed=%"PRIu64" dirn=%u) marked %s (oper=%u, admin=%u)",
 	    bond->deviceName,
 	    bond->ifSpeed,
 	    bond->ifDirection,
-	    up ? "UP" : "DOWN");
+	    bond_nio->up ? "UP" : "DOWN",
+	    bond_nio->et_last.operStatus,
+	    bond_nio->et_last.adminStatus);
   }
 
   /*_________________---------------------------__________________
