@@ -58,7 +58,7 @@ extern "C" {
       sfl_sampler_set_sFlowFsReceiver(adaptorNIO->sampler, HSP_SFLOW_RECEIVER_INDEX);
       // TODO: adapt if headerBytes changes dynamically in config settings - broadcast event?
       // same as for changes in polling interval or datagram size?
-      sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sp->sFlowSettings_file->headerBytes);
+      sfl_sampler_set_sFlowFsMaximumHeaderSize(adaptorNIO->sampler, sp->sFlowSettings->headerBytes);
     }
     return adaptorNIO->sampler;
   }

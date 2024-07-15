@@ -436,6 +436,7 @@ extern "C" {
 #define HSPEVENT_REQUEST_POLLER "request_poller" // get counter samples for a switch port
 #define HSPEVENT_FLUSH_DATAGRAM "flush_datagram" // flush datagram (e.g. on counters batch)
 #define HSPEVENT_POLL_INTERVAL "poll_interval"   // sent when actualPollingInterval changed
+#define HSPEVENT_HEADER_BYTES "header_bytes"     // (headerBytes) sent on config change
   
   typedef struct _HSPPendingSample {
     SFL_FLOW_SAMPLE_TYPE *fs;

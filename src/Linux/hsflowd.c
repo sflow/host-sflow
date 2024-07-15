@@ -1777,6 +1777,45 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________  evt_all_header_bytes     __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_all_header_bytes(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(dataLen == sizeof(uint32_t)) {
+      uint32_t headerBytes = *(uint32_t *)data;
+      SFLSampler *samplers=NULL;
+      if(EVCurrentBus() == sp->packetBus)
+	samplers = sp->agent->samplers;
+      if(EVCurrentBus() == sp->pollBus)
+	samplers = sp->poll_agent->samplers;
+      for(SFLSampler *sm = samplers; sm; sm = sm->nxt) {
+	sfl_sampler_set_sFlowFsMaximumHeaderSize(sm, headerBytes);
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________  updateHeaderBytes        __________________
+    -----------------___________________________------------------
+  */
+
+  static void updateHeaderBytes(HSP *sp) {
+    if(sp->sFlowSettings) {
+      // pick up the configured headerBytes
+      uint32_t headerBytes = sp->sFlowSettings->headerBytes;
+      // apply constraints
+      if(headerBytes > HSP_MAX_HEADER_BYTES) {
+	headerBytes = HSP_MAX_HEADER_BYTES;
+	myDebug(1, "limiting headerBytes to max: %u", headerBytes);
+      }
+      // make sure any existing samplers get the memo, in any thread
+      EVEventTxAll(sp->rootModule, HSPEVENT_HEADER_BYTES, &headerBytes, sizeof(headerBytes));
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________     evt_config_first      __________________
     -----------------___________________________------------------
   */
@@ -2016,6 +2055,9 @@ extern "C" {
     // adjust the polling schedule to respect constraints.  (This is also called
     // if the interfaces change)
     configSwitchPorts(sp); // in readPackets.c
+
+    // did the headerBytes setting change?
+    updateHeaderBytes(sp);
   }
 
   /*_________________---------------------------__________________
@@ -2571,6 +2613,8 @@ extern "C" {
     }
     // make sure every thread is notified on a change to the actual polling interval
     EVEventRxAll(sp->rootModule, HSPEVENT_POLL_INTERVAL, evt_all_poll_interval);
+    // make sure every thread is notified on a change to the header bytes setting
+    EVEventRxAll(sp->rootModule, HSPEVENT_HEADER_BYTES, evt_all_header_bytes);
       
     if(sp->DNSSD.DNSSD) {
       EVLoadModule(sp->rootModule, "mod_dnssd", sp->modulesPath);

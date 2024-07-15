@@ -320,7 +320,10 @@ extern "C" {
     }
 
     // snaplen
-    if(pcap_set_snaplen(bpfs->pcap, sp->sFlowSettings_file->headerBytes) != 0)
+    // note that doing this here means we will not pick up any dynamic-config increase
+    // in the configured headerBytes (e.g. via DNS-SD). But it's not a problem for agents
+    // that require a restart on any change to the hsflowd.conf config file.
+    if(pcap_set_snaplen(bpfs->pcap, sp->sFlowSettings->headerBytes) != 0)
       myLog(LOG_ERR, "pcap: pcap_set_snaplen(%s) failed", bpfs->deviceName);
 
     // promiscuous mode

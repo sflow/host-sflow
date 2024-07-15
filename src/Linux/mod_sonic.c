@@ -50,6 +50,7 @@ extern "C" {
 #define HSP_SONIC_FIELD_SFLOW_AGENT "agent_id"
 #define HSP_SONIC_FIELD_SFLOW_DROP_MONITOR_LIMIT "drop_monitor_limit" // *proposed*
 #define HSP_SONIC_FIELD_SFLOW_SAMPLE_DIRECTION "sample_direction" // *proposed*
+#define HSP_SONIC_FIELD_SFLOW_HEADER_BYTES "max_header_size" // *proposed*
 
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
@@ -207,6 +208,7 @@ extern "C" {
     // sFlow config
     bool sflow_enable;
     uint32_t sflow_polling;
+    uint32_t sflow_headerBytes;
     char *sflow_agent;
     uint32_t sflow_dropLimit;
     bool sflow_dropLimit_set;
@@ -1773,6 +1775,7 @@ extern "C" {
     bool sflow_enable = NO;
     char *sflow_agent = NULL;
     uint32_t sflow_polling = HSP_SONIC_DEFAULT_POLLING_INTERVAL;
+    uint32_t sflow_headerBytes = SFL_DEFAULT_HEADER_SIZE;
     uint32_t sflow_dropLimit = 0;
     char *sflow_direction = NULL;
     if(reply->type == REDIS_REPLY_ARRAY
@@ -1792,6 +1795,9 @@ extern "C" {
 
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_POLLING))
 	    sflow_polling = db_getU32(f_val);
+
+	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_HEADER_BYTES))
+	    sflow_headerBytes = db_getU32(f_val);
 
 	  if(my_strequal(f_name->str, HSP_SONIC_FIELD_SFLOW_DROP_MONITOR_LIMIT)) {
 	    sflow_dropLimit = db_getU32(f_val);
@@ -1819,6 +1825,10 @@ extern "C" {
     if(sflow_polling != mdata->sflow_polling) {
       EVDebug(mod, 1, "sflow_polling %u -> %u", mdata->sflow_polling, sflow_polling);
       mdata->sflow_polling = sflow_polling;
+    }
+    if(sflow_headerBytes != mdata->sflow_headerBytes) {
+      EVDebug(mod, 1, "sflow_headerBytes %u -> %u", mdata->sflow_headerBytes, sflow_headerBytes);
+      mdata->sflow_headerBytes = sflow_headerBytes;
     }
     if(sflow_dropLimit != mdata->sflow_dropLimit) {
       EVDebug(mod, 1, "sflow_dropLimit %u -> %u", mdata->sflow_dropLimit, sflow_dropLimit);
@@ -2176,6 +2186,8 @@ extern "C" {
 	EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
       }
       snprintf(cfgLine, EV_MAX_EVT_DATALEN, "polling=%u", mdata->sflow_polling);
+      EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
+      snprintf(cfgLine, EV_MAX_EVT_DATALEN, "headerBytes=%u", mdata->sflow_headerBytes);
       EVEventTx(mod, mdata->configEvent, cfgLine, my_strlen(cfgLine));
       if(mdata->sflow_dropLimit_set) {
 	snprintf(cfgLine, EV_MAX_EVT_DATALEN, "dropLimit=%u", mdata->sflow_dropLimit);
