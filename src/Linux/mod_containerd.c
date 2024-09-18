@@ -146,7 +146,7 @@ extern "C" {
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
 	SFLAdaptor *adaptor = adaptorListGet(container->vm.interfaces, deviceName);
 	if(adaptor == NULL) {
-	  adaptor = nioAdaptorNew(deviceName, mac, ifIndex);
+	  adaptor = nioAdaptorNew(mod, deviceName, mac, ifIndex);
 	  adaptorListAdd(container->vm.interfaces, adaptor);
 	  // add to "all namespaces" collections too - but only the ones where
 	  // the id is really global.  For example,  many containers can have
@@ -162,63 +162,66 @@ extern "C" {
 	  if(UTHashGet(sp->adaptorsByIndex, adaptor) == NULL)
 	    if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL)
 	      EVDebug(mod, 1, "Warning: container adaptor overwriting adaptorsByIndex");
+	}
+	else {
+	  // clear mark
+	  unmarkAdaptor(adaptor);
+	}
 
-	  // mark it as a vm/container device
-	  // and record the dsIndex there for easy mapping later
-	  // provided it is unique.  Otherwise set it to all-ones
-	  // to indicate that it should not be used to map to container.
-	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	  nio->vm_or_container = YES;
-	  if(nio->container_dsIndex != container->vm.dsIndex) {
-	    if(nio->container_dsIndex == 0)
-	      nio->container_dsIndex = container->vm.dsIndex;
-	    else {
-	      EVDebug(mod, 1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
-	      // mark is as not a unique mapping
-	      nio->container_dsIndex = 0xFFFFFFFF;
-	    }
+	// mark it as a vm/container device
+	// and record the dsIndex there for easy mapping later
+	// provided it is unique.  Otherwise set it to all-ones
+	// to indicate that it should not be used to map to container.
+	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+	nio->vm_or_container = YES;
+	if(nio->container_dsIndex != container->vm.dsIndex) {
+	  if(nio->container_dsIndex == 0)
+	    nio->container_dsIndex = container->vm.dsIndex;
+	  else {
+	    EVDebug(mod, 1, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
+	    // mark is as not a unique mapping
+	    nio->container_dsIndex = 0xFFFFFFFF;
 	  }
-
-	  // did we get an ip address too?
-	  SFLAddress ipAddr = { };
-	  if(parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET)) {
-	    if(!SFLAddress_isZero(&ipAddr)
-	       && mdata->vnicByIP) {
-	      EVDebug(mod, 1, "VNIC: learned virtual ipAddr: %s", ipStr);
-	      // Can use this to associate traffic with this container
-	      // if this address appears in sampled packet header as
-	      // outer or inner IP
-	      ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
-	      HSPVNIC search = { .ipAddr = ipAddr };
-	      HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
-	      if(vnic) {
-		// found IP - check for non-unique mapping
-		if(vnic->dsIndex != container->vm.dsIndex) {
-		  EVDebug(mod, 1, "VNIC: IP %s clash between %s (ds=%u) and %s (ds=%u) -- setting unique=no",
-			  ipStr,
-			  vnic->c_hostname,
-			  vnic->dsIndex,
-			  container->hostname,
-			  container->vm.dsIndex);
-		  vnic->unique = NO;
-		}
-	      }
-	      else {
-		// add new VNIC entry
-		vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
-		vnic->ipAddr = ipAddr;
-		vnic->dsIndex = container->vm.dsIndex;
-		vnic->c_name = my_strdup(container->name);
-		vnic->c_hostname = my_strdup(container->hostname);
-		UTHashAdd(mdata->vnicByIP, vnic);
-		vnic->unique = YES;
-		EVDebug(mod, 1, "VNIC: linked to %s (ds=%u)",
+	}
+	
+	// did we get an ip address too?
+	SFLAddress ipAddr = { };
+	if(parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET)) {
+	  if(!SFLAddress_isZero(&ipAddr)
+	     && mdata->vnicByIP) {
+	    EVDebug(mod, 1, "VNIC: learned virtual ipAddr: %s", ipStr);
+	    // Can use this to associate traffic with this container
+	    // if this address appears in sampled packet header as
+	    // outer or inner IP
+	    ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
+	    HSPVNIC search = { .ipAddr = ipAddr };
+	    HSPVNIC *vnic = UTHashGet(mdata->vnicByIP, &search);
+	    if(vnic) {
+	      // found IP - check for non-unique mapping
+	      if(vnic->dsIndex != container->vm.dsIndex) {
+		EVDebug(mod, 1, "VNIC: IP %s clash between %s (ds=%u) and %s (ds=%u) -- setting unique=no",
+			ipStr,
 			vnic->c_hostname,
-			vnic->dsIndex);
+			vnic->dsIndex,
+			container->hostname,
+			container->vm.dsIndex);
+		vnic->unique = NO;
 	      }
 	    }
+	    else {
+	      // add new VNIC entry
+	      vnic = (HSPVNIC *)my_calloc(sizeof(HSPVNIC));
+	      vnic->ipAddr = ipAddr;
+	      vnic->dsIndex = container->vm.dsIndex;
+	      vnic->c_name = my_strdup(container->name);
+	      vnic->c_hostname = my_strdup(container->hostname);
+	      UTHashAdd(mdata->vnicByIP, vnic);
+	      vnic->unique = YES;
+	      EVDebug(mod, 1, "VNIC: linked to %s (ds=%u)",
+		      vnic->c_hostname,
+		      vnic->dsIndex);
+	    }
 	  }
-
 	}
       }
     }
@@ -639,11 +642,11 @@ extern "C" {
     HSPVMState *vm = &container->vm;
     if(vm) {
       // reset the information that we are about to refresh
-      adaptorListMarkAll(vm->interfaces);
+      markAdaptors_adaptorList(mod, vm->interfaces);
       // then refresh it
       readContainerInterfaces(mod, container);
       // and clean up
-      deleteMarkedAdaptors_adaptorList(sp, vm->interfaces);
+      deleteMarkedAdaptors_adaptorList(mod, vm->interfaces);
       adaptorListFreeMarked(vm->interfaces);
     }
   }

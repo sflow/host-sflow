@@ -232,10 +232,15 @@ extern "C" {
   void adaptorFree(SFLAdaptor *ad);
   int adaptorInstances(void);
 
+  void markAdaptor(SFLAdaptor *ad);
+  bool adaptorIsMarked(SFLAdaptor *ad);
+  void unmarkAdaptor(SFLAdaptor *ad);
+
   // SFLAdaptorList
   SFLAdaptorList *adaptorListNew(void);
   void adaptorListReset(SFLAdaptorList *adList);
   void adaptorListFree(SFLAdaptorList *adList);
+#define SFLADAPTOR_MARK_DEL 0x80000000
   void adaptorListMarkAll(SFLAdaptorList *adList);
   int adaptorListFreeMarked(SFLAdaptorList *adList);
   SFLAdaptor *adaptorListGet(SFLAdaptorList *adList, char *dev);

@@ -1322,10 +1322,23 @@ extern "C" {
     my_free(adList);
   }
 
+  void markAdaptor(SFLAdaptor *ad)  {
+    ad->marked |= SFLADAPTOR_MARK_DEL;
+  }
+
+  bool adaptorIsMarked(SFLAdaptor *ad)  {
+    return (ad->marked & SFLADAPTOR_MARK_DEL) == SFLADAPTOR_MARK_DEL;
+  }
+
+  void unmarkAdaptor(SFLAdaptor *ad)  {
+    ad->marked &= ~SFLADAPTOR_MARK_DEL;
+  }
+  
   void adaptorListMarkAll(SFLAdaptorList *adList)
   {
     SFLAdaptor *ad;
-    ADAPTORLIST_WALK(adList, ad) ad->marked = YES;
+    ADAPTORLIST_WALK(adList, ad)
+      markAdaptor(ad);
   }
 
   int adaptorListFreeMarked(SFLAdaptorList *adList)
@@ -1333,7 +1346,8 @@ extern "C" {
     uint32_t removed = 0;
     for(uint32_t i = 0; i < adList->num_adaptors; i++) {
       SFLAdaptor *ad = adList->adaptors[i];
-      if(ad && ad->marked) {
+      if(ad
+	 && adaptorIsMarked(ad)) {
 	adaptorFree(ad);
 	adList->adaptors[i] = NULL;
 	removed++;

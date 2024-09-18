@@ -118,7 +118,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex) {
+  SFLAdaptor *nioAdaptorNew(EVMod *mod, char *dev, u_char *macBytes, uint32_t ifIndex) {
     SFLAdaptor *adaptor = adaptorNew(dev, macBytes, sizeof(HSPAdaptorNIO), ifIndex);
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     // set defaults
@@ -128,6 +128,7 @@ extern "C" {
     nio->ethtool_GSET = YES;
     nio->ethtool_GSTATS = YES;
     nio->procNetDev = YES;
+    adaptor->marked = mod->id;
     return adaptor;
   }
 
@@ -218,20 +219,35 @@ extern "C" {
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag) {
     int found = 0;
     SFLAdaptor *ad;
-    UTHASH_WALK(adaptorHT, ad) if(ad->marked) {
-      deleteAdaptor(sp, ad, freeFlag);
-      found++;
+    UTHASH_WALK(adaptorHT, ad) {
+      if(adaptorIsMarked(ad)) {
+	deleteAdaptor(sp, ad, freeFlag);
+	found++;
+      }
     }
     return found;
   }
 
-  int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList) {
+  int markAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList) {
     int found = 0;
     SFLAdaptor *ad;
-    ADAPTORLIST_WALK(adList, ad) if(ad->marked) {
-      deleteAdaptor(sp, ad, NO);
-      found++;
-    }
+    ADAPTORLIST_WALK(adList, ad)
+      if(ad->marked == mod->id) {
+	markAdaptor(ad);
+	found++;
+      }
+    return found;
+  }
+
+  int deleteMarkedAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    int found = 0;
+    SFLAdaptor *ad;
+    ADAPTORLIST_WALK(adList, ad)
+      if(adaptorIsMarked(ad)) {
+	deleteAdaptor(sp, ad, NO);
+	found++;
+      }
     return found;
   }
 
@@ -452,6 +468,162 @@ extern "C" {
     -----------------___________________________________------------------
   */
 
+  void sendInterfaceCounterSample(EVMod *mod, SFLPoller *poller, SFLAdaptor *adaptor, SFL_COUNTERS_SAMPLE_TYPE *cs)
+  {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+    // see if we were able to discern multicast and broadcast counters
+    // by polling for ethtool stats.  Be careful to use unsigned 32-bit
+    // arithmetic here:
+#define UNSUPPORTED_SFLOW_COUNTER32 (uint32_t)-1
+    uint32_t pkts_in = adaptorNIO->nio.pkts_in;
+    uint32_t pkts_out = adaptorNIO->nio.pkts_out;
+    uint32_t mcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
+    uint32_t mcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
+    uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
+    uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
+    uint32_t unknown_in =  UNSUPPORTED_SFLOW_COUNTER32;
+    uint32_t ifStatus = adaptorNIO->up ? (SFLSTATUS_ADMIN_UP | SFLSTATUS_OPER_UP) : 0;
+    
+    // more detailed counters may have been found via ethtool or equivalent:
+    if(adaptorNIO->et_found & HSP_ETCTR_MC_IN) {
+      mcasts_in = (uint32_t)adaptorNIO->et_total.mcasts_in;
+      if(adaptorNIO->procNetDev)
+	pkts_in -= mcasts_in;
+    }
+    if(adaptorNIO->et_found & HSP_ETCTR_BC_IN) {
+      bcasts_in = (uint32_t)adaptorNIO->et_total.bcasts_in;
+      if(adaptorNIO->procNetDev)
+	pkts_in -= bcasts_in;
+    }
+    if(adaptorNIO->et_found & HSP_ETCTR_MC_OUT) {
+      mcasts_out = (uint32_t)adaptorNIO->et_total.mcasts_out;
+      if(adaptorNIO->procNetDev)
+	pkts_out -= mcasts_out;
+    }
+    if(adaptorNIO->et_found & HSP_ETCTR_BC_OUT) {
+      bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
+      if(adaptorNIO->procNetDev)
+	pkts_out -= bcasts_out;
+    }
+    if(adaptorNIO->et_found & HSP_ETCTR_UNKN) {
+      unknown_in = (uint32_t)adaptorNIO->et_total.unknown_in;
+    }
+    if((adaptorNIO->et_found & HSP_ETCTR_ADMIN)
+       && (adaptorNIO->et_found & HSP_ETCTR_OPER)) {
+      ifStatus = 0;
+      if((adaptorNIO->et_last.adminStatus & 1)) ifStatus |= SFLSTATUS_ADMIN_UP;
+      if((adaptorNIO->et_last.operStatus & 1)) ifStatus |= SFLSTATUS_OPER_UP;
+    }
+    
+    if(adaptorNIO->bond_master
+       || adaptorNIO->bond_master_2) {
+      EVDebug(mod, 1, "bond interface status: %s=%u (ifSpeed=%"PRIu64" dirn=%u et_found=%u up=%u)",
+	      adaptor->deviceName,
+	      ifStatus,
+	      adaptor->ifSpeed,
+	      adaptor->ifDirection,
+	      adaptorNIO->et_found,
+	      adaptorNIO->up);
+    }
+    
+    // generic interface counters
+    SFLCounters_sample_element elem = { 0 };
+    elem.tag = SFLCOUNTERS_GENERIC;
+    elem.counterBlock.generic.ifIndex = poller->dsi.ds_index;
+    elem.counterBlock.generic.ifType = 6; // assume ethernet
+    elem.counterBlock.generic.ifSpeed = adaptor->ifSpeed;
+    elem.counterBlock.generic.ifDirection = adaptor->ifDirection;
+    elem.counterBlock.generic.ifStatus = ifStatus;
+    elem.counterBlock.generic.ifPromiscuousMode = adaptor->promiscuous;
+    elem.counterBlock.generic.ifInOctets = adaptorNIO->nio.bytes_in;
+    elem.counterBlock.generic.ifInUcastPkts = pkts_in;
+    elem.counterBlock.generic.ifInMulticastPkts = mcasts_in;
+    elem.counterBlock.generic.ifInBroadcastPkts = bcasts_in;
+    elem.counterBlock.generic.ifInDiscards = adaptorNIO->nio.drops_in;
+    elem.counterBlock.generic.ifInErrors = adaptorNIO->nio.errs_in;
+    elem.counterBlock.generic.ifInUnknownProtos = unknown_in;
+    elem.counterBlock.generic.ifOutOctets = adaptorNIO->nio.bytes_out;
+    elem.counterBlock.generic.ifOutUcastPkts = pkts_out;
+    elem.counterBlock.generic.ifOutMulticastPkts = mcasts_out;
+    elem.counterBlock.generic.ifOutBroadcastPkts = bcasts_out;
+    elem.counterBlock.generic.ifOutDiscards = adaptorNIO->nio.drops_out;
+    elem.counterBlock.generic.ifOutErrors = adaptorNIO->nio.errs_out;
+    SFLADD_ELEMENT(cs, &elem);
+    
+    if(adaptorNIO->vm_or_container) {
+#define HSP_DIRECTION_SWAP(g,f) do {				\
+	uint32_t _tmp = g.ifIn ## f;				\
+	g.ifIn ## f = g.ifOut ## f;				\
+	g.ifOut ## f = _tmp; } while(0)
+      HSP_DIRECTION_SWAP(elem.counterBlock.generic, UcastPkts);
+      HSP_DIRECTION_SWAP(elem.counterBlock.generic, MulticastPkts);
+      HSP_DIRECTION_SWAP(elem.counterBlock.generic, BroadcastPkts);
+      HSP_DIRECTION_SWAP(elem.counterBlock.generic, Discards);
+      HSP_DIRECTION_SWAP(elem.counterBlock.generic, Errors);
+    }
+    
+    // add optional interface name struct
+    SFLCounters_sample_element pn_elem = { 0 };
+    pn_elem.tag = SFLCOUNTERS_PORTNAME;
+    char *sFlowPortName = adaptor->deviceName;
+    // It might be more elegant to splice in an alternative PORTNAME element
+    // later in mod_sonic evt_cntr_sample() but there is an IFLA_IFALIAS
+    // that we might someday discover via netlink and want to export as
+    // the portName even on other platforms, so allow the policy to to be
+    // a global flag that we test here.  For now the flag is
+    // sp->sonic.setIfName but it could end up as something like "sp->portNameUseAlias".
+    if(sp->sonic.setIfName
+       && adaptorNIO->deviceAlias)
+      sFlowPortName = adaptorNIO->deviceAlias;
+    pn_elem.counterBlock.portName.portName.len = my_strlen(sFlowPortName);
+    pn_elem.counterBlock.portName.portName.str = sFlowPortName;
+    SFLADD_ELEMENT(cs, &pn_elem);
+    
+    // possibly include LACP struct for bond slave
+    // (used to send for bond-master too,  but that
+    // was a mis-reading of the standard).
+    SFLCounters_sample_element lacp_elem = { 0 };
+    if(adaptorNIO->bond_slave
+       || adaptorNIO->bond_slave_2) {
+      updateBondCounters(sp, adaptor);
+      lacp_elem.tag = SFLCOUNTERS_LACP;
+      lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
+      SFLADD_ELEMENT(cs, &lacp_elem);
+    }
+    
+    // possibly include SFP struct with optical gauges
+    SFLCounters_sample_element sfp_elem = { 0 };
+    if(adaptorNIO->sfp.num_lanes) {
+      sfp_elem.tag = SFLCOUNTERS_SFP;
+      sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
+      SFLADD_ELEMENT(cs, &sfp_elem);
+    }
+    
+    // circulate the cs to be annotated by other modules before it is sent out.
+    // This differs from the packet-sample treatment in that everything is
+    // on the stack.  If we ever wanted to delay counter samples until additional
+    // lookups were performed then this would all have to shift onto the heap.
+    // Note that this differs from HSPEVENT_HOST_COUNTER_SAMPLE in that we
+    // wrap it in an HSPPendingCSample so we can supply the poller pointer too.
+    HSPPendingCSample ps = { .poller = poller, .cs = cs };
+    EVEvent *evt_intf_cs = EVGetEvent(sp->pollBus, HSPEVENT_INTF_COUNTER_SAMPLE);
+    EVEventTx(sp->rootModule, evt_intf_cs, &ps, sizeof(ps));
+    if(ps.suppress) {
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED]++;
+    }
+    else {
+      sfl_poller_writeCountersSample(poller, cs);
+      sp->counterSampleQueued = YES;
+      sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
+    }
+  }
+
+  /*_________________-----------------------------------__________________
+    _________________   agentCB_getCounters_interface   __________________
+    -----------------___________________________________------------------
+  */
+
   static void agentCB_getCounters_interface(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
   {
     assert(poller->magic);
@@ -462,162 +634,13 @@ extern "C" {
 
     // device name was copied as userData
     char *devName = (char *)poller->userData;
-
     if(devName) {
       // look up the adaptor objects
       SFLAdaptor *adaptor = adaptorByName(sp, devName);
       if(adaptor) {
-
 	// make sure the counters are up to the second
 	updateNioCounters(sp, adaptor);
-
-	HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-
-	// see if we were able to discern multicast and broadcast counters
-	// by polling for ethtool stats.  Be careful to use unsigned 32-bit
-	// arithmetic here:
-#define UNSUPPORTED_SFLOW_COUNTER32 (uint32_t)-1
-	uint32_t pkts_in = adaptorNIO->nio.pkts_in;
-	uint32_t pkts_out = adaptorNIO->nio.pkts_out;
-	uint32_t mcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
-	uint32_t mcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
-	uint32_t bcasts_in =  UNSUPPORTED_SFLOW_COUNTER32;
-	uint32_t bcasts_out =  UNSUPPORTED_SFLOW_COUNTER32;
-	uint32_t unknown_in =  UNSUPPORTED_SFLOW_COUNTER32;
-	uint32_t ifStatus = adaptorNIO->up ? (SFLSTATUS_ADMIN_UP | SFLSTATUS_OPER_UP) : 0;
-
-	// more detailed counters may have been found via ethtool or equivalent:
-	if(adaptorNIO->et_found & HSP_ETCTR_MC_IN) {
-	  mcasts_in = (uint32_t)adaptorNIO->et_total.mcasts_in;
-	  if(adaptorNIO->procNetDev)
-	    pkts_in -= mcasts_in;
-	}
-	if(adaptorNIO->et_found & HSP_ETCTR_BC_IN) {
-	  bcasts_in = (uint32_t)adaptorNIO->et_total.bcasts_in;
-	  if(adaptorNIO->procNetDev)
-	    pkts_in -= bcasts_in;
-	}
-	if(adaptorNIO->et_found & HSP_ETCTR_MC_OUT) {
-	  mcasts_out = (uint32_t)adaptorNIO->et_total.mcasts_out;
-	  if(adaptorNIO->procNetDev)
-	    pkts_out -= mcasts_out;
-	}
-	if(adaptorNIO->et_found & HSP_ETCTR_BC_OUT) {
-	  bcasts_out = (uint32_t)adaptorNIO->et_total.bcasts_out;
-	  if(adaptorNIO->procNetDev)
-	    pkts_out -= bcasts_out;
-	}
-	if(adaptorNIO->et_found & HSP_ETCTR_UNKN) {
-	  unknown_in = (uint32_t)adaptorNIO->et_total.unknown_in;
-	}
-	if((adaptorNIO->et_found & HSP_ETCTR_ADMIN)
-	   && (adaptorNIO->et_found & HSP_ETCTR_OPER)) {
-	  ifStatus = 0;
-	  if((adaptorNIO->et_last.adminStatus & 1)) ifStatus |= SFLSTATUS_ADMIN_UP;
-	  if((adaptorNIO->et_last.operStatus & 1)) ifStatus |= SFLSTATUS_OPER_UP;
-	}
-
-	if(adaptorNIO->bond_master
-	   || adaptorNIO->bond_master_2) {
-	  EVDebug(mod, 1, "bond interface status: %s=%u (ifSpeed=%"PRIu64" dirn=%u et_found=%u up=%u)",
-		  adaptor->deviceName,
-		  ifStatus,
-		  adaptor->ifSpeed,
-		  adaptor->ifDirection,
-		  adaptorNIO->et_found,
-		  adaptorNIO->up);
-	}
-
-	// generic interface counters
-	SFLCounters_sample_element elem = { 0 };
-	elem.tag = SFLCOUNTERS_GENERIC;
-	elem.counterBlock.generic.ifIndex = poller->dsi.ds_index;
-	elem.counterBlock.generic.ifType = 6; // assume ethernet
-	elem.counterBlock.generic.ifSpeed = adaptor->ifSpeed;
-	elem.counterBlock.generic.ifDirection = adaptor->ifDirection;
-	elem.counterBlock.generic.ifStatus = ifStatus;
-	elem.counterBlock.generic.ifPromiscuousMode = adaptor->promiscuous;
-	elem.counterBlock.generic.ifInOctets = adaptorNIO->nio.bytes_in;
-	elem.counterBlock.generic.ifInUcastPkts = pkts_in;
-	elem.counterBlock.generic.ifInMulticastPkts = mcasts_in;
-	elem.counterBlock.generic.ifInBroadcastPkts = bcasts_in;
-	elem.counterBlock.generic.ifInDiscards = adaptorNIO->nio.drops_in;
-	elem.counterBlock.generic.ifInErrors = adaptorNIO->nio.errs_in;
-	elem.counterBlock.generic.ifInUnknownProtos = unknown_in;
-	elem.counterBlock.generic.ifOutOctets = adaptorNIO->nio.bytes_out;
-	elem.counterBlock.generic.ifOutUcastPkts = pkts_out;
-	elem.counterBlock.generic.ifOutMulticastPkts = mcasts_out;
-	elem.counterBlock.generic.ifOutBroadcastPkts = bcasts_out;
-	elem.counterBlock.generic.ifOutDiscards = adaptorNIO->nio.drops_out;
-	elem.counterBlock.generic.ifOutErrors = adaptorNIO->nio.errs_out;
-	SFLADD_ELEMENT(cs, &elem);
-
-	if(adaptorNIO->vm_or_container) {
-#define HSP_DIRECTION_SWAP(g,f) do {				\
-	    uint32_t _tmp = g.ifIn ## f;			\
-	    g.ifIn ## f = g.ifOut ## f;				\
-	    g.ifOut ## f = _tmp; } while(0)
-	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, UcastPkts);
-	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, MulticastPkts);
-	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, BroadcastPkts);
-	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, Discards);
-	  HSP_DIRECTION_SWAP(elem.counterBlock.generic, Errors);
-	}
-
-	// add optional interface name struct
-	SFLCounters_sample_element pn_elem = { 0 };
-	pn_elem.tag = SFLCOUNTERS_PORTNAME;
-	char *sFlowPortName = devName;
-	// It might be more elegant to splice in an alternative PORTNAME element
-	// later in mod_sonic evt_cntr_sample() but there is an IFLA_IFALIAS
-	// that we might someday discover via netlink and want to export as
-	// the portName even on other platforms, so allow the policy to to be
-	// a global flag that we test here.  For now the flag is
-	// sp->sonic.setIfName but it could end up as something like "sp->portNameUseAlias".
-	if(sp->sonic.setIfName
-	   && adaptorNIO->deviceAlias)
-	  sFlowPortName = adaptorNIO->deviceAlias;
-	pn_elem.counterBlock.portName.portName.len = my_strlen(sFlowPortName);
-	pn_elem.counterBlock.portName.portName.str = sFlowPortName;
-	SFLADD_ELEMENT(cs, &pn_elem);
-
-	// possibly include LACP struct for bond slave
-	// (used to send for bond-master too,  but that
-	// was a mis-reading of the standard).
-	SFLCounters_sample_element lacp_elem = { 0 };
-	if(adaptorNIO->bond_slave
-	   || adaptorNIO->bond_slave_2) {
-	  updateBondCounters(sp, adaptor);
-	  lacp_elem.tag = SFLCOUNTERS_LACP;
-	  lacp_elem.counterBlock.lacp = adaptorNIO->lacp; // struct copy
-	  SFLADD_ELEMENT(cs, &lacp_elem);
-	}
-
-	// possibly include SFP struct with optical gauges
-	SFLCounters_sample_element sfp_elem = { 0 };
-	if(adaptorNIO->sfp.num_lanes) {
-	  sfp_elem.tag = SFLCOUNTERS_SFP;
-	  sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
-	  SFLADD_ELEMENT(cs, &sfp_elem);
-	}
-
-	// circulate the cs to be annotated by other modules before it is sent out.
-	// This differs from the packet-sample treatment in that everything is
-	// on the stack.  If we ever wanted to delay counter samples until additional
-	// lookups were performed then this would all have to shift onto the heap.
-	// Note that this differs from HSPEVENT_HOST_COUNTER_SAMPLE in that we
-	// wrap it in an HSPPendingCSample so we can supply the poller pointer too.
-	HSPPendingCSample ps = { .poller = poller, .cs = cs };
-	EVEvent *evt_intf_cs = EVGetEvent(sp->pollBus, HSPEVENT_INTF_COUNTER_SAMPLE);
-	EVEventTx(sp->rootModule, evt_intf_cs, &ps, sizeof(ps));
-	if(ps.suppress) {
-	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES_SUPPRESSED]++;
-	}
-	else {
-	  sfl_poller_writeCountersSample(poller, cs);
-	  sp->counterSampleQueued = YES;
-	  sp->telemetry[HSP_TELEMETRY_COUNTER_SAMPLES]++;
-	}
+	sendInterfaceCounterSample(mod, poller, adaptor, cs);
       }
     }
   }
@@ -753,9 +776,9 @@ extern "C" {
     if(state->disks) strArrayFree(state->disks);
     if(state->volumes) strArrayFree(state->volumes);
     if(state->interfaces) {
-      adaptorListMarkAll(state->interfaces);
+      markAdaptors_adaptorList(mod, state->interfaces);
       // delete any hash-table references to these adaptors
-      deleteMarkedAdaptors_adaptorList(sp, state->interfaces);
+      deleteMarkedAdaptors_adaptorList(mod, state->interfaces);
       // then free them along with the adaptorList itself
       adaptorListFree(state->interfaces);
     }
@@ -2597,6 +2620,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_eapi", sp->modulesPath);
     if(sp->nlroute.nlroute)
       EVLoadModule(sp->rootModule, "mod_nlroute", sp->modulesPath);
+    if(sp->vpp.vpp)
+      EVLoadModule(sp->rootModule, "mod_vpp", sp->modulesPath);
 
     EVEventRx(sp->rootModule, EVGetEvent(sp->pollBus, EVEVENT_TICK), evt_poll_tick);
 

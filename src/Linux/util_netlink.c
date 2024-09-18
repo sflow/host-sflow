@@ -341,6 +341,28 @@ extern "C" {
     return rc;
   }
 
+  /*_________________---------------------------__________________
+    _________________    UTNLUsersock_open      __________________
+    -----------------___________________________------------------
+  */
+
+  int UTNLUsersock_open(uint32_t mod_id) {
+    int nl_sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_USERSOCK);
+    if(nl_sock < 0) {
+      myLog(LOG_ERR, "nl_sock open failed: %s", strerror(errno));
+      return -1;
+    }
+
+    // bind to the given id
+    struct sockaddr_nl sa = { .nl_family = AF_NETLINK,
+			      .nl_pid = mod_id };
+    if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+      myLog(LOG_ERR, "UTNLUsersock_open: bind failed: %s", strerror(errno));
+
+    setNonBlocking(nl_sock);
+    setCloseOnExec(nl_sock);
+    return nl_sock;
+  }
 
 #if defined(__cplusplus)
 } /* extern "C" */

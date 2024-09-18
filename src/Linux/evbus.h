@@ -44,7 +44,7 @@ extern "C" {
   typedef struct _EVMod {
     EVRoot *root;
     char *name;
-    int id;
+    uint32_t id;
     void *libHandle;
     void (*initFn)(struct _EVMod *);
     void *data;

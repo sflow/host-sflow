@@ -64,6 +64,7 @@ extern "C" {
   typedef struct _HSP_mod_PSAMPLE {
     EnumPsampleState state;
     EVBus *packetBus;
+    EVEvent *psampleEvent;
     bool psample_configured;
     int nl_sock;
     uint32_t nl_seq;
@@ -230,15 +231,9 @@ extern "C" {
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
-    EVDebug(mod, 1, "psample netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
+    EVDebug(mod, 2, "psample netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
 
-    uint16_t ifin=0,ifout=0;
-    uint32_t pkt_len=0;
-    uint32_t hdr_len=0;
-    uint32_t grp_no=0;
-    uint32_t grp_seq=0;
-    uint32_t sample_n=0;
-    u_char *pkt=NULL;
+    HSPPSample psmp = {};
     SFLFlow_sample_element *ext_elems = NULL;
     // TODO: tunnel encap/decap may be avaiable too
 
@@ -252,22 +247,23 @@ extern "C" {
       u_char *datap = msg + offset + NLA_HDRLEN;
       switch(ps_attr->nla_type) {
 	// TODO: interpret PSAMPLE_ATTR_PROTO
-      case PSAMPLE_ATTR_IIFINDEX: ifin = *(uint16_t *)datap; break;
-      case PSAMPLE_ATTR_OIFINDEX: ifout = *(uint16_t *)datap; break;
-      case PSAMPLE_ATTR_ORIGSIZE: pkt_len = *(uint32_t *)datap; break;
-      case PSAMPLE_ATTR_SAMPLE_GROUP: grp_no = *(uint32_t *)datap; break;
-      case PSAMPLE_ATTR_GROUP_SEQ: grp_seq = *(uint32_t *)datap; break;
-      case PSAMPLE_ATTR_SAMPLE_RATE: sample_n = *(uint32_t *)datap; break;
+      case PSAMPLE_ATTR_IIFINDEX: psmp.ifin = *(uint16_t *)datap; break;
+      case PSAMPLE_ATTR_OIFINDEX: psmp.ifout = *(uint16_t *)datap; break;
+      case PSAMPLE_ATTR_ORIGSIZE: psmp.pkt_len = *(uint32_t *)datap; break;
+      case PSAMPLE_ATTR_SAMPLE_GROUP: psmp.grp_no = *(uint32_t *)datap; break;
+      case PSAMPLE_ATTR_GROUP_SEQ: psmp.grp_seq = *(uint32_t *)datap; break;
+      case PSAMPLE_ATTR_SAMPLE_RATE: psmp.sample_n = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_DATA:
-	pkt = datap;
-	hdr_len = ps_attr->nla_len;
+	psmp.hdr = datap;
+	psmp.hdr_len = ps_attr->nla_len;
 	break;
       case HSP_PSAMPLE_ATTR_OUT_TC:
 	{
 	  // queue id
 	  SFLFlow_sample_element *egress_Q = my_calloc(sizeof(SFLFlow_sample_element));
 	  egress_Q->tag = SFLFLOW_EX_EGRESS_Q;
-	  egress_Q->flowType.egress_queue.queue = *(uint16_t *)datap;
+	  psmp.egressQ_id = *(uint16_t *)datap;
+	  egress_Q->flowType.egress_queue.queue = psmp.egressQ_id;
 	  ADD_TO_LIST(ext_elems, egress_Q);
 	}
 	break;
@@ -276,7 +272,8 @@ extern "C" {
 	  // queue occupancy (bytes)
 	  SFLFlow_sample_element *Q_depth = my_calloc(sizeof(SFLFlow_sample_element));
 	  Q_depth->tag = SFLFLOW_EX_Q_DEPTH;
-	  Q_depth->flowType.queue_depth.depth = *(uint64_t *)datap; // Will take lo 32-bits
+	  psmp.egressQ_byts = *(uint64_t *)datap;
+	  Q_depth->flowType.queue_depth.depth = psmp.egressQ_byts; // Will take lo 32-bits
 	  ADD_TO_LIST(ext_elems, Q_depth);
 	}
 	break;
@@ -285,7 +282,8 @@ extern "C" {
 	  // transit latency (nS)
 	  SFLFlow_sample_element *transit = my_calloc(sizeof(SFLFlow_sample_element));
 	  transit->tag = SFLFLOW_EX_TRANSIT;
-	  transit->flowType.transit_delay.delay = *(uint64_t *)datap; // Will take lo 32-bits
+	  psmp.transit_nS = *(uint64_t *)datap;
+	  transit->flowType.transit_delay.delay = psmp.transit_nS; // Will take lo 32-bits
 	  ADD_TO_LIST(ext_elems, transit);
 	}
 	break;
@@ -301,35 +299,44 @@ extern "C" {
       uint64_t transitDelay = 33333L;
       SFLFlow_sample_element *egress_Q = my_calloc(sizeof(SFLFlow_sample_element));
       egress_Q->tag = SFLFLOW_EX_EGRESS_Q;
-      egress_Q->flowType.egress_queue.queue = *(uint16_t *)(&queueIdx);
+      psmp.egressQ_id = *(uint16_t *)(&queueIdx);
+      egress_Q->flowType.egress_queue.queue = psmp.egressQ_id;
       ADD_TO_LIST(ext_elems, egress_Q);
       // queue occupancy (bytes)
       SFLFlow_sample_element *Q_depth = my_calloc(sizeof(SFLFlow_sample_element));
       Q_depth->tag = SFLFLOW_EX_Q_DEPTH;
-      Q_depth->flowType.queue_depth.depth = *(uint64_t *)(&queueDepth); // Will take lo 32-bits
+      psmp.egressQ_byts = *(uint64_t *)(&queueDepth);
+      Q_depth->flowType.queue_depth.depth = psmp.egressQ_byts; // Will take lo 32-bits
       ADD_TO_LIST(ext_elems, Q_depth);
       // transit latency (nS)
       SFLFlow_sample_element *transit = my_calloc(sizeof(SFLFlow_sample_element));
       transit->tag = SFLFLOW_EX_TRANSIT;
-      transit->flowType.transit_delay.delay = *(uint64_t *)(&transitDelay); // Will take lo 32-bits
+      psmp.egressQ_nS = *(uint64_t *)(&transitDelay);
+      transit->flowType.transit_delay.delay = psmp.egressQ_nS; // Will take lo 32-bits
       ADD_TO_LIST(ext_elems, transit);
     }
 #endif
 
-    EVDebug(mod, 3, "grp=%u", grp_no);
+    EVDebug(mod, 3, "grp=%u", psmp.grp_no);
 
+    // share on bus
+    // TOOD: consider having all the packet-sampling modules
+    // do this, then only call "takeSample()" in one place?
+    EVEventTx(mod, mdata->psampleEvent, &psmp, sizeof(psmp));
+    
     // TODO: this filter can be pushed into kernel with BPF expression on socket
     // but that might affect control messages?  For now it seems unlikely that
     // doing the fitering here will be catastophic, but we can always revisit.
-    if(grp_no
-       && (grp_no == mdata->grp_ingress
-	   || grp_no == mdata->grp_egress)
-       && pkt
-       && pkt_len
-       && sample_n) {
+    if(psmp.grp_no
+       && (psmp.grp_no == mdata->grp_ingress
+	   || psmp.grp_no == mdata->grp_egress)
+       && psmp.hdr
+       && psmp.hdr_len
+       && psmp.pkt_len
+       && psmp.sample_n) {
       
       // index for grp data
-      int egress = (grp_no == mdata->grp_egress) ? 1 : 0;
+      int egress = (psmp.grp_no == mdata->grp_egress) ? 1 : 0;
 
       // confirmation that we have moved to state==run
       if(mdata->state == HSP_PSAMPLE_STATE_JOIN_GROUP)
@@ -337,27 +344,27 @@ extern "C" {
 
       uint32_t drops = 0;
       if(mdata->last_grp_seq[egress]) {
-	drops = grp_seq - mdata->last_grp_seq[egress] - 1;
+	drops = psmp.grp_seq - mdata->last_grp_seq[egress] - 1;
 	if(drops > 0x7FFFFFFF)
 	  drops = 1;
       }
-      mdata->last_grp_seq[egress] = grp_seq;
+      mdata->last_grp_seq[egress] = psmp.grp_seq;
 
       EVDebug(mod, 2, "grp=%u in=%u out=%u n=%u seq=%u drops=%u pktlen=%u",
-	      grp_no,
-	      ifin,
-	      ifout,
-	      sample_n,
-	      grp_seq,
+	      psmp.grp_no,
+	      psmp.ifin,
+	      psmp.ifout,
+	      psmp.sample_n,
+	      psmp.grp_seq,
 	      drops,
-	      pkt_len);
+	      psmp.pkt_len);
 
-      SFLAdaptor *inDev = adaptorByIndex(sp, ifin);
-      SFLAdaptor *outDev = adaptorByIndex(sp, ifout);
+      SFLAdaptor *inDev = adaptorByIndex(sp, psmp.ifin);
+      SFLAdaptor *outDev = adaptorByIndex(sp, psmp.ifout);
       SFLAdaptor *samplerDev = egress ? outDev : inDev;
       if(!samplerDev) {
         // handle startup race-condition where interface has not been discovered yet
-        EVDebug(mod, 2, "unknown ifindex %u (startup race-condition?)", ifin);
+        EVDebug(mod, 2, "unknown ifindex %u (startup race-condition?)", psmp.ifin);
 	freeExtendedElements(ext_elems);
         return;
       }
@@ -365,21 +372,21 @@ extern "C" {
       // See if the sample_n matches what we think was configured
       HSPAdaptorNIO *nio = ADAPTOR_NIO(samplerDev);
       bool takeIt = YES;
-      uint32_t this_sample_n = sample_n;
+      uint32_t this_sample_n = psmp.sample_n;
       
-      if(sample_n != nio->sampling_n) {
+      if(psmp.sample_n != nio->sampling_n) {
 
 	EVDebug(mod, 2, "psample sampling N (%u) != configured N (%u)",
-		sample_n,
+		psmp.sample_n,
 		nio->sampling_n);
 
-	if(sample_n < nio->sampling_n) {
+	if(psmp.sample_n < nio->sampling_n) {
 	  // apply sub-sampling on this interface.  We may get here if the
 	  // hardware or kernel is configured to sample at 1:N and then
 	  // hsflowd.conf or DNS-SD adjusts it to 1:M dynamically.  This
 	  // could be a legitimate use-case, especially if the same PSAMPLE
 	  // group is feeding more than one consumer.
-	  nio->subSampleCount += sample_n;
+	  nio->subSampleCount += psmp.sample_n;
 	  if(nio->subSampleCount >= nio->sampling_n) {
 	    this_sample_n = nio->subSampleCount;
 	    nio->subSampleCount = 0;
@@ -400,11 +407,11 @@ extern "C" {
 		   samplerDev,
 		   sp->psample.ds_options,
 		   0, // hook
-		   pkt, // mac hdr
+		   psmp.hdr, // mac hdr
 		   14, // mac hdr len
-		   pkt + 14, // payload
-		   hdr_len - 14, // captured payload len
-		   pkt_len - 14, // whole pdu len
+		   psmp.hdr + 14, // payload
+		   psmp.hdr_len - 14, // captured payload len
+		   psmp.pkt_len - 14, // whole pdu len
 		   drops,
 		   this_sample_n,
 		   ext_elems);
@@ -592,7 +599,7 @@ extern "C" {
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
-
+    mdata->psampleEvent = EVGetEvent(mdata->packetBus, HSPEVENT_PSAMPLE);
 
     // if ds_options not set, apply defaults for kernel/asic sampling where
     // we know the interface index of the sampling datasource because

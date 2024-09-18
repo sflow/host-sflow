@@ -262,7 +262,7 @@ extern "C" {
       if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
 	SFLAdaptor *adaptor = adaptorListGet(pod->vm.interfaces, deviceName);
 	if(adaptor == NULL) {
-	  adaptor = nioAdaptorNew(deviceName, mac, ifIndex);
+	  adaptor = nioAdaptorNew(mod, deviceName, mac, ifIndex);
 	  adaptorListAdd(pod->vm.interfaces, adaptor);
 	  // add to "all namespaces" collections too - but only the ones where
 	  // the id is really global.  For example,  many containers can have
@@ -278,44 +278,48 @@ extern "C" {
 	  if(UTHashGet(sp->adaptorsByIndex, adaptor) == NULL)
 	    if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL)
 	      myLog(LOG_ERR, "Warning: pod adaptor overwriting adaptorsByIndex");
+	}
+	else {
+	  // clear mark
+	  unmarkAdaptor(adaptor);
+	}
 
-	  // mark it as a vm/pod device
-	  // and record the dsIndex there for easy mapping later
-	  // provided it is unique.  Otherwise set it to all-ones
-	  // to indicate that it should not be used to map to pod.
-	  HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	  nio->vm_or_container = YES;
-	  nio->container_nspid = nspid;
-	  if(nio->container_dsIndex != pod->vm.dsIndex) {
-	    if(nio->container_dsIndex == 0)
-	      nio->container_dsIndex = pod->vm.dsIndex;
-	    else {
-	      myLog(LOG_ERR, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
-	      // mark it as not a unique mapping
-	      nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
-	    }
+	// mark it as a vm/pod device
+	// and record the dsIndex there for easy mapping later
+	// provided it is unique.  Otherwise set it to all-ones
+	// to indicate that it should not be used to map to pod.
+	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+	nio->vm_or_container = YES;
+	nio->container_nspid = nspid;
+	if(nio->container_dsIndex != pod->vm.dsIndex) {
+	  if(nio->container_dsIndex == 0)
+	    nio->container_dsIndex = pod->vm.dsIndex;
+	  else {
+	    myLog(LOG_ERR, "Warning: NIC already claimed by container with dsIndex==nio->container_dsIndex");
+	    // mark it as not a unique mapping
+	    nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
 	  }
-
-	  // did we get an ip address too?
-	  SFLAddress ipAddr = { };
-	  SFLAddress ip6Addr = { };
-	  bool gotV4 = parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET);
-	  gotV4 = gotV4 && !SFLAddress_isZero(&ipAddr);
-	  bool gotV6 = parseNumericAddress(ip6Str, NULL, &ip6Addr, PF_INET6);
-	  gotV6 = gotV6 && !SFLAddress_isZero(&ip6Addr); 
-	  if(mdata->vnicByIP
-	     && (gotV4
-		 || gotV6)) {
-	    // Can use this to associate traffic with this pod
-	    // if this address appears in sampled packet header as
-	    // outer or inner IP
-	    if(gotV6) {
-	      mapIPToPod(mod, pod, &ip6Addr, ifIndex, nspid);
-	    }
-	    if(gotV4) {
-		ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
-		mapIPToPod(mod, pod, &ipAddr, ifIndex, nspid);
-	    }
+	}
+	
+	// did we get an ip address too?
+	SFLAddress ipAddr = { };
+	SFLAddress ip6Addr = { };
+	bool gotV4 = parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET);
+	gotV4 = gotV4 && !SFLAddress_isZero(&ipAddr);
+	bool gotV6 = parseNumericAddress(ip6Str, NULL, &ip6Addr, PF_INET6);
+	gotV6 = gotV6 && !SFLAddress_isZero(&ip6Addr); 
+	if(mdata->vnicByIP
+	   && (gotV4
+	       || gotV6)) {
+	  // Can use this to associate traffic with this pod
+	  // if this address appears in sampled packet header as
+	  // outer or inner IP
+	  if(gotV6) {
+	    mapIPToPod(mod, pod, &ip6Addr, ifIndex, nspid);
+	  }
+	  if(gotV4) {
+	    ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
+	    mapIPToPod(mod, pod, &ipAddr, ifIndex, nspid);
 	  }
 	}
       }
@@ -878,11 +882,11 @@ extern "C" {
     HSPVMState *vm = &pod->vm;
     if(vm) {
       // reset the information that we are about to refresh
-      adaptorListMarkAll(vm->interfaces);
+      markedAdaptors_adaptorList(mod, vm->interfaces);
       // then refresh it
       readPodInterfaces(mod, pod);
       // and clean up
-      deleteMarkedAdaptors_adaptorList(sp, vm->interfaces);
+      deleteMarkedAdaptors_adaptorList(mod, vm->interfaces);
       adaptorListFreeMarked(vm->interfaces);
     }
   }

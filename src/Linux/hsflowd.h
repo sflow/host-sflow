@@ -437,7 +437,22 @@ extern "C" {
 #define HSPEVENT_FLUSH_DATAGRAM "flush_datagram" // flush datagram (e.g. on counters batch)
 #define HSPEVENT_POLL_INTERVAL "poll_interval"   // sent when actualPollingInterval changed
 #define HSPEVENT_HEADER_BYTES "header_bytes"     // (headerBytes) sent on config change
-  
+#define HSPEVENT_PSAMPLE "psample"               // raw psample (HSPPSample)
+
+  typedef struct _HSPPSample {
+    uint32_t grp_no;
+    uint32_t grp_seq;
+    uint32_t sample_n;
+    uint32_t ifin;
+    uint32_t ifout;
+    uint32_t pkt_len;
+    uint32_t egressQ_id;
+    uint64_t egressQ_byts;
+    uint64_t transit_nS;
+    uint32_t hdr_len;
+    u_char *hdr;
+  } HSPPSample;
+
   typedef struct _HSPPendingSample {
     SFL_FLOW_SAMPLE_TYPE *fs;
     SFLSampler *sampler;
@@ -727,6 +742,10 @@ extern "C" {
 #define HSP_DEFAULT_NLROUTE_LIMIT 50
 #define HSP_MAX_NLROUTE_LIMIT 500
     } nlroute;
+    struct {
+      bool vpp;
+      uint32_t ds_options;
+    } vpp;
 
     // hardware sampling flag
     bool hardwareSampling;
@@ -866,7 +885,7 @@ extern "C" {
   bool hasVNodeRole(EVMod *mod, EnumVNodePriority vnp);
   
   // adaptors
-  SFLAdaptor *nioAdaptorNew(char *dev, u_char *macBytes, uint32_t ifIndex);
+  SFLAdaptor *nioAdaptorNew(EVMod *mod, char *dev, u_char *macBytes, uint32_t ifIndex);
 #define ADAPTOR_NIO(ad) ((HSPAdaptorNIO *)(ad)->userData)
   void adaptorAddOrReplace(UTHash *ht, SFLAdaptor *ad, char *htname);
   SFLAdaptor *adaptorByName(HSP *sp, char *dev);
@@ -877,7 +896,8 @@ extern "C" {
   SFLAdaptor *adaptorByAlias(HSP *sp, char *alias);
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
-  int deleteMarkedAdaptors_adaptorList(HSP *sp, SFLAdaptorList *adList);
+  int markedAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList);
+  int deleteMarkedAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList);
   char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen);
   void adaptorHTPrint(UTHash *ht, char *prefix);
   bool setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
@@ -902,9 +922,10 @@ extern "C" {
 #define HSP_SAMPLEOPT_INGRESS     0x0400
 #define HSP_SAMPLEOPT_EGRESS      0x0800
 #define HSP_SAMPLEOPT_DIRN_HOOK   0x1000
-  //#define HSP_SAMPLEOPT_ASIC        0x2000
+//#define HSP_SAMPLEOPT_ASIC      0x2000
 #define HSP_SAMPLEOPT_OPX         0x4000
 #define HSP_SAMPLEOPT_PSAMPLE     0x8000
+#define HSP_SAMPLEOPT_VPP        0x10000
 
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n, SFLFlow_sample_element *extended_elements);
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len);
@@ -912,6 +933,7 @@ extern "C" {
   void releasePendingSample(HSP *sp, HSPPendingSample *ps);
   int decodePendingSample(HSPPendingSample *ps);
   void forceCounterPolling(HSP *sp, SFLAdaptor *adaptor);
+  void sendInterfaceCounterSample(EVMod *mod, SFLPoller *poller, SFLAdaptor *adaptor, SFL_COUNTERS_SAMPLE_TYPE *cs);
 
   // VM lifecycle
   HSPVMState *getVM(EVMod *mod, char *uuid, bool create, size_t objSize, EnumVMType vmType, getCountersFn_t getCountersFn);

@@ -710,8 +710,13 @@ extern "C" {
   UTHash *newLocalIP = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v4, UTHASH_DFLT);
   UTHash *newLocalIP6 = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v6, UTHASH_DFLT);
 
-  // mark-and-sweep. Mark all existing adaptors
-  { SFLAdaptor *ad;  UTHASH_WALK(sp->adaptorsByName, ad) ad->marked = YES; }
+  // mark-and-sweep. Mark all existing adaptors (that are managed by this mod)
+  {
+    SFLAdaptor *ad;
+    UTHASH_WALK(sp->adaptorsByName, ad)
+      if(ad->marked == mod->id)
+	markAdaptor(ad);
+  }
 
   // Walk the interfaces and collect the non-loopback interfaces so that we
   // have a list of MAC addresses for each interface (usually only 1).
@@ -805,7 +810,7 @@ extern "C" {
       // for now just assume that each interface has only one MAC.  It's not clear how we can
       // learn multiple MACs this way anyhow.  It seems like there is just one per ifr record.
       // find or create a new "adaptor" entry
-      SFLAdaptor *adaptor = nioAdaptorNew(devName, (gotMac ? macBytes : NULL), ifIndex);
+      SFLAdaptor *adaptor = nioAdaptorNew(mod, devName, (gotMac ? macBytes : NULL), ifIndex);
 
       bool addAdaptorToHT = YES;
 
@@ -818,8 +823,8 @@ extern "C" {
 	adaptorFree(adaptor);
 	// this adaptor is going to survive
 	adaptor = existing;
-	// clear the mark so we don't free it below
-	adaptor->marked = NO;
+	// reset the mark so we don't free it below
+	unmarkAdaptor(adaptor);
 	// indicate that it is already in the lookup tables
 	addAdaptorToHT = NO;
       }

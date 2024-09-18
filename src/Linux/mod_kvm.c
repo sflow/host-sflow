@@ -283,7 +283,7 @@ extern "C" {
 	    SFLAdaptor *adaptor = adaptorListGet(state->vm.interfaces, ifname);
 	    if(adaptor == NULL) {
 	      // allocate my own  adaptors so it's safe to free them later
-	      adaptor = nioAdaptorNew(ifname, mac.mac, 0);
+	      adaptor = nioAdaptorNew(mod, ifname, mac.mac, 0);
 	      SFLAdaptor *global_ad = adaptorByMac(sp, &mac);
 	      if(global_ad) {
 		// copy index numbers to my private copy
@@ -301,7 +301,7 @@ extern "C" {
 	    // mark it as a vm/container device
 	    ADAPTOR_NIO(adaptor)->vm_or_container = YES;
 	    // clear the mark so we don't free it
-	    adaptor->marked = NO;
+	    unmarkAdaptor(adaptor);
 	  }
 	}
       }
@@ -386,7 +386,7 @@ extern "C" {
 	// remember the domId, which might have changed (if vm rebooted)
 	state->virDomainId = domId;
 	// reset the information that we are about to refresh
-	adaptorListMarkAll(vm->interfaces);
+	markAdaptors_adaptorList(mod, vm->interfaces);
 	strArrayReset(vm->volumes);
 	strArrayReset(vm->disks);
 	// get the XML descr - this seems more portable than some of

@@ -40,7 +40,7 @@ ifeq ($(GCOV),yes)
 endif
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO K8S NLROUTE
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO K8S NLROUTE VPP
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
 FEATURES_DENTOS= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
@@ -50,6 +50,7 @@ FEATURES_SONIC= SONIC PSAMPLE DOCKER DROPMON
 FEATURES_XEN= XEN OVS
 FEATURES_HOST= NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD PSAMPLE DENT DROPMON NLROUTE
 FEATURES_CONTAINERD= CONTAINERDGO
+FEATURES_VPP= VPP PSAMPLE
 
 BINDIR     ?= /usr/sbin
 INITDIR    ?= /etc/init.d
@@ -118,6 +119,10 @@ endif
 
 ifneq ($(shell echo $(FEATURES2)|grep -c " HOST "),0)
   XTGTS += $(FEATURES_HOST)
+endif
+
+ifneq ($(shell echo $(FEATURES2)|grep -c " VPP "),0)
+  XTGTS += $(FEATURES_VPP)
 endif
 
 # CONTAINERD and K8S require CONTAINERDGO, but it is
@@ -317,6 +322,9 @@ LIBS_K8S= -lm -luuid
 CFLAGS_NLROUTE=
 LIBS_NLROUTE=
 
+CFLAGS_VPP=
+LIBS_VPP=
+
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += $(CFLAGS_MOUNTPOINTS)
@@ -378,6 +386,7 @@ OBJS_EAPI=mod_eapi.o
 OBJS_CONTAINERD=mod_containerd.o
 OBJS_K8S=mod_k8s.o
 OBJS_NLROUTE=mod_nlroute.o util_netlink.o
+OBJS_VPP=mod_vpp.o util_netlink.o
 
 BUILDTGTS= mod_json.so \
            mod_dnssd.so \
@@ -438,6 +447,8 @@ CONTAINERDGO: hsflowd_containerd
 K8S: mod_k8s.so
 
 NLROUTE: mod_nlroute.so
+
+VPP: mod_vpp.so
 
 #########  hsflowd  #########
 
@@ -662,6 +673,14 @@ mod_nlroute.o: mod_nlroute.c $(HEADERS)
 mod_nlroute.so: $(OBJS_NLROUTE)
 	$(LD) -o $@ $(OBJS_NLROUTE) $(LDFLAGS_SHARED) $(LIBS_NLROUTE)
 
+#----------------------------
+
+mod_vpp.o: mod_vpp.c $(HEADERS)
+	$(CC) $(CFLAGS) -c $*.c  $(CFLAGS_VPP)
+
+mod_vpp.so: $(OBJS_VPP)
+	$(LD) -o $@ $(OBJS_VPP) $(LDFLAGS_SHARED) $(LIBS_VPP)
+
 
 #########  install  #########
 
@@ -749,3 +768,4 @@ mod_eapi.o: mod_eapi.c $(HEADERS)
 mod_containerd.o: mod_containerd.c $(HEADERS)
 mod_k8s.o: mod_k8s.c $(HEADERS)
 mod_nlroute.o: mod_nlroute.c $(HEADERS)
+mod_vpp.o: mod_vpp.c $(HEADERS)
