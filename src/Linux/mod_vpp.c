@@ -34,25 +34,28 @@ extern "C" {
   } EnumSFlowVppMsgType;
 
   typedef enum {
-    SFLOW_VPP_ATTR_PORTNAME,
-    SFLOW_VPP_ATTR_IFINDEX,
-    SFLOW_VPP_ATTR_IFTYPE,
-    SFLOW_VPP_ATTR_IFSPEED,
-    SFLOW_VPP_ATTR_IFDIRECTION,
-    SFLOW_VPP_ATTR_OPER_UP,
-    SFLOW_VPP_ATTR_ADMIN_UP,
-    SFLOW_VPP_ATTR_RX_OCTETS,
-    SFLOW_VPP_ATTR_TX_OCTETS,
-    SFLOW_VPP_ATTR_RX_UCASTS,
-    SFLOW_VPP_ATTR_TX_UCASTS,
-    SFLOW_VPP_ATTR_RX_BCASTS,
-    SFLOW_VPP_ATTR_TX_BCASTS,
-    SFLOW_VPP_ATTR_RX_MCASTS,
-    SFLOW_VPP_ATTR_TX_MCASTS,
-    SFLOW_VPP_ATTR_RX_DISCARDS,
-    SFLOW_VPP_ATTR_TX_DISCARDS,
-    SFLOW_VPP_ATTR_RX_ERRORS,
-    SFLOW_VPP_ATTR_TX_ERRORS
+    SFLOW_VPP_ATTR_PORTNAME,      /* string */
+    SFLOW_VPP_ATTR_IFINDEX,       /* u32 */
+    SFLOW_VPP_ATTR_IFTYPE,        /* u32 */
+    SFLOW_VPP_ATTR_IFSPEED,       /* u64 */
+    SFLOW_VPP_ATTR_IFDIRECTION,   /* u32 */
+    SFLOW_VPP_ATTR_OPER_UP,       /* u32 */
+    SFLOW_VPP_ATTR_ADMIN_UP,      /* u32 */
+    SFLOW_VPP_ATTR_RX_OCTETS,     /* u64 */
+    SFLOW_VPP_ATTR_TX_OCTETS,     /* u64 */
+    SFLOW_VPP_ATTR_RX_PKTS,       /* u64 */
+    SFLOW_VPP_ATTR_TX_PKTS,       /* u64 */
+    SFLOW_VPP_ATTR_RX_BCASTS,     /* u64 */
+    SFLOW_VPP_ATTR_TX_BCASTS,     /* u64 */
+    SFLOW_VPP_ATTR_RX_MCASTS,     /* u64 */
+    SFLOW_VPP_ATTR_TX_MCASTS,     /* u64 */
+    SFLOW_VPP_ATTR_RX_DISCARDS,   /* u64 */
+    SFLOW_VPP_ATTR_TX_DISCARDS,   /* u64 */
+    SFLOW_VPP_ATTR_RX_ERRORS,     /* u64 */
+    SFLOW_VPP_ATTR_TX_ERRORS,     /* u64 */
+    SFLOW_VPP_ATTR_HW_ADDRESS,    /* binary */
+    SFLOW_VPP_ATTR_UPTIME_S,      /* u32 */
+    /* enum shared with vpp-sflow, so only add here */
   } EnumSFlowVppAttributes;
 
 #define SFLOW_VPP_PSAMPLE_GROUP_INGRESS 3
@@ -72,6 +75,7 @@ extern "C" {
     uint64_t ifSpeed;
     SFLHost_nio_counters ctrs;
     HSP_ethtool_counters et_ctrs;
+    u_char mac[6];
   } HSPVppPort;
   
   typedef struct _HSP_mod_VPP {
@@ -81,6 +85,7 @@ extern "C" {
     int nl_sock;
     uint32_t group_id;
     UTHash *ports;
+    uint32_t vpp_uptime_S;
   } HSP_mod_VPP;
 
   /*_________________---------------------------__________________
@@ -124,12 +129,10 @@ extern "C" {
     SFLAdaptor *ad = adaptorByIndex(sp, port->os_index);
     if(ad == NULL
        && create) {
-      // TODO: should we try to pass the MAC from VPP?  It might be used to help figure out
-      // virtual machine ports etc.?
-      u_char mac[6] = { 0x55, 0x55, 0x55, 0x55, (port->os_index >> 16), (port->os_index & 0xFFFF) };
-      ad = nioAdaptorNew(mod, port->portName, mac, port->os_index);
-      // only the ifIndex namespace is required for this (I think)
+      ad = nioAdaptorNew(mod, port->portName, port->mac, port->os_index);
       adaptorAddOrReplace(sp->adaptorsByIndex, ad, "byIndex");
+      adaptorAddOrReplace(sp->adaptorsByMac, ad, "byMac");
+      // I don't think we should put these into adaptorsByName or adaptorsByPeerIndex, right?
     }
     return ad;
   }
@@ -155,6 +158,29 @@ extern "C" {
     }
   }
 
+  /*_________________-------------------__________________
+    _________________    getAttrInt     __________________
+    -----------------___________________------------------
+  */
+
+  // Be flexible about integer sizes in case we change our minds about them at the sender.
+  static uint64_t getAttrInt(u_char *datap, int len) {
+    switch(len) {
+    case 1:
+      return *datap;
+      break;
+    case 2:
+      return *(uint16_t *)datap;
+      break;
+    case 4:
+      return *(uint32_t *)datap;
+    case 8:
+      return *(uint64_t *)datap;
+    }
+    return 0;
+  }
+      
+
   /*_________________---------------------------__________________
     _________________ processNetlink_VPP_STATUS __________________
     -----------------___________________________------------------
@@ -162,14 +188,39 @@ extern "C" {
 
   static void processNetlink_VPP_STATUS(EVMod *mod, struct nlmsghdr *nlh)
   {
-    // HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
+    HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
+    u_char *msg = (u_char *)NLMSG_DATA(nlh);
+    int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    
+    for(int offset = 0; offset < msglen; ) {
+      struct nlattr *attr = (struct nlattr *)(msg + offset);
+      if(attr->nla_len == 0 ||
+	 (attr->nla_len + offset) > msglen) {
+	myLog(LOG_ERR, "processNetlink_VPP_IF_STATUS attr parse error");
+	break;
+      }
+      
+      u_char *datap = UTNLA_DATA(attr);
+      int datalen = UTNLA_PAYLOAD(attr);
+
+      switch(attr->nla_type) {
+      case SFLOW_VPP_ATTR_UPTIME_S:
+	mdata->vpp_uptime_S = getAttrInt(datap, datalen);
+	EVDebug(mod, 1, "VPP uptime=%u", mdata->vpp_uptime_S);
+	break;
+      default:
+	EVDebug(mod, 1, "unknown attr %d\n", attr->nla_type);
+	break;
+      }
+      offset += NLMSG_ALIGN(attr->nla_len);
+    }
   }
 
   /*_________________--------------------------------__________________
     _________________ processNetlink_VPP_IF_COUNTERS __________________
     -----------------________________________________------------------
   */
-
+    
     static void processNetlink_VPP_IF_COUNTERS(EVMod *mod, struct nlmsghdr *nlh)
   {
     HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
@@ -202,58 +253,62 @@ extern "C" {
 	}
 	break;
       case SFLOW_VPP_ATTR_IFINDEX:
-	in.vpp_index = *(uint32_t *)datap;
+	in.vpp_index = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_IFTYPE:
-	in.ifType = *(uint32_t *)datap;
+	in.ifType = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_IFSPEED:
-	in.ifSpeed = *(uint64_t *)datap;
+	in.ifSpeed = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_IFDIRECTION:
-	in.ifDirection = *(uint8_t *)datap;
+	in.ifDirection = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_OPER_UP:
-	in.operUp = (*(uint8_t *)datap == 1);
+	in.operUp = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_ADMIN_UP:
-	in.adminUp = (*(uint8_t *)datap == 1);
+	in.adminUp = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_RX_OCTETS:
-	in.ctrs.bytes_in = *(uint64_t *)datap;
+	in.ctrs.bytes_in = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_TX_OCTETS:
-	in.ctrs.bytes_out = *(uint64_t *)datap;
+	in.ctrs.bytes_out = getAttrInt(datap, datalen);
 	break;
-      case SFLOW_VPP_ATTR_RX_UCASTS:
-	in.ctrs.pkts_in = *(uint64_t *)datap;
+      case SFLOW_VPP_ATTR_RX_PKTS:
+	in.ctrs.pkts_in = getAttrInt(datap, datalen);
 	break;
-      case SFLOW_VPP_ATTR_TX_UCASTS:
-	in.ctrs.pkts_out = *(uint64_t *)datap;
+      case SFLOW_VPP_ATTR_TX_PKTS:
+	in.ctrs.pkts_out = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_RX_BCASTS:
-	in.et_ctrs.bcasts_in = *(uint64_t *)datap;
+	in.et_ctrs.bcasts_in = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_TX_BCASTS:
-	in.et_ctrs.bcasts_out = *(uint64_t *)datap;
+	in.et_ctrs.bcasts_out = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_RX_MCASTS:
-	in.et_ctrs.mcasts_in = *(uint64_t *)datap;
+	in.et_ctrs.mcasts_in = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_TX_MCASTS:
-	in.et_ctrs.mcasts_out = *(uint64_t *)datap;
+	in.et_ctrs.mcasts_out = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_RX_DISCARDS:
-	in.ctrs.drops_in = *(uint64_t *)datap;
+	in.ctrs.drops_in = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_TX_DISCARDS:
-	in.ctrs.drops_out = *(uint64_t *)datap;
+	in.ctrs.drops_out = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_RX_ERRORS:
-	in.ctrs.errs_in = *(uint64_t *)datap;
+	in.ctrs.errs_in = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_TX_ERRORS:
-	in.ctrs.errs_out = *(uint64_t *)datap;
+	in.ctrs.errs_out = getAttrInt(datap, datalen);
+	break;
+      case SFLOW_VPP_ATTR_HW_ADDRESS:
+	if(datalen == 6)
+	  memcpy(in.mac, datap, 6);
 	break;
       default:
 	EVDebug(mod, 1, "unknown attr %d\n", attr->nla_type);
@@ -277,6 +332,7 @@ extern "C" {
       port->ifSpeed = in.ifSpeed;
       port->ctrs = in.ctrs;
       port->et_ctrs = in.et_ctrs;
+      memcpy(port->mac, in.mac, 6);
 
       SFLAdaptor *adaptor = portGetAdaptor(mod, port, YES);
       if(adaptor) {
@@ -354,7 +410,6 @@ v  */
 	return;
       }
       
-      EVDebug(mod, 0, "readNetlink_VPP got %u bytes\n", numbytes);
       struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
       while(NLMSG_OK(nlh, numbytes)){
 	processNetlink(mod, nlh);
@@ -437,21 +492,23 @@ v  */
 	rx_dev = rx_prt ? portGetAdaptor(mod, rx_prt, YES) : NULL;
 	sampler_dev = rx_dev;
       }
-      uint32_t drops = 0; // TODO: add netlink drops to drops indicated in vpp counters
-      takeSample(sp,
-		 rx_dev,
-		 tx_dev,
-		 sampler_dev,
-		 sp->psample.ds_options,
-		 0, // hook
-		 psmp->hdr, // mac hdr
-		 14, // mac hdr len
-		 psmp->hdr + 14, // payload
-		 psmp->hdr_len - 14, // captured payload len
-		 psmp->pkt_len - 14, // whole pdu len
-		 drops,
-		 psmp->sample_n,
-		 NULL);
+      if(sampler_dev) {
+	uint32_t drops = 0; // TODO: add netlink drops to drops indicated in vpp counters
+	takeSample(sp,
+		   rx_dev,
+		   tx_dev,
+		   sampler_dev,
+		   sp->psample.ds_options,
+		   0, // hook
+		   psmp->hdr, // mac hdr
+		   14, // mac hdr len
+		   psmp->hdr + 14, // payload
+		   psmp->hdr_len - 14, // captured payload len
+		   psmp->pkt_len - 14, // whole pdu len
+		   drops,
+		   psmp->sample_n,
+		   NULL);
+      }
     }
   }
 
