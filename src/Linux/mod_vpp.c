@@ -56,6 +56,7 @@ extern "C" {
     SFLOW_VPP_ATTR_HW_ADDRESS,    /* binary */
     SFLOW_VPP_ATTR_UPTIME_S,      /* u32 */
     SFLOW_VPP_ATTR_OSINDEX,       /* u32 Linux ifIndex number, where applicable */
+    SFLOW_VPP_ATTR_DROPS,         /* u32 all FIFO and netlink sendmsg drops */
     /* enum shared with vpp-sflow, so only add here */
     __SFLOW_VPP_ATTR_MAX
   } EnumSFlowVppAttributes;
@@ -88,6 +89,8 @@ extern "C" {
     uint32_t group_id;
     UTHash *ports;
     uint32_t vpp_uptime_S;
+    uint32_t vpp_drops;
+    uint32_t last_grp_seq[2];
   } HSP_mod_VPP;
 
   /*_________________---------------------------__________________
@@ -209,6 +212,10 @@ extern "C" {
       case SFLOW_VPP_ATTR_UPTIME_S:
 	mdata->vpp_uptime_S = getAttrInt(datap, datalen);
 	EVDebug(mod, 1, "VPP uptime=%u", mdata->vpp_uptime_S);
+	break;
+      case SFLOW_VPP_ATTR_DROPS:
+	mdata->vpp_drops = getAttrInt(datap, datalen);
+	EVDebug(mod, 1, "VPP drops=%u", mdata->vpp_drops);
 	break;
       default:
 	EVDebug(mod, 1, "unknown attr %d\n", attr->nla_type);
@@ -475,6 +482,7 @@ v  */
   */
 
   static void evt_psample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPSample *psmp = (HSPPSample *)data;
     if(psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_INGRESS
@@ -498,7 +506,14 @@ v  */
 	sampler_dev = rx_dev;
       }
       if(sampler_dev) {
-	uint32_t drops = 0; // TODO: add netlink drops to drops indicated in vpp counters
+	uint32_t drops = 0;
+	if(mdata->last_grp_seq[egress]) {
+	  drops = psmp->grp_seq - mdata->last_grp_seq[egress] - 1;
+	  if(drops > 0x7FFFFFFF)
+	    drops = 1;
+	}
+	mdata->last_grp_seq[egress] = psmp->grp_seq;
+	
 	takeSample(sp,
 		   rx_dev,
 		   tx_dev,
@@ -510,7 +525,7 @@ v  */
 		   psmp->hdr + 14, // payload
 		   psmp->hdr_len - 14, // captured payload len
 		   psmp->pkt_len - 14, // whole pdu len
-		   drops,
+		   drops + mdata->vpp_drops,
 		   psmp->sample_n,
 		   NULL);
       }
