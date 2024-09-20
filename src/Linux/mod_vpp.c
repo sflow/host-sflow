@@ -55,7 +55,9 @@ extern "C" {
     SFLOW_VPP_ATTR_TX_ERRORS,     /* u64 */
     SFLOW_VPP_ATTR_HW_ADDRESS,    /* binary */
     SFLOW_VPP_ATTR_UPTIME_S,      /* u32 */
+    SFLOW_VPP_ATTR_OSINDEX,       /* u32 Linux ifIndex number, where applicable */
     /* enum shared with vpp-sflow, so only add here */
+    __SFLOW_VPP_ATTR_MAX
   } EnumSFlowVppAttributes;
 
 #define SFLOW_VPP_PSAMPLE_GROUP_INGRESS 3
@@ -254,6 +256,9 @@ extern "C" {
 	break;
       case SFLOW_VPP_ATTR_IFINDEX:
 	in.vpp_index = getAttrInt(datap, datalen);
+	break;
+      case SFLOW_VPP_ATTR_OSINDEX:
+	in.os_index = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_IFTYPE:
 	in.ifType = getAttrInt(datap, datalen);
