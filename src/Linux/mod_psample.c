@@ -244,7 +244,9 @@ extern "C" {
 	myLog(LOG_ERR, "processNetlink_PSAMPLE attr parse error");
 	break;
       }
-      u_char *datap = msg + offset + NLA_HDRLEN;
+      u_char *datap = UTNLA_DATA(ps_attr);
+      int datalen = UTNLA_PAYLOAD(ps_attr);
+
       switch(ps_attr->nla_type) {
 	// TODO: interpret PSAMPLE_ATTR_PROTO
       case PSAMPLE_ATTR_IIFINDEX: psmp.ifin = *(uint16_t *)datap; break;
@@ -255,7 +257,7 @@ extern "C" {
       case PSAMPLE_ATTR_SAMPLE_RATE: psmp.sample_n = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_DATA:
 	psmp.hdr = datap;
-	psmp.hdr_len = ps_attr->nla_len;
+	psmp.hdr_len = datalen;
 	break;
       case HSP_PSAMPLE_ATTR_OUT_TC:
 	{
