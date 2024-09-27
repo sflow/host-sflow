@@ -350,6 +350,11 @@ extern "C" {
       if(adaptor) {
 	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 	if(nio) {
+	  // nake sure hsflowd does not poll counters for this interface
+	  // if it appears in /proc/net/dev.  Those counters will be wrong
+	  // if VPP is using the port.
+	  nio->procNetDev = NO;
+
 	  nio->et_found = HSP_ETCTR_MC_IN
 	    | HSP_ETCTR_MC_OUT
 	    | HSP_ETCTR_BC_IN
