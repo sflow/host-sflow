@@ -57,6 +57,7 @@ extern "C" {
     SFLOW_VPP_ATTR_UPTIME_S,      /* u32 */
     SFLOW_VPP_ATTR_OSINDEX,       /* u32 Linux ifIndex number, where applicable */
     SFLOW_VPP_ATTR_DROPS,         /* u32 all FIFO and netlink sendmsg drops */
+    SFLOW_VPP_ATTR_SEQ,           /* u32 send seq no */
     /* enum shared with vpp-sflow, so only add here */
     __SFLOW_VPP_ATTR_MAX
   } EnumSFlowVppAttributes;
@@ -217,8 +218,11 @@ extern "C" {
 	mdata->vpp_drops = getAttrInt(datap, datalen);
 	EVDebug(mod, 1, "VPP drops=%u", mdata->vpp_drops);
 	break;
+      case SFLOW_VPP_ATTR_SEQ:
+	EVDebug(mod, 1, "VPP seq=%u", getAttrInt(datap, datalen));
+	break;
       default:
-	EVDebug(mod, 1, "unknown attr %d\n", attr->nla_type);
+	EVDebug(mod, 1, "unknowattr %d\n", attr->nla_type);
 	break;
       }
       offset += NLMSG_ALIGN(attr->nla_len);
@@ -321,6 +325,9 @@ extern "C" {
       case SFLOW_VPP_ATTR_HW_ADDRESS:
 	if(datalen == 6)
 	  memcpy(in.mac, datap, 6);
+	break;
+      case SFLOW_VPP_ATTR_SEQ:
+	EVDebug(mod, 1, "VPP seq=%u", getAttrInt(datap, datalen));
 	break;
       default:
 	EVDebug(mod, 1, "unknown attr %d\n", attr->nla_type);
