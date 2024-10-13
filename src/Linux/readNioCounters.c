@@ -991,6 +991,7 @@ extern "C" {
 	      if(niostate->modinfo_update == 0
 		 || (now - niostate->modinfo_update) > HSP_MODINFO_MIN_POLL_INTERVAL) {
 		niostate->modinfo_update = now;
+		strncpy(ifr.ifr_name, adaptor->deviceName, sizeof(ifr.ifr_name)-1);
 		switch(niostate->modinfo_type) {
 		case ETH_MODULE_SFF_8472:
 		  sff8472_read(sp, adaptor, &ifr, fd);
