@@ -560,7 +560,7 @@ extern "C" {
     // is not long enough to have the data we are expecting then bail. Also bail if it
     // seems to be too long.
     if(nio->modinfo_len < ETH_MODULE_SFF_8636_LEN
-       || nio->modinfo_len > ETH_MODULE_SFF_8636_NAX_LEN)
+       || nio->modinfo_len > ETH_MODULE_SFF_8636_MAX_LEN)
       goto out;
 
     eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8636_MAX_LEN);
