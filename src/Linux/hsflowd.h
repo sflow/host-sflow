@@ -904,7 +904,7 @@ extern "C" {
   SFLAdaptor *adaptorByAlias(HSP *sp, char *alias);
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
-  int markedAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList);
+  int markAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList);
   int deleteMarkedAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList);
   char *adaptorStr(SFLAdaptor *ad, char *buf, int bufLen);
   void adaptorHTPrint(UTHash *ht, char *prefix);

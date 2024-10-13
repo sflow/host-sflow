@@ -822,7 +822,7 @@ extern "C" {
     HSPVMState *vm = &container->vm;
     if(vm) {
       // reset the information that we are about to refresh
-      markedAdaptors_adaptorList(mod, vm->interfaces);
+      markAdaptors_adaptorList(mod, vm->interfaces);
       // then refresh it
       readContainerInterfaces(mod, container);
       // and clean up
