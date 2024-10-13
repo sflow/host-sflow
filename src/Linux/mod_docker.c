@@ -818,7 +818,6 @@ extern "C" {
   */
 
   static void updateContainerAdaptors(EVMod *mod, HSPVMState_DOCKER *container) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPVMState *vm = &container->vm;
     if(vm) {
       // reset the information that we are about to refresh

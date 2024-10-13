@@ -878,7 +878,6 @@ extern "C" {
   */
 
   static void updatePodAdaptors(EVMod *mod, HSPVMState_POD *pod) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPVMState *vm = &pod->vm;
     if(vm) {
       // reset the information that we are about to refresh
