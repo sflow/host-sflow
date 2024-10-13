@@ -366,8 +366,16 @@ extern "C" {
 #endif
 #ifndef ETH_MODULE_SFF_8436
 #define ETH_MODULE_SFF_8436 0x03
-#define ETH_MODULE_SFF_8436_LEN 640
+#define ETH_MODULE_SFF_8436_LEN 256
+#define ETH_MODULE_SFF_8436_MAX_LEN 640
 #endif
+#ifndef ETH_MODULE_SFF_8636
+#define ETH_MODULE_SFF_8636 0x4
+#define ETH_MODULE_SFF_8636_LEN 256
+#define ETH_MODULE_SFF_8636_MAX_LEN 640
+#endif
+    time_t modinfo_update;
+#define HSP_MODINFO_MIN_POLL_INTERVAL 300
     uint32_t modinfo_type;
     uint32_t modinfo_len;
     SFLSFP_counters sfp;

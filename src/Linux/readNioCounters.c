@@ -550,63 +550,39 @@ extern "C" {
       my_free(eeprom);
   }
 
-  static void sff8436_read(HSP *sp, SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
+  static void sff8636_read(HSP *sp, SFLAdaptor *adaptor, struct ifreq *ifr, int fd)
   {
     EVMod *mod = sp->rootModule;
     struct ethtool_eeprom *eeprom = NULL;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
-    if(nio->modinfo_len < ETH_MODULE_SFF_8436_LEN)
+    if(nio->modinfo_len < ETH_MODULE_SFF_8636_LEN)
       goto out;
 
-    eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8436_LEN);
+    eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8636_MAX_LEN);
     eeprom->cmd = ETHTOOL_GMODULEEEPROM;
-    eeprom->len = ETH_MODULE_SFF_8436_LEN;
+    eeprom->len = ETH_MODULE_SFF_8636_MAX_LEN;
 #ifdef HSP_TEST_QSFP
     int bytes = hexToBinary((u_char *)
-			    "0d-00-02-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-1b-10-00-00-7f-92-00-00-00-00"
+			    "0d-00-01-00-00-00-00-00-00-00-08-00-00-00-00-00"
+			    "00-00-00-00-00-00-2b-9d-00-00-7a-f8-00-00-00-00"
+			    "00-00-29-64-2c-8b-31-00-43-10-4d-36-4b-ff-45-50"
+			    "47-87-31-3f-31-4e-2e-c6-31-10-00-00-00-00-00-00"
 			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
 			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
 			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
 			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-ff-ff-ff-ff-ff-ff-ff-ff-00"
-			    "0d-00-23-00-00-00-00-40-40-06-d5-05-69-00-00-05"
-			    "0a-00-0a-00-46-49-4e-49-53-41-52-20-43-4f-52-50"
-			    "20-20-20-20-07-00-90-65-46-43-42-47-34-31-30-51"
-			    "42-31-43-31-30-2d-46-43-41-20-42-68-07-d0-46-db"
-			    "00-01-04-da-44-53-4a-30-30-41-41-20-20-20-20-20"
-			    "20-20-20-20-31-34-31-30-32-37-20-20-08-00-00-39"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "0f-10-00-a1-53-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "4b-00-fb-00-46-00-00-00-00-00-00-00-00-00-00-00"
-			    "94-70-6e-f0-86-c4-7b-0c-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00"
-			    "00-00-22-22-00-00-00-00-00-00-00-00-00-00-33-33"
-			    "00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00",
+			    "0d-c0-07-02-00-00-00-00-00-00-00-01-67-00-0a-00"
+			    "00-00-00-40-4f-45-4d-20-20-20-20-20-20-20-20-20"
+			    "20-20-20-20-07-00-00-00-34-30-47-2d-51-53-46-50"
+			    "2d-4c-52-34-20-20-20-20-30-31-66-26-25-1c-46-15"
+			    "00-01-0b-d8-51-50-4c-32-31-00-00-00-00-00-00-00"
+			    "20-20-20-20-31-34-30-33-31-31-20-20-08-04-00-2a"
+			    "37-34-30-2d-51-53-46-50-4c-52-20-52-45-56-20-30"
+			    "31-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00",
 			    &eeprom->data[0],
-			    ETH_MODULE_SFF_8436_LEN);
-    if(bytes != ETH_MODULE_SFF_8436_LEN) {
+			    ETH_MODULE_SFF_8636_LEN);
+    if(bytes != ETH_MODULE_SFF_8636_LEN) {
       myLog(LOG_ERR, "test QSFP: hexToBinary failed (bytes=%d)", bytes);
     }
 #else
@@ -617,54 +593,26 @@ extern "C" {
     }
 #endif
 
-    // check for SFF8436_ID_DWDM_QSFP_PLUS
+    // Must be SFF8024_ID_QSFP_PLUS
     if(eeprom->data[0] != 0x0d) {
       goto out;
     }
+    // SFF8024_DWDM_SFP is 0x0B
+    // SFF8024_ID_QSFP is 0x0C
+    // SFF8024_ID_QSFP28 is 0x011
 
     uint32_t num_lanes = 4;
     uint16_t wavelength=0;
     double temperature, voltage, bias_current[4];
-    double rx_power[4], rx_power_max, rx_power_min;
+    double rx_power[4], rx_power_max=0, rx_power_min=0;
+    double tx_power[4], tx_power_max=0, tx_power_min=0;
 
     uint16_t *eew = (uint16_t *)(eeprom->data);
 
-    // wavelength - determined by transciever technology code
-#ifndef SFF8436_DEVICE_TECH_OFFSET
-    // these defs should eventually appear in ethtool.h
-#define SFF8436_DEVICE_TECH_OFFSET 0x93
-#define SFF8436_TRANS_TECH_MASK 0xF0
-#define SFF8436_TRANS_COPPER_LNR_EQUAL (15 << 4)
-#define SFF8436_TRANS_COPPER_NEAR_EQUAL (14 << 4)
-#define SFF8436_TRANS_COPPER_FAR_EQUAL (13 << 4)
-#define SFF8436_TRANS_COPPER_LNR_FAR_EQUAL (12 << 4)
-#define SFF8436_TRANS_COPPER_PAS_EQUAL (11 << 4)
-#define SFF8436_TRANS_COPPER_PAS_UNEQUAL (10 << 4)
-#define SFF8436_TRANS_1490_DFB (9 << 4)
-#define SFF8436_TRANS_OTHERS (8 << 4)
-#define SFF8436_TRANS_1550_EML (7 << 4)
-#define SFF8436_TRANS_1310_EML (6 << 4)
-#define SFF8436_TRANS_1550_DFB (5 << 4)
-#define SFF8436_TRANS_1310_DFB (4 << 4)
-#define SFF8436_TRANS_1310_FP (3 << 4)
-#define SFF8436_TRANS_1550_VCSEL (2 << 4)
-#define SFF8436_TRANS_1310_VCSEL (1 << 4)
-#define SFF8436_TRANS_850_VCSEL (0 << 4)
-#endif
-
-    uint8_t tx_tech = (eeprom->data[SFF8436_DEVICE_TECH_OFFSET]
-		       & SFF8436_TRANS_TECH_MASK);
-    switch (tx_tech) {
-    case SFF8436_TRANS_850_VCSEL: wavelength = 850; break;
-    case SFF8436_TRANS_1310_EML:
-    case SFF8436_TRANS_1310_DFB:
-    case SFF8436_TRANS_1310_FP:
-    case SFF8436_TRANS_1310_VCSEL: wavelength = 1310; break;
-    case SFF8436_TRANS_1550_EML:
-    case SFF8436_TRANS_1550_DFB:
-    case SFF8436_TRANS_1550_VCSEL: wavelength = 1550; break;
-    case SFF8436_TRANS_1490_DFB: wavelength = 1490; break;
-    }
+    // wavelength
+    // this is presented in 1/20 nM units
+    // (sFlow only exports in nM units so we lose precision here)
+    wavelength = ntohs(eew[93]) / 20;
 
     // temperature
     uint16_t temp16 = ntohs(eew[11]);
@@ -678,11 +626,15 @@ extern "C" {
     for (int ch=0; ch < num_lanes; ch++) {
       rx_power[ch] = ntohs(eew[17 + ch]);
       bias_current[ch] = ntohs(eew[21 + ch]);
+      tx_power[ch] = ntohs(eew[25 + ch]);
     }
 
     // power
+    // TODO: check response len to see if these are present
     rx_power_max = ntohs(eew[256 + 24]);
     rx_power_min = ntohs(eew[256 + 25]);
+    tx_power_max = ntohs(eew[256 + 32]);
+    tx_power_min = ntohs(eew[256 + 33]);
 
     // populate sFlow structure
     nio->sfp.lanes = (SFLLane *)my_realloc(nio->sfp.lanes, sizeof(SFLLane) * num_lanes);
@@ -696,13 +648,18 @@ extern "C" {
       SFLLane *lane = &(nio->sfp.lanes[ch]);
       lane->lane_index = (ch + 1);
       lane->tx_bias_current = (bias_current[ch] * 2); // uA
-      lane->tx_wavelength = wavelength;
+      lane->tx_wavelength = wavelength; // nM
+      lane->tx_power = (tx_power[ch] / 10); // uW
+      lane->tx_power_min = (tx_power_min / 10); // uW
+      lane->tx_power_max = (tx_power_max / 10); // uW
       lane->rx_power = (rx_power[ch] / 10); // uW
       lane->rx_power_min = (rx_power_min / 10); // uW
       lane->rx_power_max = (rx_power_max / 10); // uW
-      lane->rx_wavelength = wavelength; // same as tx_wavelength
+      // Is rx-wavelength the same as tx_wavelength, or is this a measurement
+      // we may not have? Supplied by QSFP at the other end of the fibre?
+      lane->rx_wavelength = wavelength;
 
-      EVDebug(mod, 1, "SFP8436 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
+      EVDebug(mod, 1, "SFP8636 %s[%u] u=%u(nm) T=%u(mC) V=%u(mV) I=%u(uA) tx=%u(uW) [%u-%u] rx=%u(uW) [%u-%u]",
 	    adaptor->deviceName,
 	    ch,
 	    lane->tx_wavelength,
@@ -1019,9 +976,21 @@ extern "C" {
 	      // counters for all interfaces for host-sflow network totals.
 	      // Since the host-sflow network totals do not include optical
 	      // stats,  this is not a problem.
-	      switch(niostate->modinfo_type) {
-	      case ETH_MODULE_SFF_8472: sff8472_read(sp, adaptor, &ifr, fd); break;
-	      case ETH_MODULE_SFF_8436: sff8436_read(sp, adaptor, &ifr, fd); break;
+	      // Force a min polling interval for this operation.
+	      // TODO: make this an hsflowd.conf parameter?
+	      time_t now = sp->pollBus->now.tv_sec;
+	      if(niostate->modinfo_update == 0
+		 || (now - niostate->modinfo_update) > HSP_MODINFO_MIN_POLL_INTERVAL) {
+		niostate->modinfo_update = now;
+		switch(niostate->modinfo_type) {
+		case ETH_MODULE_SFF_8472:
+		  sff8472_read(sp, adaptor, &ifr, fd);
+		  break;
+		case ETH_MODULE_SFF_8436:
+		case ETH_MODULE_SFF_8636:
+		  sff8636_read(sp, adaptor, &ifr, fd);
+		  break;
+		}
 	      }
 	    }
 #endif /*  ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */
