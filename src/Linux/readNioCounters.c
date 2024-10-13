@@ -556,12 +556,19 @@ extern "C" {
     struct ethtool_eeprom *eeprom = NULL;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
 
-    if(nio->modinfo_len < ETH_MODULE_SFF_8636_LEN)
+    // We learned the eeprom_len from the GMODULEINFO ioctl in readInterfaces.c. If it
+    // is not long enough to have the data we are expecting then bail. Also bail if it
+    // seems to be too long.
+    if(nio->modinfo_len < ETH_MODULE_SFF_8636_LEN
+       || nio->modinfo_len > ETH_MODULE_SFF_8636_NAX_LEN)
       goto out;
 
     eeprom = (struct ethtool_eeprom *)my_calloc(sizeof(*eeprom) + ETH_MODULE_SFF_8636_MAX_LEN);
     eeprom->cmd = ETHTOOL_GMODULEEEPROM;
-    eeprom->len = ETH_MODULE_SFF_8636_MAX_LEN;
+    // Must be clear about the number of bytes we want and expect:
+    eeprom->offset = 0;
+    eeprom->len = nio->modinfo_len;
+
 #ifdef HSP_TEST_QSFP
     int bytes = hexToBinary((u_char *)
 			    "0d-00-01-00-00-00-00-00-00-00-08-00-00-00-00-00"
@@ -588,7 +595,9 @@ extern "C" {
 #else
     ifr->ifr_data = (char *)eeprom;
     if(ioctl(fd, SIOCETHTOOL, ifr) < 0) {
-      myLog(LOG_ERR, "SFF8036 ethtool ioctl failed: %s", strerror(errno));
+      myLog(LOG_ERR, "SFF8636 ETHTOOL_GMODULEEEPROM ioctl failed to %s : %s",
+	    adaptor->deviceName,
+	    strerror(errno));
       goto out;
     }
 #endif
