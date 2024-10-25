@@ -602,13 +602,16 @@ extern "C" {
     }
 #endif
 
-    // Must be SFF8024_ID_QSFP_PLUS
-    if(eeprom->data[0] != 0x0d) {
+    // Must be:
+    // SFF8024_ID_QSFP (0x0C)
+    // or SFF8024_ID_QSFP_PLUS (0x0d)
+    // or SFF8024_ID_QSFP28 (0x11)
+    if(eeprom->data[0] != 0x0c
+       && eeprom->data[0] != 0x0d
+       && eeprom->data[0] != 0x11) {
       goto out;
     }
-    // SFF8024_DWDM_SFP is 0x0B
-    // SFF8024_ID_QSFP is 0x0C
-    // SFF8024_ID_QSFP28 is 0x011
+    // note: SFF8024_DWDM_SFP is 0x0B
 
     uint32_t num_lanes = 4;
     uint16_t wavelength=0;
