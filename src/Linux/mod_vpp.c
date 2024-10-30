@@ -122,6 +122,11 @@ extern "C" {
       port->os_index = os_index;
     else
       port->os_index = HSP_VPP_IFINDEX_OFFSET + port->vpp_index;
+    EVDebug(mod, 1, "portSetOsIndex %s vpp_index=%u given os_index %u => %u",
+	    port->portName,
+	    port->vpp_index,
+	    os_index,
+	    port->os_index);
     return port->os_index;
   }
 
@@ -135,6 +140,9 @@ extern "C" {
     SFLAdaptor *ad = adaptorByIndex(sp, port->os_index);
     if(ad == NULL
        && create) {
+      EVDebug(mod, 1, "portGetAdaptor %s adding new adaptor for os_index == %u",
+	      port->portName,
+	      port->os_index);
       ad = nioAdaptorNew(mod, port->portName, port->mac, port->os_index);
       adaptorAddOrReplace(sp->adaptorsByIndex, ad, "byIndex");
       adaptorAddOrReplace(sp->adaptorsByMac, ad, "byMac");
