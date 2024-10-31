@@ -21,7 +21,6 @@ extern "C" {
 
 #define HSP_VPP_READNL_RCV_BUF 16384
 #define HSP_VPP_READNL_BATCH 10
-#define HSP_VPP_IFINDEX_OFFSET 1e9
 
   // ==================== shared with vpp-sflow plugin =========================
   // See https://github.com/sflow/vpp-sflow
@@ -75,6 +74,8 @@ extern "C" {
     uint32_t ifDirection;
     bool operUp:1;
     bool adminUp:1;
+    bool osIndexAttr:1;
+    bool active:1;
     uint32_t samplingN;
     uint64_t ifSpeed;
     SFLHost_nio_counters ctrs;
@@ -117,16 +118,31 @@ extern "C" {
     -----------------___________________________------------------
   */
   
-  static uint32_t portSetOsIndex(EVMod *mod, HSPVppPort *port, uint32_t os_index) {
+  static uint32_t portSetOsIndex(EVMod *mod, HSPVppPort *port, bool osIndexAttr, uint32_t os_index) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    // accept os_index if set, otherwise make up an ifIndex using an offset to reduce the
+    // probability of a clash between vpp and Linux. The offset can be adjusted as a config parameter,
+    // so it's possible to allow the VPP ifIndex to be used unchanged by setting vpp { ifOffset=0 } in the
+    // config.
     if(os_index)
       port->os_index = os_index;
     else
-      port->os_index = HSP_VPP_IFINDEX_OFFSET + port->vpp_index;
-    EVDebug(mod, 1, "portSetOsIndex %s vpp_index=%u given os_index %u => %u",
+      port->os_index = sp->vpp.ifOffset + port->vpp_index;
+    // remember that we heard this from vpp
+    port->osIndexAttr = osIndexAttr;
+    // and decide if it's OK to let packet-samples through (this
+    // avoids a race where a VPP restart will result in some packet
+    // samples coming through before the mapping to os_index has
+    // been learned and communicated.
+    port->active = (sp->vpp.ifOffset == 0 || port->osIndexAttr);
+    EVDebug(mod, 1, "portSetOsIndex %s vpp_index=%u attr=%s offset=%u so os_index %u => %u active=%s",
 	    port->portName,
 	    port->vpp_index,
+	    osIndexAttr ? "YES" : "NO",
+	    sp->vpp.ifOffset,
 	    os_index,
-	    port->os_index);
+	    port->os_index,
+	    port->active ? "YES" : "NO");
     return port->os_index;
   }
 
@@ -251,7 +267,8 @@ extern "C" {
 
     HSPVppPort in = {};
     char portName[SFL_MAX_PORTNAME_LEN+1];
-    
+    bool os_index_attr_included = NO;
+ 
     for(int offset = 0; offset < msglen; ) {
       struct nlattr *attr = (struct nlattr *)(msg + offset);
       if(attr->nla_len == 0 ||
@@ -277,6 +294,7 @@ extern "C" {
 	in.vpp_index = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_OSINDEX:
+	os_index_attr_included = YES;
 	in.os_index = getAttrInt(datap, datalen);
 	break;
       case SFLOW_VPP_ATTR_IFTYPE:
@@ -353,7 +371,7 @@ extern "C" {
 	port = getPort(mod, in.vpp_index, YES);
       }
       setStr(&port->portName, in.portName);
-      portSetOsIndex(mod, port, in.os_index);
+      portSetOsIndex(mod, port, os_index_attr_included, in.os_index);
       port->operUp = in.operUp;
       port->adminUp = in.adminUp;
       port->ifSpeed = in.ifSpeed;
@@ -511,10 +529,12 @@ v  */
       bool egress = (psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_EGRESS);
       HSPVppPort *rx_prt, *tx_prt;
       SFLAdaptor *rx_dev, *tx_dev, *sampler_dev;
+      bool active = NO;
       if(egress) {
 	rx_prt = getPort(mod, psmp->ifin, NO);
   	rx_dev = rx_prt ? portGetAdaptor(mod, rx_prt, NO) : NULL;
 	tx_prt = getPort(mod, psmp->ifout, YES);
+	active = tx_prt->active;
 	tx_dev = tx_prt ? portGetAdaptor(mod, tx_prt, YES) : NULL;
 	sampler_dev = tx_dev;
       }
@@ -522,6 +542,7 @@ v  */
 	tx_prt = getPort(mod, psmp->ifout, NO);
 	tx_dev = tx_prt ? portGetAdaptor(mod, tx_prt, NO) : NULL;
 	rx_prt = getPort(mod, psmp->ifin, YES);
+	active = rx_prt->active;
 	rx_dev = rx_prt ? portGetAdaptor(mod, rx_prt, YES) : NULL;
 	sampler_dev = rx_dev;
       }
@@ -533,21 +554,22 @@ v  */
 	    drops = 1;
 	}
 	mdata->last_grp_seq[egress] = psmp->grp_seq;
-	
-	takeSample(sp,
-		   rx_dev,
-		   tx_dev,
-		   sampler_dev,
-		   sp->psample.ds_options,
-		   0, // hook
-		   psmp->hdr, // mac hdr
-		   14, // mac hdr len
-		   psmp->hdr + 14, // payload
-		   psmp->hdr_len - 14, // captured payload len
-		   psmp->pkt_len - 14, // whole pdu len
-		   drops + mdata->vpp_drops,
-		   psmp->sample_n,
-		   NULL);
+
+	if(active)
+	  takeSample(sp,
+		     rx_dev,
+		     tx_dev,
+		     sampler_dev,
+		     sp->psample.ds_options,
+		     0, // hook
+		     psmp->hdr, // mac hdr
+		     14, // mac hdr len
+		     psmp->hdr + 14, // payload
+		     psmp->hdr_len - 14, // captured payload len
+		     psmp->pkt_len - 14, // whole pdu len
+		     drops + mdata->vpp_drops,
+		     psmp->sample_n,
+		     NULL);
       }
     }
   }

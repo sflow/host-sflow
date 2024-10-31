@@ -104,6 +104,7 @@ extern "C" {
 #define HSP_MAX_SUBAGENTID 199999
 #define HSP_DEFAULT_LOGICAL_DSINDEX_START 100000
 #define HSP_DEFAULT_APP_DSINDEX_START 150000
+#define HSP_DEFAULT_VPP_IFINDEX_OFFSET 1e9
 #define HSP_MAX_TICKS 60
 
 #define HSP_REFRESH_VMS 60
@@ -753,6 +754,7 @@ extern "C" {
     struct {
       bool vpp;
       uint32_t ds_options;
+      uint32_t ifOffset;
     } vpp;
 
     // hardware sampling flag
