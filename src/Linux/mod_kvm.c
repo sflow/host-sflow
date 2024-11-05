@@ -411,7 +411,7 @@ extern "C" {
 	// they are still present in the global-namespace list,  but
 	// we have to do this here in case one of these was discovered
 	// and allocated just for this VM.
-	deleteMarkedAdaptors_adaptorList(sp, vm->interfaces);
+	deleteMarkedAdaptors_adaptorList(mod, vm->interfaces);
 	adaptorListFreeMarked(vm->interfaces);
       }
     }
