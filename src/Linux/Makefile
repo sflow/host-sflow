@@ -361,7 +361,8 @@ OBJS_HSFLOWD= hsflowconfig.o \
               readHidCounters.o \
               readNioCounters.o \
 	      readTcpipCounters.o \
-	      readPackets.o
+	      readPackets.o \
+	      readVNIC.o
 
 OBJS_JSON=mod_json.o
 OBJS_DNSSD=mod_dnssd.o
@@ -738,6 +739,7 @@ evbus.o: evbus.c $(HEADERS)
 hsflowconfig.o: hsflowconfig.c $(HEADERS)
 hsflowd.o: hsflowd.c $(HEADERS)
 readInterfaces.o: readInterfaces.c $(HEADERS)
+readVNIC.o: readVNIC.c $(HEADERS)
 readCpuCounters.o: readCpuCounters.c $(HEADERS)
 readMemoryCounters.o: readMemoryCounters.c $(HEADERS)
 readDiskCounters.o: readDiskCounters.c $(HEADERS)

@@ -939,6 +939,12 @@ extern "C" {
 	    : NULL);
   }
 
+  UTArray *UTArrayCopy(UTArray *ar, int flags) {
+    UTArray *cpy = UTArrayNew(flags);
+    UTArrayAddAll(cpy, ar);
+    return cpy;
+  }
+  
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________
     ----------------___________________________------------------
@@ -1869,7 +1875,15 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
   }
 
   // Cursor walk. Start from 0.
-  // Ordering will be scrambled if HT grows.
+  // Ordering will be scrambled if HT grows or shrinks.
+  // That would happen if we tried to do this by object
+  // pointer too, so it's not a very predictable sequence
+  // unless we know that the collection is not going to
+  // grow or shrink, or unless it's OK to miss some
+  // this time through. If you need to visit everything
+  // once in a more deterministic way then calling
+  // UTHashElements() and iterating over that is likely
+  // to work better -- or use a binary tree instead.
   void *UTHashNext(UTHash *oh, uint32_t *pCursor) {
     uint32_t csr = *pCursor;
     // skip over NULLs and DBINS
@@ -1889,6 +1903,20 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
       *pCursor = csr + 1;
       return obj;
     }
+  }
+
+  UTArray *UTHashElements(UTHash *oh) {
+    UTArray *ar = UTArrayNew(UTARRAY_DFLT);
+    SEMLOCK_DO(oh->sync) {
+      for(uint32_t ii=0; ii<oh->cap; ii++) {
+	void *elem = oh->bins[ii];
+	if(elem
+	   && elem != UTHASH_DBIN)
+	  UTArrayAdd(ar, elem);
+      }
+    }
+    return ar; // remember to UTArrayFree() this later
+
   }
   
   /*_________________---------------------------__________________

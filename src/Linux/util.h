@@ -213,7 +213,6 @@ extern "C" {
   void *UTArrayAt(UTArray *ar, int i);
   void UTArrayPush(UTArray *ar, void *obj);
   void *UTArrayPop(UTArray *ar);
-  uint32_t UTArraySnapshot(UTArray *ar, uint32_t buf_n, void *buf);
 #define UTARRAY_WALK(ar, obj) for(uint32_t _ii=0; _ii<UTArrayN(ar); _ii++) if(((obj)=(typeof(obj))UTArrayAt((ar), _ii)))
 
   // tokenizer
@@ -308,6 +307,7 @@ extern "C" {
   void UTHashReset(UTHash *oh);
   uint32_t UTHashN(UTHash *oh);
   void *UTHashNext(UTHash *oh, uint32_t *pCursor);
+  UTArray *UTHashElements(UTHash *oh);
 
 #define UTHASH_DBIN (void *)-1
 

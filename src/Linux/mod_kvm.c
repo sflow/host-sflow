@@ -358,7 +358,6 @@ extern "C" {
 
   static void configVMs_KVM(EVMod *mod) {
     HSP_mod_KVM *mdata = (HSP_mod_KVM *)mod->data;
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     if(mdata->virConn == NULL) {
       // no libvirt connection
       return;

@@ -263,6 +263,10 @@ extern "C" {
     SFLPoller *poller;
   } HSPVMState;
 
+  typedef void (*HSPVnicIPCB)(EVMod *mod, HSPVMState *vm, SFLAdaptor *adaptor, SFLAddress *ipAddr, uint32_t nspid);
+  int readVNICInterfaces(EVMod *mod, HSPVMState *vm, uint32_t nspid, HSPVnicIPCB ipCB);
+#define HSPVNIC_DSINDEX_NONUNIQUE 0xFFFFFFFF
+
   typedef enum { IPSP_NONE=0,
 		 IPSP_CLASS_E,
 		 IPSP_MULTICAST,
