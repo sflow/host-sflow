@@ -296,8 +296,8 @@ extern "C" {
 		}
 		else {
 		  int ifIndex = ifr.ifr_ifindex;
-		  SFLAddress ipAddr = {};
-		  SFLAddress ip6Addr = {};
+		  SFLAddress ipAddr = { .type = SFLADDRESSTYPE_IP_V4 };
+		  SFLAddress ip6Addr = { .type = SFLADDRESSTYPE_IP_V6 };
 
 		  // see if we can get an IP address
 		  if(ioctl(fd,SIOCGIFADDR, &ifr) < 0) {
@@ -310,7 +310,6 @@ extern "C" {
 		    if (ifr.ifr_addr.sa_family == AF_INET) {
 		      struct sockaddr_in *s = (struct sockaddr_in *)&ifr.ifr_addr;
 		      // IP addr is now s->sin_addr
-		      ipAddr.type = SFLADDRESSTYPE_IP_V4;
 		      ipAddr.address.ip_v4.addr = s->sin_addr.s_addr;
 		    }
 		  }
