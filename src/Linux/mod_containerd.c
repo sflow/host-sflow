@@ -685,7 +685,6 @@ extern "C" {
     if(!jmetrics)
       return;
 
-    bool isSandbox = NO;
     cJSON *jnames = cJSON_GetObjectItem(jmetrics, "Names");
     if(jnames) {
       cJSON *jcgpth = cJSON_GetObjectItem(jnames, "CgroupsPath");
@@ -703,15 +702,10 @@ extern "C" {
       }
     }
     
-    // TODO: skip "k8s_POD_*" containers
-    // (or make that a config setting)
-    // But maybe that doesn't happen with containerd?  Not
-    // seeing them here.
-
     setContainerName(mod, container, jid->valuestring);
     
     cJSON *jn = cJSON_GetObjectItem(jnames, "ContainerName");
-    cJSON *jt = cJSON_GetObjectItem(jnames, "ContainerType");
+    //cJSON *jt = cJSON_GetObjectItem(jnames, "ContainerType");
     cJSON *jhn = cJSON_GetObjectItem(jnames, "Hostname");
     cJSON *jsn = cJSON_GetObjectItem(jnames, "SandboxName");
     cJSON *jsns = cJSON_GetObjectItem(jnames, "SandboxNamespace");
@@ -726,7 +720,7 @@ extern "C" {
       // the form k8s_<containername>_<sandboxname>_<sandboxnamespace>_<sandboxuser>_<c.attempt>
       // pull out name, hostname, sandboxname and sandboxnamespace
       char *jn_s = (jn && strlen(jn->valuestring)) ? jn->valuestring : NULL;
-      char *jt_s = (jt && strlen(jt->valuestring)) ? jt->valuestring : NULL;
+      //char *jt_s = (jt && strlen(jt->valuestring)) ? jt->valuestring : NULL;
       char *jhn_s = (jhn && strlen(jhn->valuestring)) ? jhn->valuestring : NULL;
       char *jsn_s = (jsn && strlen(jsn->valuestring)) ? jsn->valuestring : NULL;
       char *jsns_s = (jsns && strlen(jsns->valuestring)) ? jsns->valuestring : NULL;
@@ -747,9 +741,6 @@ extern "C" {
 	       jsns_s ?: "");
       // and assign to hostname
       setContainerHostname(mod, container, compoundName);
-      // remember if containerType is sandbox
-      if(my_strequal(jt_s, "sandbox"))
-	isSandbox = YES;
     }
     
     cJSON *jcpu = cJSON_GetObjectItem(jmetrics, "Cpu");
@@ -801,19 +792,7 @@ extern "C" {
     if(container->last_vnic == 0
        || (now_mono - container->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
       container->last_vnic = now_mono;
-      // Each pod appears to have one container with type "sandbox" and
-      // one or more with type "container".  Although it is the containers
-      // that send/receive traffic it is potentially expensive to resolve
-      // which of them it was on a sample-by-sample basis.  That's because
-      // they share the same network namespace so the (inner) IP address
-      // is not enough and we would have to look up the container by following
-      // the TCP/UDP socket inode to PID (see mod_systemd). If that socket
-      // lookup can be done efficiently (e.g. by using a network namespace
-      // parameter in the netlink DIAG call) then we can try it,  but for
-      // now we will associate traffic with the sandbox container, effectively
-      // appointing it as the representative for the pod.
-      if(isSandbox)
-	updateContainerAdaptors(mod, container);
+      updateContainerAdaptors(mod, container);
     }
 
     if(container->last_cgroup == 0
