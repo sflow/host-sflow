@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # command-line utility to send JSON-encoded rtflow records through hsflowd.
-# requires "jsonPort=36343" in hsflowd.conf.
+# requires "json { udpport=36343 }" in hsflowd.conf.
 
 import argparse
 import json
@@ -42,4 +42,4 @@ for i in range(0, len(args.name)):
 
 msg = {"rtflow":metrics}
 sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-sock.sendto(json.dumps(msg),("127.0.0.1",36343))
+sock.sendto(json.dumps(msg).encode(),("127.0.0.1",36343))

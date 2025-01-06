@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Send JSON-encoded rtmetric messages through hsflowd to provide
 # separate moniting of every CPU.
 
-# Requires "jsonPort=36343" in hsflowd.conf.
+# Requires "json { udpport=36343 }" in hsflowd.conf.
 
 # This should be executed periodically e.g. by cron(1)
 # or like this at the shell prompt for testing:
@@ -31,5 +31,5 @@ for line in inputfile:
                 'cpu_x_sintr': { "type":"counter32", "value": int(toks[7]) }
             }
         }
-        sock.sendto(json.dumps(msg), ('127.0.0.1', 36343))
+        sock.sendto(json.dumps(msg).encode(), ('127.0.0.1', 36343))
 inputfile.close()

@@ -1,7 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # command-line utility to send JSON-encoded rtmetric values through hsflowd.
-# requires "jsonPort=36343" in hsflowd.conf.
+# requires "json { udpport=36343 }" in hsflowd.conf.
 
 import argparse
 import json

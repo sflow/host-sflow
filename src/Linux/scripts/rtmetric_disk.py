@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 # Send JSON-encoded rtmetric through hsflowd to provide
 # separate moniting of every local disk partition.
 
-# Requires "jsonPort=36343" in hsflowd.conf.
+# Requires "json {udpport=36343 }" in hsflowd.conf.
 
 # This should be executed periodically e.g. by cron(1)
 # or like this at the shell prompt for testing:
@@ -14,10 +14,9 @@ import json
 import time
 import os
 import re
-from string import maketrans
 
 # we are going to translate '/' to '_' in the mount point names
-transtab = maketrans("/", "_")
+transtab = str.maketrans("/", "_")
 
 # match the subset of mount points that we want to report on
 pattern = re.compile('^/$|^/tmp|^/usr/')
@@ -43,5 +42,5 @@ for line in p.read().splitlines() :
             }
         }
         # print json.dumps(msg)
-        sock.sendto(json.dumps(msg), ('127.0.0.1', 36343))
+        sock.sendto(json.dumps(msg).encode(), ('127.0.0.1', 36343))
 p.close()
