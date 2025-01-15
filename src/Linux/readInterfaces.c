@@ -16,10 +16,7 @@ extern "C" {
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <linux/if_vlan.h>
-
-#if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 3)
 #include <ifaddrs.h> // for getifaddrs(3)
-#endif
 
   // limit the number of chars we will read from each line
   // in /proc/net/dev and /prov/net/vlan/config
@@ -107,8 +104,11 @@ extern "C" {
     EVMod *mod = sp->rootModule;
     int addresses_added = 0;
     // getifaddrs(3) first appeared in glibc 2.3
-    // and first included v6 addresses in 2.3.3
-#if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 3)
+    // and first included v6 addresses in 2.3.3, but it
+    // is has been part of standard C lib for more than 20
+    // years so no longer testing for it.  This makes it
+    // eaiser to use other C platforms.
+    // #if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 3)
     struct ifaddrs *ifap = NULL;
 
     
@@ -183,7 +183,7 @@ extern "C" {
 
     EVDebug(mod, 1, "readL3Addresses: found %u extra L3 addresses", addresses_added);
 
-#endif
+    // #endif (no longer testing for GLIBC version)
     return addresses_added;
   }
 
