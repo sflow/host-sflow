@@ -133,20 +133,10 @@ extern "C" {
   static uint32_t portSetOsIndex(EVMod *mod, HSPVppPort *port, bool osIndexAttr, uint32_t os_index) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // accept os_index if set, otherwise make up an ifIndex using an offset to reduce the
-    // probability of a clash between vpp and Linux. The offset can be adjusted as a config parameter,
-    // so it's possible to allow that vpp ifIndex to be used unchanged by setting "vpp { ifOffset=0 }" in the
-    // config.
+    // probability of a clash between vpp and Linux. The offset can be adjusted as a config parameter (ifOffset).
     // Another option made possible here is to turn off the translation from vpp ifIndex to Linux ifIndex
     // altogether with "vpp { osIndex=OFF }", but that will still add the offset to try and avoid any clash
-    // with Linux ifIndex numbers.
-    // So to always export vpp ifIndex numbers unchanged you need "vpp { osIndex=OFF ifOffset=0 }".
-    // TODO: When vpp ifindex numbers are exported unchanged, we should ensure that hsflowd will not
-    // report counters, samples or drops for any Linux ifIndex.  One was to do this might be to keep
-    // using an ifOffset to keep the Adaptor/Poller/Sampler objects distinct, and then swap in the
-    // vpp ifIndex at the point of export, similar to the mod_sonic approach.
-    // Another option is to add a "namespace" key to every interface id, so that a unique interface key is
-    // really (namespace,ifIndex).  And use that everywhere that adaptors are stored and retrieved.  We could
-    // hash namespaces to unique 32-bit integers so that a full interface key would be 64-bits.
+    // with Linux ifIndex numbers, and then subtract it again just before the samples go out (see below).
     if(os_index
        && sp->vpp.osIndex)
       port->os_index = os_index;
