@@ -1542,6 +1542,7 @@ extern "C" {
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->vpp.vpp = YES;
 	    sp->vpp.ifOffset = HSP_DEFAULT_VPP_IFINDEX_OFFSET;
+	    sp->vpp.osIndex = YES;
 	    level[++depth] = HSPOBJ_VPP;
 	    break;
 	  case HSPTOKEN_SAMPLING:
@@ -2159,6 +2160,9 @@ extern "C" {
 	    switch(tok->stok) {
 	    case HSPTOKEN_IFOFFSET:
 	      if((tok = expectInteger32(sp, tok, &sp->vpp.ifOffset, 0, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_OSINDEX:
+	      if((tok = expectONOFF(sp, tok, &sp->vpp.osIndex)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

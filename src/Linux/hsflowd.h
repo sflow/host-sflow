@@ -759,6 +759,7 @@ extern "C" {
       bool vpp;
       uint32_t ds_options;
       uint32_t ifOffset;
+      bool osIndex;
     } vpp;
 
     // hardware sampling flag
