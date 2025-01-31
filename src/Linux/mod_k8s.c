@@ -1320,14 +1320,15 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
 
+    EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+    
     // Go program may want to send rtmetrics (to mod_json)
-    mdata->rtmetricEvent = EVGetEvent(sp->packetBus, HSPEVENT_RTMETRIC_JSON);
+    mdata->rtmetricEvent = EVGetEvent(packetBus, HSPEVENT_RTMETRIC_JSON);
     
     if(sp->k8s.markTraffic) {
       // By requesting HSPEVENT_FLOW_SAMPLE_RELEASED as well as
       // HSPEVENT_FLOW_SAMPLE we ensure that mod_tcp (if loaded)
       // will have completed it's annotation of the sample first.
-      EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE_RELEASED), evt_flow_sample_released);
       mdata->vnicByMAC = UTHASH_NEW(HSPVnicMAC, mac, UTHASH_SYNC); // need sync (poll + packet thread)
