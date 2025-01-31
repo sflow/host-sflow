@@ -113,6 +113,18 @@ extern "C" {
     return port;
   }
 
+  static HSPVppPort *getPortByOsIndex(EVMod *mod, uint32_t os_index) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    HSPVppPort *port = NULL;
+    if(os_index >= sp->vpp.ifOffset) {
+      uint32_t vpp_index = os_index- sp->vpp.ifOffset;
+      HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
+      HSPVppPort search = { .vpp_index=vpp_index };
+      port = UTHashGet(mdata->ports, &search);
+    }
+    return port;
+  }
+
   /*_________________---------------------------__________________
     _________________    portSetOsIndex         __________________
     -----------------___________________________------------------
@@ -121,10 +133,12 @@ extern "C" {
   static uint32_t portSetOsIndex(EVMod *mod, HSPVppPort *port, bool osIndexAttr, uint32_t os_index) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // accept os_index if set, otherwise make up an ifIndex using an offset to reduce the
-    // probability of a clash between vpp and Linux. The offset can be adjusted as a config parameter,
-    // so it's possible to allow the VPP ifIndex to be used unchanged by setting vpp { ifOffset=0 } in the
-    // config.
-    if(os_index)
+    // probability of a clash between vpp and Linux. The offset can be adjusted as a config parameter (ifOffset).
+    // Another option made possible here is to turn off the translation from vpp ifIndex to Linux ifIndex
+    // altogether with "vpp { osIndex=OFF }", but that will still add the offset to try and avoid any clash
+    // with Linux ifIndex numbers, and then subtract it again just before the samples go out (see below).
+    if(os_index
+       && sp->vpp.osIndex)
       port->os_index = os_index;
     else
       port->os_index = sp->vpp.ifOffset + port->vpp_index;
@@ -133,8 +147,10 @@ extern "C" {
     // and decide if it's OK to let packet-samples through (this
     // avoids a race where a VPP restart will result in some packet
     // samples coming through before the mapping to os_index has
-    // been learned and communicated.
-    port->active = (sp->vpp.ifOffset == 0 || port->osIndexAttr);
+    // been learned and communicated).
+    port->active = (sp->vpp.ifOffset == 0
+		    || sp->vpp.osIndex == NO
+		    || port->osIndexAttr);
     EVDebug(mod, 1, "portSetOsIndex %s vpp_index=%u attr=%s offset=%u so os_index %u => %u active=%s",
 	    port->portName,
 	    port->vpp_index,
@@ -374,6 +390,8 @@ extern "C" {
       portSetOsIndex(mod, port, os_index_attr_included, in.os_index);
       port->operUp = in.operUp;
       port->adminUp = in.adminUp;
+      port->ifType = in.ifType;
+      port->ifDirection = in.ifDirection;
       port->ifSpeed = in.ifSpeed;
       port->ctrs = in.ctrs;
       port->et_ctrs = in.et_ctrs;
@@ -396,8 +414,10 @@ extern "C" {
 	    | HSP_ETCTR_OPER
 	    | HSP_ETCTR_ADMIN;
 	  accumulateNioCounters(sp, adaptor, &port->ctrs, &port->et_ctrs);
+	  nio->et_last.adminStatus = port->adminUp;
+	  nio->et_last.operStatus = port->operUp;
 	  nio->last_update = mdata->pollBus->now.tv_sec;
-
+	  adaptor->ifDirection = port->ifDirection;
 	  // Request a poller for this adaptor if one is not already there.
 	  // This is done with an event because it is usually called from
 	  // the packetBus, but here we are already on the pollBus so it will
@@ -575,6 +595,116 @@ v  */
   }
 
   /*_________________---------------------------__________________
+    _________________       evt_flow_sample     __________________
+    -----------------___________________________------------------
+   packet bus
+  */
+
+  static void evt_flow_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSPPendingSample *ps = (HSPPendingSample *)data;
+    // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
+    // the VPP ifIndex namespace. For packet samples that means:
+    // 1. sampler ds_index
+    // 2. flow_sample input, output ports
+    // If a mapping is missing for the sampler we have to block the sample.
+    // If a mapping is missing for in/out ports we have to zero it out (0 == unknown)
+    uint32_t osIndex = SFL_DS_INDEX(ps->sampler->dsi);
+    HSPVppPort *vppPort = getPortByOsIndex(mod, osIndex);
+    if(vppPort == NULL) {
+      EVDebug(mod, 2, "suppress packet sample from non-vpp port (osIndex=%u)", osIndex);
+      ps->suppress = YES;
+    }
+    else {
+      // fix datasource
+      sfl_sampler_set_dsAlias(ps->sampler, vppPort->vpp_index);
+      // fix in/out
+      if(ps->fs->input
+	 && ps->fs->input != SFL_INTERNAL_INTERFACE) {
+	// translate, or mark unknown
+	HSPVppPort *in = getPortByOsIndex(mod, ps->fs->input);
+	ps->fs->input = in ? in->vpp_index : 0;
+      }
+      if(ps->fs->output
+	 && ps->fs->output != SFL_INTERNAL_INTERFACE
+	 && (ps->fs->output & 0x80000000) == 0) {
+	// translate, or mark unknown
+	HSPVppPort *out = getPortByOsIndex(mod, ps->fs->output);
+	ps->fs->output = out ? out->vpp_index : 0;
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________    evt_discard_sample     __________________
+    -----------------___________________________------------------
+   packet bus
+  */
+
+  static void evt_discard_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSPPendingEvtSample *ps = (HSPPendingEvtSample *)data;
+    // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
+    // the SONiC ifIndex namespace.
+    uint32_t dsClass = ps->discard->ds_class;
+    uint32_t osIndex = ps->discard->ds_index;
+    HSPVppPort *vppPort = NULL;
+    uint32_t dsIndexAlias = 0;
+    if(dsClass == SFL_DSCLASS_IFINDEX
+       && osIndex != 0) {
+      vppPort = getPortByOsIndex(mod, osIndex);
+      dsIndexAlias = vppPort ? vppPort->vpp_index : 0;
+      // Note that if dsIndexAlias is 0 that means "no alias"
+      sfl_notifier_set_dsAlias(ps->notifier, dsIndexAlias);
+    }
+    // fix in/out
+    if(ps->discard->input
+       && ps->discard->input != SFL_INTERNAL_INTERFACE) {
+      // translate, or mark unknown
+	HSPVppPort *in = getPortByOsIndex(mod, ps->discard->input);
+	ps->discard->input = in ? in->vpp_index : 0;
+    }
+    if(ps->discard->output
+       && ps->discard->output != SFL_INTERNAL_INTERFACE
+       && (ps->discard->output & 0x80000000) == 0) {
+      // translate, or mark unknown
+      HSPVppPort *out = getPortByOsIndex(mod, ps->discard->output);
+      ps->discard->output = out ? out->vpp_index : 0;
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________       evt_cntr_sample     __________________
+    -----------------___________________________------------------
+    poll bus
+  */
+
+  static void evt_cntr_sample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSPPendingCSample *ps = (HSPPendingCSample *)data;
+    // find and translate all ifIndex fields from the OS (Linux) ifIndex namespace to
+    // the VPP ifIndex namespace. For interface counter samples that means:
+    // 1. poller ds_index
+    // 2. generic counters ifIndex
+    uint32_t osIndex = SFL_DS_INDEX(ps->poller->dsi);
+    HSPVppPort *vppPort = getPortByOsIndex(mod, osIndex);
+    if(vppPort == NULL) {
+      // in this mode we do not report on anything that is not a VPP interface
+      ps->suppress = YES;
+    }
+    else {
+      // fix datasource
+      sfl_poller_set_dsAlias(ps->poller, vppPort->vpp_index);
+      // look through counter structures
+      for(SFLCounters_sample_element *elem = ps->cs->elements;
+	  elem != NULL;
+	  elem = elem->nxt) {
+	if(elem->tag == SFLCOUNTERS_GENERIC) {
+	  // fix generic ifIndex
+	  elem->counterBlock.generic.ifIndex = vppPort->vpp_index;
+	}
+      }
+    }
+  }
+
+  /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
   */
@@ -593,6 +723,23 @@ v  */
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_PSAMPLE), evt_psample);
+
+    if(sp->vpp.osIndex == NO) {
+      // If we are not trying to map into the Linux ifIndex namespace then the poller and
+      // sampler objects will be using vpp_index numbers offset by sp->vpp.ifOffset.  That
+      // will (hopefully) ensure that they do not clash with any other netdevs that that hsflowd
+      // concerned with, but to translate the sFlow export back into the VPP namespace we
+      // have to intercept the samples as they go out here.  This is similar to the behavior in
+      // mod_sonic.
+      // (Note that in future we could do this more elegantly by including a "namespace" key
+      // that applies to any adaptor lookup, but the sFlow data model presents as one namespace
+      // with a flat 32-bit ifIndex space, so it's likely that we will always have to do some
+      // flattening like this to present a clean model to the sFlow collector.)
+      EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
+      EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTF_EVENT_SAMPLE), evt_discard_sample);
+      EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_INTF_COUNTER_SAMPLE), evt_cntr_sample);
+    }
+    
     // TODO: check these flags
     if(sp->vpp.ds_options == 0)
       sp->vpp.ds_options = (HSP_SAMPLEOPT_DEV_SAMPLER
