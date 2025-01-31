@@ -969,8 +969,8 @@ extern "C" {
       char rtmVal[RTMETRIC_VAL_LEN]; // e.g. 123.0 or "helloworld"
       char *p = str + strlen(HSP_K8S_CTRPREFIX);
       char *sep = "[] \t";
-      if(parseNextTok(&p, sep, NO, 0, YES, rtmKey, RTMETRIC_KEY_LEN))
-	if(parseNextTok(&p, sep, NO, 0, YES, rtmTyp, RTMETRIC_TYP_LEN))
+      if(parseNextTok(&p, sep, NO, 0, YES, rtmTyp, RTMETRIC_KEY_LEN))
+	if(parseNextTok(&p, sep, NO, 0, YES, rtmKey, RTMETRIC_TYP_LEN))
 	  if(parseNextTok(&p, sep, NO, 0, YES, rtmVal, RTMETRIC_VAL_LEN)) {
 	    snprintf(rtmBuf, RTMETRIC_JSON_LEN,
 		     "{ \"rtmetric\": {"
