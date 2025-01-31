@@ -1121,6 +1121,41 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
   }
 
   /*_________________---------------------------__________________
+    _________________      readJSONMsg          __________________
+    -----------------___________________________------------------
+  */
+
+  static void readJSONMsg(EVMod *mod, char *buf, int len)
+  {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+
+    if(sp->sFlowSettings == NULL) {
+      // config was turned off
+      return;
+    }
+    EVDebug(mod, 2, "got JSON msg: %u bytes", len);
+    cJSON *top = cJSON_Parse(buf);
+    if(top) {
+      if(EVDebug(mod, 1, NULL))
+	logJSON(top, "got JSON message");
+      cJSON *fs = cJSON_GetObjectItem(top, "flow_sample");
+      if(fs)
+	readJSON_flowSample(mod, fs);
+      cJSON *cs = cJSON_GetObjectItem(top, "counter_sample");
+      if(cs)
+	readJSON_counterSample(mod, cs);
+      cJSON *rtmetric = cJSON_GetObjectItem(top, "rtmetric");
+      if(rtmetric)
+	readJSON_rtmetric(mod, rtmetric);
+      cJSON *rtflow = cJSON_GetObjectItem(top, "rtflow");
+      if(rtflow)
+	readJSON_rtflow(mod, rtflow);
+      cJSON_Delete(top);
+    }
+  }
+
+
+  /*_________________---------------------------__________________
     _________________      readJSON             __________________
     -----------------___________________________------------------
   */
@@ -1142,24 +1177,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
 	int len = read(sock->fd, buf, HSP_MAX_JSON_MSG_BYTES);
 	if(len <= 0) break;
 	EVDebug(mod, 2, "got JSON msg: %u bytes", len);
-	cJSON *top = cJSON_Parse(buf);
-	if(top) {
-	  if(EVDebug(mod, 1, NULL))
-	    logJSON(top, "got JSON message");
-	  cJSON *fs = cJSON_GetObjectItem(top, "flow_sample");
-	  if(fs)
-	    readJSON_flowSample(mod, fs);
-	  cJSON *cs = cJSON_GetObjectItem(top, "counter_sample");
-	  if(cs)
-	    readJSON_counterSample(mod, cs);
-	  cJSON *rtmetric = cJSON_GetObjectItem(top, "rtmetric");
-	  if(rtmetric)
-	    readJSON_rtmetric(mod, rtmetric);
-	  cJSON *rtflow = cJSON_GetObjectItem(top, "rtflow");
-	  if(rtflow)
-	    readJSON_rtflow(mod, rtflow);
-	  cJSON_Delete(top);
-	}
+	readJSONMsg(mod, buf, len);
       }
     }
     // may have queued one or more counter-samples during this read-batch.
@@ -1189,6 +1207,10 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     }
   }
 
+  static void evt_json_msg(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    readJSONMsg(mod, data, dataLen);
+  }
+
   void mod_json(EVMod *mod) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     mod->data = my_calloc(sizeof(HSP_mod_JSON));
@@ -1206,6 +1228,12 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
     // time out applications with tick
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_packet_tick);
 
+    // allow other modules to submit json messages (on packetBus) that
+    // will be parsed and included in the sFlow feed for this agent. Can be
+    // used to send named metrics to the collector from any module.
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_RTMETRIC_JSON), evt_json_msg);
+
+    // if json port is non-zero, we listen for local messages
     if(sp->json.port) {
       // TODO: do we really need to bind to both "127.0.0.1" and "::1" ?
       mdata->json_soc = UTSocketUDP("127.0.0.1", PF_INET, sp->json.port, HSP_JSON_RCV_BUF);
@@ -1215,6 +1243,7 @@ static void readJSON_flowSample(EVMod *mod, cJSON *fs)
       EVBusAddSocket(mod, mdata->packetBus, mdata->json_soc6, readJSON, NULL);
     }
 
+    // can also listen on FIFO
     if(sp->json.FIFO) {
       // This makes it possible to use hsflowd from a container whose networking may be
       // virtualized but where a directory such as /tmp is still accessible and shared.

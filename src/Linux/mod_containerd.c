@@ -57,6 +57,7 @@ extern "C" {
 
 #define HSP_CONTAINERD_READER "/usr/sbin/hsflowd_containerd"
 #define HSP_CONTAINERD_DATAPREFIX "data>"
+#define HSP_CONTAINERD_CTRPREFIX "ctr>"
 
 #define HSP_CONTAINERD_MAX_FNAME_LEN 255
 #define HSP_CONTAINERD_MAX_LINELEN 512
@@ -90,6 +91,7 @@ extern "C" {
 
   typedef struct _HSP_mod_CONTAINERD {
     EVBus *pollBus;
+    EVBus *packetBus;
     UTHash *vmsByUUID;
     UTHash *vmsByID;
     SFLCounters_sample_element vnodeElem;
@@ -106,6 +108,7 @@ extern "C" {
     uint32_t ds_byInnerMAC;
     uint32_t ds_byIP;
     uint32_t ds_byInnerIP;
+    EVEvent *rtmetricEvent;
   } HSP_mod_CONTAINERD;
 
 #define HSP_CONTAINERD_MAX_STATS_LINELEN 512
@@ -817,12 +820,37 @@ extern "C" {
   }
   
   static void readContainerData(EVMod *mod, char *str, void *magic) {
-    // HSP_mod_CONTAINERD *mdata = (HSP_mod_CONTAINERD *)mod->data;
+    HSP_mod_CONTAINERD *mdata = (HSP_mod_CONTAINERD *)mod->data;
     int prefixLen = strlen(HSP_CONTAINERD_DATAPREFIX);
     if(memcmp(str, HSP_CONTAINERD_DATAPREFIX, prefixLen) == 0) {
       cJSON *top = cJSON_Parse(str + prefixLen);
       readContainerJSON(mod, top, magic);
       cJSON_Delete(top);
+    }
+    else if(memcmp(str, HSP_CONTAINERD_CTRPREFIX, strlen(HSP_CONTAINERD_CTRPREFIX)) == 0) {
+      // Go program wants us to share this as an rtmetric in my sFlow feed
+      // Expect form: "ctr> counter32 mycount 123"
+      // This would look cleaner if Go program sent JSON msg.
+      #define RTMETRIC_JSON_LEN 256
+      #define RTMETRIC_TYP_LEN 64
+      #define RTMETRIC_KEY_LEN 64
+      #define RTMETRIC_VAL_LEN 64
+      char rtmBuf[RTMETRIC_JSON_LEN];
+      char rtmTyp[RTMETRIC_TYP_LEN]; // e.g. counter32 or string
+      char rtmKey[RTMETRIC_KEY_LEN];
+      char rtmVal[RTMETRIC_VAL_LEN]; // e.g. 123.0 or "helloworld"
+      char *p = str + strlen(HSP_CONTAINERD_CTRPREFIX);
+      char *sep = "[] \t";
+      if(parseNextTok(&p, sep, NO, 0, YES, rtmTyp, RTMETRIC_TYP_LEN))
+	if(parseNextTok(&p, sep, NO, 0, YES, rtmKey, RTMETRIC_KEY_LEN))
+	  if(parseNextTok(&p, sep, NO, 0, YES, rtmVal, RTMETRIC_VAL_LEN)) {
+	    snprintf(rtmBuf, RTMETRIC_JSON_LEN,
+		     "{ \"rtmetric\": {"
+		     "\"datasource\": \"%s\","
+		     "\"%s\":{\"type\":\"%s\", \"value\":%s }"
+		     "} }", mod->name, rtmKey, rtmTyp, rtmVal);
+	    EVEventTx(mod, mdata->rtmetricEvent, rtmBuf, strlen(rtmBuf));
+	  }
     }
   }
   
@@ -1062,14 +1090,17 @@ extern "C" {
     
     // register call-backs
     mdata->pollBus = EVGetBus(mod, HSPBUS_POLL, YES);
+    mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
 
+    // Go program may want to send rtmetrics (to mod_json)
+    mdata->rtmetricEvent = EVGetEvent(mdata->packetBus, HSPEVENT_RTMETRIC_JSON);
+
     if(sp->containerd.markTraffic) {
-      EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-      EVEventRx(mod, EVGetEvent(packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
+      EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_FLOW_SAMPLE), evt_flow_sample);
       mdata->vnicByMAC = UTHASH_NEW(HSPVnicMAC, mac, UTHASH_SYNC); // need sync (poll + packet thread)
       mdata->vnicByIP = UTHASH_NEW(HSPVnicIP, ipAddr, UTHASH_SYNC); // need sync (poll + packet thread)
     }

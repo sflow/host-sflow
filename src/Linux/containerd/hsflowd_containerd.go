@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"fmt"
 )
 
 import (
@@ -120,6 +121,11 @@ type CMonitor struct {
 	dbg          int
 	dbgLogger    *log.Logger
 	dataLogger   *log.Logger
+	ctrLogger    *log.Logger
+	c_countdown  int
+	c_pollM      int
+	c_pollC      int
+	c_apiEvt     int
 }
 
 func main() {
@@ -143,6 +149,11 @@ func main() {
 		dbg:          *debugLevel,
 		dbgLogger:    log.New(os.Stdout, "debug>", log.Ldate|log.Ltime|log.Lshortfile),
 		dataLogger:   log.New(os.Stdout, "data>", 0),
+		ctrLogger:    log.New(os.Stdout, "ctr>", 0),
+		c_countdown:  0,
+		c_pollM:      0,
+		c_pollC:      0,
+ 	        c_apiEvt:     0,
 	}
 
 	if err := cm.readConfig("/etc/hsflowd.auto"); err != nil {
@@ -166,20 +177,25 @@ func main() {
 	}
 }
 
-func (cm CMonitor) log(level int, v ...interface{}) {
+func (cm *CMonitor) log(level int, v ...interface{}) {
 	if cm.dbg >= level {
-		cm.dbgLogger.Println(v)
+		cm.dbgLogger.Output(2, fmt.Sprintln(v))
 	}
 }
 
-func (cm CMonitor) fatal(err error) {
+func (cm *CMonitor) fatal(err error) {
 	debug.PrintStack()
 	cm.dbgLogger.Fatal(err)
 }
 
-func (cm CMonitor) dataLog(msg string) {
+func (cm *CMonitor) dataLog(msg string) {
 	cm.dataLogger.Println(msg)
 }
+
+func (cm *CMonitor) ctrLog(v ...interface{}) {
+	cm.ctrLogger.Println(v)
+}
+
 func (cm *CMonitor) readConfig(path string) error {
 	auto, err := os.Open(path)
 	if err != nil {
@@ -203,11 +219,11 @@ func (cm *CMonitor) readConfig(path string) error {
 	return err
 }
 
-func (cm CMonitor) sFlowContainerKey(nsname string, cont containerd.Container) string {
+func (cm *CMonitor) sFlowContainerKey(nsname string, cont containerd.Container) string {
 	return nsname + "." + cont.ID()
 }
 
-func (cm CMonitor) loadContainer(nsctx context.Context, nsname string, cont containerd.Container) error {
+func (cm *CMonitor) loadContainer(nsctx context.Context, nsname string, cont containerd.Container) error {
 	info, err := cont.Info(nsctx, containerd.WithoutRefreshedMetadata)
 	if err != nil {
 		return err
@@ -268,7 +284,7 @@ func (cm CMonitor) loadContainer(nsctx context.Context, nsname string, cont cont
 	return nil
 }
 
-func (cm CMonitor) loadContainers(ctx context.Context, client *containerd.Client) error {
+func (cm *CMonitor) loadContainers(ctx context.Context, client *containerd.Client) error {
 	cm.log(0, "loadContainers() sfcontainers size=", len(cm.sfcontainers))
 	nsclient := client.NamespaceService()
 	nslist, err := nsclient.List(ctx)
@@ -304,7 +320,8 @@ func (cm CMonitor) loadContainers(ctx context.Context, client *containerd.Client
 	return nil
 }
 
-func (cm CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, sfc *SFlowContainer) error {
+func (cm *CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, sfc *SFlowContainer) error {
+	cm.c_pollM += 1
 	cm.log(1, "pollmetrics: ", sfc.Id)
 	myctx := namespaces.WithNamespace(ctx, sfc.Namespace)
 	container, err := client.LoadContainer(myctx, sfc.Id)
@@ -412,6 +429,15 @@ func (cm CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, s
 }
 
 func (cm *CMonitor) metricTick(ctx context.Context, client *containerd.Client) error {
+	cm.c_countdown--
+	if(cm.c_countdown <= 0) {
+		// adopt same polling interval for my own debug counters
+		cm.c_countdown = cm.polling
+		cm.ctrLog("gauge32 ncontainers ", len(cm.sfcontainers))
+		cm.ctrLog("counter32 metricpolls ", cm.c_pollM)
+		cm.ctrLog("counter32 containerpolls ", cm.c_pollC)
+		cm.ctrLog("counter32 apievents ", cm.c_apiEvt)
+	}
 	for _, sfc := range cm.sfcontainers {
 		if sfc.pollNow {
 			// extra poll at beginning or end of lifecycle
@@ -434,7 +460,8 @@ func (cm *CMonitor) metricTick(ctx context.Context, client *containerd.Client) e
 	return nil
 }
 
-func (cm CMonitor) pollContainer(ctx context.Context, client *containerd.Client, nsname string, id string) error {
+func (cm *CMonitor) pollContainer(ctx context.Context, client *containerd.Client, nsname string, id string) error {
+	cm.c_pollC += 1
 	nsctx := namespaces.WithNamespace(ctx, nsname)
 	cont, err := client.LoadContainer(nsctx, id)
 	if err != nil {
@@ -459,7 +486,7 @@ func (cm CMonitor) pollContainer(ctx context.Context, client *containerd.Client,
 	return nil
 }
 
-func (cm CMonitor) monitorContainers(ctx context.Context) error {
+func (cm *CMonitor) monitorContainers(ctx context.Context) error {
 	cm.log(1, "monitorContainers polling=", cm.polling)
 	client, err := containerd.New("/run/containerd/containerd.sock")
 	if err != nil {
@@ -493,6 +520,7 @@ func (cm CMonitor) monitorContainers(ctx context.Context) error {
 		if e != nil {
 			var out []byte
 			if e.Event != nil {
+				cm.c_apiEvt += 1
 				v, err := typeurl.UnmarshalAny(e.Event)
 				if err != nil {
 					cm.log(1, "cannot unmarshall event: ", err)

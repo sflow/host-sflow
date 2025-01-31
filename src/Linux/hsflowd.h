@@ -451,6 +451,7 @@ extern "C" {
 #define HSPEVENT_POLL_INTERVAL "poll_interval"   // sent when actualPollingInterval changed
 #define HSPEVENT_HEADER_BYTES "header_bytes"     // (headerBytes) sent on config change
 #define HSPEVENT_PSAMPLE "psample"               // raw psample (HSPPSample)
+#define HSPEVENT_RTMETRIC_JSON "rtmetric_json"   // rtmetric msg in JSON format
 
   typedef struct _HSPPSample {
     uint32_t grp_no;

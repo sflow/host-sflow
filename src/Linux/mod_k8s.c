@@ -65,6 +65,7 @@ extern "C" {
 
 #define HSP_K8S_READER "/usr/sbin/hsflowd_containerd"
 #define HSP_K8S_DATAPREFIX "data>"
+#define HSP_K8S_CTRPREFIX "ctr>"
 
 #define HSP_K8S_MAX_FNAME_LEN 255
 #define HSP_K8S_MAX_LINELEN 512
@@ -117,6 +118,7 @@ extern "C" {
     uint32_t ds_byInnerIP;
     uint32_t pod_byAddr;
     uint32_t pod_byCgroup;
+    EVEvent *rtmetricEvent;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -946,12 +948,37 @@ extern "C" {
   }
   
   static void readContainerData(EVMod *mod, char *str, void *magic) {
-    // HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     int prefixLen = strlen(HSP_K8S_DATAPREFIX);
     if(memcmp(str, HSP_K8S_DATAPREFIX, prefixLen) == 0) {
       cJSON *top = cJSON_Parse(str + prefixLen);
       readContainerJSON(mod, top, magic);
       cJSON_Delete(top);
+    }
+    else if(memcmp(str, HSP_K8S_CTRPREFIX, strlen(HSP_K8S_CTRPREFIX)) == 0) {
+      // Go program wants us to share this as an rtmetric in my sFlow feed
+      // Expect form: "ctr> counter32 <int>"
+      // This would look cleaner if Go program sent JSON msg.
+      #define RTMETRIC_JSON_LEN 256
+      #define RTMETRIC_KEY_LEN 64
+      #define RTMETRIC_TYP_LEN 64
+      #define RTMETRIC_VAL_LEN 64
+      char rtmBuf[RTMETRIC_JSON_LEN];
+      char rtmKey[RTMETRIC_KEY_LEN];
+      char rtmTyp[RTMETRIC_TYP_LEN]; // e.g. counter32 or string
+      char rtmVal[RTMETRIC_VAL_LEN]; // e.g. 123.0 or "helloworld"
+      char *p = str + strlen(HSP_K8S_CTRPREFIX);
+      char *sep = "[] \t";
+      if(parseNextTok(&p, sep, NO, 0, YES, rtmKey, RTMETRIC_KEY_LEN))
+	if(parseNextTok(&p, sep, NO, 0, YES, rtmTyp, RTMETRIC_TYP_LEN))
+	  if(parseNextTok(&p, sep, NO, 0, YES, rtmVal, RTMETRIC_VAL_LEN)) {
+	    snprintf(rtmBuf, RTMETRIC_JSON_LEN,
+		     "{ \"rtmetric\": {"
+		     "\"datasource\": \"%s\","
+		     "\"%s\":{\"type\":\"%s\", \"value\":%s }"
+		     "} }", mod->name, rtmKey, rtmTyp, rtmVal);
+	    EVEventTx(mod, mdata->rtmetricEvent, rtmBuf, strlen(rtmBuf));
+	  }
     }
   }
   
@@ -1293,6 +1320,9 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
 
+    // Go program may want to send rtmetrics (to mod_json)
+    mdata->rtmetricEvent = EVGetEvent(sp->packetBus, HSPEVENT_RTMETRIC_JSON);
+    
     if(sp->k8s.markTraffic) {
       // By requesting HSPEVENT_FLOW_SAMPLE_RELEASED as well as
       // HSPEVENT_FLOW_SAMPLE we ensure that mod_tcp (if loaded)

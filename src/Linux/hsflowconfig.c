@@ -1990,6 +1990,7 @@ extern "C" {
 	    switch(tok->stok) {
 	    case HSPTOKEN_UDPPORT:
 	    case HSPTOKEN_JSONPORT:
+	      // setting to 0 turns off localhost socket listening
 	      if((tok = expectInteger32(sp, tok, &sp->json.port,0,65535)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_FIFO:
