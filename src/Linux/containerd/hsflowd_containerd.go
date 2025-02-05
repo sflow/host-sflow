@@ -126,6 +126,7 @@ type CMonitor struct {
 	c_pollM      int
 	c_pollC      int
 	c_apiEvt     int
+	c_pollL      int
 }
 
 func main() {
@@ -154,6 +155,7 @@ func main() {
 		c_pollM:      0,
 		c_pollC:      0,
  	        c_apiEvt:     0,
+		c_pollL:      0,
 	}
 
 	if err := cm.readConfig("/etc/hsflowd.auto"); err != nil {
@@ -437,6 +439,7 @@ func (cm *CMonitor) metricTick(ctx context.Context, client *containerd.Client) e
 		cm.ctrLog("counter32 metricpolls ", cm.c_pollM)
 		cm.ctrLog("counter32 containerpolls ", cm.c_pollC)
 		cm.ctrLog("counter32 apievents ", cm.c_apiEvt)
+		cm.ctrLog("counter32 eventloop", cm.c_pollL)
 	}
 	for _, sfc := range cm.sfcontainers {
 		if sfc.pollNow {
@@ -499,6 +502,7 @@ func (cm *CMonitor) monitorContainers(ctx context.Context) error {
 	var tload time.Time = time.Now()
 	var ttick time.Time = time.Now()
 	for {
+		cm.c_pollL += 1
 		if firstTime || time.Since(tload) >= (time.Second*time.Duration(cm.polling)) { // TODO: can check less often once we react to events
 			firstTime = false
 			err := cm.loadContainers(ctx, client)

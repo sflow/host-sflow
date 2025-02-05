@@ -119,6 +119,8 @@ extern "C" {
     uint32_t pod_byAddr;
     uint32_t pod_byCgroup;
     EVEvent *rtmetricEvent;
+    uint32_t c_readCB;
+    uint32_t c_readContainerCB;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -984,7 +986,8 @@ extern "C" {
   
   static void readContainerCB(EVMod *mod, EVSocket *sock, EnumEVSocketReadStatus status, void *magic) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    // HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    mdata->c_readContainerCB++;
     switch(status) {
     case EVSOCKETREAD_AGAIN:
       break;
@@ -1221,6 +1224,8 @@ extern "C" {
   */
 
   static void readCB(EVMod *mod, EVSocket *sock, void *magic) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    mdata->c_readCB++;
     EVSocketReadLines(mod, sock, readContainerCB, NO, magic);
   }
 
