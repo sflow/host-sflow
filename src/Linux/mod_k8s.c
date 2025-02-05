@@ -1245,15 +1245,21 @@ extern "C" {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
 
     if(EVDebug(mod, 1, NULL)) {
-      EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u,n_vnicByIP=%u",
+      EVDebug(mod, 1, "ds_byMAC=%u,ds_byInnerMAC=%u,ds_byIP=%u,ds_byInnerIP=%u,pod_byAddr=%u,pod_byCgroup=%u,n_vnicByIP=%u,readCB=%u,readContainerCB=%u",
 	      mdata->ds_byMAC,
 	      mdata->ds_byInnerMAC,
 	      mdata->ds_byIP,
 	      mdata->ds_byInnerIP,
-	    mdata->pod_byAddr,
+	      mdata->pod_byAddr,
 	      mdata->pod_byCgroup,
-	      UTHashN(mdata->vnicByIP));
+	      UTHashN(mdata->vnicByIP),
+	      mdata->c_readCB,
+	      mdata->c_readContainerCB);
     }
+    // These counters are "total in last second".  They are not universally interesting, just
+    // for understanding how this module is interfacing with the hsflowd_containerd.go program.
+    mdata->c_readCB = 0;
+    mdata->c_readContainerCB=0;
 
     if(--mdata->idleSweepCountdown <= 0) {
       // rearm
