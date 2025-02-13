@@ -124,6 +124,10 @@ extern "C" {
 	    mdata->group_id,
 	    strerror(errno));
       // go back to the retry loop
+      // Note that if we have dropped privileges in the interim then
+      // we will continue to fail here, with "Operation not permitted"
+      // even if "sudo modprobe sample" has installed the kernel module.
+      // Not sure if we should consider that a fatal error or not?
       mdata->state = HSP_PSAMPLE_STATE_GET_FAMILY;
     }
   }
