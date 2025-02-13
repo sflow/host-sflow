@@ -123,6 +123,8 @@ extern "C" {
       myLog(LOG_ERR, "error joining PSAMPLE netlink group %u : %s",
 	    mdata->group_id,
 	    strerror(errno));
+      // go back to the retry loop
+      mdata->state = HSP_PSAMPLE_STATE_GET_FAMILY;
     }
   }
 
