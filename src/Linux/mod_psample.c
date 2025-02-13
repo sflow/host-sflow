@@ -57,7 +57,6 @@ extern "C" {
   typedef enum {
     HSP_PSAMPLE_STATE_INIT=0,
     HSP_PSAMPLE_STATE_GET_FAMILY,
-    HSP_PSAMPLE_STATE_WAIT,
     HSP_PSAMPLE_STATE_JOIN_GROUP,
     HSP_PSAMPLE_STATE_RUN } EnumPsampleState;
 
@@ -94,6 +93,7 @@ extern "C" {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
     EVDebug(mod, 1, "getFamily");
     mdata->state = HSP_PSAMPLE_STATE_GET_FAMILY;
+    mdata->retry_countdown = HSP_PSAMPLE_WAIT_RETRY_S;
     UTNLGeneric_send(mdata->nl_sock,
 		     mod->id,
 		     GENL_ID_CTRL,
@@ -508,13 +508,6 @@ extern "C" {
 	}
       }
     }
-
-    // This should have advanced the state past GET_FAMILY
-    if(mdata->state == HSP_PSAMPLE_STATE_GET_FAMILY) {
-      EVDebug(mod, 1, "failed to get family details - wait before trying again");
-      mdata->state = HSP_PSAMPLE_STATE_WAIT;
-      mdata->retry_countdown = HSP_PSAMPLE_WAIT_RETRY_S;
-    }
   }
   
   /*_________________---------------------------__________________
@@ -574,9 +567,6 @@ extern "C" {
       break;
     case HSP_PSAMPLE_STATE_GET_FAMILY:
       // waiting for family info response
-      break;
-    case HSP_PSAMPLE_STATE_WAIT:
-      // pausing before trying again
       if(--mdata->retry_countdown <= 0)
 	getFamily_PSAMPLE(mod);
       break;
