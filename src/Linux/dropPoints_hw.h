@@ -230,5 +230,8 @@ HSP_DROPPOINT(==,locked_port,locked_port)             /* DROP: Traps packets tha
 							 check. That is, packets that were received via a locked port and whose {SMAC, VID} does not
 							 correspond to an FDB entry pointing to the port */
 
+HSP_DROPPOINT(*=,vpp_*,unknown)                       /* VPP engine error-drop - this placeholder allows those drops to be sent out, but additional
+                                                         entries will appear here in due course to map the VPP drop strings into sFlow drop reasons. */
+
 /* report anything else with reason "unknown" */
 // HSP_DROPPOINT(*=,*,unknown)
