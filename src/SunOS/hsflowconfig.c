@@ -795,7 +795,7 @@ extern "C" {
       for(HSPCollector *coll = sp->sFlow->sFlowSettings_file->collectors; coll; coll = coll->nxt) {
 	//////////////////////// collector /////////////////////////
 	if(coll->ipAddr.type == 0) {
-	  myLog(LOG_ERR, "parse error in %s : collector  has no IP", sp->configFile);
+	  myLog(LOG_ERR, "parse error in %s : collector has no IP", sp->configFile);
 	  parseOK = NO;
 	}
       }
