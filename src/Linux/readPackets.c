@@ -218,13 +218,6 @@ extern "C" {
       }
     }
 
-    SFL_FLOW_SAMPLE_TYPE *fs = my_calloc(sizeof(SFL_FLOW_SAMPLE_TYPE));
-
-    // set the ingress and egress ifIndex numbers.
-    // Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
-    fs->input = ad_in ? ad_in->ifIndex : (internal_in ? SFL_INTERNAL_INTERFACE : 0);
-    fs->output = ad_out ? ad_out->ifIndex : (internal_out ? SFL_INTERNAL_INTERFACE : 0);
-
     SFLAdaptor *sampler_dev = ad_tap;
     if(ad_tap
        && (dsopts & HSP_SAMPLEOPT_DEV_SAMPLER)) {
@@ -283,6 +276,13 @@ extern "C" {
 	 && !ADAPTOR_NIO(ad_out)->loopback)
 	getPoller(sp, ad_out);
     }
+
+    SFL_FLOW_SAMPLE_TYPE *fs = my_calloc(sizeof(SFL_FLOW_SAMPLE_TYPE));
+
+    // set the ingress and egress ifIndex numbers.
+    // Can be "INTERNAL" (0x3FFFFFFF) or "UNKNOWN" (0).
+    fs->input = ad_in ? ad_in->ifIndex : (internal_in ? SFL_INTERNAL_INTERFACE : 0);
+    fs->output = ad_out ? ad_out->ifIndex : (internal_out ? SFL_INTERNAL_INTERFACE : 0);
 
     // build the sampled header structure
     HSPPendingSample *ps = pendingSampleNew(sampler, fs);

@@ -242,6 +242,7 @@ extern "C" {
     HSPPSample psmp = {};
     SFLFlow_sample_element *ext_elems = NULL;
     // TODO: tunnel encap/decap may be avaiable too
+    bool free_ext_elems = YES;
 
     for(int offset = GENL_HDRLEN; offset < msglen; ) {
       struct nlattr *ps_attr = (struct nlattr *)(msg + offset);
@@ -409,6 +410,7 @@ extern "C" {
 	// take the sample - this will take over responsibility for
 	// freeing the extended elements when the sample has
 	// been fully processed.
+	free_ext_elems = NO;
 	takeSample(sp,
 		   inDev,
 		   outDev,
@@ -424,10 +426,10 @@ extern "C" {
 		   this_sample_n,
 		   ext_elems);
       }
-      else {
-	// clean up
-	freeExtendedElements(ext_elems);
-      }
+    }
+    if(free_ext_elems) {
+      // we didn't pass these on, so clean up
+      freeExtendedElements(ext_elems);
     }
   }
 

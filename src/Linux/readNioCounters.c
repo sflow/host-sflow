@@ -381,9 +381,9 @@ extern "C" {
       if(nio->poller
 	 && nio->switchPort
 	 && nio->poller->sFlowCpInterval) {
-	uint32_t countdown = nio->poller->countersCountdown;
-	uint32_t nudgeBack = countdown % sp->syncPollingInterval;
-	uint32_t nudgeFwd = sp->syncPollingInterval - nudgeBack;
+	time_t countdown = nio->poller->countersCountdown;
+	time_t nudgeBack = countdown % sp->syncPollingInterval;
+	time_t nudgeFwd = sp->syncPollingInterval - nudgeBack;
 	// take the smaller nudge - as long as it's in the future
 	if(nudgeBack < nudgeFwd
 	   && countdown > nudgeBack)

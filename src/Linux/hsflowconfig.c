@@ -696,6 +696,7 @@ extern "C" {
     HSPToken *token = (HSPToken *)my_calloc(sizeof(HSPToken));
     token->str = (char *)my_calloc(len + 1);
     memcpy(token->str, str, len);
+    token->str[len] = '\0';
     // if it is special token, then record the index number here too
     for(uint32_t i = 0; i < HSPTOKEN_NUM_TOKENS; i++) {
       if(strcasecmp(token->str, HSPSpecialTokens[i].str) == 0) {

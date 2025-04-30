@@ -203,14 +203,14 @@ extern "C" {
   UTArray *UTArrayNew(int flags);
   uint32_t UTArrayAdd(UTArray *ar, void *obj);
   uint32_t UTArrayAddAll(UTArray *ar, UTArray *add);
-  void UTArrayPut(UTArray *ar, void *obj, int i);
+  void UTArrayPut(UTArray *ar, void *obj, uint32_t i);
   bool UTArrayDel(UTArray *ar, void *obj);
-  void *UTArrayDelAt(UTArray *ar, int i);
+  void *UTArrayDelAt(UTArray *ar, uint32_t i);
   void UTArrayPack(UTArray *ar);
   void UTArrayReset(UTArray *ar);
   void UTArrayFree(UTArray *ar);
   uint32_t UTArrayN(UTArray *ar);
-  void *UTArrayAt(UTArray *ar, int i);
+  void *UTArrayAt(UTArray *ar, uint32_t i);
   void UTArrayPush(UTArray *ar, void *obj);
   void *UTArrayPop(UTArray *ar);
 #define UTARRAY_WALK(ar, obj) for(uint32_t _ii=0; _ii<UTArrayN(ar); _ii++) if(((obj)=(typeof(obj))UTArrayAt((ar), _ii)))

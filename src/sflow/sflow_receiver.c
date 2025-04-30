@@ -83,7 +83,7 @@ time_t sfl_receiver_get_sFlowRcvrTimeout(SFLReceiver *receiver) {
   return receiver->sFlowRcvrTimeout;
 }
 void sfl_receiver_set_sFlowRcvrTimeout(SFLReceiver *receiver, time_t sFlowRcvrTimeout) {
-  receiver->sFlowRcvrTimeout =sFlowRcvrTimeout;
+  receiver->sFlowRcvrTimeout = sFlowRcvrTimeout;
 } 
 uint32_t sfl_receiver_get_sFlowRcvrMaximumDatagramSize(SFLReceiver *receiver) {
   return receiver->sFlowRcvrMaximumDatagramSize;
@@ -127,9 +127,11 @@ void sfl_receiver_tick(SFLReceiver *receiver, time_t now)
 {
   sfl_receiver_flush(receiver);
   // check the timeout
-  if(receiver->sFlowRcvrTimeout && (uint32_t)receiver->sFlowRcvrTimeout != 0xFFFFFFFF) {
+  if(receiver->sFlowRcvrTimeout
+     && receiver->sFlowRcvrTimeout > 0) {
     // count down one tick and reset if we reach 0
-    if(--receiver->sFlowRcvrTimeout == 0) reset(receiver);
+    if(--receiver->sFlowRcvrTimeout <= 0)
+      reset(receiver);
   }
 }
 

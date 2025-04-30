@@ -495,22 +495,24 @@ extern "C" {
     // set device type from ethtool driver info - could also have gone
     // to /sys/class/net/<device>/.
     HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
-    struct ethtool_drvinfo drvinfo;
-    drvinfo.cmd = ETHTOOL_GDRVINFO;
+    struct ethtool_drvinfo drvinfo = { .cmd = ETHTOOL_GDRVINFO };
     ifr->ifr_data = (char *)&drvinfo;
     if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
       EnumHSPDevType devType = HSPDEV_OTHER;
-      if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
-	devType = HSPDEV_BRIDGE;
-      else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
-	devType = HSPDEV_VETH;
-      else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
-	devType = HSPDEV_VIF;
-      else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
-	devType = HSPDEV_OVS;
-      else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
-	devType = HSPDEV_PHYSICAL;
-      else if(my_strlen(drvinfo.bus_info))
+      if(drvinfo.driver) {
+	if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
+	  devType = HSPDEV_BRIDGE;
+	else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
+	  devType = HSPDEV_VETH;
+	else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
+	  devType = HSPDEV_VIF;
+	else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
+	  devType = HSPDEV_OVS;
+	else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
+	  devType = HSPDEV_PHYSICAL;
+      }
+      if(devType == HSPDEV_OTHER
+	 && my_strlen(drvinfo.bus_info))
 	devType = HSPDEV_PHYSICAL;
 
       if(adaptorNIO->devType != devType) {
@@ -706,10 +708,6 @@ extern "C" {
 
     uint32_t ad_added=0, ad_removed=0, ad_cameup=0, ad_wentdown=0, ad_changed=0;
 
-  // keep v4 and v6 separate to simplify HT logic
-  UTHash *newLocalIP = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v4, UTHASH_DFLT);
-  UTHash *newLocalIP6 = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v6, UTHASH_DFLT);
-
   // mark-and-sweep. Mark all existing adaptors (that are managed by this mod)
   {
     SFLAdaptor *ad;
@@ -731,6 +729,10 @@ extern "C" {
     fprintf (stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
     return 0;
   }
+
+  // keep v4 and v6 separate to simplify HT logic
+  UTHash *newLocalIP = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v4, UTHASH_DFLT);
+  UTHash *newLocalIP6 = UTHASH_NEW(HSPLocalIP, ipAddr.address.ip_v6, UTHASH_DFLT);
 
   FILE *procFile = fopen(PROCFS_STR "/net/dev", "r");
   if(procFile) {

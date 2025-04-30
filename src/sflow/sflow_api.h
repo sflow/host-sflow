@@ -136,7 +136,7 @@ typedef struct _SFLPoller {
   /* MIB fields */
   SFLDataSource_instance dsi;
   uint32_t sFlowCpReceiver;
-  time_t sFlowCpInterval;
+  uint32_t sFlowCpInterval;
   /* public fields */
   struct _SFLAgent *agent; /* pointer to my agent */
   void *magic;             /* ptr to pass back in getCountersFn() */
@@ -144,7 +144,7 @@ typedef struct _SFLPoller {
   getCountersFn_t getCountersFn;
   /* private fields */
   SFLReceiver *myReceiver;
-  time_t countersCountdown;
+  uint32_t countersCountdown;
   uint32_t countersSampleSeqNo;
   /* optional alias datasource index */
   uint32_t ds_alias;

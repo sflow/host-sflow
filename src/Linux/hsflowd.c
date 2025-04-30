@@ -1182,7 +1182,7 @@ extern "C" {
     sfl_receiver_set_sFlowRcvrOwner(receiver, "Virtual Switch sFlow Probe");
 
     // set the timeout to infinity
-    sfl_receiver_set_sFlowRcvrTimeout(receiver, 0xFFFFFFFF);
+    sfl_receiver_set_sFlowRcvrTimeout(receiver, -1);
 
     return agent;
   }

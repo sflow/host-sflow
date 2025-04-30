@@ -563,10 +563,10 @@ extern "C" {
 	}
 	else {
 	  // wait here
-	  pthread_join(*thread, NULL); // TODO: check for error?
-	  my_free(thread);
 	  EVDebug(mod, 1, "getNetlinkSocket(): opened new socket in namespace: %u", nspid);
+	  pthread_join(*thread, NULL); // TODO: check for error?
 	}
+	my_free(thread);
       }
       else {
 	// open in default namespace
