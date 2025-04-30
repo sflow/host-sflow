@@ -337,9 +337,12 @@ extern "C" {
       EVAction *act;
       if(evt->actionsChanged) {
 	SEMLOCK_DO(mod->root->sync) {
-	  UTArrayReset(evt->actions_run);
-	  UTArrayAddAll(evt->actions_run, evt->actions);
-	  evt->actionsChanged = NO;
+	  // check again once we have the lock
+	  if(evt->actionsChanged) {
+	    UTArrayReset(evt->actions_run);
+	    UTArrayAddAll(evt->actions_run, evt->actions);
+	    evt->actionsChanged = NO;
+	  }
 	}
       }
       UTARRAY_WALK(evt->actions_run, act) {
@@ -392,11 +395,14 @@ extern "C" {
     // and other registered sockets
     if(bus->socketsChanged) {
       SEMLOCK_DO(bus->root->sync) {
-	UTArrayReset(bus->sockets_run);
-	UTArrayAddAll(bus->sockets_run, bus->sockets);
-	UTARRAY_WALK(bus->sockets_del, sock) EVSocketFree(sock);
-	UTArrayReset(bus->sockets_del);
-	bus->socketsChanged = NO;
+	// check again once we have the lock
+	if(bus->socketsChanged) {
+	  UTArrayReset(bus->sockets_run);
+	  UTArrayAddAll(bus->sockets_run, bus->sockets);
+	  UTARRAY_WALK(bus->sockets_del, sock) EVSocketFree(sock);
+	  UTArrayReset(bus->sockets_del);
+	  bus->socketsChanged = NO;
+	}
       }
     }
     UTARRAY_WALK(bus->sockets_run, sock) {

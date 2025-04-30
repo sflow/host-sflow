@@ -342,18 +342,21 @@ extern "C" {
   {
     if(UTHeap.n_foreign) {
       SEMLOCK_DO(UTHeap.sync_foreign) {
-	for(UTHeapHeader *utBuf = UTHeap.foreign, *prev = NULL; utBuf; ) {
-	  UTHeapHeader *nextBuf = utBuf->nxt;
-	  if(utBuf->h.realmIdx == utRealm.realmIdx) {
-	    // this one is mine - recycle and unlink
-	    myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
-	    UTHeapQFree(utBuf);
-	    if(prev) prev->nxt = nextBuf;
-	    else UTHeap.foreign = nextBuf;
-	    UTHeap.n_foreign--;
+	// check again now we have the lock
+	if(UTHeap.n_foreign) {
+	  for(UTHeapHeader *utBuf = UTHeap.foreign, *prev = NULL; utBuf; ) {
+	    UTHeapHeader *nextBuf = utBuf->nxt;
+	    if(utBuf->h.realmIdx == utRealm.realmIdx) {
+	      // this one is mine - recycle and unlink
+	      myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
+	      UTHeapQFree(utBuf);
+	      if(prev) prev->nxt = nextBuf;
+	      else UTHeap.foreign = nextBuf;
+	      UTHeap.n_foreign--;
+	    }
+	    else prev = utBuf;
+	    utBuf = nextBuf;
 	  }
-	  else prev = utBuf;
-	  utBuf = nextBuf;
 	}
       }
     }
@@ -845,7 +848,7 @@ extern "C" {
     return ar->n;
   }
 
-  void *UTArrayDelAt(UTArray *ar, int i) {
+  void *UTArrayDelAt(UTArray *ar, uint32_t i) {
     void *obj = NULL;
     SEMLOCK_DO(ar->sync) {
       if(i < ar->n) {
@@ -888,7 +891,7 @@ extern "C" {
     return ans;
   }
 
-  void UTArrayPut(UTArray *ar, void *obj, int i) {
+  void UTArrayPut(UTArray *ar, void *obj, uint32_t i) {
     SEMLOCK_DO(ar->sync) {
       arrayGrowthCheck(ar, i);
       ar->objs[i] = obj;
@@ -933,7 +936,7 @@ extern "C" {
     return ar->n;
   }
 
-  void *UTArrayAt(UTArray *ar, int i) {
+  void *UTArrayAt(UTArray *ar, uint32_t i) {
     return ((i < ar->n)
 	    ? ar->objs[i]
 	    : NULL);
@@ -971,8 +974,10 @@ extern "C" {
       return NO;
     }
 
-    if(info == NULL) return NO;
+    if(info == NULL)
+      return NO;
 
+    bool ans = NO;
     if(info->ai_addr) {
       // answer is now in info - a linked list of answers with sockaddr values.
       // extract the address we want from the first one. $$$ should perhaps
@@ -1001,13 +1006,13 @@ extern "C" {
 	break;
       default:
 	myLog(LOG_ERR, "get addrinfo: unexpected address family: %d", info->ai_family);
-	return NO;
+	ans = NO;
 	break;
       }
     }
     // free the dynamically allocated data before returning
     freeaddrinfo(info);
-    return YES;
+    return ans;
   }
 
   bool lookupAddress(char *name, struct sockaddr *sa, SFLAddress *addr, int family)
