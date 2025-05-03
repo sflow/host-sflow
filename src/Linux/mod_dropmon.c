@@ -428,18 +428,22 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void getFamily_DROPMON(EVMod *mod)
+  static int getFamily_DROPMON(EVMod *mod)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     setState(mod, HSP_DROPMON_STATE_GET_FAMILY);
-    UTNLGeneric_send(mdata->nl_sock,
-		     mod->id,
-		     GENL_ID_CTRL,
-		     CTRL_CMD_GETFAMILY,
-		     CTRL_ATTR_FAMILY_NAME,
-		     DROPMON_GENL_NAME,
-		     sizeof(DROPMON_GENL_NAME)+1,
-		     ++mdata->nl_seq);
+    int status = UTNLGeneric_send(mdata->nl_sock,
+				  mod->id,
+				  GENL_ID_CTRL,
+				  CTRL_CMD_GETFAMILY,
+				  CTRL_ATTR_FAMILY_NAME,
+				  DROPMON_GENL_NAME,
+				  sizeof(DROPMON_GENL_NAME)+1,
+				  ++mdata->nl_seq);
+    if(status < 0) {
+      EVDebug(mod, 1, "getFamily_DROPMON() failed: %s", strerror(errno));
+    }
+    return status;
   }
 
   /*_________________---------------------------__________________
@@ -525,8 +529,12 @@ That would allow everything to stay on the stack as it does here, which has nice
     };
 
     struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
-				 struct msghdr msg = { .msg_name = &sa, .msg_namelen = sizeof(sa), .msg_iov = iov, .msg_iovlen = (2 + fl) };
-    return sendmsg(mdata->nl_sock, &msg, 0);
+    struct msghdr msg = { .msg_name = &sa, .msg_namelen = sizeof(sa), .msg_iov = iov, .msg_iovlen = (2 + fl) };
+    int status = sendmsg(mdata->nl_sock, &msg, 0);
+    if(status < 0) {
+      EVDebug(mod, 1, "start_DROPMON() sendmsg failed: %s", strerror(errno));
+    }
+    return status;
   }
 
   /*_________________---------------------------__________________
@@ -541,32 +549,39 @@ That would allow everything to stay on the stack as it does here, which has nice
     uint8_t alertMode = NET_DM_ALERT_MODE_PACKET;
     uint32_t truncLen = SFL_DEFAULT_HEADER_SIZE; // TODO: parameter? Write to notifier too?
     uint32_t queueLen = HSP_DROPMON_QUEUE; // TODO: parameter?
+    int status;
     // This control will fail if the feed has already been configured and started externally.
     // TODO: set these in one message?
-    UTNLGeneric_send(mdata->nl_sock,
-		     mod->id,
-		     mdata->family_id,
-		     NET_DM_CMD_CONFIG,
-		     NET_DM_ATTR_TRUNC_LEN,
-		     &truncLen,
-		     sizeof(truncLen),
-		     ++mdata->nl_seq);
-    UTNLGeneric_send(mdata->nl_sock,
-		     mod->id,
-		     mdata->family_id,
-		     NET_DM_CMD_CONFIG,
-		     NET_DM_ATTR_QUEUE_LEN,
-		     &queueLen,
-		     sizeof(queueLen),
-		     ++mdata->nl_seq);
-    UTNLGeneric_send(mdata->nl_sock,
-		     mod->id,
-		     mdata->family_id,
-		     NET_DM_CMD_CONFIG,
-		     NET_DM_ATTR_ALERT_MODE,
-		     &alertMode,
-		     sizeof(alertMode),
-		     ++mdata->nl_seq);
+    status = UTNLGeneric_send(mdata->nl_sock,
+				  mod->id,
+				  mdata->family_id,
+				  NET_DM_CMD_CONFIG,
+				  NET_DM_ATTR_TRUNC_LEN,
+				  &truncLen,
+				  sizeof(truncLen),
+				  ++mdata->nl_seq);
+    if(status < 0)
+      myLog(LOG_ERR, "UTNLGeneric_send(truncLen) failed: %s", strerror(errno));
+    status = UTNLGeneric_send(mdata->nl_sock,
+			      mod->id,
+			      mdata->family_id,
+			      NET_DM_CMD_CONFIG,
+			      NET_DM_ATTR_QUEUE_LEN,
+			      &queueLen,
+			      sizeof(queueLen),
+			      ++mdata->nl_seq);
+    if(status < 0)
+      myLog(LOG_ERR, "UTNLGeneric_send(queueLen) failed: %s", strerror(errno));
+    status = UTNLGeneric_send(mdata->nl_sock,
+			      mod->id,
+			      mdata->family_id,
+			      NET_DM_CMD_CONFIG,
+			      NET_DM_ATTR_ALERT_MODE,
+			      &alertMode,
+			      sizeof(alertMode),
+			      ++mdata->nl_seq);
+    if(status < 0)
+      myLog(LOG_ERR, "UTNLGeneric_send(alertMode) failed: %s", strerror(errno));
   }
 
   /*_________________---------------------------__________________
@@ -574,94 +589,92 @@ That would allow everything to stay on the stack as it does here, which has nice
     -----------------___________________________------------------
   */
 
-  static void processNetlink_GENERIC(EVMod *mod, struct nlmsghdr *nlh)
+  static void processNetlink_GENERIC(EVMod *mod, struct nlmsghdr *nlh, int numbytes)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    int msglen = nlh->nlmsg_len;
+    if(msglen > numbytes) {
+      EVDebug(mod, 0, "processNetlink_GENERIC msglen too long");
+      return;
+    }
+    if(msglen < (NLMSG_HDRLEN + GENL_HDRLEN + NLA_HDRLEN)) {
+      EVDebug(mod, 0, "processNetlink_GENERIC msglen too short");
+      return;
+    }
     char *msg = (char *)NLMSG_DATA(nlh);
-    int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    msglen -= NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
     EVDebug(mod, 1, "generic netlink CMD = %u", genl->cmd);
+    msglen -= GENL_HDRLEN;
 
-    for(int offset = GENL_HDRLEN; offset < msglen; ) {
-      struct nlattr *attr = (struct nlattr *)(msg + offset);
-      if(attr->nla_len == 0 ||
-	 (attr->nla_len + offset) > msglen) {
-	myLog(LOG_ERR, "processNetlink_GENERIC attr parse error");
-	break; // attr parse error
-      }
-      char *attr_datap = (char *)attr + NLA_HDRLEN;
-      switch(attr->nla_type) {
+    struct nlattr *attr0 = (struct nlattr *)(msg + GENL_HDRLEN);
+    for(int attrs_len = msglen;
+	UTNLA_OK(attr0, attrs_len);
+	attr0 = UTNLA_NEXT(attr0, attrs_len)) {
+      switch(attr0->nla_type) {
       case CTRL_ATTR_VERSION:
-	mdata->genetlink_version = *(uint32_t *)attr_datap;
+	mdata->genetlink_version = *(uint32_t *)UTNLA_DATA(attr0);
 	break;
       case CTRL_ATTR_FAMILY_ID:
-	mdata->family_id = *(uint16_t *)attr_datap;
+	mdata->family_id = *(uint16_t *)UTNLA_DATA(attr0);
 	EVDebug(mod, 1, "generic family id: %u", mdata->family_id); 
 	break;
       case CTRL_ATTR_FAMILY_NAME:
-	EVDebug(mod, 1, "generic family name: %s", attr_datap); 
+	EVDebug(mod, 1, "generic family name: %s", (char *)UTNLA_DATA(attr0)); 
 	break;
       case CTRL_ATTR_HDRSIZE:
-	mdata->headerSize = *(uint32_t *)attr_datap;
+	mdata->headerSize = *(uint32_t *)UTNLA_DATA(attr0);
 	EVDebug(mod, 1, "generic family headerSize: %u", mdata->headerSize); 
 	break;
       case CTRL_ATTR_MAXATTR:
-	mdata->maxAttr = *(uint32_t *)attr_datap;
+	mdata->maxAttr = *(uint32_t *)UTNLA_DATA(attr0);
 	EVDebug(mod, 1, "generic family maxAttr: %u", mdata->maxAttr);
 	break;
       case CTRL_ATTR_OPS:
 	EVDebug(mod, 1, "generic family OPS");
 	break;
       case CTRL_ATTR_MCAST_GROUPS:
-	for(int grp_offset = NLA_HDRLEN; grp_offset < attr->nla_len;) {
-	  struct nlattr *grp_attr = (struct nlattr *)(msg + offset + grp_offset);
-	  if(grp_attr->nla_len == 0 ||
-	     (grp_attr->nla_len + grp_offset) > attr->nla_len) {
-	    myLog(LOG_ERR, "processNetlink_GENERIC grp_attr parse error");
-	    break;
-	  }
-	  char *grp_name=NULL;
-	  uint32_t grp_id=0;
-	  for(int gf_offset = NLA_HDRLEN; gf_offset < grp_attr->nla_len; ) {
-	    struct nlattr *gf_attr = (struct nlattr *)(msg + offset + grp_offset + gf_offset);
-	    if(gf_attr->nla_len == 0 ||
-	       (gf_attr->nla_len + gf_offset) > grp_attr->nla_len) {
-	      myLog(LOG_ERR, "processNetlink_GENERIC gf_attr parse error");
-	      break;
+	{
+	  struct nlattr *attr1 = (struct nlattr *)UTNLA_DATA(attr0);
+	  for(int attr0_len = UTNLA_PAYLOAD(attr0);
+	      UTNLA_OK(attr1, attr0_len);
+	      attr1 = UTNLA_NEXT(attr1, attr0_len)) {
+	    char *grp_name=NULL;
+	    uint32_t grp_id=0;
+	    struct nlattr *attr2 = UTNLA_DATA(attr1);
+	    for(int attr1_len = UTNLA_PAYLOAD(attr1);
+		UTNLA_OK(attr2, attr1_len);
+		attr2 = UTNLA_NEXT(attr2, attr1_len)) {
+	      switch(attr2->nla_type) {
+	      case CTRL_ATTR_MCAST_GRP_NAME:
+		grp_name = (char *)UTNLA_DATA(attr2);
+		EVDebug(mod, 1, "multicast group: %s", grp_name);
+		break;
+	      case CTRL_ATTR_MCAST_GRP_ID:
+		grp_id = *(uint32_t *)UTNLA_DATA(attr2);
+		EVDebug(mod, 1, "multicast group id: %u", grp_id);
+		break;
+	      }
 	    }
-	    char *grp_attr_datap = (char *)gf_attr + NLA_HDRLEN;
-	    switch(gf_attr->nla_type) {
-	    case CTRL_ATTR_MCAST_GRP_NAME:
-	      grp_name = grp_attr_datap;
-	      EVDebug(mod, 1, "multicast group: %s", grp_name); 
-	      break;
-	    case CTRL_ATTR_MCAST_GRP_ID:
-	      grp_id = *(uint32_t *)grp_attr_datap;
-	      EVDebug(mod, 1, "multicast group id: %u", grp_id); 
-	      break;
+	    if(mdata->state == HSP_DROPMON_STATE_GET_FAMILY
+	       && grp_name
+	       && grp_id == NET_DM_GRP_ALERT) {
+	      EVDebug(mod, 1, "found group %s=%u", grp_name, grp_id);
+	      mdata->group_id = grp_id;
+	      // could go ahead and run configure_DROPMON, start_DROPMON
+	      // here, but want that logic to be down in evt_tick() so
+	      // just set the state and breathe for a moment:
+	      setState(mod, HSP_DROPMON_STATE_GOT_GROUP);
 	    }
-	    gf_offset += NLMSG_ALIGN(gf_attr->nla_len);
 	  }
-	  if(mdata->state == HSP_DROPMON_STATE_GET_FAMILY
-	     && grp_name
-	     && grp_id == NET_DM_GRP_ALERT) {
-	    EVDebug(mod, 1, "found group %s=%u", grp_name, grp_id);
-	    mdata->group_id = grp_id;
-	    // could go ahead and run configure_DROPMON, start_DROPMON
-	    // here, but want that logic to be down in evt_tick() so
-	    // just set the state and breathe for a moment:
-	    setState(mod, HSP_DROPMON_STATE_GOT_GROUP);
-	  }
-	  grp_offset += NLMSG_ALIGN(grp_attr->nla_len);
 	}
 	break;
       default:
 	EVDebug(mod, 1, "attr type: %u (nested=%u) len: %u",
-		attr->nla_type,
-		attr->nla_type & NLA_F_NESTED,
-		attr->nla_len);
+		attr0->nla_type,
+		attr0->nla_type & NLA_F_NESTED,
+		attr0->nla_len);
       }
-      offset += NLMSG_ALIGN(attr->nla_len);
     }
   }
 
@@ -699,13 +712,16 @@ That would allow everything to stay on the stack as it does here, which has nice
     -----------------___________________________------------------
   */
 
-  static void processNetlink_DROPMON(EVMod *mod, struct nlmsghdr *nlh)
+  static void processNetlink_DROPMON(EVMod *mod, struct nlmsghdr *nlh, int numbytes)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    if(msglen < (GENL_HDRLEN + NLA_HDRLEN)) {
+      EVDebug(mod, 0, "processNetlink_DROPMON msglen too short");
+      return;
+    }
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
     EVDebug(mod, 3, "netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
     
@@ -966,14 +982,14 @@ That would allow everything to stay on the stack as it does here, which has nice
     -----------------___________________________------------------
   */
 
-  static void processNetlink(EVMod *mod, struct nlmsghdr *nlh)
+  static void processNetlink(EVMod *mod, struct nlmsghdr *nlh, int numbytes)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     if(nlh->nlmsg_type == NETLINK_GENERIC) {
-      processNetlink_GENERIC(mod, nlh);
+      processNetlink_GENERIC(mod, nlh, numbytes);
     }
     else if(nlh->nlmsg_type == mdata->family_id) {
-      processNetlink_DROPMON(mod, nlh);
+      processNetlink_DROPMON(mod, nlh, numbytes);
     }
   }
 
@@ -988,12 +1004,14 @@ That would allow everything to stay on the stack as it does here, which has nice
     uint8_t recv_buf[HSP_DROPMON_READNL_RCV_BUF];
     int batch = 0;
     for( ; batch < HSP_DROPMON_READNL_BATCH; batch++) {
-      int numbytes = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
-      if(numbytes <= 0)
+      int msglen = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
+      if(msglen < sizeof(struct nlmsghdr))
 	break;
-      EVDebug(mod, 4, "readNetlink_DROPMON - msg = %d bytes", numbytes);
-      struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
-      while(NLMSG_OK(nlh, numbytes)){
+      EVDebug(mod, 4, "readNetlink_DROPMON - msg = %d bytes", msglen);
+      int numbytes = msglen;
+      for(struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
+	  NLMSG_OK(nlh, numbytes);
+	  nlh = NLMSG_NEXT(nlh, numbytes)) {
 	if(nlh->nlmsg_type == NLMSG_DONE)
 	  break;
 	if(nlh->nlmsg_type == NLMSG_ERROR){
@@ -1013,8 +1031,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 	  }
 	  break;
 	}
-	processNetlink(mod, nlh);
-	nlh = NLMSG_NEXT(nlh, numbytes);
+	processNetlink(mod, nlh, numbytes);
       }
     }
 
