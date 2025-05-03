@@ -170,7 +170,7 @@ extern "C" {
 			      HSP_READPACKET_BATCH_PCAP,
 			      readPackets_pcap_cb,
 			      (u_char *)bpfs);
-    if(batch == -1) {
+    if(unlikely(batch == -1)) {
       myLog(LOG_ERR, "pcap: pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
       // may get here if the interface was removed
       tap_close(mod, bpfs);
@@ -404,13 +404,18 @@ extern "C" {
   
   static void tap_close(EVMod *mod, BPFSoc *bpfs) {
     bpfs->adaptor = NULL;
-    bpfs->sock->fd = -1;
+    if(bpfs->sock) {
+      // The fd socket belongs to pcap, not to EVSocket. We
+      // can tell EVSocketClose not to touch it but this way
+      // is more ostentatious.
+      bpfs->sock->fd = -1;
+    }
     if(bpfs->pcap) {
       pcap_close(bpfs->pcap);
       bpfs->pcap = NULL;
     }
     if(bpfs->sock) {
-      EVSocketClose(mod, bpfs->sock, YES);
+      EVSocketClose(mod, bpfs->sock, NO);
       bpfs->sock = NULL;
     }
   }

@@ -68,6 +68,7 @@ extern "C" {
       ans = vsnprintf(buf->buf + buf->len, needed+1, fmt, args);
       buf->len += needed;
     }
+    va_end(args);
     return ans;
   }
 
@@ -172,6 +173,7 @@ extern "C" {
     va_list args;
     va_start(args, fmt);
     myLogv2(level, end, syslogType, fmt, args);
+    va_end(args);
   }
     
   void myLog(int syslogType, char *fmt, ...)
@@ -179,6 +181,7 @@ extern "C" {
     va_list args;
     va_start(args, fmt);
     myLogv2(debugLevel, YES, syslogType, fmt, args);
+    va_end(args);
   }
 
   void setDebug(int level) {
@@ -200,6 +203,7 @@ extern "C" {
       va_list args;
       va_start(args, fmt);
       myLogv2(level, YES, LOG_DEBUG, fmt, args);
+      va_end(args);
     }
   }
 
@@ -220,7 +224,7 @@ extern "C" {
   void *my_os_calloc(size_t bytes)
   {
 #ifdef UTHEAP
-    myDebug(4, "my_os_calloc(%u)", bytes);
+    myDebug(4, "my_os_calloc(%zu)", bytes);
 #endif
     void *mem = SYS_CALLOC(1, bytes);
     if(mem == NULL) {
@@ -233,7 +237,7 @@ extern "C" {
   void *my_os_realloc(void *ptr, size_t bytes)
   {
 #ifdef UTHEAP
-    myDebug(4, "my_os_realloc(%u)", bytes);
+    myDebug(4, "my_os_realloc(%zu)", bytes);
 #endif
     void *mem = SYS_REALLOC(ptr, bytes);
     if(mem == NULL) {
@@ -325,7 +329,7 @@ extern "C" {
   static struct {
     UTHeapHeader *foreign;
     pthread_mutex_t *sync_foreign;
-    uint32_t n_foreign;
+    volatile ut_atomic_t n_foreign;
   } UTHeap;
 
   // call once at startup
@@ -340,23 +344,21 @@ extern "C" {
   // each thread should call this periodically
   void UTHeapGC(void)
   {
-    if(UTHeap.n_foreign) {
+    ut_atomic_t n_foreign = UT_atomic_load_acq_n(&UTHeap.n_foreign);
+    if(n_foreign > 0) {
       SEMLOCK_DO(UTHeap.sync_foreign) {
-	// check again now we have the lock
-	if(UTHeap.n_foreign) {
-	  for(UTHeapHeader *utBuf = UTHeap.foreign, *prev = NULL; utBuf; ) {
-	    UTHeapHeader *nextBuf = utBuf->nxt;
-	    if(utBuf->h.realmIdx == utRealm.realmIdx) {
-	      // this one is mine - recycle and unlink
-	      myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
-	      UTHeapQFree(utBuf);
-	      if(prev) prev->nxt = nextBuf;
-	      else UTHeap.foreign = nextBuf;
-	      UTHeap.n_foreign--;
-	    }
-	    else prev = utBuf;
-	    utBuf = nextBuf;
+	for(UTHeapHeader *utBuf = UTHeap.foreign, *prev = NULL; utBuf; ) {
+	  UTHeapHeader *nextBuf = utBuf->nxt;
+	  if(utBuf->h.realmIdx == utRealm.realmIdx) {
+	    // this one is mine - recycle and unlink
+	    myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
+	    UTHeapQFree(utBuf);
+	    if(prev) prev->nxt = nextBuf;
+	    else UTHeap.foreign = nextBuf;
+	    UT_atomic_dec(UTHeap.n_foreign);
 	  }
+	  else prev = utBuf;
+	  utBuf = nextBuf;
 	}
       }
     }
@@ -385,7 +387,7 @@ extern "C" {
       SEMLOCK_DO(UTHeap.sync_foreign) {
 	utBuf->nxt = UTHeap.foreign;
 	UTHeap.foreign = utBuf;
-	UTHeap.n_foreign++;
+	UT_atomic_inc(UTHeap.n_foreign);
       }
     }
   }
@@ -496,32 +498,36 @@ extern "C" {
     // return number of characters read (0 for empty line), or EOF if file
     // was already at EOF. Always null-terminate the buffer. Indicate
     // number of truncated characters with the pointer provided.
-    int ch;
+    if(buf == NULL
+       || len < 2) {
+      // must have at least a 2-byte buffer 
+      return EOF;
+    }
+    int chop=0;
     uint32_t count=0;
     bool atEOF=YES;
-    bool bufOK=(buf != NULL
-		&& len > 1);
-    if(p_truncated)
-      *p_truncated = 0;
-    while((ch = getc(ff)) != EOF) {
+    int ch;
+    while((ch = fgetc(ff)) != EOF) {
       atEOF = NO;
       // EOL on CR, LF or CRLF
       if(ch == 10 || ch == 13) {
 	if(ch == 13) {
 	  // peek for CRLF
-	  if((ch = getc(ff)) != 10)
+	  if((ch = fgetc(ff)) != 10)
 	    ungetc(ch, ff);
 	}
 	break;
       }
-      if(bufOK
-	 && count < (len-1))
+      if(count < (len-1)
+	 && ch >= 0
+	 && ch <= 255)
 	buf[count++] = ch;
-      else if(p_truncated)
-	(*p_truncated)++;
+      else
+	chop++;
     }
-    if(bufOK)
-      buf[count] = '\0';
+    buf[count] = '\0';
+    if(p_truncated)
+      *p_truncated = chop;
     return atEOF ? EOF : count;
   }
 
@@ -816,7 +822,20 @@ extern "C" {
     }
   }
 
-  static void arrayDeleteCheck(UTArray *ar) {
+  static void arrayPack_nolock(UTArray *ar) {
+    int found = 0;
+    for(uint32_t i = 0; i < ar->n; i++) {
+      void *obj = ar->objs[i];
+      if(obj) {
+	ar->objs[i] = NULL;
+	ar->objs[found++] = obj;
+      }
+    }
+    ar->dbins = 0;
+    ar->n = found;
+  }
+
+  static void arrayDeleteCheck_nolock(UTArray *ar) {
     ar->dbins++;
     if(ar->options & UTARRAY_PACK
        // used to have more efficient "lazy" pack like this:
@@ -826,7 +845,7 @@ extern "C" {
        // because less likely to be thrown off by "holes" in
        // the array.  Can revist if efficiency is neeeded.
        )
-      UTArrayPack(ar);
+      arrayPack_nolock(ar);
   }
     
   uint32_t UTArrayAdd(UTArray *ar, void *obj) {
@@ -854,7 +873,7 @@ extern "C" {
       if(i < ar->n) {
 	obj = ar->objs[i];
 	ar->objs[i] = NULL;
-	arrayDeleteCheck(ar);
+	arrayDeleteCheck_nolock(ar);
       }
     }
     return obj;
@@ -882,7 +901,7 @@ extern "C" {
       for(uint32_t i = 0; i < ar->n; i++) {
 	if(ar->objs[i] == obj) {
 	  ar->objs[i] = NULL;
-	  arrayDeleteCheck(ar);
+	  arrayDeleteCheck_nolock(ar);
 	  ans = YES;
 	  break;
 	}
@@ -901,16 +920,7 @@ extern "C" {
 
   void UTArrayPack(UTArray *ar) {
     SEMLOCK_DO(ar->sync) {
-      int found = 0;
-      for(uint32_t i = 0; i < ar->n; i++) {
-	void *obj = ar->objs[i];
-	if(obj) {
-	  ar->objs[i] = NULL;
-	  ar->objs[found++] = obj;
-	}
-      }
-      ar->dbins = 0;
-      ar->n = found;
+      arrayPack_nolock(ar);
     }
   }
 
@@ -977,7 +987,7 @@ extern "C" {
     if(info == NULL)
       return NO;
 
-    bool ans = NO;
+    bool ans = YES;
     if(info->ai_addr) {
       // answer is now in info - a linked list of answers with sockaddr values.
       // extract the address we want from the first one. $$$ should perhaps
@@ -1414,18 +1424,23 @@ extern "C" {
   }
 
   /*________________---------------------------__________________
-    ________________     UTTruncateOpenFile     __________________
+    ________________    UTTruncateOpenFile     __________________
     ----------------___________________________------------------
   */
 
-  int UTTruncateOpenFile(FILE *fptr)   {
+  bool UTTruncateOpenFile(FILE *fptr)   {
     int fd = fileno(fptr);
     if(fd == -1) {
-      myLog(LOG_ERR, "truncateOpenFile(): fileno() failed : %s", strerror(errno));
+      myLog(LOG_ERR, "UTTruncateOpenFile(): fileno() failed : %s", strerror(errno));
       return NO;
     }
-    if(ftruncate(fd, lseek(fd, 0, SEEK_CUR)) != 0) {
-      myLog(LOG_ERR, "truncateOpenFile(): ftruncate() failed : %s", strerror(errno));
+    off_t offset = lseek(fd, 0, SEEK_CUR);
+    if(offset < 0) {
+      myLog(LOG_ERR, "UTTruncateOpenFile(): lseek() failed : %s", strerror(errno));
+      return NO;
+    }
+    if(ftruncate(fd, offset) != 0) {
+      myLog(LOG_ERR, "UTTruncateOpenFile(): ftruncate() failed : %s", strerror(errno));
       return NO;
     }
     return YES;
@@ -1436,7 +1451,7 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  int UTFileExists(char *path) {
+  bool UTFileExists(char *path) {
     struct stat statBuf;
     return (stat(path, &statBuf) == 0);
   }
@@ -2040,8 +2055,14 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     regex_t *rx = (regex_t *)my_calloc(sizeof(regex_t));
     int err = regcomp(rx, pattern_str, REG_EXTENDED | REG_NEWLINE);
     if(err != 0) {
-      char errbuf[101];
-      myLog(LOG_ERR, "regcomp(%s) failed: %s", pattern_str, regerror(err, rx, errbuf, 100));
+#define UT_ERRBUF_LEN 100
+      char errbuf[UT_ERRBUF_LEN+1];
+      errbuf[0] = '\0';
+      size_t required = regerror(err, rx, errbuf, UT_ERRBUF_LEN);
+      myLog(LOG_ERR, "regcomp(%s) failed: %s%s",
+	    pattern_str,
+	    errbuf,
+	    (required > UT_ERRBUF_LEN) ? "(truncated)" : "");
       my_free(rx);
       return NULL;
     }

@@ -1236,8 +1236,10 @@ fail:
         hooks->deallocate(buffer->buffer);
     }
 
+    /* coverity[dead_error_condition]*/
     if (printed != NULL)
     {
+        /* coverity[dead_error_line]*/
         hooks->deallocate(printed);
     }
 

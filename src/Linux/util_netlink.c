@@ -317,15 +317,22 @@ extern "C" {
       if(errno == EAGAIN || errno == EINTR)
 	goto try_again;
     }
-    if (rc > 0) {
+    if (rc > sizeof(struct nlmsghdr)) {
       struct nlmsghdr *recv_hdr = (struct nlmsghdr*)recv_buf;
       struct ifinfomsg *infomsg = NLMSG_DATA(recv_hdr);
       // report the ifIndex that was found
       *pIfIndex = infomsg->ifi_index;
       struct rtattr *rta = IFLA_RTA(infomsg);
-      int len = recv_hdr->nlmsg_len;
+      uint16_t len = recv_hdr->nlmsg_len;
+      // extra check to reassure coverity
+      if((int)len > rc) {
+	return -1;
+      }
       // this only writes into resultBuf if field is found
       while (RTA_OK(rta, len)){
+	// extra check to reassure coverity
+	if(len > rc)
+	  break;
 	if(rta->rta_type == field) {
 	  char *res = RTA_DATA(rta);
 	  uint res_len = RTA_PAYLOAD(rta);

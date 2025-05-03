@@ -39,7 +39,9 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFLAdaptor *ad = UTHashNext(sp->adaptorsByIndex, &mdata->cursor);
     if(ad) {
-      UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+      int rc = UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+      if (rc <= 0)
+	EVDebug(mod, 1, "UTNLRoute_send() failed: rc=%d : %s", rc, strerror(errno));
       return YES;
     }
     mdata->sweeping = NO;
@@ -107,9 +109,14 @@ extern "C" {
     if(dataLen == sizeof(ad)) {
       memcpy(&ad, data, dataLen);
       // send request
-      UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
-      // block here to recv immediately
-      readAlias(mod);
+      int status = UTNLRoute_send(mdata->nl_sock, mod->id, ad->ifIndex, IFLA_IFALIAS, ++mdata->seqNo);
+      if(status < 0) {
+	myLog(LOG_ERR, "UTNLRoute_send() failed: %s", strerror(errno));
+      }
+      else {
+	// block here to recv immediately
+	readAlias(mod);
+      }
     }
   }
 

@@ -242,10 +242,10 @@ extern "C" {
     else {
       switch (reply->type) {
       case REDIS_REPLY_STRING:
-	UTStrBuf_printf(sbuf, "string(%d)=\"%s\"", reply->len, reply->str);
+	UTStrBuf_printf(sbuf, "string(%lu)=\"%s\"", reply->len, reply->str);
 	break;
       case REDIS_REPLY_ARRAY:
-	UTStrBuf_printf(sbuf, "array(%d)", reply->elements);
+	UTStrBuf_printf(sbuf, "array(%lu)", reply->elements);
 	break;
       case REDIS_REPLY_INTEGER:
 	UTStrBuf_printf(sbuf, "integer(%lld)", reply->integer);
@@ -273,13 +273,16 @@ extern "C" {
   */
   static uint32_t db_getU32(redisReply *reply) {
     uint32_t ans32 = 0;
-    switch (reply->type) {
-    case REDIS_REPLY_STRING:
-      ans32 = strtoul(reply->str, NULL, 0);
-      break;
-    case REDIS_REPLY_INTEGER:
-      ans32 = (uint32_t)reply->integer;
-      break;
+    if(reply) {
+      switch (reply->type) {
+      case REDIS_REPLY_STRING:
+	if(reply->str)
+	  ans32 = strtoul(reply->str, NULL, 0);
+	break;
+      case REDIS_REPLY_INTEGER:
+	ans32 = (uint32_t)reply->integer;
+	break;
+      }
     }
     return ans32;
   }
@@ -758,6 +761,7 @@ extern "C" {
     if(fjson) {
       UTStrBuf *sbuf = UTStrBuf_new();
       char lineBuf[1024];
+      lineBuf[0] = '\0';
       int truncated = NO;
       while(my_readline(fjson, lineBuf, 1024, &truncated) != EOF) {
 	if(truncated)
@@ -774,25 +778,27 @@ extern "C" {
       else {
 	cJSON *instances = cJSON_GetObjectItem(dbconfig, "INSTANCES");
 	cJSON *databases = cJSON_GetObjectItem(dbconfig, "DATABASES");
-	for(cJSON *inst = instances->child; inst; inst = inst->next) {
-	  cJSON *hostname = cJSON_GetObjectItem(inst, "hostname");
-	  cJSON *port = cJSON_GetObjectItem(inst, "port");
-	  cJSON *passPath = cJSON_GetObjectItem(inst, "password_path");
-	  cJSON *unixSock = cJSON_GetObjectItem(inst, "unix_socket_path");
-	  // cJSON *persist = cJSON_GetObjectItem(inst, "persistence_for_warm_boot");
-	  addDB(mod,
-		inst->string,
-		hostname ? hostname->valuestring : NULL,
-		port ? port->valueint : 0,
-		unixSock ? unixSock->valuestring : NULL,
-		passPath ? passPath->valuestring : NULL);
-	}
-	for(cJSON *dbTab = databases->child; dbTab; dbTab = dbTab->next) {
-	  cJSON *id = cJSON_GetObjectItem(dbTab, "id");
-	  cJSON *inst = cJSON_GetObjectItem(dbTab, "instance");
-	  cJSON *sep = cJSON_GetObjectItem(dbTab, "separator");
-	  if(id && inst) {
-	    addDBTable(mod, inst->valuestring, dbTab->string, id->valueint, sep->valuestring);
+	if(instances && databases) {
+	  for(cJSON *inst = instances->child; inst; inst = inst->next) {
+	    cJSON *hostname = cJSON_GetObjectItem(inst, "hostname");
+	    cJSON *port = cJSON_GetObjectItem(inst, "port");
+	    cJSON *passPath = cJSON_GetObjectItem(inst, "password_path");
+	    cJSON *unixSock = cJSON_GetObjectItem(inst, "unix_socket_path");
+	    // cJSON *persist = cJSON_GetObjectItem(inst, "persistence_for_warm_boot");
+	    addDB(mod,
+		  inst->string,
+		  hostname ? hostname->valuestring : NULL,
+		  port ? port->valueint : 0,
+		  unixSock ? unixSock->valuestring : NULL,
+		  passPath ? passPath->valuestring : NULL);
+	  }
+	  for(cJSON *dbTab = databases->child; dbTab; dbTab = dbTab->next) {
+	    cJSON *id = cJSON_GetObjectItem(dbTab, "id");
+	    cJSON *inst = cJSON_GetObjectItem(dbTab, "instance");
+	    cJSON *sep = cJSON_GetObjectItem(dbTab, "separator");
+	    if(id && inst && sep) {
+	      addDBTable(mod, inst->valuestring, dbTab->string, id->valueint, sep->valuestring);
+	    }
 	  }
 	}
       }
@@ -2354,7 +2360,7 @@ extern "C" {
 	  db_getSystemReady(mod);
 	}
 	else {
-	  EVDebug(mod, 1, "sonic: waitReady timeout after %u seconds", waiting);
+	  EVDebug(mod, 1, "sonic: waitReady timeout after %ld seconds", (long)waiting);
 	  setSonicState(mod, HSP_SONIC_STATE_CONNECTED);
 	}
       }

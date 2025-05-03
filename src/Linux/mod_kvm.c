@@ -161,11 +161,31 @@ extern "C" {
 	  /* we get reads, writes and errors from a different call */
 	  virDomainBlockStatsStruct blkStats;
 	  if(virDomainBlockStats(domainPtr, dskPath, &blkStats, sizeof(blkStats)) != -1) {
-	    if(blkStats.rd_req != -1) dskElem.counterBlock.host_vrt_dsk.rd_req += blkStats.rd_req;
-	    if(blkStats.rd_bytes != -1) dskElem.counterBlock.host_vrt_dsk.rd_bytes += blkStats.rd_bytes;
-	    if(blkStats.wr_req != -1) dskElem.counterBlock.host_vrt_dsk.wr_req += blkStats.wr_req;
-	    if(blkStats.wr_bytes != -1) dskElem.counterBlock.host_vrt_dsk.wr_bytes += blkStats.wr_bytes;
-	    if(blkStats.errs != -1) dskElem.counterBlock.host_vrt_dsk.errs += blkStats.errs;
+	    if(blkStats.rd_req != -1) {
+	      // explicitly use only lower 31 bits to appease coverity
+	      uint32_t rd_req = blkStats.rd_req & 0x7FFFFFFF;
+	      dskElem.counterBlock.host_vrt_dsk.rd_req += rd_req;
+	    }
+	    if(blkStats.rd_bytes != -1) {
+	      // explicitly use only lower 63 bits to appease coverity
+	      uint64_t rd_bytes = blkStats.rd_bytes & 0x7FFFFFFFFFFFFFFF;
+	      dskElem.counterBlock.host_vrt_dsk.rd_bytes += rd_bytes;
+	    }
+	    if(blkStats.wr_req != -1) {
+	      // explicitly use only lower 31 bits to appease coverity
+	      uint32_t wr_req = blkStats.wr_req & 0x7FFFFFFF;
+	      dskElem.counterBlock.host_vrt_dsk.wr_req += wr_req;
+	    }
+	    if(blkStats.wr_bytes != -1) {
+	      // explicitly use only lower 63 bits to appease coverity
+	      uint64_t wr_bytes = blkStats.wr_bytes & 0x7FFFFFFFFFFFFFFF;
+	      dskElem.counterBlock.host_vrt_dsk.wr_bytes += wr_bytes;
+	    }
+	    if(blkStats.errs != -1) {
+	      // explicitly use only lower 31 bits to appease coverity
+	      uint32_t errs = blkStats.errs & 0x7FFFFFFF;
+	      dskElem.counterBlock.host_vrt_dsk.errs += errs;
+	    }
 	  }
 	}
 	SFLADD_ELEMENT(cs, &dskElem);
@@ -252,18 +272,22 @@ extern "C" {
 	char *path = get_xml_attr(mod, n, "file");
 	if(path) {
 	  EVDebug(mod, 1, "disk.file=%s", path);
-	  if(disk_path) *disk_path = path;
+	  if(disk_path)
+	    *disk_path = path;
 	}
       }
       else if(domain_xml_path_equal(mod, n, "target", "disk", "devices", NULL)) {
 	char *dev = get_xml_attr(mod, n, "dev");
 	EVDebug(mod, 1, "disk.dev=%s", dev);
-	if(disk_dev) *disk_dev = dev;
+	if(disk_dev)
+	  *disk_dev = dev;
       }
       else if(domain_xml_path_equal(mod, n, "readonly", "disk", "devices", NULL)) {
 	EVDebug(mod, 1, "ignoring readonly device");
-	*disk_path = NULL;
-	*disk_dev = NULL;
+	if(disk_path)
+	  *disk_path = NULL;
+	if(disk_dev)
+	  *disk_dev = NULL;
 	return;
       }
     }

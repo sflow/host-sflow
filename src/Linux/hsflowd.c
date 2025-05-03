@@ -333,7 +333,7 @@ extern "C" {
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
     bool changed = (nio->selectionPriority != priority);
     if(changed) {
-      myDebug(1, "setAdaptorSelectionPriority(%s): %s %u -> %u (changed=%s)",
+      myDebug(1, "setAdaptorSelectionPriority(%s): %s %u -> %u",
 	      method,
 	      adaptor->deviceName,
 	      nio->selectionPriority,
@@ -1109,8 +1109,11 @@ extern "C" {
     if(sp->memLimitBytes > 0) {
       struct rusage usage;
       getrusage(RUSAGE_SELF, &usage);
-      if(usage.ru_maxrss > (long)sp->memLimitBytes) {
-	myLog(LOG_ERR, "Configured memory limit of %u exceeded (rss=%u)", sp->memLimitBytes, usage.ru_maxrss);
+      // cast all to long to make printf format easier
+      if((long)usage.ru_maxrss > (long)sp->memLimitBytes) {
+	myLog(LOG_ERR, "Configured memory limit of %ld exceeded (rss=%ld)",
+	      (long)sp->memLimitBytes,
+	      (long)usage.ru_maxrss);
 	exit(EXIT_FAILURE);
       }
     }
@@ -1308,7 +1311,7 @@ extern "C" {
 
     // Do something useful with siginfo_t
     if (sig == SIGSEGV)
-      fprintf(out, "SIGSEGV, faulty address is %p\n", info->si_addr);
+      fprintf(outFile, "SIGSEGV, faulty address is %p\n", info->si_addr);
 
     // thread info
     EVBus *bus = EVCurrentBus();
@@ -1953,7 +1956,7 @@ extern "C" {
       myLog(LOG_ERR, "getrlimit(%s) failed : %s", resourceName, strerror(errno));
     }
     else {
-      myLog(LOG_INFO, "getrlimit(%s) = %u (max=%u)", resourceName, rlim.rlim_cur, rlim.rlim_max);
+      myLog(LOG_INFO, "getrlimit(%s) = %lu (max=%lu)", resourceName, rlim.rlim_cur, rlim.rlim_max);
     }
     return rlim.rlim_cur;
   }
@@ -2179,7 +2182,10 @@ extern "C" {
 	myLog(LOG_ERR, "Failed to open debugLog %s : %s", sp->logFile, strerror(errno));
       }
       else {
-	chmod(sp->logFile, 0666); // so we can reopen after privilege drop
+	// chmod so we can reopen after privilege drop
+	if(chmod(sp->logFile, 0666) < 0) {
+	  myLog(LOG_ERR, "chmod(%s, 0666) failed: %s", sp->logFile, strerror(errno));
+	}
 	setlinebuf(f_dbg);
 	setDebugOut(f_dbg);
 	setDebugLimit(strtol(sp->logBytes, NULL, 0));
@@ -2704,7 +2710,9 @@ extern "C" {
     if(getDebug() == 0) {
       // shouldn't need to be root again to remove the pidFile
       // (i.e. we should still have execute permission on /var/run)
-      remove(sp->pidFile);
+      if(remove(sp->pidFile) < 0) {
+	myLog(LOG_ERR, "remove(%s) failed: %s", sp->pidFile, strerror(errno));
+      }
     }
 
 #ifdef GPROF

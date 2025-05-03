@@ -499,20 +499,17 @@ extern "C" {
     ifr->ifr_data = (char *)&drvinfo;
     if(ioctl(fd, SIOCETHTOOL, ifr) >= 0) {
       EnumHSPDevType devType = HSPDEV_OTHER;
-      if(drvinfo.driver) {
-	if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
-	  devType = HSPDEV_BRIDGE;
-	else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
-	  devType = HSPDEV_VETH;
-	else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
-	  devType = HSPDEV_VIF;
-	else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
-	  devType = HSPDEV_OVS;
-	else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
-	  devType = HSPDEV_PHYSICAL;
-      }
-      if(devType == HSPDEV_OTHER
-	 && my_strlen(drvinfo.bus_info))
+      if(!strncasecmp(drvinfo.driver, "bridge", strlen("bridge")))
+	devType = HSPDEV_BRIDGE;
+      else if(!strncasecmp(drvinfo.driver, "veth", strlen("veth")))
+	devType = HSPDEV_VETH;
+      else if(!strncasecmp(drvinfo.driver, "vif", strlen("vif")))
+	devType = HSPDEV_VIF;
+      else if(!strncasecmp(drvinfo.driver, "openvswitch", strlen("openvswitch")))
+	devType = HSPDEV_OVS;
+      else if(strncasecmp(drvinfo.driver, "e1000", strlen("e1000")))
+	devType = HSPDEV_PHYSICAL;
+      else if(my_strlen(drvinfo.bus_info))
 	devType = HSPDEV_PHYSICAL;
 
       if(adaptorNIO->devType != devType) {

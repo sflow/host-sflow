@@ -60,7 +60,7 @@ extern "C" {
     time_t last_cgroup;
     char *cgroup_devices;
     UTHash *containers;
-    int cgroup_id;
+    uint64_t cgroup_id;
   } HSPVMState_POD;
 
 #define HSP_K8S_READER "/usr/sbin/hsflowd_containerd"
@@ -486,7 +486,7 @@ extern "C" {
 	  struct stat statBuf = {};
 	  if(stat(path, &statBuf) == 0) {
 	    pod->cgroup_id = statBuf.st_ino;
-	    EVDebug(mod, 1, "Learned cgroup_id = %u for pod %s",
+	    EVDebug(mod, 1, "Learned cgroup_id = %"PRIu64" for pod %s",
 		    pod->cgroup_id,
 		    pod->hostname);
 	    // remember this for packet sample lookup
@@ -1202,7 +1202,7 @@ extern "C" {
 	HSPVMState_POD *pod = UTHashGet(mdata->podsByCgroupId, &search);
 	if(pod) {
 	  mdata->pod_byCgroup++;
-	  EVDebug(mod, 2, "mod_k8s: cgroup_id(%u)->pod(%s) dsIndex=%u",
+	  EVDebug(mod, 2, "mod_k8s: cgroup_id(%"PRIu64")->pod(%s) dsIndex=%u",
 		  ps->cgroup_id,
 		  pod->hostname,
 		  pod->vm.dsIndex);
@@ -1263,7 +1263,7 @@ extern "C" {
 
     if(--mdata->idleSweepCountdown <= 0) {
       // rearm
-      time_t idleTimeout = 1 + (sp->actualPollingInterval * 2);
+      uint32_t idleTimeout = 1 + (sp->actualPollingInterval * 2);
       mdata->idleSweepCountdown = idleTimeout;
       // look for idle pods
       time_t now_mono = mdata->pollBus->now.tv_sec;

@@ -127,6 +127,7 @@ extern "C" {
     char *err_step;
     char *err_msg;
     uint32_t diag_tx;
+    uint32_t diag_tx_err;
     uint32_t diag_rx;
     uint32_t nl_seq_tx;
     uint32_t nl_seq_rx;
@@ -154,6 +155,7 @@ extern "C" {
   typedef struct _HSP_mod_TCP {
     EVBus *packetBus;
     uint32_t diag_tx;
+    uint32_t diag_tx_err;
     uint32_t diag_rx;
     uint32_t nl_seq_lost;
     uint32_t samples_annotated;
@@ -236,13 +238,14 @@ extern "C" {
     // user info.  Prefer getpwuid_r() if avaiable...
     struct passwd *uid_info = getpwuid(diag_msg->idiag_uid);
     if(EVDebug(mod, 2, NULL)) {
-      EVDebug(mod, 2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
+      EVDebug(mod, 2, "diag_msg: found=%s prot=%s UID=%u(%s) inode=%u (tx=%u,txerr=%u,rx=%u,queued=%u,lost=%u,nspid=%u)",
 	      found ? "YES" : "NO",
 	    found ? (found->udp ? "UDP":"TCP") : "",
 	      diag_msg->idiag_uid,
 	      uid_info ? uid_info->pw_name : "<user not found>",
 	      diag_msg->idiag_inode,
 	      sock->diag_tx,
+	      sock->diag_tx_err,
 	      sock->diag_rx,
 	      sock->nl_seq_tx - sock->nl_seq_rx,
 	    sock->nl_seq_lost,
@@ -366,7 +369,7 @@ extern "C" {
 	  break;
 	default:
 	  if(EVDebug(mod, 1, NULL)) {
-	    EVDebug(mod, 1, "INET_DIAG_(%u): payload=%u", attr->rta_type, RTA_PAYLOAD(attr));
+	    EVDebug(mod, 1, "INET_DIAG_(%u): payload=%lu", attr->rta_type, RTA_PAYLOAD(attr));
 	  }
 	  break;
 	}
@@ -419,8 +422,9 @@ extern "C" {
     HSP_mod_TCP *mdata = (HSP_mod_TCP *)mod->data;
 
     if(EVDebug(mod, 1, NULL)) {
-      EVDebug(mod, 1, "tx=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u, sockets=%u",
+      EVDebug(mod, 1, "tx=%u, txerr=%u, rx=%u, lost=%u, timeout=%u, annotated=%u, ipip_tx=%u, sockets=%u",
 	      mdata->diag_tx,
+	      mdata->diag_tx_err,
 	      mdata->diag_rx,
 	      mdata->nl_seq_lost,
 	      mdata->diag_timeouts,
@@ -714,14 +718,21 @@ extern "C" {
       // add to HT and timeout queue
       UTHashAdd(mdata->sampleHT, tcpSample);
       UTQ_ADD_TAIL(mdata->timeoutQ, tcpSample);
-      UTNLDiag_send(sock->nl_sock,
-		    &tcpSample->conn_req,
-		    sizeof(tcpSample->conn_req),
-		    (tcpSample->udp || sp->tcp.dump), // set DUMP flag if UDP
-		    ++sock->nl_seq_tx);
+      int status = UTNLDiag_send(sock->nl_sock,
+				 &tcpSample->conn_req,
+				 sizeof(tcpSample->conn_req),
+				 (tcpSample->udp || sp->tcp.dump), // set DUMP flag if UDP
+				 ++sock->nl_seq_tx);
+      if(status < 0) {
+	EVDebug(mod, 1, "UTNLDiag_send() failed: %s", strerror(errno));
+	sock->diag_tx_err++;
+	mdata->diag_tx_err++;
+      }
+      else {
+	sock->diag_tx++;
+	mdata->diag_tx++;
+      }
       sock->lastUsed = now_mS(mod);
-      sock->diag_tx++;
-      mdata->diag_tx++;
     }
   }
 

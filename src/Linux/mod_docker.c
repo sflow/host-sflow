@@ -1699,7 +1699,7 @@ extern "C" {
   static void processDockerResponse(EVMod *mod, EVSocket *sock, HSPDockerRequest *req) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     char *line = UTSTRBUF_STR(sock->ioline);
-    EVDebug(mod, 2, "processDockerResponse (state=%u) got answer (seqNo=%d len=%u): <%s>",
+    EVDebug(mod, 2, "processDockerResponse (state=%u) got answer (seqNo=%d len=%zu): <%s>",
 	    req->state,
 	    req->seqNo,
 	    UTSTRBUF_LEN(sock->ioline),
@@ -1745,7 +1745,7 @@ extern "C" {
     case HSPDOCKERREQ_CONTENT: {
       int clen = req->chunkLength ?: req->contentLength;
       if(clen != UTSTRBUF_LEN(sock->ioline)) {
-	myLog(LOG_ERR, "ERROR req->chunkLength=%d req->contentLength=%d len(sock->ioline)=%d",
+	myLog(LOG_ERR, "ERROR req->chunkLength=%d req->contentLength=%d len(sock->ioline)=%zu",
 	      req->chunkLength,
 	      req->contentLength,
 	      UTSTRBUF_LEN(sock->ioline));
@@ -1940,7 +1940,7 @@ extern "C" {
       return;
     }
     char *cmd = UTSTRBUF_STR(req->request);
-    ssize_t len = UTSTRBUF_LEN(req->request);
+    size_t len = UTSTRBUF_LEN(req->request);
     int fd = UTUnixDomainSocket(HSP_DOCKER_SOCK);
     EVDebug(mod, 1, "dockerAPIRequest(%s) seqNo=%d, fd==%d", cmd, req->seqNo, fd);
     if(fd < 0)  {
@@ -1963,7 +1963,7 @@ extern "C" {
 	}
       }
       else {
-	myLog(LOG_ERR, "dockerAPIRequest - write(%s) returned %d != %u: %s",
+	myLog(LOG_ERR, "dockerAPIRequest - write(%s) returned %d != %zu: %s",
 	      cmd, cc, len, strerror(errno));
       }
     }

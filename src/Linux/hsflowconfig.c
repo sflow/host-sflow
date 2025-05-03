@@ -172,13 +172,15 @@ extern "C" {
   {
     uint32_t mult = 1;
     uint32_t len = my_strlen(str);
-    char last = toupper(str[len - 1]);
-    if(last == 'K' || last == 'M' || last == 'G') {
-      // number of the form "100M" or "1G"
-      str[len - 1] = '\0'; // blat the K, M or G
-      if(last == 'K') mult = 1000;
-      if(last == 'M') mult = 1000000;
-      if(last == 'G') mult = 1000000000;
+    if(len > 0) {
+      char last = toupper(str[len - 1]);
+      if(last == 'K' || last == 'M' || last == 'G') {
+	// number of the form "100M" or "1G"
+	str[len - 1] = '\0'; // blat the K, M or G
+	if(last == 'K') mult = 1000;
+	if(last == 'M') mult = 1000000;
+	if(last == 'G') mult = 1000000000;
+      }
     }
     return mult;
   }
@@ -207,15 +209,17 @@ extern "C" {
   {
     uint64_t mult = 1;
     uint32_t len = my_strlen(str);
-    char last = toupper(str[len - 1]);
-    if(last == 'K' || last == 'M' || last == 'G' || last == 'T' || last == 'P') {
-      // number of the form "100M" or "1G"
-      str[len - 1] = '\0'; // blat the K, M, G, T or P
-      if(last == 'K') mult = 1000LL;
-      if(last == 'M') mult = 1000000LL;
-      if(last == 'G') mult = 1000000000LL;
-      if(last == 'T') mult = 1000000000000LL;
-      if(last == 'P') mult = 1000000000000000LL;
+    if(len > 1) {
+      char last = toupper(str[len - 1]);
+      if(last == 'K' || last == 'M' || last == 'G' || last == 'T' || last == 'P') {
+	// number of the form "100M" or "1G"
+	str[len - 1] = '\0'; // blat the K, M, G, T or P
+	if(last == 'K') mult = 1000LL;
+	if(last == 'M') mult = 1000000LL;
+	if(last == 'G') mult = 1000000000LL;
+	if(last == 'T') mult = 1000000000000LL;
+	if(last == 'P') mult = 1000000000000000LL;
+      }
     }
     return mult;
   }
@@ -824,8 +828,10 @@ extern "C" {
     }
 
     if(deepest) {
-      if(p_polling && deepest->got_polling_secs) *p_sampling = deepest->polling_secs;
-      if(p_sampling && deepest->got_sampling_n) *p_sampling = deepest->sampling_n;
+      if(p_polling && deepest->got_polling_secs)
+	*p_polling = deepest->polling_secs;
+      if(p_sampling && deepest->got_sampling_n)
+	*p_sampling = deepest->sampling_n;
       return YES;
     }
     return NO;

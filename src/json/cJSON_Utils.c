@@ -225,8 +225,11 @@ CJSON_PUBLIC(char *) cJSONUtils_FindPointerFromObjectTo(const cJSON * const obje
                 /* check if conversion to unsigned long is valid
                  * This should be eliminated at compile time by dead code elimination
                  * if size_t is an alias of unsigned long, or if it is bigger */
+		/* coverity[result_independent_of_operands] */
+		/* coverity[dead_error_condition] */
                 if (child_index > ULONG_MAX)
                 {
+		  /* coverity[dead_error_begin] */
                     cJSON_free(target_pointer);
                     cJSON_free(full_pointer);
                     return NULL;
@@ -1180,8 +1183,11 @@ static void create_patches(cJSON * const patches, const unsigned char * const pa
                 /* check if conversion to unsigned long is valid
                  * This should be eliminated at compile time by dead code elimination
                  * if size_t is an alias of unsigned long, or if it is bigger */
+	      /* coverity[result_independent_of_operands] */
+	      /* coverity[dead_error_condition] */
                 if (index > ULONG_MAX)
                 {
+		  /* coverity[dead_error_begin] */
                     cJSON_free(new_path);
                     return;
                 }
@@ -1195,8 +1201,11 @@ static void create_patches(cJSON * const patches, const unsigned char * const pa
                 /* check if conversion to unsigned long is valid
                  * This should be eliminated at compile time by dead code elimination
                  * if size_t is an alias of unsigned long, or if it is bigger */
+	      /* coverity[result_independent_of_operands] */
+	      /* coverity[dead_error_condition] */
                 if (index > ULONG_MAX)
                 {
+		  /* coverity[dead_error_begin] */
                     cJSON_free(new_path);
                     return;
                 }

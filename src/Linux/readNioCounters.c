@@ -503,14 +503,18 @@ extern "C" {
       SFF8472_CAL(voltage, eew, (128 + 44));
       // rx power calibration is a polynomial
       // read the float coefficients as uint32_t
-      // so we can byte-swap them easily:
-      uint32_t rxpwr[5];
-      memcpy(rxpwr, eew + 128 + 28, 5 * 4);
-      for(int ii = 0; ii < 5; ii++) rxpwr[ii] = ntohl(rxpwr[ii]);
+      // so we can byte-swap them easily. Then
+      // use them as floats:
+      union {
+	uint32_t i[5];
+	float f[5];
+      } rxpwr;
+      memcpy(rxpwr.i, eew + 128 + 28, 5 * 4);
+      for(int ii = 0; ii < 5; ii++) rxpwr.i[ii] = ntohl(rxpwr.i[ii]);
       // now apply to rx_pwr
-      SFF8472_CAL_RXPWR(rx_power, (float *)rxpwr);
-      SFF8472_CAL_RXPWR(rx_power_min, (float *)rxpwr);
-      SFF8472_CAL_RXPWR(rx_power_max, (float *)rxpwr);
+      SFF8472_CAL_RXPWR(rx_power, rxpwr.f);
+      SFF8472_CAL_RXPWR(rx_power_min, rxpwr.f);
+      SFF8472_CAL_RXPWR(rx_power_max, rxpwr.f);
     }
 
     // populate sFlow structure

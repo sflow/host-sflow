@@ -237,6 +237,8 @@ extern "C" {
     HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    if(msglen < NLA_HDRLEN)
+      return;
     
     for(int offset = 0; offset < msglen; ) {
       struct nlattr *attr = (struct nlattr *)(msg + offset);
@@ -259,7 +261,7 @@ extern "C" {
 	EVDebug(mod, 1, "VPP drops=%u", mdata->vpp_drops);
 	break;
       case SFLOW_VPP_ATTR_SEQ:
-	EVDebug(mod, 1, "VPP seq=%u", getAttrInt(datap, datalen));
+	EVDebug(mod, 1, "VPP seq=%"PRIu64, getAttrInt(datap, datalen));
 	break;
       default:
 	EVDebug(mod, 1, "unknowattr %d\n", attr->nla_type);
@@ -280,6 +282,8 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
     int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    if(msglen < NLA_HDRLEN)
+      return;
 
     HSPVppPort in = {};
     char portName[SFL_MAX_PORTNAME_LEN+1];
@@ -369,7 +373,7 @@ extern "C" {
 	  memcpy(in.mac, datap, 6);
 	break;
       case SFLOW_VPP_ATTR_SEQ:
-	EVDebug(mod, 1, "VPP seq=%u", getAttrInt(datap, datalen));
+	EVDebug(mod, 1, "VPP seq=%"PRIu64, getAttrInt(datap, datalen));
 	break;
       default:
 	EVDebug(mod, 1, "unknown attr %d\n", attr->nla_type);
@@ -555,7 +559,7 @@ v  */
   	rx_dev = rx_prt ? portGetAdaptor(mod, rx_prt, NO) : NULL;
 	tx_prt = getPort(mod, psmp->ifout, YES);
 	active = tx_prt->active;
-	tx_dev = tx_prt ? portGetAdaptor(mod, tx_prt, YES) : NULL;
+	tx_dev = portGetAdaptor(mod, tx_prt, YES);
 	sampler_dev = tx_dev;
       }
       else {
@@ -563,7 +567,7 @@ v  */
 	tx_dev = tx_prt ? portGetAdaptor(mod, tx_prt, NO) : NULL;
 	rx_prt = getPort(mod, psmp->ifin, YES);
 	active = rx_prt->active;
-	rx_dev = rx_prt ? portGetAdaptor(mod, rx_prt, YES) : NULL;
+	rx_dev = portGetAdaptor(mod, rx_prt, YES);
 	sampler_dev = rx_dev;
       }
       if(sampler_dev) {

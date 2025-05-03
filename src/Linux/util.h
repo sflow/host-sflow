@@ -48,6 +48,18 @@ extern "C" {
 #define YES 1
 #define NO 0
 
+  // atomics
+typedef int32_t ut_atomic_t;
+#define UT_atomic_load_acq_n(a) __atomic_load_n((a), __ATOMIC_ACQUIRE)
+#define UT_atomic_store_rel_n(a, b) __atomic_store_n ((a), (b), __ATOMIC_RELEASE)
+#define UT_atomic_add(val, delta) __sync_add_and_fetch(&(val), (ut_atomic_t)(delta))
+#define UT_atomic_inc(val) UT_atomic_add(val, 1)
+#define UT_atomic_dec(val) UT_atomic_add(val, -1)
+
+  // branch-prediction help
+#define likely(x)     __builtin_expect((x),1)
+#define unlikely(x)   __builtin_expect((x),0)
+
 #include "sflow.h" // for SFLAddress, SFLAdaptorList...
 
   // addressing
@@ -248,8 +260,8 @@ extern "C" {
 #define ADAPTORLIST_WALK(al, ad) for(uint32_t _ii = 0; _ii < (al)->num_adaptors; _ii++) if(((ad)=(al)->adaptors[_ii]))
 
   // file utils
-  int UTTruncateOpenFile(FILE *fptr);
-  int UTFileExists(char *path);
+  bool UTTruncateOpenFile(FILE *fptr);
+  bool UTFileExists(char *path);
 
   // sockets
   typedef union _UTSockAddr {

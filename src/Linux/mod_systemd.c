@@ -271,7 +271,7 @@ extern "C" {
 	  }
 	  else {
 	    container->cgroup_id = statBuf.st_ino;
-	    EVDebug(mod, 1, "Learned cgroup_id = %u for container %s (%s)",
+	    EVDebug(mod, 1, "Learned cgroup_id = %"PRIu64" for container %s (%s)",
 		    container->cgroup_id,
 		    container->id,
 		    fName);
@@ -1211,11 +1211,11 @@ extern "C" {
     // INET_DIAG lookup may have found a cgroup_id.  If so, it will be the
     // inode of the container that sent or received it. This appeared in kernel ~ 5.15 (ubuntu22).
     if(ps->cgroup_id) {
-      EVDebug(mod, 2, "mod_systemd: inet_diag cgroup = %u", ps->cgroup_id);
+      EVDebug(mod, 2, "mod_systemd: inet_diag cgroup = %"PRIu64, ps->cgroup_id);
       HSPVMState_SYSTEMD search = { .cgroup_id = ps->cgroup_id };
       HSPVMState_SYSTEMD *container = UTHashGet(mdata->vmsByCgroupId, &search);
       if(container) {
-	EVDebug(mod, 2, "mod_systemd: cgroup_id(%u)->container(%s) dsIndex=%u",
+	EVDebug(mod, 2, "mod_systemd: cgroup_id(%"PRIu64")->container(%s) dsIndex=%u",
 		ps->cgroup_id,
 		container->id,
 		container->vm.dsIndex);

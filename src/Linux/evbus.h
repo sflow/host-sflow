@@ -80,7 +80,8 @@ extern "C" {
     pthread_t *thread;
     int childCount;
     UTHash *msgs;
-    bool socketsChanged:1;
+    volatile ut_atomic_t socketsRevision;
+    ut_atomic_t socketsRunRevision;
     bool running:1;
     bool stop:1;
   } EVBus;
@@ -108,7 +109,14 @@ extern "C" {
     int id;
     UTArray *actions;
     UTArray *actions_run;
-    bool actionsChanged:1;
+    // Any thread changing the actions must increment the
+    // actionsRevision (with the lock to ensure that every
+    // change is counted).
+    volatile ut_atomic_t actionsRevision;
+    // The thread that owns this event will (eventually) notice
+    // that it is behind, and will take the same lock to recompile.
+    // That means it can miss a revision and still catch up.
+    ut_atomic_t actionsRunRevision;
   } EVEvent;
 
   typedef void (*EVActionCB)(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);

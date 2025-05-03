@@ -40,8 +40,8 @@ extern "C" {
   */
 
   static int readBroadcomCounters(EVMod *mod, SFLBCM_tables *bcm) {
-    uint64_t scratch64;
-    uint64_t mode;
+    uint64_t scratch64=0;
+    uint64_t mode=0;
 
 #define HSP_BCM_FILES "/cumulus/switchd/run/"
 

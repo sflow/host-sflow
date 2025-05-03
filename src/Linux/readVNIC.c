@@ -139,7 +139,7 @@ extern "C" {
 
     // learn my own namespace inode from /proc/self/ns/net
     if(stat("/proc/self/ns/net", &myNS) == 0) {
-      EVDebug(mod, 1, "my namespace dev.inode == %u.%u",
+      EVDebug(mod, 1, "my namespace dev.inode == %lu.%lu",
 	      myNS.st_dev,
 	      myNS.st_ino);
     }
@@ -178,7 +178,7 @@ extern "C" {
 
       struct stat statBuf;
       if(fstat(nsfd, &statBuf) == 0) {
-	EVDebug(mod, 2, "vm namespace dev.inode == %u.%u", statBuf.st_dev, statBuf.st_ino);
+	EVDebug(mod, 2, "vm namespace dev.inode == %lu.%lu", statBuf.st_dev, statBuf.st_ino);
 	if(statBuf.st_dev == myNS.st_dev
 	   && statBuf.st_ino == myNS.st_ino) {
 	  EVDebug(mod, 1, "skip my own namespace");

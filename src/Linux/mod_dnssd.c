@@ -96,7 +96,8 @@ extern "C" {
     // collect array of results
     for(int entry = 0; entry < answer_count; entry++) {
 
-      myDebug(1, "dnsSD: entry %d, bytes_left=%d", entry, (endp - p));
+      int32_t entryBytes = (endp - p);
+      myDebug(1, "dnsSD: entry %d, bytes_left=%d", entry, entryBytes);
 
       // consume name (again)
       query_name_len = dn_skipname(p, endp);
@@ -108,9 +109,10 @@ extern "C" {
 
       // now p should be looking at:
       // [type:16][class:16][ttl:32][len:16][record]
-      if((endp - p) <= 16) {
+      int32_t bytesLeft = (endp - p);
+      if(bytesLeft <= 16) {
 	myLog(LOG_ERR,"ans %d of %d: ran off end -- only %d bytes left",
-	      entry, answer_count, (endp-p));
+	      entry, answer_count, bytesLeft);
 	return -1;
       }
       uint16_t res_typ =  (p[0] << 8)  |  p[1];
@@ -120,6 +122,14 @@ extern "C" {
       p += 10;
       // use another pointer to walk the payload and move p to the next answer
       u_char *x = p;
+      int32_t resBytesLeft = (endp - p);
+
+      if(res_len > resBytesLeft) {
+	myLog(LOG_ERR,"ans %d of %d: ran off end",
+	      entry, answer_count);
+	return -1;
+      }
+
       p += res_len;
       uint16_t res_payload = res_len;
 
@@ -142,8 +152,9 @@ extern "C" {
 	  res_payload -= 6;
 
 	  // still got room for an FQDN?
-	  if((endp - x) < HSP_MIN_DNAME) {
-	    myLog(LOG_ERR,"no room for target name -- only %d bytes left", (endp - x));
+	  int32_t bytesLeft = (int32_t)(endp - x);
+	  if(bytesLeft < HSP_MIN_DNAME) {
+	    myLog(LOG_ERR,"no room for target name -- only %d bytes left", bytesLeft);
 	    return -1;
 	  }
 
@@ -189,8 +200,9 @@ extern "C" {
 	  // [TXT:res_len]
 
 	  // still got room for a text record?
-	  if((endp - x) < HSP_MIN_TXT) {
-	    myLog(LOG_ERR,"no room for text record -- only %d bytes left", (endp - x));
+	  int32_t bytesLeft = (int32_t)(endp - x);
+	  if(bytesLeft < HSP_MIN_TXT) {
+	    myLog(LOG_ERR,"no room for text record -- only %d bytes left", bytesLeft);
 	    return -1;
 	  }
 

@@ -138,7 +138,7 @@ extern "C" {
 	sock->magic = magic;
 	UTHashAdd(mod->root->sockets, sock);
 	UTArrayAdd(bus->sockets, sock);
-	bus->socketsChanged = YES;
+	UT_atomic_inc(bus->socketsRevision);
       }
     }
     return sock;
@@ -164,7 +164,7 @@ extern "C" {
       EVBus *bus = sock->bus;
       UTArrayDel(bus->sockets, sock);
       UTArrayAdd(bus->sockets_del, sock);
-      bus->socketsChanged = YES;
+      UT_atomic_inc(bus->socketsRevision);
     }
     return (deleted != NULL);
   }
@@ -174,10 +174,11 @@ extern "C" {
     act->module = mod;
     act->actionCB = cb;
     SEMLOCK_DO(mod->root->sync) {
-      // Note that ordering is preserved here. The last one to
-      // ask for an event will be the one that gets it last.
+      // Note that event delivering order is preserved here. The last one
+      // to ask for an event will be the last one to get it each time.
       UTArrayAdd(evt->actions, act);
-      evt->actionsChanged = YES;
+      // indicate the change in an appropriately atomic way
+      UT_atomic_inc(evt->actionsRevision);
     }
     if(my_strequal(evt->name, EVEVENT_DECI)) {
       // shorten select timeout so we can deliver deciTicks
@@ -282,18 +283,30 @@ extern "C" {
 
   static int busRxPipe(EVBus *bus, int fd) {
     EVEventHdr hdr = { 0 };
-    char data[PIPE_BUF];
+    char data[PIPE_BUF + 16];
     if(pipeRead(bus, fd, &hdr, sizeof(hdr)) == NO)
       return 0;
+    if(hdr.dataLen > PIPE_BUF) {
+      myLog(LOG_ERR, "bus %s pipeRead bad dataLen=%u", bus->name, hdr.dataLen);
+      return 0;
+    }
     if(hdr.dataLen
        && pipeRead(bus, fd, data, hdr.dataLen) == NO)
       return 0;
-    data[hdr.dataLen] = '\0'; // NULL-terminate (convenient if string msg)
+    // NULL-terminate (convenient if string msg). We get away with this even
+    // if the read was a full PIPE_BUF bytes because we reserved a little more
+    // than that for data[]
+    data[hdr.dataLen] = '\0';
     EVMod *mod;
     EVEvent *evt;
     SEMLOCK_DO(bus->root->sync) {
       mod = UTArrayAt(bus->root->moduleList, hdr.modId);
       evt = UTArrayAt(bus->eventList, hdr.eventId);
+    }
+    if(mod == NULL
+       || evt == NULL) {
+      // module or event were not found
+      return 0;
     }
     return EVEventTx(mod, evt, (hdr.dataLen ? data : NULL), hdr.dataLen);
   }
@@ -303,7 +316,7 @@ extern "C" {
 		       .eventId = evt->id,
 		       .dataLen = dataLen };
     if((sizeof(hdr) + dataLen) > PIPE_BUF) {
-      myLog(LOG_ERR, "write() from mod %s to event pipe %s : msg too long(%u) => not atomic",
+      myLog(LOG_ERR, "write() from mod %s to event pipe %s : msg too long(%zu) => not atomic",
 	    mod->name,
 	    evt->name,
 	    dataLen);
@@ -335,14 +348,14 @@ extern "C" {
     if(evt->bus == EVCurrentBus()) {
       // local event
       EVAction *act;
-      if(evt->actionsChanged) {
+      // Notice if the list of actions has changed.
+      ut_atomic_t rev = UT_atomic_load_acq_n(&evt->actionsRevision);
+      if(unlikely(rev != evt->actionsRunRevision)) {
+	// compile actions -> actions_run.
 	SEMLOCK_DO(mod->root->sync) {
-	  // check again once we have the lock
-	  if(evt->actionsChanged) {
-	    UTArrayReset(evt->actions_run);
-	    UTArrayAddAll(evt->actions_run, evt->actions);
-	    evt->actionsChanged = NO;
-	  }
+	  UTArrayReset(evt->actions_run);
+	  UTArrayAddAll(evt->actions_run, evt->actions);
+	  UT_atomic_inc(evt->actionsRunRevision);
 	}
       }
       UTARRAY_WALK(evt->actions_run, act) {
@@ -393,16 +406,16 @@ extern "C" {
     FD_SET(bus->pipe[0], &readfds);
     max_fd = bus->pipe[0];
     // and other registered sockets
-    if(bus->socketsChanged) {
+    // notice if the list of sockets has changed.
+    ut_atomic_t rev = UT_atomic_load_acq_n(&bus->socketsRevision);
+    if(unlikely(rev != bus->socketsRunRevision)) {
+      // compile sockets -> sockets_run. Need lock to access bus->sockets etc.
       SEMLOCK_DO(bus->root->sync) {
-	// check again once we have the lock
-	if(bus->socketsChanged) {
-	  UTArrayReset(bus->sockets_run);
-	  UTArrayAddAll(bus->sockets_run, bus->sockets);
-	  UTARRAY_WALK(bus->sockets_del, sock) EVSocketFree(sock);
-	  UTArrayReset(bus->sockets_del);
-	  bus->socketsChanged = NO;
-	}
+	UTArrayReset(bus->sockets_run);
+	UTArrayAddAll(bus->sockets_run, bus->sockets);
+	UTARRAY_WALK(bus->sockets_del, sock) EVSocketFree(sock);
+	UTArrayReset(bus->sockets_del);
+	UT_atomic_inc(bus->socketsRunRevision);
       }
     }
     UTARRAY_WALK(bus->sockets_run, sock) {
@@ -723,6 +736,7 @@ extern "C" {
       if(msg->count > 1)
 	myLog(syslogType, "(msg repeated %u times in %u secs)", msg->count, rl_secs);
       msg->count = 1;
+      va_end(args);
     }
     else {
       msg->count++;
@@ -734,10 +748,12 @@ extern "C" {
 	&& mod->debugLevel >= level)
        || debug(level)) {
       if(fmt) {
-	myLog2(level, NO, LOG_DEBUG, "%s:", mod->name);
+	char *mname = (mod ? mod->name : "<none>");
+	myLog2(level, NO, LOG_DEBUG, "%s:", mname);
 	va_list args;
 	va_start(args, fmt);
 	myLogv2(level, YES, LOG_DEBUG, fmt, args);
+	va_end(args);
       }
       return YES;
     }
