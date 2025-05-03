@@ -22,9 +22,7 @@ extern "C" {
 #endif
 
 #define HSP_PSAMPLE_READNL_RCV_BUF 16384
-#define HSP_PSAMPLE_RCVMSG_CBUFLEN 256
 #define HSP_PSAMPLE_READNL_BATCH 10
-#define HSP_PSAMPLE_MM_BATCH 8
 #define HSP_PSAMPLE_RCVBUF 8000000
 
   // Shadow the attributes in linux/psample.h so
@@ -76,11 +74,6 @@ extern "C" {
     uint32_t grp_ingress;
     uint32_t grp_egress;
     uint32_t last_grp_seq[2];
-    struct mmsghdr mmsgheader[HSP_PSAMPLE_MM_BATCH];
-    struct iovec iov[HSP_PSAMPLE_MM_BATCH];
-    char controlbuf[HSP_PSAMPLE_MM_BATCH][HSP_PSAMPLE_RCVMSG_CBUFLEN];
-    UTSockAddr peer[HSP_PSAMPLE_MM_BATCH];
-    char msgbuf[HSP_PSAMPLE_MM_BATCH][HSP_PSAMPLE_READNL_RCV_BUF];
   } HSP_mod_PSAMPLE;
 
   /*_________________---------------------------__________________
@@ -94,14 +87,18 @@ extern "C" {
     EVDebug(mod, 1, "getFamily");
     mdata->state = HSP_PSAMPLE_STATE_GET_FAMILY;
     mdata->retry_countdown = HSP_PSAMPLE_WAIT_RETRY_S;
-    UTNLGeneric_send(mdata->nl_sock,
-		     mod->id,
-		     GENL_ID_CTRL,
-		     CTRL_CMD_GETFAMILY,
-		     CTRL_ATTR_FAMILY_NAME,
-		     PSAMPLE_GENL_NAME,
-		     sizeof(PSAMPLE_GENL_NAME)+1,
-		     ++mdata->nl_seq);
+    int status = UTNLGeneric_send(mdata->nl_sock,
+				  mod->id,
+				  GENL_ID_CTRL,
+				  CTRL_CMD_GETFAMILY,
+				  CTRL_ATTR_FAMILY_NAME,
+				  PSAMPLE_GENL_NAME,
+				  sizeof(PSAMPLE_GENL_NAME)+1,
+				  ++mdata->nl_seq);
+    if(status < 0) {
+      EVDebug(mod, 1, "getFamily_PSAMPLE() UTNLGeneric_send failed: %s",
+	      strerror(errno));
+    }
   }
 
   /*_________________---------------------------__________________
@@ -137,82 +134,79 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void processNetlink_GENERIC(EVMod *mod, struct nlmsghdr *nlh)
+  static void processNetlink_GENERIC(EVMod *mod, struct nlmsghdr *nlh, int numbytes)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
+    int msglen = nlh->nlmsg_len;
+    if(msglen > numbytes) {
+      EVDebug(mod, 0, "processNetlink_GENERIC msglen too long");
+      return;
+    }
+    if(msglen < (NLMSG_HDRLEN + GENL_HDRLEN + NLA_HDRLEN)) {
+      EVDebug(mod, 0, "processNetlink_GENERIC msglen too short");
+      return;
+    }
     char *msg = (char *)NLMSG_DATA(nlh);
-    int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    msglen -= NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
     EVDebug(mod, 1, "generic netlink CMD = %u", genl->cmd);
+    msglen -= GENL_HDRLEN;
 
-    for(int offset = GENL_HDRLEN; offset < msglen; ) {
-      struct nlattr *attr = (struct nlattr *)(msg + offset);
-      if(attr->nla_len == 0 ||
-	 (attr->nla_len + offset) > msglen) {
-	myLog(LOG_ERR, "processNetlink_GENERIC attr parse error");
-	break; // attr parse error
-      }
-      char *attr_datap = (char *)attr + NLA_HDRLEN;
-      switch(attr->nla_type) {
+    struct nlattr *attr0 = (struct nlattr *)(msg + GENL_HDRLEN);
+    for(int attrs_len = msglen;
+	UTNLA_OK(attr0, attrs_len);
+	attr0 = UTNLA_NEXT(attr0, attrs_len)) {
+      switch(attr0->nla_type) {
       case CTRL_ATTR_VERSION:
-	mdata->genetlink_version = *(uint32_t *)attr_datap;
+	mdata->genetlink_version = *(uint32_t *)UTNLA_DATA(attr0);
 	break;
       case CTRL_ATTR_FAMILY_ID:
-	mdata->family_id = *(uint16_t *)attr_datap;
+	mdata->family_id = *(uint16_t *)UTNLA_DATA(attr0);
 	EVDebug(mod, 1, "generic family id: %u", mdata->family_id); 
 	break;
       case CTRL_ATTR_FAMILY_NAME:
-	EVDebug(mod, 1, "generic family name: %s", attr_datap); 
+	EVDebug(mod, 1, "generic family name: %s", (char *)UTNLA_DATA(attr0));
 	break;
       case CTRL_ATTR_MCAST_GROUPS:
-	for(int grp_offset = NLA_HDRLEN; grp_offset < attr->nla_len;) {
-	  struct nlattr *grp_attr = (struct nlattr *)(msg + offset + grp_offset);
-	  if(grp_attr->nla_len == 0 ||
-	     (grp_attr->nla_len + grp_offset) > attr->nla_len) {
-	    myLog(LOG_ERR, "processNetlink_GENERIC grp_attr parse error");
-	    break;
-	  }
-	  char *grp_name=NULL;
-	  uint32_t grp_id=0;
-	  for(int gf_offset = NLA_HDRLEN; gf_offset < grp_attr->nla_len; ) {
-	    struct nlattr *gf_attr = (struct nlattr *)(msg + offset + grp_offset + gf_offset);
-	    if(gf_attr->nla_len == 0 ||
-	       (gf_attr->nla_len + gf_offset) > grp_attr->nla_len) {
-	      myLog(LOG_ERR, "processNetlink_GENERIC gf_attr parse error");
-	      break;
+	{
+	  struct nlattr *attr1 = (struct nlattr *)UTNLA_DATA(attr0);
+	  for(int attr0_len = UTNLA_PAYLOAD(attr0);
+	      UTNLA_OK(attr1, attr0_len);
+	      attr1 = UTNLA_NEXT(attr1, attr0_len)) {
+	    char *grp_name=NULL;
+	    uint32_t grp_id=0;
+	    struct nlattr *attr2 = UTNLA_DATA(attr1);
+	    for(int attr1_len = UTNLA_PAYLOAD(attr1);
+		UTNLA_OK(attr2, attr1_len);
+		attr2 = UTNLA_NEXT(attr2, attr1_len)) {
+	      switch(attr2->nla_type) {
+	      case CTRL_ATTR_MCAST_GRP_NAME:
+		grp_name = (char *)UTNLA_DATA(attr2);
+		EVDebug(mod, 1, "multicast group: %s", grp_name);
+		break;
+	      case CTRL_ATTR_MCAST_GRP_ID:
+		grp_id = *(uint32_t *)UTNLA_DATA(attr2);
+		EVDebug(mod, 1, "multicast group id: %u", grp_id);
+		break;
+	      }
 	    }
-	    char *grp_attr_datap = (char *)gf_attr + NLA_HDRLEN;
-	    switch(gf_attr->nla_type) {
-	    case CTRL_ATTR_MCAST_GRP_NAME:
-	      grp_name = grp_attr_datap;
-	      EVDebug(mod, 1, "psample multicast group: %s", grp_name); 
-	      break;
-	    case CTRL_ATTR_MCAST_GRP_ID:
-	      grp_id = *(uint32_t *)grp_attr_datap;
-	      EVDebug(mod, 1, "psample multicast group id: %u", grp_id); 
-	      break;
+	    if(mdata->state == HSP_PSAMPLE_STATE_GET_FAMILY
+	       && grp_name
+	       && grp_id
+	       && my_strequal(grp_name, PSAMPLE_NL_MCGRP_SAMPLE_NAME)) {
+	      EVDebug(mod, 1, "psample found group %s=%u", grp_name, grp_id);
+	      mdata->group_id = grp_id;
+	      joinGroup_PSAMPLE(mod);
 	    }
-	    gf_offset += NLMSG_ALIGN(gf_attr->nla_len);
 	  }
-	  if(mdata->state == HSP_PSAMPLE_STATE_GET_FAMILY
-	     && grp_name
-	     && grp_id
-	     && my_strequal(grp_name, PSAMPLE_NL_MCGRP_SAMPLE_NAME)) {
-	    EVDebug(mod, 1, "psample found group %s=%u", grp_name, grp_id);
-	    mdata->group_id = grp_id;
-	    joinGroup_PSAMPLE(mod);
-	  }
-
-	  grp_offset += NLMSG_ALIGN(grp_attr->nla_len);
 	}
 	break;
       default:
 	EVDebug(mod, 1, "psample attr type: %u (nested=%u) len: %u",
-		attr->nla_type,
-		attr->nla_type & NLA_F_NESTED,
-		attr->nla_len);
+		attr0->nla_type,
+		attr0->nla_type & NLA_F_NESTED,
+		attr0->nla_len);
       }
-      offset += NLMSG_ALIGN(attr->nla_len);
     }
   }
 
@@ -230,27 +224,34 @@ extern "C" {
     }
   }
 
-  static void processNetlink_PSAMPLE(EVMod *mod, struct nlmsghdr *nlh)
+  static void processNetlink_PSAMPLE(EVMod *mod, struct nlmsghdr *nlh, int numbytes)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
+    int msglen = nlh->nlmsg_len;
+    if(msglen > numbytes) {
+      EVDebug(mod, 0, "processNetlink_PSAMPLE msglen too long");
+      return;
+    }
+    if(msglen < (NLMSG_HDRLEN + GENL_HDRLEN + NLA_HDRLEN)) {
+      EVDebug(mod, 0, "processNetlink_PSAMPLE msglen too short");
+      return;
+    }
     u_char *msg = (u_char *)NLMSG_DATA(nlh);
-    int msglen = nlh->nlmsg_len - NLMSG_HDRLEN;
+    msglen -= NLMSG_HDRLEN;
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
-    EVDebug(mod, 2, "psample netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
+    EVDebug(mod, 2, "processNetlink_PSAMPLE (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
+    msglen -= GENL_HDRLEN;
 
     HSPPSample psmp = {};
     SFLFlow_sample_element *ext_elems = NULL;
     // TODO: tunnel encap/decap may be avaiable too
     bool free_ext_elems = YES;
-
-    for(int offset = GENL_HDRLEN; offset < msglen; ) {
-      struct nlattr *ps_attr = (struct nlattr *)(msg + offset);
-      if(ps_attr->nla_len == 0 ||
-	 (ps_attr->nla_len + offset) > msglen) {
-	myLog(LOG_ERR, "processNetlink_PSAMPLE attr parse error");
-	break;
-      }
+ 
+    struct nlattr *ps_attr = (struct nlattr *)(msg + GENL_HDRLEN);
+    for(int attrs_len = msglen;
+	UTNLA_OK(ps_attr, attrs_len);
+	ps_attr = UTNLA_NEXT(ps_attr, attrs_len)) {
       u_char *datap = UTNLA_DATA(ps_attr);
       int datalen = UTNLA_PAYLOAD(ps_attr);
 
@@ -297,7 +298,6 @@ extern "C" {
 	}
 	break;
       }
-      offset += NLMSG_ALIGN(ps_attr->nla_len);
     }
 
     //#define TEST_PSAMPLE_EXTENSIONS 1
@@ -438,14 +438,14 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void processNetlink(EVMod *mod, struct nlmsghdr *nlh)
+  static void processNetlink(EVMod *mod, struct nlmsghdr *nlh, int numbytes)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
     if(nlh->nlmsg_type == NETLINK_GENERIC) {
-      processNetlink_GENERIC(mod, nlh);
+      processNetlink_GENERIC(mod, nlh, numbytes);
     }
     else if(nlh->nlmsg_type == mdata->family_id) {
-      processNetlink_PSAMPLE(mod, nlh);
+      processNetlink_PSAMPLE(mod, nlh, numbytes);
     }
   }
 
@@ -457,63 +457,34 @@ extern "C" {
   static void readNetlink_PSAMPLE(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP_mod_PSAMPLE *mdata = (HSP_mod_PSAMPLE *)mod->data;
-    
+    uint8_t recv_buf[HSP_PSAMPLE_READNL_RCV_BUF];
     int batch = 0;
     for( ; batch < HSP_PSAMPLE_READNL_BATCH; batch++) {
-
-      // wire up my packet buffers (may only
-      // need the msg_namelen to be reset every time)
-      for(uint32_t ii = 0; ii < HSP_PSAMPLE_MM_BATCH; ii++) {
-	struct msghdr *mh = &mdata->mmsgheader[ii].msg_hdr;
-	mh->msg_control = &mdata->controlbuf[ii];
-	mh->msg_controllen = HSP_PSAMPLE_RCVMSG_CBUFLEN;
-	mh->msg_name = &mdata->peer[ii];
-	mh->msg_namelen = sizeof(mdata->peer[ii]);
-	mh->msg_iov = &mdata->iov[ii];
-	mh->msg_iovlen = 1;
-	mh->msg_flags = 0;
-	mdata->iov[ii].iov_base = mdata->msgbuf[ii];;
-	mdata->iov[ii].iov_len = HSP_PSAMPLE_READNL_RCV_BUF;
-      }
-      int flags = 0;
-      struct timespec timeout = {};
-      int cc = recvmmsg(sock->fd, mdata->mmsgheader, HSP_PSAMPLE_MM_BATCH, flags, &timeout);
-      
-      if(cc > 1)
-	EVDebug(mod, 0, "recvmmsg got %u msgs\n", cc);
-      
-      if(cc <= 0) {
-	if(errno != EAGAIN) {
-	  myLog(LOG_ERR, "recvmmsg() failed, cc=%d, %s\n", cc, strerror(errno));
-	}
-	return;
-      }
-      for(int ii = 0; ii < cc; ii++) {
-	struct mmsghdr *mm = &mdata->mmsgheader[ii];      
-	int numbytes = mm->msg_len;
-	if(numbytes > 0) {
-	  struct nlmsghdr *nlh = (struct nlmsghdr*) mdata->msgbuf[ii];
-	  while(NLMSG_OK(nlh, numbytes)){
-	    if(nlh->nlmsg_type == NLMSG_DONE)
-	      break;
-	    if(nlh->nlmsg_type == NLMSG_ERROR){
-	      struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
-	      if(err_msg->error == 0) {
-		EVDebug(mod, 1, "received Netlink ACK");
-	      }
-	      else {
-		// TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
-		EVDebug(mod, 1, "state %u: error in netlink message: %d : %s",
-			mdata->state,
-			err_msg->error,
-			strerror(-err_msg->error));
-	      }
-	      break;
-	    }
-	    processNetlink(mod, nlh);
-	    nlh = NLMSG_NEXT(nlh, numbytes);
+      int msglen = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
+      if(msglen < sizeof(struct nlmsghdr))
+	break;
+      EVDebug(mod, 4, "readNetlink_PSAMPLE - msg = %d bytes", msglen);
+      int numbytes = msglen;
+      struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
+      while(NLMSG_OK(nlh, numbytes)){
+	if(nlh->nlmsg_type == NLMSG_DONE)
+	  break;
+	if(nlh->nlmsg_type == NLMSG_ERROR){
+	  struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
+	  if(err_msg->error == 0) {
+	    EVDebug(mod, 1, "received Netlink ACK");
 	  }
+	  else {
+	    // TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
+	    EVDebug(mod, 1, "state %u: error in netlink message: %d : %s",
+		    mdata->state,
+		    err_msg->error,
+		    strerror(-err_msg->error));
+	  }
+	  break;
 	}
+	processNetlink(mod, nlh, numbytes);
+	nlh = NLMSG_NEXT(nlh, numbytes);
       }
     }
   }
