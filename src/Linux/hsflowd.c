@@ -354,6 +354,7 @@ extern "C" {
     HSPLocalIP *lip = my_calloc(sizeof(HSPLocalIP));
     lip->ipAddr = *ipAddr;
     lip->devs = strArrayNew();
+    strArrayAdd(lip->devs, dev);
     th_n_localIPs++;
     return lip;
   }
