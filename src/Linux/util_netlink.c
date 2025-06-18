@@ -304,6 +304,69 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    UTNLRoute_ns_send      __________________
+    -----------------___________________________------------------
+  */
+
+  int UTNLRoute_ns_send(int sockfd, uint32_t mod_id, int fd, uint32_t seqNo) {
+    // sizeof(struct rtgenmsg) is only 1 but we can get
+    // the compiler to help us with the padding and
+    // construct the request in one struct.
+    struct {
+      struct nlmsghdr nlh;
+      __attribute__((aligned(4))) struct rtgenmsg rtg;
+      __attribute__((aligned(4))) struct rtattr rta;
+      __attribute__((aligned(4))) uint32_t fd;
+    } m = {
+      .nlh.nlmsg_len = sizeof(m),
+      .nlh.nlmsg_pid = UTNLGeneric_pid(mod_id),
+      .nlh.nlmsg_flags = NLM_F_REQUEST,
+      .nlh.nlmsg_type = RTM_GETNSID,
+      .nlh.nlmsg_seq = seqNo,
+      .rtg.rtgen_family = AF_UNSPEC,
+      .rta.rta_type = NETNSA_FD,
+      .rta.rta_len = sizeof(m.rta) + sizeof(m.fd),
+      .fd = fd
+    };
+    return send(sockfd, &m, sizeof(m), 0);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    UTNLRoute_ns_recv      __________________
+    -----------------___________________________------------------
+  */
+
+  int UTNLRoute_ns_recv(int sockfd, uint32_t *p_nsid) {
+    uint8_t recv_buf[HSP_READNL_RCV_BUF];
+    int rc;
+  try_again:
+    rc = recv(sockfd, recv_buf, HSP_READNL_RCV_BUF, 0);
+    if(rc < 0) {
+      if(errno == EAGAIN || errno == EINTR)
+	goto try_again;
+      return -1;
+    }
+    if(rc > sizeof(struct nlmsghdr)) {
+      struct nlmsghdr *recv_hdr = (struct nlmsghdr*)recv_buf;
+      if(recv_hdr->nlmsg_type == RTM_GETNSID) {
+	uint16_t len = recv_hdr->nlmsg_len;
+	struct rtgenmsg *genmsg = NLMSG_DATA(recv_hdr);
+	struct rtattr *rta = UTNLA_RTA(genmsg);
+	while (RTA_OK(rta, len)){
+	  if(len > rc)
+	    return -1;
+	  if(rta->rta_type == NETNSA_NSID) {
+	    *p_nsid = *(uint32_t *)RTA_DATA(rta);
+	    return YES;
+	  }
+	  rta = RTA_NEXT(rta, len);
+	}
+      }
+    }
+    return NO;
+  }
+
+  /*_________________---------------------------__________________
     _________________      UTNLRoute_recv       __________________
     -----------------___________________________------------------
   */

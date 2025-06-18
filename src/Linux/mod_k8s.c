@@ -20,6 +20,7 @@ extern "C" {
 #include "hsflowd.h"
 #include "cpu_utils.h"
 #include "math.h"
+#include "util_netlink.h"
 
   // limit the number of chars we will read from each line
   // (there can be more than this - my_readline will chop for us)
@@ -61,6 +62,7 @@ extern "C" {
     char *cgroup_devices;
     UTHash *containers;
     uint64_t cgroup_id;
+    uint32_t nsid; // network namespace id (for nspid->nsid->dev)
   } HSPVMState_POD;
 
 #define HSP_K8S_READER "/usr/sbin/hsflowd_containerd"
@@ -121,6 +123,9 @@ extern "C" {
     EVEvent *rtmetricEvent;
     uint32_t c_readCB;
     uint32_t c_readContainerCB;
+    int nl_sock;
+    EVSocket *evSoc;
+    uint32_t seq_no;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -528,6 +533,39 @@ extern "C" {
     return container;
   }
 
+
+  /*_________________---------------------------__________________
+    _________________   updatePodNSID           __________________
+    -----------------___________________________------------------
+    look up the associated nsid via NETLINK_ROUTE
+  */
+
+  static void updatePodNSID(EVMod *mod, HSPVMState_POD *pod) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    // open /proc/<nspid>/ns/net
+    char topath[HSP_MAX_PATHLEN];
+    snprintf(topath, HSP_MAX_PATHLEN, PROCFS_STR "/%u/ns/net", pod->nspid);
+    int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
+    if(nsfd < 0) {
+      EVDebug(mod, 1, "cannot open %s : %s", topath, strerror(errno));
+      close(nsfd);
+      return;
+    }
+    if(UTNLRoute_ns_send(mdata->nl_sock, mod->id, nsfd, ++mdata->seq_no) > 0) {
+      int ok = UTNLRoute_ns_recv(mdata->nl_sock, &pod->nsid);
+      switch(ok) {
+      case -1:
+	EVDebug(mod, 1, "UTNLRoute_ns_recv() failed : %s", strerror(errno));
+	break;
+      case NO:
+	EVDebug(mod, 1, "UTNLRoute_ns_recv() lookup failed");
+      case YES:
+	EVDebug(mod, 1, "UTNLRoute_ns_recv() returned nsid=", pod->nsid);
+      }
+    }
+    close(nsfd);
+  }
+
   /*_________________---------------------------__________________
     _________________  updatePodAdaptors        __________________
     -----------------___________________________------------------
@@ -543,6 +581,8 @@ extern "C" {
       // and clean up
       deleteMarkedAdaptors_adaptorList(mod, vm->interfaces);
       adaptorListFreeMarked(vm->interfaces);
+      // experimental - get pod NSID as well
+      updatePodNSID(mod, pod);
     }
   }
 
@@ -1330,6 +1370,11 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, EVEVENT_TOCK), evt_tock);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
+
+    // for netlink requests
+    mdata->nl_sock = UTNLRoute_open(mod->id, NO, 1000000); // blocking socket (for now)
+    // TODO: need to figure out how to match up response to request - maybe set seqNo==cgroup_id?
+    // mdata->evSoc = EVBusAddSocket(mod, mdata->pollBus, mdata->nl_sock, readNetlinkCB, NULL);
 
     EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     

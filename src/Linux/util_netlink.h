@@ -13,6 +13,7 @@ extern "C" {
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <linux/genetlink.h>
+#include <linux/net_namespace.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -62,6 +63,8 @@ extern "C" {
   int UTNLRoute_open(uint32_t mod_id, bool nonBlocking, size_t bufferSize);
   int UTNLRoute_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint field, uint32_t seqNo);
   int UTNLRoute_recv(int sockfd, uint field, uint32_t *pIfIndex, char *resultBuf, uint *pResultLen);
+  int UTNLRoute_ns_send(int sockfd, uint32_t mod_id, int fd, uint32_t seqNo);
+  int UTNLRoute_ns_recv(int sockfd, uint32_t *p_nsid);
 
   int UTNLUsersock_open(uint32_t mod_id);
 
@@ -82,6 +85,9 @@ extern "C" {
 #define UTNLA_SPACE(len)	NLA_ALIGN(UTNLA_LENGTH(len))
 #define UTNLA_DATA(nla)   ((void *)(((char *)(nla)) + UTNLA_LENGTH(0)))
 #define UTNLA_PAYLOAD(nla) ((int)((nla)->nla_len) - UTNLA_LENGTH(0))
+
+  // Also need way to access attribute offset that can also work for struct rtgenmsg
+#define UTNLA_RTA(msg)  ((struct rtattr*)(((char*)(msg)) + NLMSG_ALIGN(sizeof(*msg))))
 
 #if defined(__cplusplus)
 } /* extern "C" */
