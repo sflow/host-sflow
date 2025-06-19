@@ -177,7 +177,7 @@ endif
 
 #########  compilation flags  #########
 
-HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h dropPoints_sw.h dropPoints_hw.h Makefile
+HEADERS= util.h util_dbus.h .h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h dropPoints_sw.h dropPoints_hw.h Makefile
 
 # compiler
 #CC= g++
@@ -385,7 +385,7 @@ OBJS_DBUS=mod_dbus.o util_dbus.o
 OBJS_SYSTEMD=mod_systemd.o util_dbus.o util_netlink.o
 OBJS_EAPI=mod_eapi.o
 OBJS_CONTAINERD=mod_containerd.o
-OBJS_K8S=mod_k8s.o
+OBJS_K8S=mod_k8s.o util_netlink.o
 OBJS_NLROUTE=mod_nlroute.o util_netlink.o
 OBJS_VPP=mod_vpp.o util_netlink.o
 
