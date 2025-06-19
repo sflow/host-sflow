@@ -348,18 +348,22 @@ extern "C" {
     }
     if(rc > sizeof(struct nlmsghdr)) {
       struct nlmsghdr *recv_hdr = (struct nlmsghdr*)recv_buf;
-      if(recv_hdr->nlmsg_type == RTM_GETNSID) {
-	uint16_t len = recv_hdr->nlmsg_len;
-	struct rtgenmsg *genmsg = NLMSG_DATA(recv_hdr);
-	struct rtattr *rta = UTNLA_RTA(genmsg);
-	while (RTA_OK(rta, len)){
-	  if(len > rc)
-	    return -1;
-	  if(rta->rta_type == NETNSA_NSID) {
-	    *p_nsid = *(uint32_t *)RTA_DATA(rta);
-	    return YES;
+      switch(recv_hdr->nlmsg_type) {
+      case RTM_GETNSID:
+      case RTM_NEWNSID:
+	{
+	  uint16_t len = recv_hdr->nlmsg_len;
+	  struct rtgenmsg *genmsg = NLMSG_DATA(recv_hdr);
+	  struct rtattr *rta = UTNLA_RTA(genmsg);
+	  while (RTA_OK(rta, len)){
+	    if(len > rc)
+	      return -1;
+	    if(rta->rta_type == NETNSA_NSID) {
+	      *p_nsid = *(uint32_t *)RTA_DATA(rta);
+	      return YES;
+	    }
+	    rta = RTA_NEXT(rta, len);
 	  }
-	  rta = RTA_NEXT(rta, len);
 	}
       }
     }
