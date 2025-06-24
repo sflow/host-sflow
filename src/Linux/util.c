@@ -104,7 +104,7 @@ extern "C" {
     buf->len = 0;
     UTStrBuf_nul_terminate(buf);
   }
-  
+
   UTStrBuf *UTStrBuf_wrap(char *str) {
     UTStrBuf *buf = UTStrBuf_new();
     UTStrBuf_append(buf, str);
@@ -175,7 +175,7 @@ extern "C" {
     myLogv2(level, end, syslogType, fmt, args);
     va_end(args);
   }
-    
+
   void myLog(int syslogType, char *fmt, ...)
   {
     va_list args;
@@ -259,10 +259,9 @@ extern "C" {
     -----------------_______________________________________------------------
   */
 
-  typedef union _UTHeapHeader {
-    uint64_t hdrBits64[2];     // force sizeof(UTBufferHeader) == 128bits to ensure alignment
-    union _UTHeapHeader *nxt;  // valid when in linked list waiting to be reallocated
-    struct {                   // valid when buffer being used - store bookkeeping info here
+  typedef struct _UTHeapHeader {
+    struct _UTHeapHeader *nxt;
+    struct {
       uint32_t realmIdx;
       uint32_t queueIdx;
     } h;
@@ -314,11 +313,26 @@ extern "C" {
       utBuf = (UTHeapHeader *)my_os_calloc(1<<queueIdx);
       utRealm.totalAllocatedBytes += (1<<queueIdx);
     }
-    // remember the details so we know what to do on free (overwriting the nxt pointer)
+    // remember the details so we know what to do on free
+    utBuf->nxt = NULL;
     utBuf->h.realmIdx = utRealm.realmIdx;
     utBuf->h.queueIdx = queueIdx;
     // return a pointer to just after the header
     return (char *)utBuf + sizeof(UTHeapHeader);
+  }
+  /*_________________---------------------------__________________
+    _________________    UTHeapQFree            __________________
+    -----------------___________________________------------------
+  */
+
+  static void UTHeapQRecycle(UTHeapHeader *utBuf)
+  {
+    // read the queue index before we overwrite it
+    uint16_t queueIdx = utBuf->h.queueIdx;
+    memset(utBuf, 0, 1 << queueIdx);
+    // put it back on the queue
+    utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
+    utRealm.bufferLists[queueIdx] = utBuf;
   }
 
   /*_________________---------------------------__________________
@@ -352,7 +366,8 @@ extern "C" {
 	  if(utBuf->h.realmIdx == utRealm.realmIdx) {
 	    // this one is mine - recycle and unlink
 	    myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
-	    UTHeapQFree(utBuf);
+	    utBuf->nxt = NULL;
+	    UTHeapQRecycle(utBuf);
 	    if(prev) prev->nxt = nextBuf;
 	    else UTHeap.foreign = nextBuf;
 	    UT_atomic_dec(UTHeap.n_foreign);
@@ -372,13 +387,11 @@ extern "C" {
   void UTHeapQFree(void *buf)
   {
     UTHeapHeader *utBuf = UTHeapQHdr(buf);
+    if(utBuf->nxt != NULL) {
+      return; // ignore double-free
+    }
     if(utBuf->h.realmIdx == utRealm.realmIdx) {
-      // read the queue index before we overwrite it
-      uint16_t queueIdx = utBuf->h.queueIdx;
-      memset(utBuf, 0, 1 << queueIdx);
-      // put it back on the queue
-      utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
-      utRealm.bufferLists[queueIdx] = utBuf;
+      UTHeapQRecycle(utBuf);
     }
     else {
       // foreign realm - queue it for the owner to recycle.  Could
@@ -551,12 +564,12 @@ extern "C" {
     // NULL -> NULL
     if(str == NULL)
       return NULL;
-    
+
     // "" -> NULL
     if(len == 0
        || *str == '\0')
       return NULL;
-    
+
     char *end = str + len - 1;
 
     // Trim leading space
@@ -847,7 +860,7 @@ extern "C" {
        )
       arrayPack_nolock(ar);
   }
-    
+
   uint32_t UTArrayAdd(UTArray *ar, void *obj) {
     int offset = -1;
     SEMLOCK_DO(ar->sync) {
@@ -957,7 +970,7 @@ extern "C" {
     UTArrayAddAll(cpy, ar);
     return cpy;
   }
-  
+
   /*________________---------------------------__________________
     ________________       lookupAddress       __________________
     ----------------___________________________------------------
@@ -1273,7 +1286,7 @@ extern "C" {
   */
 
   static __thread int th_n_adaptors=0;
-  
+
   SFLAdaptor *adaptorNew(char *dev, u_char *macBytes, size_t userDataSize, uint32_t ifIndex) {
     SFLAdaptor *ad = (SFLAdaptor *)my_calloc(sizeof(SFLAdaptor));
     ad->deviceName = my_strdup(dev);
@@ -1354,7 +1367,7 @@ extern "C" {
   void unmarkAdaptor(SFLAdaptor *ad)  {
     ad->marked &= ~SFLADAPTOR_MARK_DEL;
   }
-  
+
   void adaptorListMarkAll(SFLAdaptorList *adList)
   {
     SFLAdaptor *ad;
@@ -1938,33 +1951,43 @@ static uint32_t hashSearch(UTHash *oh, void *obj, void **found) {
     return ar; // remember to UTArrayFree() this later
 
   }
-  
+
   /*_________________---------------------------__________________
     _________________   socket handling         __________________
     -----------------___________________________------------------
   */
-  
-  void UTSocketRcvbuf(int fd, int requested) {
-    int rcvbuf=0;
-    socklen_t rcvbufsiz = sizeof(rcvbuf);
-    if(getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &rcvbufsiz) < 0) {
-      myLog(LOG_ERR, "UTSocketRcvbuf: getsockopt(SO_RCVBUF) failed: %s", strerror(errno));
+
+  static void UTSocketBuf(int fd, int requested, int opt, const char *optName) {
+    int socbuf=0;
+    socklen_t socbufsiz = sizeof(socbuf);
+    if(getsockopt(fd, SOL_SOCKET, opt, &socbuf, &socbufsiz) < 0) {
+      myLog(LOG_ERR, "UTSocketBuf: getsockopt(%s) failed: %s", optName, strerror(errno));
     }
-    myDebug(1, "UTSocketRcvbuf: socket buffer current=%d", rcvbuf);
-    if(rcvbuf < requested) {
+    myDebug(1, "UTSocketBuf: socket buffer %s current=%d", optName, socbuf);
+    if(socbuf < requested) {
       // want more: submit the request
-      rcvbuf = requested;
-      if(setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
-	myLog(LOG_ERR, "UTSocketRcvbuf: setsockopt(SO_RCVBUF=%d) failed: %s",
-	      requested, strerror(errno));
+      socbuf = requested;
+      if(setsockopt(fd, SOL_SOCKET, opt, &socbuf, sizeof(socbuf)) < 0) {
+	myLog(LOG_ERR, "UTSocketBuf: setsockopt(%s) failed: %s", optName, strerror(errno));
       }
       // see what we actually got
-      rcvbufsiz = sizeof(rcvbuf);
-      if(getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &rcvbufsiz) < 0) {
-	myLog(LOG_ERR, "UTSocketRcvbuf: getsockopt(SO_RCVBUF) failed: %s", strerror(errno));
+      socbufsiz = sizeof(socbuf);
+      if(getsockopt(fd, SOL_SOCKET, opt, &socbuf, &socbufsiz) < 0) {
+	myLog(LOG_ERR, "UTSocketBuf: getsockopt(%s) failed: %s", optName, strerror(errno));
       }
-      myDebug(1, "UTSocketRcvbuf: socket buffer requested=%d received=%d", requested, rcvbuf);
+      myDebug(1, "UTSocketBuf: socket buffer %s requested=%d received=%d",
+	      optName,
+	      requested,
+	      socbuf);
     }
+  }
+
+  void UTSocketRcvbuf(int fd, int requested) {
+    UTSocketBuf(fd, requested, SO_RCVBUF, "RCVBUF");
+  }
+
+  void UTSocketSndbuf(int fd, int requested) {
+    UTSocketBuf(fd, requested, SO_SNDBUF, "SNDBUF");
   }
 
   int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize)

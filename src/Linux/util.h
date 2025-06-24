@@ -270,6 +270,7 @@ typedef int32_t ut_atomic_t;
   } UTSockAddr;
 
   void UTSocketRcvbuf(int fd, int requested);
+  void UTSocketSndbuf(int fd, int requested);
   int UTSocketUDP(char *bindaddr, int family, uint16_t port, int bufferSize);
   int UTUnixDomainSocket(char *path);
 
