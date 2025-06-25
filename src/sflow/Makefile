@@ -12,8 +12,8 @@ CFLAGS += -DSFL_USE_32BIT_INDEX -Wno-unused-function
 LDFLAGS=
 
 #CC= g++
-#CC= gcc -std=c99
-CC= gcc
+CC= gcc -std=c99
+#CC= gcc
 
 OBJS= sflow_agent.o \
       sflow_sampler.o \
@@ -23,7 +23,7 @@ OBJS= sflow_agent.o \
       sflow_xdr.o
 
 libsflow.a: $(OBJS)
-	ar cru $@ $(OBJS)
+	ar cr $@ $(OBJS)
 	ranlib $@
 
 all: libsflow.a
