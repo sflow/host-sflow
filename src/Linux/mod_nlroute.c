@@ -692,8 +692,10 @@ extern "C" {
 #endif
 
     // The two sockets can both use the same callback
-    EVBusAddSocket(mod, pollBus, mdata->nl_sock, readNetlinkCB, NULL);
-    EVBusAddSocket(mod, pollBus, mdata->nl_sock_strict, readNetlinkCB, NULL);
+    if(mdata->nl_sock > 0)
+      EVBusAddSocket(mod, pollBus, mdata->nl_sock, readNetlinkCB, NULL);
+    if(mdata->nl_sock_strict > 0)
+      EVBusAddSocket(mod, pollBus, mdata->nl_sock_strict, readNetlinkCB, NULL);
     mdata->deciBatch = sp->nlroute.limit / 10;
     if(mdata->deciBatch == 0)
       mdata->deciBatch = 1;

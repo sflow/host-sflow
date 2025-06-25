@@ -271,7 +271,7 @@ extern "C" {
     struct sockaddr_nl sa = {
       .nl_family = AF_NETLINK,
       .nl_groups = nl_groups,
-      .nl_pid = getpid()  /* UTNLGeneric_pid(mod_id) */
+      .nl_pid = UTNLGeneric_pid(mod_id) + nl_strict
     };
     if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
       myLog(LOG_ERR, "UTNLRoute_open: bind failed: %s", strerror(errno));
