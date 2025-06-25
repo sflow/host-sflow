@@ -170,6 +170,9 @@ extern "C" {
   typedef struct _HSPPcap {
     struct _HSPPcap *nxt;
     char *dev;
+    regex_t *dev_regex;
+    char *dev_regex_str;
+    bool dynamic;
     bool promisc;
     bool vport;
     bool vport_set;
@@ -465,6 +468,8 @@ extern "C" {
   } HSPGetNSID;
 #define HSPEVENT_GET_NSID "get_nsid"           // (HSPGetNSID *)
 #define HSPEVENT_GET_NSID_ANS "get_nsid_ans"   // (HSPGetNSID *)
+
+#define HSPEVENT_GET_TAP "get_tap"   // ifIndex
 
   typedef struct _HSPPSample {
     uint32_t grp_no;

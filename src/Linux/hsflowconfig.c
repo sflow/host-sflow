@@ -1906,6 +1906,13 @@ extern "C" {
 	    case HSPTOKEN_DEV:
 	      if((tok = expectDevice(sp, tok, &pc->dev)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_DEV_PATTERN:
+	      if((tok = expectRegex(sp, tok, &pc->dev_regex)) == NULL) return NO;
+	      pc->dev_regex_str = my_strdup(tok->str);
+	      break;
+	    case HSPTOKEN_DYNAMIC:
+	      if((tok = expectONOFF(sp, tok, &pc->dynamic)) == NULL) return NO;
+	      break;
 	    case HSPTOKEN_PROMISC:
 	      if((tok = expectONOFF(sp, tok, &pc->promisc)) == NULL) return NO;
 	      break;

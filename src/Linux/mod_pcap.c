@@ -33,6 +33,7 @@ extern "C" {
     bool vport:1;
     bool vport_set:1;
     bool samplingRateSet:1; // set with pcap{sampling=<n>}
+    bool tap_open_ok:1;
     pcap_t *pcap;
     char pcap_err[PCAP_ERRBUF_SIZE];
     int n_dlts;
@@ -41,11 +42,12 @@ extern "C" {
   } BPFSoc;
 
   typedef struct _HSP_mod_PCAP {
-    UTArray *bpf_socs;
+    UTHash *bpf_socs;
     EVBus *packetBus;
   } HSP_mod_PCAP;
 
   static void tap_close(EVMod *mod, BPFSoc *bpfs);
+  static void removeAndFreeBPFSocket(EVMod *mod,  BPFSoc *bpfs);
 
   /*_________________---------------------------__________________
     _________________      readPackets          __________________
@@ -173,7 +175,7 @@ extern "C" {
     if(unlikely(batch == -1)) {
       myLog(LOG_ERR, "pcap: pcap_dispatch error : %s\n", pcap_geterr(bpfs->pcap));
       // may get here if the interface was removed
-      tap_close(mod, bpfs);
+      removeAndFreeBPFSocket(mod, bpfs);
     }
   }
 
@@ -272,7 +274,7 @@ extern "C" {
     // read pcap stats to get drops - will go out with
     // packet samples sent from readPackets.c
     BPFSoc *bpfs;
-    UTARRAY_WALK(mdata->bpf_socs, bpfs) {
+    UTHASH_WALK(mdata->bpf_socs, bpfs) {
       struct pcap_stat stats;
       if(bpfs->pcap
 	 && pcap_stats(bpfs->pcap, &stats) == 0) {
@@ -297,7 +299,7 @@ extern "C" {
     return NO;
   }
   
-  static void tap_open(EVMod *mod, BPFSoc *bpfs) {
+  static bool tap_open(EVMod *mod, BPFSoc *bpfs) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
 
@@ -308,7 +310,7 @@ extern "C" {
     // create pcap
     if((bpfs->pcap = pcap_create(bpfs->deviceName, bpfs->pcap_err)) == NULL) {
       myLog(LOG_ERR, "pcap: device %s open failed: %s", bpfs->deviceName, bpfs->pcap_err);
-      return;
+      return NO;
     }
 
     // immediate mode
@@ -338,7 +340,7 @@ extern "C" {
     int status = pcap_activate(bpfs->pcap);
     if(status < 0) {
       myLog(LOG_ERR, "pcap: activate(%s) ERROR: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
-      return;
+      return NO;
     }
     else if(status > 0) {
       EVDebug(mod, 0, "activate(%s) warning: %s", bpfs->deviceName, pcap_geterr(bpfs->pcap));
@@ -349,52 +351,59 @@ extern "C" {
     // get list of possible datalink types
     bpfs->n_dlts = pcap_list_datalinks(bpfs->pcap, &bpfs->dlts);
     // note: bpfs->dlts should only be freed with pcap_free_datalinks()
-    if(bpfs->n_dlts > 0 && bpfs->dlts) {
-      for(int ii=0; ii < bpfs->n_dlts; ii++) {
-	int dlt = bpfs->dlts[ii]; 
-	EVDebug(mod, 1, "device %s offers DLT=%u (%s)",
-		bpfs->deviceName,
-		dlt,
-		pcap_datalink_val_to_name(dlt));
-      }
-      // if we find one we like, set it with pcap_set_datalink()
-      bpfs->dlt = -1;
-      // TODO: add support for 802.11 frames -- will require indicating protocol to
-      // takeSample() call more explicitly. (SFLHEADER_IEEE80211MAC or
-      // SFLHEADER_IEEE80211_AMPUD or SFLHEADER_IEEE80211_AMSDU_SUBFRAME)
-      // TODO: add support for MPLS encapsulation (SFLHEADER_MPLS)
-      // Apply preference order in case there is a choice...
-      if(chooseDLT(bpfs, DLT_EN10MB) == NO)
-	if(chooseDLT(bpfs, DLT_RAW) == NO)
-	  chooseDLT(bpfs, DLT_LINUX_SLL);
-      // DLT_IEEE802_11
-      if(bpfs->dlt == -1) {
-	myLog(LOG_ERR, "pcap: %s has no supported datalink encapsulaton", bpfs->deviceName);
-	tap_close(mod, bpfs);
-      }
-      else {
-	EVDebug(mod, 1, "device %s selecting encapsulation=%u (%s)",
-		bpfs->deviceName,
-		bpfs->dlt,
-		pcap_datalink_val_to_name(bpfs->dlt));
-	pcap_set_datalink(bpfs->pcap, bpfs->dlt); 
-      }		
-
-      // get file descriptor
-      int fd = pcap_fileno(bpfs->pcap);
-      
-      // configure BPF sampling
-      if(bpfs->samplingRate > 1)
-	setKernelSampling(mod, bpfs, fd);
-      
-      // register
-      bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
-      
-      // assume we always want to get counters for anything we are tapping.
-      // Have to force this here in case there are no samples that would
-      // trigger it in readPackets.c:takeSample()
-      forceCounterPolling(sp, bpfs->adaptor);
+    if(bpfs->n_dlts <= 0
+       || bpfs->dlts == NULL) {
+      EVDebug(mod, 1, "device %s no dlts", bpfs->deviceName);
+      return NO;
     }
+
+    for(int ii=0; ii < bpfs->n_dlts; ii++) {
+      int dlt = bpfs->dlts[ii]; 
+      EVDebug(mod, 1, "device %s offers DLT=%u (%s)",
+	      bpfs->deviceName,
+	      dlt,
+	      pcap_datalink_val_to_name(dlt));
+    }
+    // if we find one we like, set it with pcap_set_datalink()
+    bpfs->dlt = -1;
+    // TODO: add support for 802.11 frames -- will require indicating protocol to
+    // takeSample() call more explicitly. (SFLHEADER_IEEE80211MAC or
+    // SFLHEADER_IEEE80211_AMPUD or SFLHEADER_IEEE80211_AMSDU_SUBFRAME)
+    // TODO: add support for MPLS encapsulation (SFLHEADER_MPLS)
+    // Apply preference order in case there is a choice...
+    if(chooseDLT(bpfs, DLT_EN10MB) == NO)
+      if(chooseDLT(bpfs, DLT_RAW) == NO)
+	chooseDLT(bpfs, DLT_LINUX_SLL);
+    // DLT_IEEE802_11
+    if(bpfs->dlt == -1) {
+      myLog(LOG_ERR, "pcap: %s has no supported datalink encapsulaton", bpfs->deviceName);
+      tap_close(mod, bpfs);
+      return NO;
+    }
+
+    EVDebug(mod, 1, "device %s selecting encapsulation=%u (%s)",
+	    bpfs->deviceName,
+	    bpfs->dlt,
+	    pcap_datalink_val_to_name(bpfs->dlt));
+
+    pcap_set_datalink(bpfs->pcap, bpfs->dlt); 
+
+    // get file descriptor
+    int fd = pcap_fileno(bpfs->pcap);
+      
+    // configure BPF sampling
+    if(bpfs->samplingRate > 1)
+      setKernelSampling(mod, bpfs, fd);
+      
+    // register
+    bpfs->sock = EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_pcap, bpfs);
+      
+    // assume we always want to get counters for anything we are tapping.
+    // Have to force this here in case there are no samples that would
+    // trigger it in readPackets.c:takeSample()
+    forceCounterPolling(sp, bpfs->adaptor);
+    // tap open successful
+    return YES;
   }
 
   /*_________________---------------------------__________________
@@ -404,7 +413,7 @@ extern "C" {
   
   static void tap_close(EVMod *mod, BPFSoc *bpfs) {
     bpfs->adaptor = NULL;
-    if(bpfs->sock) {
+    if(bpfs->sock > 0) {
       // The fd socket belongs to pcap, not to EVSocket. We
       // can tell EVSocketClose not to touch it but this way
       // is more ostentatious.
@@ -418,30 +427,63 @@ extern "C" {
       EVSocketClose(mod, bpfs->sock, NO);
       bpfs->sock = NULL;
     }
+    bpfs->tap_open_ok = NO;
   }
 
   /*_________________---------------------------__________________
     _________________     addBPFSocket          __________________
     -----------------___________________________------------------
   */
-  static void addBPFSocket(EVMod *mod,  HSPPcap *pcap, SFLAdaptor *adaptor) {
+  static bool addBPFSocket(EVMod *mod,  HSPPcap *pcap, SFLAdaptor *adaptor) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
+    BPFSoc search = { .deviceName = adaptor->deviceName };
+    if(UTHashGet(mdata->bpf_socs, &search)) {
+      EVDebug(mod, 1, "sampling already configured for device=%s", adaptor->deviceName);
+      return NO;
+    }
     EVDebug(mod, 1, "addBPFSocket(%s) speed=%"PRIu64, adaptor->deviceName, adaptor->ifSpeed);
     BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
-    UTArrayAdd(mdata->bpf_socs, bpfs);
+    UTHashAdd(mdata->bpf_socs, bpfs);
     bpfs->module = mod;
     bpfs->adaptor = adaptor;
-    bpfs->deviceName = adaptor->deviceName;
+    setStr(&bpfs->deviceName, adaptor->deviceName);
     bpfs->promisc = pcap->promisc;
     bpfs->vport = pcap->vport;
     bpfs->vport_set = pcap->vport_set;
     bpfs->samplingRate = pcap->sampling_n;
     bpfs->samplingRateSet = pcap->sampling_n_set;
-    tap_open(mod, bpfs);
+    // if the tap does not open, keep bpfs object (but indicate using flag)
+    bpfs->tap_open_ok = tap_open(mod, bpfs);
+    // say that we added a new bpfs,  even if it didn't work
+    return YES;
   }
 
   /*_________________---------------------------__________________
-    _________________    evt_config_first        __________________
+    _________________  removeAndFreeBPFSocket   __________________
+    -----------------___________________________------------------
+  */
+  static void removeAndFreeBPFSocket(EVMod *mod,  BPFSoc *bpfs) {
+    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
+    tap_close(mod, bpfs);
+    UTHashDel(mdata->bpf_socs, bpfs);
+    if(bpfs->deviceName)
+      my_free(bpfs->deviceName);
+    my_free(bpfs);
+  }
+
+  /*_________________---------------------------__________________
+    _________________      speedTestOK          __________________
+    -----------------___________________________------------------
+  */
+
+  static bool speedTestOK(EVMod *mod, HSPPcap *pcap, SFLAdaptor *adaptor) {
+    return ((adaptor->ifSpeed == pcap->speed_min && pcap->speed_max == 0)
+	    || (adaptor->ifSpeed >= pcap->speed_min
+		&& adaptor->ifSpeed <= pcap->speed_max));
+  }
+
+  /*_________________---------------------------__________________
+    _________________    evt_config_first       __________________
     -----------------___________________________------------------
   */
 
@@ -450,51 +492,77 @@ extern "C" {
 
     // the list of pcap {} sections may expand to a longer list of BPFSoc
     // objects if we are matching with patterns or on ifSpeed etc.
-    for(HSPPcap *pcap = sp->pcap.pcaps; pcap; pcap = pcap->nxt) {
-      if(pcap->dev) {
-	SFLAdaptor *adaptor = adaptorByName(sp, pcap->dev);
-	if(adaptor == NULL) {
-	  myLog(LOG_ERR, "pcap: device %s not found", pcap->dev);
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      for(HSPPcap *pcap = sp->pcap.pcaps; pcap; pcap = pcap->nxt) {
+	if(pcap->dynamic) // ignore dynamic pcaps here
+	  continue;
+	if(pcap->dev
+	   && adaptorByName(sp, pcap->dev) != adaptor)
+	  continue;
+	if(pcap->dev_regex
+	   && regexec(pcap->dev_regex, adaptor->deviceName, 0, NULL, 0) != 0)
+	  continue;
+	if(pcap->speed_set
+	   && !speedTestOK(mod, pcap, adaptor))
+	    continue;
+	// passed speed test, but there may be other reasons to reject:
+	HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
+	if(nio->bond_master) {
+	  EVDebug(mod, 1, "skip %s (bond_master)", adaptor->deviceName);
 	  continue;
 	}
+	if(nio->vlan != HSP_VLAN_ALL) {
+	  EVDebug(mod, 1, "skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
+	  continue;
+	}
+	if(nio->devType != HSPDEV_PHYSICAL
+	   && nio->devType != HSPDEV_OTHER) {
+	  EVDebug(mod, 1, "skip %s (devType=%s)",
+		  adaptor->deviceName,
+		  devTypeName(nio->devType));
+	  continue;
+	}
+	// passed all the tests
 	addBPFSocket(mod, pcap, adaptor);
       }
-      else if(pcap->speed_set) {
-	if(debug(1)) {
-	  char sp1[20], sp2[20];
-	  printSpeed(pcap->speed_min, sp1, 20);
-	  printSpeed(pcap->speed_max, sp2, 20);
-	  EVDebug(mod, 1, "searching devices with speed %s-%s", sp1, sp2);
-	}
-	SFLAdaptor *adaptor;
-	UTHASH_WALK(sp->adaptorsByName, adaptor) {
- 	  EVDebug(mod, 2, "consider %s (speed=%"PRIu64")", adaptor->deviceName, adaptor->ifSpeed);
-	  if((adaptor->ifSpeed == pcap->speed_min && pcap->speed_max == 0)
-	     || (adaptor->ifSpeed >= pcap->speed_min
-		 && adaptor->ifSpeed <= pcap->speed_max)) {
-	    EVDebug(mod, 2, "%s speed OK", adaptor->deviceName);
-	    // passed the speed test,  but there may be other
-	    // reasons to reject this one:
-	    HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
-	    if(nio->bond_master) {
-	      EVDebug(mod, 1, "skip %s (bond_master)", adaptor->deviceName);
-	    }
-	    else if(nio->vlan != HSP_VLAN_ALL) {
-	      EVDebug(mod, 1, "skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
-	    }
-	    else if(nio->devType != HSPDEV_PHYSICAL
-		    && nio->devType != HSPDEV_OTHER) {
-	      EVDebug(mod, 1, "skip %s (devType=%s)",
-		      adaptor->deviceName,
-		      devTypeName(nio->devType));
-	    }
-	    else {
-	      // passed all the tests
-	      addBPFSocket(mod, pcap, adaptor);
-	    }
-	  }
-	}
-      }
+    }
+  }
+
+  /*_________________---------------------------__________________
+    _________________       evt_get_tap         __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_get_tap(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    if(dataLen != sizeof(uint32_t))
+      return;
+    uint32_t ifIndex = 0;
+    memcpy(&ifIndex, data, dataLen);
+    SFLAdaptor *adaptor = adaptorByIndex(sp, ifIndex);
+    if(adaptor == NULL) {
+      EVDebug(mod, 1, "evt_get_tap: adaptor not found for ifIndex %u", ifIndex);
+      return;
+    }
+    // next we have to find a dynamic pcap{} that will match this device
+    // on all specified criteria.
+    for(HSPPcap *pcap = sp->pcap.pcaps; pcap; pcap = pcap->nxt) {
+      if(!pcap->dynamic)  // only dynamic pcaps here
+	continue;
+      if(pcap->dev
+	 && adaptorByName(sp, pcap->dev) != adaptor)
+	continue;
+      if(pcap->dev_regex
+	 && regexec(pcap->dev_regex, adaptor->deviceName, 0, NULL, 0) != 0)
+	continue;
+      if(pcap->speed_set
+	 && !speedTestOK(mod, pcap, adaptor))
+	continue;
+      // we don't apply the other filters here (bond_master, vlan, dev-type)
+      // in case that was actually part of the requestor's plan.
+      EVDebug(mod, 1, "evt_get_tap: dynamic add pcap tap on %s", adaptor->deviceName);
+      addBPFSocket(mod, pcap, adaptor);
     }
   }
 
@@ -507,13 +575,14 @@ extern "C" {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // close sockets and remove adaptor references for anything that no longer exists
+    UTArray *elems = UTHashElements(mdata->bpf_socs);
     BPFSoc *bpfs;
-    UTARRAY_WALK(mdata->bpf_socs, bpfs) {
+    UTARRAY_WALK(elems, bpfs) {
       if(adaptorByName(sp, bpfs->deviceName) == NULL) {
-	// no longer found
-	tap_close(mod, bpfs);
+	removeAndFreeBPFSocket(mod, bpfs);
       }
     }
+    UTArrayFree(elems);
   }
 
   /*_________________---------------------------__________________
@@ -524,12 +593,14 @@ extern "C" {
   void mod_pcap(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_PCAP));
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
-    mdata->bpf_socs = UTArrayNew(UTARRAY_DFLT);
+    mdata->bpf_socs = UTHASH_NEW(BPFSoc, deviceName, UTHASH_SKEY);
     // register call-backs
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
+    // dynamic tap request api
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_GET_TAP), evt_get_tap);
   }
 
 #if defined(__cplusplus)
