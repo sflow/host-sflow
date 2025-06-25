@@ -566,6 +566,11 @@ extern "C" {
 	    uint32_t ifIndex = adaptor->ifIndex;
 	    EVDebug(mod, 1, "request tap device %s (ifIndex=%u)", adaptor->deviceName, ifIndex);
 	    EVEventTx(mod, mdata->evt_get_tap, &ifIndex, sizeof(ifIndex));
+	    // We might still take one more step here and remember that any packets
+	    // seen at this adaptor must be to or from that pod,  but we still have
+	    // to use the MAC addresses to decide on in/out direction, so I think that means
+	    // we rely on the readVNICInterfaces() step to harvest the MACs that will
+	    // appear in samples taken there.
 	  }
 	}
       }

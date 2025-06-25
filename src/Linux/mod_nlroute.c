@@ -384,7 +384,7 @@ extern "C" {
       case IFLA_LINK_NETNSID:
 	{
 	  uint32_t nsid = *(uint32_t *)data;
-	  EVDebug(mod, 1, "IFLA_LINK_NETNSID=%u", htonl(nsid));
+	  EVDebug(mod, 1, "IFLA_LINK_NETNSID=%u", nsid);
 	  SFLAdaptor *ad = adaptorByIndex(sp, ifIndex);
 	  if(ad)
 	    setAdaptorNETNSID(sp, ad, nsid, "netlink");
@@ -482,6 +482,7 @@ extern "C" {
 	break;
       EVDebug(mod, 1, "  rttype=%s(%u) payload=%u",
 	      netnsaName(rta->rta_type),
+	      rta->rta_type,
 	      RTA_PAYLOAD(rta));
       if(rta->rta_type == NETNSA_NSID) {
 	req->get_nsid.nsid = *(uint32_t *)RTA_DATA(rta);
