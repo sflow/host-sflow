@@ -476,7 +476,7 @@ extern "C" {
     uint16_t len = recv_hdr->nlmsg_len;
     struct rtgenmsg *genmsg = NLMSG_DATA(recv_hdr);
     struct rtattr *rta = UTNLA_RTA(genmsg);
-    while (RTA_OK(rta, len)){
+    while (RTA_OK(rta, len)) {
       // extra check to reassure coverity
       if(len > msglen)
 	break;
@@ -487,8 +487,8 @@ extern "C" {
 	req->get_nsid.nsid = *(uint32_t *)RTA_DATA(rta);
 	req->get_nsid.found = YES;
       }
+      rta = RTA_NEXT(rta, len);
     }
-    rta = RTA_NEXT(rta, len);
     // clear state in the request
     if(req->fd) {
       close(req->fd);
