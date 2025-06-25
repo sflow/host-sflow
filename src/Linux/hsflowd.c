@@ -188,6 +188,16 @@ extern "C" {
     return NULL;
   }
 
+  SFLAdaptor *adaptorByNETNSID(HSP *sp, uint32_t netnsid) {
+    SFLAdaptor *adaptor;
+    UTHASH_WALK(sp->adaptorsByName, adaptor) {
+      HSPAdaptorNIO *adaptorNIO = ADAPTOR_NIO(adaptor);
+      if(adaptorNIO->netnsid == netnsid)
+	return adaptor;
+    }
+    return NULL;
+  }
+
   static void deleteAdaptorFromHT(UTHash *ht, SFLAdaptor *ad, char *htname) {
     char buf[256];
     if(UTHashDel(ht, ad) != ad) {

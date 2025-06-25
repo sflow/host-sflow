@@ -928,6 +928,7 @@ extern "C" {
   SFLAdaptor *adaptorByPeerIndex(HSP *sp, uint32_t ifIndex);
   SFLAdaptor *adaptorByIP(HSP *sp, SFLAddress *ip);
   SFLAdaptor *adaptorByAlias(HSP *sp, char *alias);
+  SFLAdaptor *adaptorByNETNSID(HSP *sp, uint32_t netnsid);
   void deleteAdaptor(HSP *sp, SFLAdaptor *ad, int freeFlag);
   int deleteMarkedAdaptors(HSP *sp, UTHash *adaptorHT, int freeFlag);
   int markAdaptors_adaptorList(EVMod *mod, SFLAdaptorList *adList);

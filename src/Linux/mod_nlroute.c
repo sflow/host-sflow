@@ -222,11 +222,6 @@ extern "C" {
 
     UTStrBuf *strBuf = UTStrBuf_new();
     HSPNLRequestPrint(req, strBuf);
-    
-    if(req->reqType != RTM_GETLINK
-       && req->reqType != RTM_GETADDR)
-      goto not_sent;
-    
     EVDebug(mod, 1,  "sending request %s", UTSTRBUF_STR(strBuf));
     int rc = -1;
     if(req->reqType == RTM_GETLINK
@@ -247,8 +242,10 @@ extern "C" {
       }
       rc = UTNLRoute_ns_send(mdata->nl_sock, mod->id, req->fd, req->seqNo);
     }
-    else
+    else {
+      EVDebug(mod, 1, "unsupported request type %u", req->reqType);
       goto not_sent;
+    }
     if (rc <= 0) {
       myLog(LOG_ERR, "UTNLRoute_*_send(%s) failed: rc=%d : %s",
 	    UTSTRBUF_STR(strBuf),

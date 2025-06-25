@@ -127,6 +127,7 @@ extern "C" {
     EVSocket *evSoc;
     uint32_t seq_no;
     EVEvent *evt_get_nsid;
+    EVEvent *evt_get_tap;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -542,6 +543,8 @@ extern "C" {
   */
   
   static void evt_get_nsid_ans(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     EVDebug(mod, 1, "evt_get_nsid_ans");
     if(dataLen == sizeof(HSPGetNSID)) {
       HSPGetNSID get_nsid;
@@ -558,15 +561,12 @@ extern "C" {
 		  get_nsid.nsid,
 		  pod->hostname);
 	  pod->nsid = get_nsid.nsid;
-	  // TODO: next step would be to find the netdev with this nsid and
-	  // ask for packet-sampling to be enabled there. We might also need
-	  // to remember that device ifIndex as a pod attribute so we can map
-	  // traffic to this pod if the packet-sample "tap" has that value.
-	  // To ask for packet-sampling to be turned on we could send out
-	  // another request. I don't think we would ever need to send a
-	  // retraction. The device will surely go away if the pod goes away,
-	  // and the pcap module should notice and close it's socket etc. if
-	  // that happens.
+	  SFLAdaptor *adaptor = adaptorByNETNSID(sp, pod->nsid);
+	  if(adaptor) {
+	    uint32_t ifIndex = adaptor->ifIndex;
+	    EVDebug(mod, 1, "request tap device %s (ifIndex=%u)", adaptor->deviceName, ifIndex);
+	    EVEventTx(mod, mdata->evt_get_tap, &ifIndex, sizeof(ifIndex));
+	  }
 	}
       }
     }
@@ -1389,7 +1389,10 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_GET_NSID_ANS), evt_get_nsid_ans);
 
     EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-    
+
+    // event to ask for sampling on a device
+    mdata->evt_get_tap = EVGetEvent(packetBus, HSPEVENT_GET_TAP);
+
     // Go program may want to send rtmetrics (to mod_json)
     mdata->rtmetricEvent = EVGetEvent(packetBus, HSPEVENT_RTMETRIC_JSON);
     
