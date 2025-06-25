@@ -486,7 +486,10 @@ extern "C" {
 	      RTA_PAYLOAD(rta));
       if(rta->rta_type == NETNSA_NSID) {
 	req->get_nsid.nsid = *(uint32_t *)RTA_DATA(rta);
-	req->get_nsid.found = YES;
+	if (req->get_nsid.nsid == NETNSA_NSID_NOT_ASSIGNED)
+	  EVDebug(mod, 1, "nsid not assigned");
+	else
+	  req->get_nsid.found = YES;
       }
       rta = RTA_NEXT(rta, len);
     }
@@ -663,6 +666,7 @@ extern "C" {
       HSPNLRequest *req = HSPNLRequestNew(mod, RTM_GETNSID, 0);
       memcpy(&req->get_nsid, data, dataLen);
       EVDebug(mod, 1, "evt_get_nsid lookup nspid %u", req->get_nsid.nspid);
+      req->get_nsid.found = NO;
       HSPNLRequestEnqueue(mod, req);
     }
   }
