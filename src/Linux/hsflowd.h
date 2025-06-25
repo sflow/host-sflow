@@ -341,6 +341,7 @@ extern "C" {
     bool procNetDev:1;
     bool changed_speed:1;
     bool changed_alias:1;
+    bool changed_netnsid:1;
     bool changed_external:1; // something was changed by a module
     int32_t vlan;
 #define HSP_VLAN_ALL -1
@@ -408,6 +409,9 @@ extern "C" {
     // numbering may write a priority number here to
     // stabilize the agent address selection.
     uint32_t selectionPriority;
+    // IFLA_LINK_NETNSID may be learned from NETLINK_ROUTE RTM_GETLINK
+#define HSP_NETNSID_UNKNOWN -1
+    uint32_t netnsid;
     // Container dsIndex number and namespace - for case where vnic
     // belongs to container:
     uint32_t container_dsIndex;
@@ -452,6 +456,15 @@ extern "C" {
 #define HSPEVENT_HEADER_BYTES "header_bytes"     // (headerBytes) sent on config change
 #define HSPEVENT_PSAMPLE "psample"               // raw psample (HSPPSample)
 #define HSPEVENT_RTMETRIC_JSON "rtmetric_json"   // rtmetric msg in JSON format
+
+  typedef struct _HSPGetNSID {
+    uint32_t nspid;
+    uint32_t nsid;
+    uint32_t dsIndex;
+    bool found;
+  } HSPGetNSID;
+#define HSPEVENT_GET_NSID "get_nsid"           // (HSPGetNSID *)
+#define HSPEVENT_GET_NSID_ANS "get_nsid_ans"   // (HSPGetNSID *)
 
   typedef struct _HSPPSample {
     uint32_t grp_no;
@@ -918,6 +931,7 @@ extern "C" {
   void adaptorHTPrint(UTHash *ht, char *prefix);
   bool setAdaptorSpeed(HSP *sp, SFLAdaptor *adaptor, uint64_t speed, char *method);
   bool setAdaptorAlias(HSP *sp, SFLAdaptor *adaptor, char *alias, char *method);
+  bool setAdaptorNETNSID(HSP *sp, SFLAdaptor *adaptor, uint32_t netnsid, char *method);
   bool setAdaptorSelectionPriority(HSP *sp, SFLAdaptor *adaptor, uint32_t priority, char *method);
 
   // local IPs

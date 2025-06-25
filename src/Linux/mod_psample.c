@@ -17,10 +17,6 @@ extern "C" {
 
 #include "util_netlink.h"
 
-#ifndef SOL_NETLINK
-#define SOL_NETLINK 270
-#endif
-
 #define HSP_PSAMPLE_READNL_RCV_BUF 16384
 #define HSP_PSAMPLE_READNL_BATCH 10
 #define HSP_PSAMPLE_RCVBUF 8000000

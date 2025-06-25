@@ -128,6 +128,7 @@ extern "C" {
     nio->ethtool_GSET = YES;
     nio->ethtool_GSTATS = YES;
     nio->procNetDev = YES;
+    nio->netnsid = HSP_NETNSID_UNKNOWN;
     adaptor->marked = mod->id;
     return adaptor;
   }
@@ -327,7 +328,23 @@ extern "C" {
     }
     return changed;
   }
-  
+
+  bool setAdaptorNETNSID(HSP *sp, SFLAdaptor *adaptor, uint32_t netnsid, char *method)
+  {
+    HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
+    bool changed = nio->netnsid != netnsid;
+    if(changed) {
+      myDebug(1, "setAdaptorNETNSID(%s): %s netnsid %u -> %u",
+	      method,
+	      adaptor->deviceName,
+	      nio->netnsid,
+	      netnsid);
+      nio->netnsid = netnsid;
+      nio->changed_netnsid = nio->changed_external = YES;
+    }
+    return changed;
+  }
+
   bool setAdaptorSelectionPriority(HSP *sp, SFLAdaptor *adaptor, uint32_t priority, char *method)
   {
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);

@@ -126,6 +126,7 @@ extern "C" {
     int nl_sock;
     EVSocket *evSoc;
     uint32_t seq_no;
+    EVEvent *evt_get_nsid;
   } HSP_mod_K8S;
 
   /*_________________---------------------------__________________
@@ -533,37 +534,49 @@ extern "C" {
     return container;
   }
 
-
   /*_________________---------------------------__________________
     _________________   updatePodNSID           __________________
     -----------------___________________________------------------
     look up the associated nsid via NETLINK_ROUTE
+    (api provided by mod_nlroute)
   */
+  
+  static void evt_get_nsid_ans(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    EVDebug(mod, 1, "evt_get_nsid_ans");
+    if(dataLen == sizeof(HSPGetNSID)) {
+      HSPGetNSID get_nsid;
+      memcpy(&get_nsid, data, dataLen);
+      if(get_nsid.found) {
+	EVDebug(mod, 1, "evt_get_nsid_ans nspid %u -> nsid %u (ds_index=%u)",
+		get_nsid.nspid,
+		get_nsid.nsid,
+		get_nsid.dsIndex);
+	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, get_nsid.dsIndex);
+	if(pod) {
+	  EVDebug(mod, 1, "nsid %u->%u to pod %s",
+		  pod->nsid,
+		  get_nsid.nsid,
+		  pod->hostname);
+	  pod->nsid = get_nsid.nsid;
+	  // TODO: next step would be to find the netdev with this nsid and
+	  // ask for packet-sampling to be enabled there. We might also need
+	  // to remember that device ifIndex as a pod attribute so we can map
+	  // traffic to this pod if the packet-sample "tap" has that value.
+	  // To ask for packet-sampling to be turned on we could send out
+	  // another request. I don't think we would ever need to send a
+	  // retraction. The device will surely go away if the pod goes away,
+	  // and the pcap module should notice and close it's socket etc. if
+	  // that happens.
+	}
+      }
+    }
+  }
 
   static void updatePodNSID(EVMod *mod, HSPVMState_POD *pod) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
-    // open /proc/<nspid>/ns/net
-    char topath[HSP_MAX_PATHLEN];
-    snprintf(topath, HSP_MAX_PATHLEN, PROCFS_STR "/%u/ns/net", pod->nspid);
-    int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
-    if(nsfd < 0) {
-      EVDebug(mod, 1, "cannot open %s : %s", topath, strerror(errno));
-      close(nsfd);
-      return;
-    }
-    if(UTNLRoute_ns_send(mdata->nl_sock, mod->id, nsfd, ++mdata->seq_no) > 0) {
-      int ok = UTNLRoute_ns_recv(mdata->nl_sock, &pod->nsid);
-      switch(ok) {
-      case -1:
-	EVDebug(mod, 1, "UTNLRoute_ns_recv() failed : %s", strerror(errno));
-	break;
-      case NO:
-	EVDebug(mod, 1, "UTNLRoute_ns_recv() lookup failed");
-      case YES:
-	EVDebug(mod, 1, "UTNLRoute_ns_recv() returned nsid=", pod->nsid);
-      }
-    }
-    close(nsfd);
+    // vm.ds_index is easier lookup hook that vm.uuid or pod->hostname
+    HSPGetNSID get_nsid = { .nspid = pod->nspid, .dsIndex = pod->vm.dsIndex };
+    EVEventTx(mod, mdata->evt_get_nsid, &get_nsid, sizeof(get_nsid));
   }
 
   /*_________________---------------------------__________________
@@ -581,7 +594,7 @@ extern "C" {
       // and clean up
       deleteMarkedAdaptors_adaptorList(mod, vm->interfaces);
       adaptorListFreeMarked(vm->interfaces);
-      // experimental - get pod NSID as well
+      // get pod NSID (asynchronous - not set immediately)
       updatePodNSID(mod, pod);
     }
   }
@@ -1371,10 +1384,9 @@ extern "C" {
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_CONFIG_DONE), evt_cfg_done);
     EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_HOST_COUNTER_SAMPLE), evt_host_cs);
 
-    // for netlink requests
-    mdata->nl_sock = UTNLRoute_open(mod->id, NO, 1000000); // blocking socket (for now)
-    // TODO: need to figure out how to match up response to request - maybe set seqNo==cgroup_id?
-    // mdata->evSoc = EVBusAddSocket(mod, mdata->pollBus, mdata->nl_sock, readNetlinkCB, NULL);
+    // GET_NSID api - offered by mod_nlroute
+    mdata->evt_get_nsid = EVGetEvent(mdata->pollBus, HSPEVENT_GET_NSID);
+    EVEventRx(mod, EVGetEvent(mdata->pollBus, HSPEVENT_GET_NSID_ANS), evt_get_nsid_ans);
 
     EVBus *packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     

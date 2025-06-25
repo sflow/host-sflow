@@ -18,10 +18,6 @@ extern "C" {
 
 #include "util_netlink.h"
 
-#ifndef SOL_NETLINK
-#define SOL_NETLINK 270
-#endif
-
 #ifndef DROPMON_GENL_NAME
   #define DROPMON_GENL_NAME "NET_DM"
 #endif

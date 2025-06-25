@@ -26,6 +26,18 @@ extern "C" {
 
 #include "util.h"
 
+#ifndef SOL_NETLINK
+#define SOL_NETLINK 270
+#endif
+
+#ifndef NETLINK_GET_STRICT_CHK
+  // might be NETLINK_DUMP_STRICT_CHK on this
+  // kernel but just set it to the integer.
+  // We'll get a "protocol not available" error
+  // if it is not supported.
+#define NETLINK_GET_STRICT_CHK 12
+#endif
+
 #define HSP_READNL_RCV_BUF 8192
 #define HSP_READNL_BATCH 100
 
@@ -60,11 +72,13 @@ extern "C" {
 
   int UTNLGeneric_send(int sockfd, uint32_t mod_id, int type, int cmd, int req_type, void *req, int req_len, uint32_t seqNo);
 
-  int UTNLRoute_open(uint32_t mod_id, bool nonBlocking, size_t bufferSize);
+  int UTNLRoute_open(uint32_t mod_id, bool nonBlocking, size_t bufferSize, uint32_t nl_groups, bool nl_strict);
   int UTNLRoute_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint field, uint32_t seqNo);
-  int UTNLRoute_recv(int sockfd, uint field, uint32_t *pIfIndex, char *resultBuf, uint *pResultLen);
+  typedef void (*UTNLRouteCB)(void *magic, struct nlmsghdr *msghdr, int msglen);
+  int UTNLRoute_recv_nlmsg(void *magic, int sockfd, UTNLRouteCB routeCB);
+  int UTNLRoute_link_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint32_t seqNo);
+  int UTNLRoute_addr_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint32_t seqNo);
   int UTNLRoute_ns_send(int sockfd, uint32_t mod_id, int fd, uint32_t seqNo);
-  int UTNLRoute_ns_recv(int sockfd, uint32_t *p_nsid);
 
   int UTNLUsersock_open(uint32_t mod_id);
 
@@ -88,6 +102,9 @@ extern "C" {
 
   // Also need way to access attribute offset that can also work for struct rtgenmsg
 #define UTNLA_RTA(msg)  ((struct rtattr*)(((char*)(msg)) + NLMSG_ALIGN(sizeof(*msg))))
+
+  // macro for structure alignment
+#define UTNL_ALIGNED __attribute__((aligned(NLMSG_ALIGNTO)))
 
 #if defined(__cplusplus)
 } /* extern "C" */

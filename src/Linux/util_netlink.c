@@ -136,22 +136,26 @@ extern "C" {
     _________________       fcntl utils         __________________
     -----------------___________________________------------------
   */
-  static void setNonBlocking(int fd) {
+  static bool setNonBlocking(int fd) {
     // set the socket to non-blocking
     int fdFlags = fcntl(fd, F_GETFL);
     fdFlags |= O_NONBLOCK;
     if(fcntl(fd, F_SETFL, fdFlags) < 0) {
       myLog(LOG_ERR, "fcntl(O_NONBLOCK) failed: %s", strerror(errno));
+      return NO;
     }
+    return YES;
   }
 
-  static void setCloseOnExec(int fd) {
+  static bool setCloseOnExec(int fd) {
     // make sure it doesn't get inherited, e.g. when we fork a script
     int fdFlags = fcntl(fd, F_GETFD);
     fdFlags |= FD_CLOEXEC;
     if(fcntl(fd, F_SETFD, fdFlags) < 0) {
       myLog(LOG_ERR, "fcntl(F_SETFD=FD_CLOEXEC) failed: %s", strerror(errno));
+      return NO;
     }
+    return YES;
   }
 
   /*_________________---------------------------__________________
@@ -246,29 +250,55 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  int UTNLRoute_open(uint32_t mod_id, bool nonBlocking, size_t bufferSize) {
+  int UTNLRoute_open(uint32_t mod_id, bool nonBlocking, size_t bufferSize, uint32_t nl_groups, bool nl_strict) {
     int nl_sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
     if(nl_sock < 0) {
       myLog(LOG_ERR, "UTNLRoute_open: open failed: %s", strerror(errno));
-      return -1;
+      goto errout;
+    }
+
+    if(nl_strict) {
+      // Enable kernel filtering on the ifIndex request field in, e.g, struct ifaddrmsg. This
+      // will fail on older kernels (such as the 3.10 we see on centos7)
+      int optval = 1;
+      if (setsockopt(nl_sock, SOL_NETLINK, NETLINK_GET_STRICT_CHK, &optval, sizeof(optval)) < 0) {
+	myLog(LOG_ERR, "setsockopt(NETLINK_GET_STRICT_CHK) failed: %s\n", strerror(errno));
+	goto errout;
+      }
     }
 
     // bind to a suitable id
     struct sockaddr_nl sa = {
       .nl_family = AF_NETLINK,
+      .nl_groups = nl_groups,
       .nl_pid = getpid()  /* UTNLGeneric_pid(mod_id) */
     };
-    if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+    if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
       myLog(LOG_ERR, "UTNLRoute_open: bind failed: %s", strerror(errno));
+      goto errout;
+    }
 
     // Depending on how this socket is used it may be necessary to increase
     // the allocated kernel buffer space to avoid ENOBUFS errors.
-    if(bufferSize)
+    if(bufferSize) {
       UTSocketRcvbuf(nl_sock, bufferSize);
-    if(nonBlocking)
-      setNonBlocking(nl_sock);
-    setCloseOnExec(nl_sock);
+      UTSocketSndbuf(nl_sock, bufferSize);
+    }
+    if(nonBlocking) {
+      if(!setNonBlocking(nl_sock))
+	goto errout;
+    }
+    if(!setCloseOnExec(nl_sock))
+      goto errout;
+
+    // everything OK
     return nl_sock;
+
+  errout:
+    // not OK, clean up
+    if(nl_sock >= 0)
+      close(nl_sock);
+    return -1;
   }
 
   /*_________________---------------------------__________________
@@ -304,19 +334,65 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    UTNLRoute_link_send    __________________
+    -----------------___________________________------------------
+    When used with regular filtering this will reply with all the attributes for the given
+    ifIndex. With strict filtering we do not get any attributes at all. Not sure why. Maybe
+    the strict variant expects the desired attributes to be itemized in the request?
+  */
+
+  int UTNLRoute_link_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint32_t seqNo) {
+    struct {
+      struct nlmsghdr nlh;
+      UTNL_ALIGNED struct ifinfomsg ifi;
+    } m = {
+      .nlh.nlmsg_len = sizeof(m),
+      .nlh.nlmsg_pid = UTNLGeneric_pid(mod_id),
+      .nlh.nlmsg_flags = NLM_F_REQUEST,
+      .nlh.nlmsg_type = RTM_GETLINK,
+      .nlh.nlmsg_seq = seqNo,
+      .ifi.ifi_family = AF_UNSPEC,
+      .ifi.ifi_change = 0xffffffff,
+      .ifi.ifi_index = ifIndex
+    };
+    return send(sockfd, &m, sizeof(m), 0);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    UTNLRoute_addr_send    __________________
+    -----------------___________________________------------------
+    When used with a strict-filtering socket, this will dump all the addresses
+    for the interface with the given ifIndex. (With a regular-filtering socket
+    that ifIndex will be ignored and all interfaces will be dumped.)
+  */
+
+  int UTNLRoute_addr_send(int sockfd, uint32_t mod_id, uint32_t ifIndex, uint32_t seqNo) {
+    struct {
+      struct nlmsghdr nlh;
+      UTNL_ALIGNED struct ifaddrmsg ifa;
+    } m = {
+      .nlh.nlmsg_len = sizeof(m),
+      .nlh.nlmsg_pid = UTNLGeneric_pid(mod_id),
+      .nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP,
+      .nlh.nlmsg_type = RTM_GETADDR,
+      .nlh.nlmsg_seq = seqNo,
+      .ifa.ifa_family = AF_UNSPEC,
+      .ifa.ifa_index = ifIndex,
+    };
+    return send(sockfd, &m, sizeof(m), 0);
+  }
+
+  /*_________________---------------------------__________________
     _________________    UTNLRoute_ns_send      __________________
     -----------------___________________________------------------
   */
 
   int UTNLRoute_ns_send(int sockfd, uint32_t mod_id, int fd, uint32_t seqNo) {
-    // sizeof(struct rtgenmsg) is only 1 but we can get
-    // the compiler to help us with the padding and
-    // construct the request in one struct.
     struct {
       struct nlmsghdr nlh;
-      __attribute__((aligned(4))) struct rtgenmsg rtg;
-      __attribute__((aligned(4))) struct rtattr rta;
-      __attribute__((aligned(4))) uint32_t fd;
+      UTNL_ALIGNED struct rtgenmsg rtg;
+      UTNL_ALIGNED struct rtattr rta;
+      UTNL_ALIGNED uint32_t fd;
     } m = {
       .nlh.nlmsg_len = sizeof(m),
       .nlh.nlmsg_pid = UTNLGeneric_pid(mod_id),
@@ -332,85 +408,25 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
-    _________________    UTNLRoute_ns_recv      __________________
+    _________________   UTNLRoute_recv_nlmsg    __________________
     -----------------___________________________------------------
   */
 
-  int UTNLRoute_ns_recv(int sockfd, uint32_t *p_nsid) {
+  int UTNLRoute_recv_nlmsg(void *magic, int sockfd, UTNLRouteCB routeCB) {
     uint8_t recv_buf[HSP_READNL_RCV_BUF];
     int rc;
   try_again:
     rc = recv(sockfd, recv_buf, HSP_READNL_RCV_BUF, 0);
     if(rc < 0) {
       if(errno == EAGAIN || errno == EINTR)
-	goto try_again;
-      return -1;
+        goto try_again;
+      fprintf(stderr, "UTNLRoute_recv_nlmsg error : %s\n", strerror(errno));
     }
-    if(rc > sizeof(struct nlmsghdr)) {
-      struct nlmsghdr *recv_hdr = (struct nlmsghdr*)recv_buf;
-      switch(recv_hdr->nlmsg_type) {
-      case RTM_GETNSID:
-      case RTM_NEWNSID:
-	{
-	  uint16_t len = recv_hdr->nlmsg_len;
-	  struct rtgenmsg *genmsg = NLMSG_DATA(recv_hdr);
-	  struct rtattr *rta = UTNLA_RTA(genmsg);
-	  while (RTA_OK(rta, len)){
-	    if(len > rc)
-	      return -1;
-	    if(rta->rta_type == NETNSA_NSID) {
-	      *p_nsid = *(uint32_t *)RTA_DATA(rta);
-	      return YES;
-	    }
-	    rta = RTA_NEXT(rta, len);
-	  }
-	}
-      }
-    }
-    return NO;
-  }
-
-  /*_________________---------------------------__________________
-    _________________      UTNLRoute_recv       __________________
-    -----------------___________________________------------------
-  */
-
-  int UTNLRoute_recv(int sockfd, uint field, uint32_t *pIfIndex, char *resultBuf, uint *pResultLen) {
-    uint8_t recv_buf[HSP_READNL_RCV_BUF];
-    int rc;
-  try_again:
-    rc = recv(sockfd, recv_buf, HSP_READNL_RCV_BUF, 0);
-    if(rc < 0) {
-      if(errno == EAGAIN || errno == EINTR)
-	goto try_again;
-    }
-    if (rc > sizeof(struct nlmsghdr)) {
-      struct nlmsghdr *recv_hdr = (struct nlmsghdr*)recv_buf;
-      struct ifinfomsg *infomsg = NLMSG_DATA(recv_hdr);
-      // report the ifIndex that was found
-      *pIfIndex = infomsg->ifi_index;
-      struct rtattr *rta = IFLA_RTA(infomsg);
-      uint16_t len = recv_hdr->nlmsg_len;
-      // extra check to reassure coverity
-      if((int)len > rc) {
-	return -1;
-      }
-      // this only writes into resultBuf if field is found
-      while (RTA_OK(rta, len)){
-	// extra check to reassure coverity
-	if(len > rc)
-	  break;
-	if(rta->rta_type == field) {
-	  char *res = RTA_DATA(rta);
-	  uint res_len = RTA_PAYLOAD(rta);
-	  if(res_len > *pResultLen)
-	    res_len = *pResultLen; // truncate if result buffer too short
-	  else
-	    *pResultLen = res_len;
-	  memcpy(resultBuf, res, res_len);
-	}
-	rta = RTA_NEXT(rta, len);
-      }
+    int len = rc;
+    for(struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
+	NLMSG_OK(nlh, len);
+	nlh = NLMSG_NEXT(nlh, len)) {
+      (*routeCB)(magic, nlh, len);
     }
     return rc;
   }
