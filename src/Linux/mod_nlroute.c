@@ -353,7 +353,7 @@ extern "C" {
       uint32_t nested = rta->rta_type & NLA_F_NESTED;
       void *data = RTA_DATA(rta);
       uint32_t dataLen = RTA_PAYLOAD(rta);
-      EVDebug(mod, 1, "  rttype=%s(%u) nested=%u payload=%u",
+      EVDebug(mod, 2, "  rttype=%s(%u) nested=%u payload=%u",
 	      iflaName(rttype),
 	      rttype,
 	      nested,
@@ -427,7 +427,7 @@ extern "C" {
       if(len > msglen)
 	break;
 
-      EVDebug(mod, 1, "  rta_type=%s(%u) payload=%u",
+      EVDebug(mod, 2, "  rta_type=%s(%u) payload=%u",
 	      ifaName(rta->rta_type),
 	      rta->rta_type,
 	      RTA_PAYLOAD(rta));
