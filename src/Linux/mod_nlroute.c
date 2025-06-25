@@ -105,6 +105,18 @@ extern "C" {
 
 #define MY_IFA_MAX (sizeof(ifa_name) / sizeof(char *))
 
+  static const char *netnsa_name[] = {
+    "NETNSA_NONE",
+    "NETNSA_NSID",
+    "NETNSA_PID",
+    "NETNSA_FD",
+    "NETNSA_TARGET_NSID",
+    "NETNSA_CURRENT_NSID",
+  };
+
+#define MY_NETNSA_MAX (sizeof(netnsa_name) / sizeof(char *))
+
+
   typedef struct _HSPNLRequest {
     struct _HSPNLRequest *prev;
     struct _HSPNLRequest *next;
@@ -149,6 +161,10 @@ extern "C" {
 
   static const char *ifaName(int ifa) {
     return (ifa < MY_IFA_MAX) ? ifa_name[ifa] : "<ifa_unknown>";
+  }
+
+  static const char *netnsaName(int netnsa) {
+    return (netnsa < MY_NETNSA_MAX) ? netnsa_name[netnsa] : "<netnsa_unknown>";
   }
 
   /*_________________---------------------------__________________
@@ -464,6 +480,9 @@ extern "C" {
       // extra check to reassure coverity
       if(len > msglen)
 	break;
+      EVDebug(mod, 1, "  rttype=%s(%u) payload=%u",
+	      netnsaName(rta->rta_type),
+	      RTA_PAYLOAD(rta));
       if(rta->rta_type == NETNSA_NSID) {
 	req->get_nsid.nsid = *(uint32_t *)RTA_DATA(rta);
 	req->get_nsid.found = YES;

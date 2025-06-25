@@ -545,7 +545,7 @@ extern "C" {
   static void evt_get_nsid_ans(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    EVDebug(mod, 1, "evt_get_nsid_ans");
+    EVDebug(mod, 1, "evt_get_nsid_ans: dataLen=%u", dataLen);
     if(dataLen == sizeof(HSPGetNSID)) {
       HSPGetNSID get_nsid;
       memcpy(&get_nsid, data, dataLen);
