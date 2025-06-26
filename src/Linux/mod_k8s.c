@@ -212,6 +212,7 @@ extern "C" {
     else {
       // add new VNIC entry
       vnicMAC = (HSPVnicMAC *)my_calloc(sizeof(HSPVnicMAC));
+      vnicMAC->mac = *mac;
       vnicMAC->dsIndex = pod->vm.dsIndex;
       // vnicMAC->ifIndex = adaptor->ifIndex; // we now learn this ifIndex later
       vnicMAC->nspid = nspid;
