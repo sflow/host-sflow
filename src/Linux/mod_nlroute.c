@@ -373,7 +373,9 @@ extern "C" {
 	readAlias(mod, ifIndex, buf, dataLen);
 	break;
       case IFLA_ADDRESS:
+#ifdef IFLA_PERM_ADDRESS
       case IFLA_PERM_ADDRESS:
+#endif
 	u_char hex[64];
 	printHex(data, dataLen, hex, 64, YES);
 	EVDebug(mod, 1, "%s=%s", iflaName(rttype), hex);
