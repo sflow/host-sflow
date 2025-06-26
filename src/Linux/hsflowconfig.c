@@ -1545,6 +1545,9 @@ extern "C" {
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->nlroute.nlroute = YES;
 	    sp->nlroute.limit = HSP_DEFAULT_NLROUTE_LIMIT;
+	    sp->nlroute.link = YES;
+	    sp->nlroute.addr = YES;
+	    sp->nlroute.setIfAlias = YES;
 	    level[++depth] = HSPOBJ_NLROUTE;
 	    break;
 	  case HSPTOKEN_VPP:
@@ -1778,6 +1781,12 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_EOF:
 	      if((tok = expectONOFF(sp, tok, &sp->k8s.eof)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SETIFALIAS:
+	      if((tok = expectONOFF(sp, tok, &sp->k8s.setIfAlias)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SETIFNAME:
+	      if((tok = expectONOFF(sp, tok, &sp->k8s.setIfName)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
@@ -2067,6 +2076,12 @@ extern "C" {
 	    case HSPTOKEN_SUPPRESSOTHER:
 	      if((tok = expectONOFF(sp, tok, &sp->sonic.suppressOther)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_SETIFALIAS:
+	      if((tok = expectONOFF(sp, tok, &sp->sonic.setIfAlias)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SETIFNAME:
+	      if((tok = expectONOFF(sp, tok, &sp->sonic.setIfName)) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;
@@ -2163,6 +2178,15 @@ extern "C" {
 	    switch(tok->stok) {
 	    case HSPTOKEN_LIMIT:
 	      if((tok = expectInteger32(sp, tok, &sp->nlroute.limit, 0, HSP_MAX_NLROUTE_LIMIT)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_LINK:
+	      if((tok = expectONOFF(sp, tok, &sp->nlroute.link)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_ADDR:
+	      if((tok = expectONOFF(sp, tok, &sp->nlroute.addr)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_SETIFALIAS:
+	      if((tok = expectONOFF(sp, tok, &sp->nlroute.setIfAlias)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

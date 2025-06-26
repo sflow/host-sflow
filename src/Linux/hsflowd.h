@@ -775,6 +775,9 @@ extern "C" {
       uint32_t limit;
 #define HSP_DEFAULT_NLROUTE_LIMIT 50
 #define HSP_MAX_NLROUTE_LIMIT 500
+      bool setIfAlias;
+      bool link;
+      bool addr;
     } nlroute;
     struct {
       bool vpp;

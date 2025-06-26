@@ -213,10 +213,14 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     SFLAdaptor *ad = UTHashNext(sp->adaptorsByIndex, &mdata->cursor);
     if(ad) {
-      HSPNLRequest *req1 = HSPNLRequestNew(mod, RTM_GETLINK, ad->ifIndex);
-      HSPNLRequestEnqueue(mod, req1);
-      HSPNLRequest *req2 = HSPNLRequestNew(mod, RTM_GETADDR, ad->ifIndex);
-      HSPNLRequestEnqueue(mod, req2);
+      if(sp->nlroute.link) {
+	HSPNLRequest *req1 = HSPNLRequestNew(mod, RTM_GETLINK, ad->ifIndex);
+	HSPNLRequestEnqueue(mod, req1);
+      }
+      if(sp->nlroute.addr) {
+	HSPNLRequest *req2 = HSPNLRequestNew(mod, RTM_GETADDR, ad->ifIndex);
+	HSPNLRequestEnqueue(mod, req2);
+      }
       return YES;
     }
     return NO;
@@ -370,7 +374,8 @@ extern "C" {
 	  memcpy(buf, data, dataLen);
 	buf[dataLen] = '\0';
 	EVDebug(mod, 1, "IFLA_IFALIAS=%s", buf);
-	readAlias(mod, ifIndex, buf, dataLen);
+	if(sp->nlroute.setIfAlias)
+	  readAlias(mod, ifIndex, buf, dataLen);
 	break;
       case IFLA_ADDRESS:
 #ifdef IFLA_PERM_ADDRESS
