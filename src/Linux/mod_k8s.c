@@ -551,22 +551,26 @@ extern "C" {
       HSPGetNSID get_nsid;
       memcpy(&get_nsid, data, dataLen);
       if(get_nsid.found) {
-	EVDebug(mod, 1, "evt_get_nsid_ans nspid %u -> nsid %u (ds_index=%u)",
+	EVDebug(mod, 1, "evt_get_nsid_ans: nspid %u -> nsid %u (ds_index=%u)",
 		get_nsid.nspid,
 		get_nsid.nsid,
 		get_nsid.dsIndex);
 	HSPVMState_POD *pod = (HSPVMState_POD *)getVM_byDS(mod, get_nsid.dsIndex);
 	if(pod) {
-	  EVDebug(mod, 1, "nsid %u->%u to pod %s",
+	  EVDebug(mod, 1, "evt_get_nsid_ans: nsid %u->%u to pod %s",
 		  pod->nsid,
 		  get_nsid.nsid,
 		  pod->hostname);
 	  pod->nsid = get_nsid.nsid;
 	  SFLAdaptor *adaptor = adaptorByNETNSID(sp, pod->nsid);
 	  if(adaptor) {
+	    // setting the vm_or_container flag triggers "bridgeModel" treatment
+	    // when we submit packet samples associated with this adaptor
+	    ADAPTOR_NIO(adaptor)->vm_or_container = YES;
+	    
 	    uint32_t ifIndex = adaptor->ifIndex;
 	    pod->ifIndex = ifIndex;
-	    EVDebug(mod, 1, "request tap device %s (ifIndex=%u)", adaptor->deviceName, ifIndex);
+	    EVDebug(mod, 1, "evt_get_nsid_ans: request tap on device %s (ifIndex=%u)", adaptor->deviceName, ifIndex);
 	    EVEventTx(mod, mdata->evt_get_tap, &ifIndex, sizeof(ifIndex));
 	    // We might still take one more step here and remember that any packets
 	    // seen at this adaptor must be to or from that pod,  but we still have
@@ -580,8 +584,14 @@ extern "C" {
 	    // to tag the packet-samples with.
 	    HSPVnicMAC *vnicMAC;
 	    UTHASH_WALK(mdata->vnicByMAC, vnicMAC) {
+
+	      char buf[32];
+	      EVDebug(mod, 2, "evt_get_nsid_ans: consider vnicMAC(mac=%s, nspid=%u)",
+		      SFLMacAddress_print(&vnicMAC->mac, buf, 32),
+		      vnicMAC->nspid);
+
 	      if(vnicMAC->nspid == pod->nspid) {
-		EVDebug(mod, 1, "vnicMAC with nspid %u ifIndex %u -> %u",
+		EVDebug(mod, 1, "evt_get_nsid_ans: vnicMAC with nspid %u ifIndex %u -> %u",
 			vnicMAC->nspid,
 			vnicMAC->ifIndex,
 			pod->ifIndex);
@@ -1120,9 +1130,11 @@ extern "C" {
     HSPVnicMAC searchMAC = { .mac = *mac };
     HSPVnicMAC *vnicMAC = UTHashGet(mdata->vnicByMAC, &searchMAC);
     if(vnicMAC) {
-      EVDebug(mod, 2, "containerDSByMAC matched ds=%u nspid=%u",
+      EVDebug(mod, 2, "containerDSByMAC matched ds=%u nspid=%u ifIndex=%u owners=%u",
 	      vnicMAC->dsIndex,
-	      vnicMAC->nspid);
+	      vnicMAC->nspid,
+	      vnicMAC->ifIndex,
+	      UTHashN(vnicMAC->owners));
       // make sure it represents a unique mapping
       if(UTHashN(vnicMAC->owners) == 1) {
 	*(p_nspid) = vnicMAC->nspid; // get pod namespace too
