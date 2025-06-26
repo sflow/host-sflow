@@ -583,11 +583,13 @@ extern "C" {
     case RTM_GETSTATS:
       EVDebug(mod, 1, "STATS");
       break;
+#if 0
     case RTM_NEWVLAN:
     case RTM_GETVLAN:
     case RTM_DELVLAN:
       EVDebug(mod, 1, "VLAN");
       break;
+#endif 
     }
     if(req
        && done) {
