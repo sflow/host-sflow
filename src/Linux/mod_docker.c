@@ -311,12 +311,12 @@ extern "C" {
     callback from readVNIC.c
   */
 
-  static void mapIPToContainer(EVMod *mod, HSPVMState *vm, SFLAdaptor *adaptor, SFLAddress *ipAddr, uint32_t nspid) {
+  static void mapIPToContainer(EVMod *mod, HSPVMState *vm, SFLMacAddress *mac, SFLAddress *ipAddr, uint32_t nspid) {
     HSP_mod_DOCKER *mdata = (HSP_mod_DOCKER *)mod->data;
     if(!mdata->vnicByMAC)
       return;
     HSPVMState_DOCKER *container = (HSPVMState_DOCKER *)vm;
-    HSPVnicMAC searchMAC = { .mac = adaptor->macs[0] };
+    HSPVnicMAC searchMAC = { .mac = *mac };
     HSPVnicMAC *vnicMAC = UTHashGet(mdata->vnicByMAC, &searchMAC);
     if(vnicMAC) {
       UTHashAdd(vnicMAC->owners, container);
@@ -325,7 +325,7 @@ extern "C" {
       // add new VNIC entry
       vnicMAC = (HSPVnicMAC *)my_calloc(sizeof(HSPVnicMAC));
       vnicMAC->dsIndex = container->vm.dsIndex;
-      vnicMAC->ifIndex = adaptor->ifIndex;
+      // vnicMAC->ifIndex = adaptor->ifIndex;
       vnicMAC->nspid = nspid;
       UTHashAdd(mdata->vnicByMAC, vnicMAC);
       vnicMAC->owners = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);

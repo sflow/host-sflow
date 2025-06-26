@@ -63,6 +63,7 @@ extern "C" {
     UTHash *containers;
     uint64_t cgroup_id;
     uint32_t nsid; // network namespace id (for nspid->nsid->dev)
+    uint32_t ifIndex; // vport
   } HSPVMState_POD;
 
 #define HSP_K8S_READER "/usr/sbin/hsflowd_containerd"
@@ -198,12 +199,12 @@ extern "C" {
   callback from readVNIC.c
   */
 
-  static void mapIPToPod(EVMod *mod, HSPVMState *vm, SFLAdaptor *adaptor, SFLAddress *ipAddr, uint32_t nspid) {
+  static void mapIPToPod(EVMod *mod, HSPVMState *vm, SFLMacAddress *mac, SFLAddress *ipAddr, uint32_t nspid) {
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     if(!mdata->vnicByMAC)
       return;
     HSPVMState_POD *pod = (HSPVMState_POD *)vm;
-    HSPVnicMAC searchMAC = { .mac = adaptor->macs[0] };
+    HSPVnicMAC searchMAC = { .mac = *mac };
     HSPVnicMAC *vnicMAC = UTHashGet(mdata->vnicByMAC, &searchMAC);
     if(vnicMAC) {
       UTHashAdd(vnicMAC->owners, pod);
@@ -212,7 +213,7 @@ extern "C" {
       // add new VNIC entry
       vnicMAC = (HSPVnicMAC *)my_calloc(sizeof(HSPVnicMAC));
       vnicMAC->dsIndex = pod->vm.dsIndex;
-      vnicMAC->ifIndex = adaptor->ifIndex;
+      // vnicMAC->ifIndex = adaptor->ifIndex; // we now learn this ifIndex later
       vnicMAC->nspid = nspid;
       UTHashAdd(mdata->vnicByMAC, vnicMAC);
       vnicMAC->owners = UTHASH_NEW(HSPVMState_POD, hostname, UTHASH_SKEY);
@@ -564,6 +565,7 @@ extern "C" {
 	  SFLAdaptor *adaptor = adaptorByNETNSID(sp, pod->nsid);
 	  if(adaptor) {
 	    uint32_t ifIndex = adaptor->ifIndex;
+	    pod->ifIndex = ifIndex;
 	    EVDebug(mod, 1, "request tap device %s (ifIndex=%u)", adaptor->deviceName, ifIndex);
 	    EVEventTx(mod, mdata->evt_get_tap, &ifIndex, sizeof(ifIndex));
 	    // We might still take one more step here and remember that any packets
@@ -574,6 +576,12 @@ extern "C" {
 	    if(sp->k8s.setIfAlias)
 	      setAdaptorAlias(sp, adaptor, pod->hostname, "MOD_K8S");
 	    // should emerge as sFlow PORT_NAME if sp->k8s.setIfName is also set.
+	    // now find the vnicMAC by nspid, and tell him the ifIndex that we want him
+	    // to tag the packet-samples with.
+	    HSPVnicMAC *vnicMAC;
+	    UTHASH_WALK(mdata->vnicByMAC, vnicMAC)
+	      if(vnicMAC->nspid == pod->nspid)
+		vnicMAC->ifIndex = pod->ifIndex;
 	  }
 	}
       }

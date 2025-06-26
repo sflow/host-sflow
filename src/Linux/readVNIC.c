@@ -40,11 +40,17 @@ extern "C" {
     uint32_t ifIndex;
     uint32_t nspid;
     if(sscanf(line, "VNIC: %u %s %s %s %s %u", &ifIndex, deviceName, macStr, ipStr, ip6Str, &nspid) == 6) {
-      u_char mac[6];
-      if(hexToBinary((u_char *)macStr, mac, 6) == 6) {
-	SFLAdaptor *adaptor = adaptorListGet(vm->interfaces, deviceName);
+      SFLMacAddress mac = {};
+      if(hexToBinary((u_char *)macStr, mac.mac, 6) == 6) {
+	// adaptor deviceName and ifIndex are not very helpful here because
+	// they are private to the namespace of the container (and the ifIndex is
+	// NOT globally unique) so the mapping we are harvesting here is really
+	// MAC,IP <-> nspid.
+	SFLAdaptor *adaptor = NULL;
+#if 0
+	adaptor = adaptorListGet(vm->interfaces, deviceName);
 	if(adaptor == NULL) {
-	  adaptor = nioAdaptorNew(mod, deviceName, mac, ifIndex);
+	  adaptor = nioAdaptorNew(mod, deviceName, mac.mac, ifIndex);
 	  adaptorListAdd(vm->interfaces, adaptor);
 	  // add to "all namespaces" collections too - but only the ones where
 	  // the id is really global.  For example,  many containers can have
@@ -88,7 +94,8 @@ extern "C" {
 	    nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
 	  }
 	}
-	
+#endif
+
 	// did we get an ip address too?
 	SFLAddress ipAddr = { };
 	SFLAddress ip6Addr = { };
@@ -101,11 +108,11 @@ extern "C" {
 	  // if this address appears in sampled packet header as
 	  // outer or inner IP
 	  if(gotV6) {
-	    ipCB(mod, vm, adaptor, &ip6Addr, nspid);
+	    ipCB(mod, vm, &mac, &ip6Addr, nspid);
 	  }
 	  if(gotV4) {
-	    ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
-	    ipCB(mod, vm, adaptor, &ipAddr, nspid);
+	    // ADAPTOR_NIO(adaptor)->ipAddr = ipAddr;
+	    ipCB(mod, vm, &mac, &ipAddr, nspid);
 	  }
 	}
       }
