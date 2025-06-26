@@ -579,9 +579,16 @@ extern "C" {
 	    // now find the vnicMAC by nspid, and tell him the ifIndex that we want him
 	    // to tag the packet-samples with.
 	    HSPVnicMAC *vnicMAC;
-	    UTHASH_WALK(mdata->vnicByMAC, vnicMAC)
-	      if(vnicMAC->nspid == pod->nspid)
+	    UTHASH_WALK(mdata->vnicByMAC, vnicMAC) {
+	      if(vnicMAC->nspid == pod->nspid) {
+		EVDebug(mod, 1, "vnicMAC with nspid %u ifIndex %u -> %u",
+			vnicMAC->nspid,
+			vnicMAC->ifIndex,
+			pod->ifIndex);
 		vnicMAC->ifIndex = pod->ifIndex;
+		break;
+	      }
+	    }
 	  }
 	}
       }
@@ -1193,21 +1200,21 @@ extern "C" {
 	return YES;
       }
     }
-    if(ps->l3_offset) {
-      // outer IP
-      ps->src_dsIndex = containerDSByIP(mod, &ps->src, &ps->src_nspid, &ps->src_ifIndex);
-      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst, &ps->dst_nspid, &ps->dst_ifIndex);
-      if(ps->src_dsIndex || ps->dst_dsIndex) {
-	mdata->ds_byIP++;
-	return YES;
-      }
-    }
     if(ps->hdr_protocol == SFLHEADER_ETHERNET_ISO8023) {
       // outer MAC
       ps->src_dsIndex = containerDSByMAC(mod, &ps->macsrc, &ps->src_nspid, &ps->src_ifIndex);
       ps->dst_dsIndex = containerDSByMAC(mod, &ps->macdst, &ps->dst_nspid, &ps->dst_ifIndex);
       if(ps->src_dsIndex || ps->dst_dsIndex) {
 	mdata->ds_byMAC++;
+	return YES;
+      }
+    }
+    if(ps->l3_offset) {
+      // outer IP
+      ps->src_dsIndex = containerDSByIP(mod, &ps->src, &ps->src_nspid, &ps->src_ifIndex);
+      ps->dst_dsIndex = containerDSByIP(mod, &ps->dst, &ps->dst_nspid, &ps->dst_ifIndex);
+      if(ps->src_dsIndex || ps->dst_dsIndex) {
+	mdata->ds_byIP++;
 	return YES;
       }
     }

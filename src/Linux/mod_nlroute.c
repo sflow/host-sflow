@@ -393,7 +393,7 @@ extern "C" {
       case IFLA_LINK_NETNSID:
 	{
 	  uint32_t nsid = *(uint32_t *)data;
-	  EVDebug(mod, 1, "IFLA_LINK_NETNSID=%u", nsid);
+	  EVDebug(mod, 1, "IFLA_LINK_NETNSID(%u)=%u", ifIndex, nsid);
 	  SFLAdaptor *ad = adaptorByIndex(sp, ifIndex);
 	  if(ad)
 	    setAdaptorNETNSID(sp, ad, nsid, "netlink");
