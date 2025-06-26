@@ -572,7 +572,7 @@ extern "C" {
 	    // we rely on the readVNICInterfaces() step to harvest the MACs that will
 	    // appear in samples taken there.
 	    if(sp->k8s.setIfAlias)
-	      setAdaptorAlias(sp, adaptor, pod->hostname, "MOD_K8s");
+	      setAdaptorAlias(sp, adaptor, pod->hostname, "MOD_K8S");
 	    // should emerge as sFlow PORT_NAME if sp->k8s.setIfName is also set.
 	  }
 	}
