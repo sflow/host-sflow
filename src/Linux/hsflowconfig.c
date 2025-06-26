@@ -1435,6 +1435,8 @@ extern "C" {
 	  case HSPTOKEN_K8S:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->k8s.k8s = YES;
+	    sp->setIfAlias = YES;
+	    sp->setIfName = YES;
 	    level[++depth] = HSPOBJ_K8S;
 	    break;
 	  case HSPTOKEN_ULOG:

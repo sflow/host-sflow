@@ -601,9 +601,13 @@ extern "C" {
     // the portName even on other platforms, so allow the policy to to be
     // a global flag that we test here.  For now the flag is
     // sp->sonic.setIfName but it could end up as something like "sp->portNameUseAlias".
-    if(sp->sonic.setIfName
-       && adaptorNIO->deviceAlias)
+    if(adaptorNIO->deviceAlias
+       && ((sp->sonic.sonic
+	    && sp->sonic.setIfName)
+	   || (sp->k8s.k8s
+	       && sp->k8s.setIfName))) {
       sFlowPortName = adaptorNIO->deviceAlias;
+    }
     pn_elem.counterBlock.portName.portName.len = my_strlen(sFlowPortName);
     pn_elem.counterBlock.portName.portName.str = sFlowPortName;
     SFLADD_ELEMENT(cs, &pn_elem);

@@ -667,6 +667,8 @@ extern "C" {
       bool k8s;
       bool markTraffic;
       bool eof;
+      bool setIfAlias;
+      bool setIfName;
     } k8s;
     struct {
       bool cumulus;
