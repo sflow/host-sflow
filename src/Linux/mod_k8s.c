@@ -265,7 +265,7 @@ extern "C" {
       }
       stats.cpu_count += container->stats.cpu_count;
       EVDebug(mod, 2, "getCounters_POD(): container %s has cpu_count %u (total now = %u)",
-	      container->name,
+	      container->name ?: "<no name>",
 	      container->stats.cpu_count,
 	      stats.cpu_count);
       stats.cpu_total += container->stats.cpu_total;
@@ -827,16 +827,21 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static uint32_t setPodNSPid(EVMod *mod, HSPVMState_POD *pod) {
+  static bool setPodNSPid(EVMod *mod, HSPVMState_POD *pod) {
     // pick up an nspid from my list of active containers
+    bool changed = NO;
     HSPK8sContainer *container;
     UTHASH_WALK(pod->containers, container) {
-      if(container->pid) {
-	pod->nspid = (uint32_t)container->pid;
+      if(container->pid
+	 && !container->isSandbox) {
+	if(pod->nspid != (uint32_t)container->pid) {
+	  pod->nspid = (uint32_t)container->pid;
+	  changed = YES;
+	}
 	break;
       }
     }
-    return pod->nspid;
+    return changed;
   }
 
   /*_________________---------------------------__________________
@@ -982,27 +987,30 @@ extern "C" {
 
     // make sure this container is assigned to this pod.
     podAddContainer(mod, pod, container);
-    
-    // set/update the pod nspid
-    setPodNSPid(mod, pod);
 
-    {
-      // probe for the MAC and peer-ifIndex (will only
-      // work if we have at least one regular container here
-      // since the sandbox has pid==0).
-      
+    time_t now_mono = mdata->pollBus->now.tv_sec;
+    pod->last_heard = now_mono;
+
+    if(!container->isSandbox) {
+      // set/update the pod nspid
+      if(setPodNSPid(mod, pod)) {
+	updatePodAdaptors(mod, pod);
+	pod->last_vnic = now_mono;
+	updatePodCgroupPaths(mod, pod);
+	pod->last_cgroup = now_mono;
+      }
+    }
+
+    if(pod->nspid) {
       // see if spacing the VNIC refresh reduces load
-      time_t now_mono = mdata->pollBus->now.tv_sec;
-      pod->last_heard = now_mono;
-
-      if(pod->last_vnic == 0
-	 || (now_mono - pod->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
+      // (we might just dispense with this refresh altogether
+      // since the addresses will not change under any
+      // normal circumstances?)
+      if((now_mono - pod->last_vnic) > HSP_VNIC_REFRESH_TIMEOUT) {
 	pod->last_vnic = now_mono;
 	updatePodAdaptors(mod, pod);
       }
-      
-      if(pod->last_cgroup == 0
-	 || (now_mono - pod->last_cgroup) > HSP_CGROUP_REFRESH_TIMEOUT) {
+      if((now_mono - pod->last_cgroup) > HSP_CGROUP_REFRESH_TIMEOUT) {
 	pod->last_cgroup = now_mono;
 	updatePodCgroupPaths(mod, pod);
       }
