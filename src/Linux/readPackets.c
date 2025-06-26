@@ -108,6 +108,12 @@ extern "C" {
 	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES_SUPPRESSED]++;
       }
       else {
+	// apply in/out overrides if set
+	if(ps->src_ifIndex)
+	  ps->fs->input = ps->src_ifIndex;
+	if(ps->dst_ifIndex)
+	  ps->fs->output = ps->dst_ifIndex;
+	// and now we can finally send the sample
 	sfl_agent_set_now(ps->sampler->agent, bus->now.tv_sec, bus->now.tv_nsec);
 	sfl_sampler_writeFlowSample(ps->sampler, ps->fs);
 	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES]++;
