@@ -325,7 +325,7 @@ extern "C" {
       // add new VNIC entry
       vnicMAC = (HSPVnicMAC *)my_calloc(sizeof(HSPVnicMAC));
       vnicMAC->dsIndex = container->vm.dsIndex;
-      // vnicMAC->ifIndex = adaptor->ifIndex;
+      vnicMAC->mac = *mac;
       vnicMAC->nspid = nspid;
       UTHashAdd(mdata->vnicByMAC, vnicMAC);
       vnicMAC->owners = UTHASH_NEW(HSPVMState_DOCKER, vm.uuid, UTHASH_DFLT);
@@ -606,13 +606,7 @@ extern "C" {
   static void updateContainerAdaptors(EVMod *mod, HSPVMState_DOCKER *container) {
     HSPVMState *vm = &container->vm;
     if(vm) {
-      // reset the information that we are about to refresh
-      markAdaptors_adaptorList(mod, vm->interfaces);
-      // then refresh it
       readVNICInterfaces(mod, &container->vm, container->pid, mapIPToContainer);
-      // and clean up
-      deleteMarkedAdaptors_adaptorList(mod, vm->interfaces);
-      adaptorListFreeMarked(vm->interfaces);
     }
   }
 

@@ -46,57 +46,6 @@ extern "C" {
 	// they are private to the namespace of the container (and the ifIndex is
 	// NOT globally unique) so the mapping we are harvesting here is really
 	// MAC,IP <-> nspid.
-	SFLAdaptor *adaptor = NULL;
-#if 0
-	adaptor = adaptorListGet(vm->interfaces, deviceName);
-	if(adaptor == NULL) {
-	  adaptor = nioAdaptorNew(mod, deviceName, mac.mac, ifIndex);
-	  adaptorListAdd(vm->interfaces, adaptor);
-	  // add to "all namespaces" collections too - but only the ones where
-	  // the id is really global.  For example,  many containers can have
-	  // an "eth0" adaptor so we can't add it to sp->adaptorsByName.
-
-	  // And because the containers are likely to be ephemeral, don't
-	  // replace the global adaptor if it's already there.
-
-	  if(UTHashGet(sp->adaptorsByMac, adaptor) == NULL)
-	    if(UTHashAdd(sp->adaptorsByMac, adaptor) != NULL)
-	      myLog(LOG_ERR, "Warning: vnic adaptor overwriting adaptorsByMac");
-
-	  if(UTHashGet(sp->adaptorsByIndex, adaptor) == NULL)
-	    if(UTHashAdd(sp->adaptorsByIndex, adaptor) != NULL)
-	      myLog(LOG_ERR, "Warning: vnic adaptor overwriting adaptorsByIndex");
-	}
-	else {
-	  // clear mark
-	  unmarkAdaptor(adaptor);
-	}
-
-	// call back with the adaptor (may call again with IPs below)
-	ipCB(mod, vm, adaptor, NULL, nspid);
-
-	// mark it as a vm/pod device
-	// and record the dsIndex there for easy mapping later
-	// provided it is unique.  Otherwise set it to all-ones
-	// to indicate that it should not be used to map to pod.
-	HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
-	nio->vm_or_container = YES;
-
-	// TODO: this part we might bring back into mod_container, mod_docker and mod_k8s so that the HSPAdaptorNIO
-	// does not need to know about container_dsIndex and container_nspid and DSINDEX_NONUNIQUE?
-	nio->container_nspid = nspid;
-	if(nio->container_dsIndex != vm->dsIndex) {
-	  if(nio->container_dsIndex == 0)
-	    nio->container_dsIndex = vm->dsIndex;
-	  else {
-	    myLog(LOG_ERR, "Warning: VNIC already claimed by container with dsIndex==nio->container_dsIndex");
-	    // mark it as not a unique mapping
-	    nio->container_dsIndex = HSPVNIC_DSINDEX_NONUNIQUE;
-	  }
-	}
-#endif
-
-	// did we get an ip address too?
 	SFLAddress ipAddr = { };
 	SFLAddress ip6Addr = { };
 	bool gotV4 = parseNumericAddress(ipStr, NULL, &ipAddr, PF_INET);
@@ -117,7 +66,6 @@ extern "C" {
 	}
       }
     }
-    // TODO: if the adaptor is a veth-pair, can we find an IP address from the other end?
     return YES;
   }
 
