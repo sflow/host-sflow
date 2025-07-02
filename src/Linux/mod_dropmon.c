@@ -132,6 +132,7 @@ extern "C" {
     uint32_t ignoredDrops_sw;
     uint32_t ignoredDrops_rn;
     uint32_t totalDrops_thisTick; // for threshold
+    uint32_t max_exceeded; // sucessive ticks over max
     bool dropmon_disabled;
     EVEvent *evt_intf_es;
   } HSP_mod_DROPMON;
@@ -1137,13 +1138,23 @@ That would allow everything to stay on the stack as it does here, which has nice
       return;
 
     // check circuit-breaker threshold
-    if(sp->dropmon.max
-       && mdata->totalDrops_thisTick > sp->dropmon.max) {
-      EVDebug(mod, 0, "threshold exceeded (%u > %u): turning off feed",
-	    mdata->totalDrops_thisTick,
-	    sp->dropmon.max);
-      stopMonitoring(mod);
-      mdata->dropmon_disabled = YES;
+    if(sp->dropmon.max) {
+      if(mdata->totalDrops_thisTick > sp->dropmon.max) {
+	mdata->max_exceeded++;
+	EVDebug(mod, 0, "threshold exceeded (%u > %u) for %u seconds (max_trip=%u)",
+		mdata->totalDrops_thisTick,
+		sp->dropmon.max,
+		mdata->max_exceeded,
+		sp->dropmon.max_trip);
+	if(sp->dropmon.max_trip
+	   && (mdata->max_exceeded >= sp->dropmon.max_trip)) {
+	  stopMonitoring(mod);
+	  mdata->dropmon_disabled = YES;
+	}
+      }
+      else {
+	mdata->max_exceeded = 0;
+      }
     }
     // reset for next second
     mdata->totalDrops_thisTick = 0;

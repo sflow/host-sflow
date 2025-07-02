@@ -1463,6 +1463,7 @@ extern "C" {
 	    sp->dropmon.start = YES;
 	    sp->dropmon.limit = HSP_DEFAULT_DROPLIMIT;
 	    sp->dropmon.max = HSP_DEFAULT_DROPTRAP_MAX;
+	    sp->dropmon.max_trip = HSP_DEFAULT_DROPTRAP_MAX_TRIP;
 	    sp->dropmon.sw = YES;
 	    sp->dropmon.hw = YES;
 	    sp->dropmon.rn = YES;
@@ -1901,6 +1902,8 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_MAX:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.max, 1, 0xFFFFFFFF)) == NULL) return NO;
+	    case HSPTOKEN_MAX_TRIP:
+	      if((tok = expectInteger32(sp, tok, &sp->dropmon.max_trip, 1, 0xFFFFFFFF)) == NULL) return NO;
 	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);

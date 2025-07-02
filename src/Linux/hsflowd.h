@@ -472,6 +472,7 @@ extern "C" {
 #define HSPEVENT_GET_TAP "get_tap"   // ifIndex
 
   typedef struct _HSPPSample {
+    uint32_t proto;
     uint32_t grp_no;
     uint32_t grp_seq;
     uint32_t sample_n;
@@ -739,7 +740,9 @@ extern "C" {
       uint32_t limit;
 #define HSP_DEFAULT_DROPLIMIT 100
       uint32_t max;
-#define HSP_DEFAULT_DROPTRAP_MAX 100000 // "circuit-breaker" turns off feed
+      uint32_t max_trip;
+#define HSP_DEFAULT_DROPTRAP_MAX 100000
+#define HSP_DEFAULT_DROPTRAP_MAX_TRIP 2
       bool hw_unknown;
       bool hw_function;
       regex_t *hide_regex;
