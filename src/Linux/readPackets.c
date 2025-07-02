@@ -154,17 +154,18 @@ extern "C" {
 	macdst[12] = '\0';
 	ethtype = (mac_hdr[12] << 8) + mac_hdr[13];
       }
-      EVDebug(mod, 1, "takeSample: hook=%u tap=%s in=%s out=%s pkt_len=%u cap_len=%u mac_len=%u (%s -> %s et=0x%04X)",
-	    hook,
-	    ad_tap ? ad_tap->deviceName : "<no tap>",
-	    ad_in ? ad_in->deviceName : "<not found>",
-	    ad_out ? ad_out->deviceName : "<not found>",
-	    pkt_len,
-	    cap_len,
-	    mac_len,
-	    macsrc,
-	    macdst,
-	    ethtype);
+      EVDebug(mod, 1, "takeSample: hook=%u tap=%s proto=%u in=%s out=%s pkt_len=%u cap_len=%u mac_len=%u (%s -> %s et=0x%04X)",
+	      hook,
+	      ad_tap ? ad_tap->deviceName : "<no tap>",
+	      protocol,
+	      ad_in ? ad_in->deviceName : "<not found>",
+	      ad_out ? ad_out->deviceName : "<not found>",
+	      pkt_len,
+	      cap_len,
+	      mac_len,
+	      macsrc,
+	      macdst,
+	      ethtype);
     }
     
     uint32_t dsopts = options;

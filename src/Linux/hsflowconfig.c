@@ -1902,6 +1902,7 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_MAX:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.max, 1, 0xFFFFFFFF)) == NULL) return NO;
+	      break;
 	    case HSPTOKEN_MAX_TRIP:
 	      if((tok = expectInteger32(sp, tok, &sp->dropmon.max_trip, 1, 0xFFFFFFFF)) == NULL) return NO;
 	      break;
