@@ -118,6 +118,7 @@ extern "C" {
 			 dev_in,
 			 dev_out,
 			 NULL,
+			 0, // protocol
  			 sp->ulog.ds_options,
 			 pkt->hook,
 			 pkt->mac,

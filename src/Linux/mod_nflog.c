@@ -159,6 +159,7 @@ extern "C" {
 			 adaptorByIndex(sp, (ifin_phys ?: ifin)),
 			 adaptorByIndex(sp, (ifout_phys ?: ifout)),
 			 NULL,
+			 0, // protocol
  			 sp->nflog.ds_options,
 			 msg_pkt_hdr->hook,
 			 mac_hdr,

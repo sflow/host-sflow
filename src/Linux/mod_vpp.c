@@ -580,6 +580,7 @@ v  */
 		     rx_dev,
 		     tx_dev,
 		     sampler_dev,
+		     psmp->proto,
 		     sp->psample.ds_options,
 		     0, // hook
 		     psmp->hdr, // mac hdr

@@ -197,6 +197,7 @@ extern "C" {
 		 dev_in,
 		 dev_out,
 		 NULL, // tap
+		 0, // protocol
 		 dsopts,
 		 0, // hook
 		 pkt,

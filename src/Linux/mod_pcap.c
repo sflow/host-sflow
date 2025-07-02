@@ -152,6 +152,7 @@ extern "C" {
 		 srcdev,
 		 dstdev,
 		 bpfs->adaptor,
+		 bpfs->dlt,
 		 ds_options,
 		 0 /*hook*/,
 		 mac_hdr /* mac hdr*/,

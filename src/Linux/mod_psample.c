@@ -252,7 +252,7 @@ extern "C" {
       int datalen = UTNLA_PAYLOAD(ps_attr);
 
       switch(ps_attr->nla_type) {
-	// TODO: interpret PSAMPLE_ATTR_PROTO
+      case PSAMPLE_ATTR_PROTO: psmp.proto = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_IIFINDEX: psmp.ifin = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_OIFINDEX: psmp.ifout = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_ORIGSIZE: psmp.pkt_len = *(uint32_t *)datap; break;
@@ -411,6 +411,7 @@ extern "C" {
 		   inDev,
 		   outDev,
 		   samplerDev,
+		   psmp.proto,
 		   sp->psample.ds_options,
 		   0, // hook
 		   psmp.hdr, // mac hdr
