@@ -31,7 +31,6 @@ extern "C" {
   */
 
   static int vnicCB(EVMod *mod, HSPVMState *vm, char *line, HSPVnicIPCB ipCB) {
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     EVDebug(mod, 1, "linkCB: line=<%s>", line);
     char deviceName[HSP_VNIC_MAX_LINELEN];
     char macStr[HSP_VNIC_MAX_LINELEN];
