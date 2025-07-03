@@ -183,7 +183,7 @@ extern "C" {
   */
 
   uint32_t UTNLGeneric_pid(uint32_t mod_id) {
-    return (mod_id << 16) | getpid();
+    return (mod_id << 16) | (getpid() & 0xFFFF);
   }
 
   /*_________________---------------------------__________________
@@ -202,7 +202,8 @@ extern "C" {
     struct sockaddr_nl sa = { .nl_family = AF_NETLINK,
 			      .nl_pid = UTNLGeneric_pid(mod_id) };
     if(bind(nl_sock, (struct sockaddr *)&sa, sizeof(sa)) < 0)
-      myLog(LOG_ERR, "UTNLGeneric_open: bind failed: %s", strerror(errno));
+      myLog(LOG_ERR, "UTNLGeneric_open(mod=%u): bind failed: %s",
+	    mod_id, strerror(errno));
 
     setNonBlocking(nl_sock);
     setCloseOnExec(nl_sock);
