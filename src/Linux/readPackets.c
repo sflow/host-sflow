@@ -12,6 +12,15 @@ extern "C" {
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 
+  // /usr/include/pcap/dlt.h may not be present, so
+  // just set the the definitions we need here.
+#ifndef DLT_EN10MB
+#define DLT_EN10MB 1
+#endif
+#ifndef DLT_INFINIBAND
+#define DLT_INFINIBAND 247
+#endif
+  
 
   /*_________________---------------------------__________________
     _________________       getPoller           __________________
@@ -301,48 +310,68 @@ extern "C" {
     hdrElem->flowType.header.header_bytes = (u_char *)pendingSample_calloc(ps, maxHdrLen);
     hdrElem->flowType.header.frame_length = pkt_len + FCS_bytes;
     hdrElem->flowType.header.stripped = FCS_bytes;
-    
-    uint64_t mac_hdr_test=0;
-    if(mac_hdr && mac_len > 8) {
-      memcpy(&mac_hdr_test, mac_hdr, 8);
-    }
-    
-    if(mac_len == 14
-       && mac_hdr_test != 0) {
-      // set the header_protocol to ethernet and
-      // reunite the mac header and payload in one buffer
-      hdrElem->flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
-      memcpy(hdrElem->flowType.header.header_bytes, mac_hdr, mac_len);
-      maxHdrLen -= mac_len;
-      uint32_t payloadBytes = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
-      memcpy(hdrElem->flowType.header.header_bytes + mac_len, cap_hdr, payloadBytes);
-      hdrElem->flowType.header.header_length = payloadBytes + mac_len;
-      hdrElem->flowType.header.frame_length += mac_len;
+
+    if(protocol == DLT_INFINIBAND) {
+      // For this case we respect the protocol parameter, and tag
+      // the sample so that the collector can decode it correctly.
+      hdrElem->flowType.header.header_length = ((mac_len + cap_len) < maxHdrLen) ? (mac_len + cap_len) : maxHdrLen;
+      memcpy(hdrElem->flowType.header.header_bytes, mac_hdr, hdrElem->flowType.header.header_length);
+      hdrElem->flowType.header.header_protocol = SFLHEADER_INFINIBAND;
+      FCS_bytes = 6; // 2-byte (hop-by-hop) and 4-byte (end-to-end) CRCs
+      hdrElem->flowType.header.frame_length = pkt_len + FCS_bytes;
+      hdrElem->flowType.header.stripped = FCS_bytes;
     }
     else {
-      u_char ipversion = cap_hdr[0] >> 4;
-      if(ipversion != 4 && ipversion != 6) {
-	EVDebug(mod, 1, "received non-IP packet. Encapsulation is unknown");
-	// still go through the motions so that everything is freed properly, but
-	// don't actually send out the sample.
-	sendPS = NO;
-	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES_UNKNOWN]++;
+      // We could also test for protocol == DLT_EN10MB, 0x0800, 0x86DD etc.
+      // but only mod_pcap and mod_psample currently set the
+      // protocol input parameter here, so instead we
+      // fall back on these legacy assumptions...
+
+      // use 64-bit int as efficient way to test for zero/non-zero mac hdr
+      uint64_t mac_hdr_test=0;
+      if(mac_hdr && mac_len > 8) {
+	memcpy(&mac_hdr_test, mac_hdr, 8);
+      }
+      
+      if(mac_len == 14
+	 && mac_hdr_test != 0) {
+	// set the header_protocol to ethernet and
+	// reunite the mac header and payload in one buffer.
+	// It may just be mod_ulog that separates them, so
+	// if we drop mod_ulog we could simplify a little here.
+	hdrElem->flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+	memcpy(hdrElem->flowType.header.header_bytes, mac_hdr, mac_len);
+	maxHdrLen -= mac_len;
+	uint32_t payloadBytes = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
+	memcpy(hdrElem->flowType.header.header_bytes + mac_len, cap_hdr, payloadBytes);
+	hdrElem->flowType.header.header_length = payloadBytes + mac_len;
+	hdrElem->flowType.header.frame_length += mac_len;
       }
       else {
-	if(mac_len == 0) {
-	  // assume ethernet was (or will be) the framing
-	  mac_len = 14;
+	u_char ipversion = cap_hdr[0] >> 4;
+	if(ipversion != 4 && ipversion != 6) {
+	  EVDebug(mod, 1, "received non-IP packet. Encapsulation is unknown");
+	  // still go through the motions so that everything is freed properly, but
+	  // don't actually send out the sample.
+	sendPS = NO;
+	sp->telemetry[HSP_TELEMETRY_FLOW_SAMPLES_UNKNOWN]++;
 	}
-	hdrElem->flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
-	hdrElem->flowType.header.stripped += mac_len;
-	hdrElem->flowType.header.header_length = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
-	memcpy(hdrElem->flowType.header.header_bytes, cap_hdr, hdrElem->flowType.header.header_length);
-	hdrElem->flowType.header.frame_length += mac_len;
+	else {
+	  if(mac_len == 0) {
+	    // assume ethernet was (or will be) the framing
+	    mac_len = 14;
+	  }
+	  hdrElem->flowType.header.header_protocol = (ipversion == 4) ? SFLHEADER_IPv4 : SFLHEADER_IPv6;
+	  hdrElem->flowType.header.stripped += mac_len;
+	  hdrElem->flowType.header.header_length = (cap_len < maxHdrLen) ? cap_len : maxHdrLen;
+	  memcpy(hdrElem->flowType.header.header_bytes, cap_hdr, hdrElem->flowType.header.header_length);
+	  hdrElem->flowType.header.frame_length += mac_len;
+	}
       }
     }
     // add to flow sample
     SFLADD_ELEMENT(fs, hdrElem);
-
+      
     // submit the actual sampling rate so it goes out with the sFlow feed
     // otherwise the sampler object would fill in his own (sub-sampling) rate.
     // If it's a switch port then samplerNIO->sampling_n may be set, so that

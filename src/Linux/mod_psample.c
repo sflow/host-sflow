@@ -355,10 +355,11 @@ extern "C" {
       }
       mdata->last_grp_seq[egress] = psmp.grp_seq;
 
-      EVDebug(mod, 2, "grp=%u in=%u out=%u n=%u seq=%u drops=%u pktlen=%u",
+      EVDebug(mod, 2, "grp=%u in=%u out=%u proto=%u n=%u seq=%u drops=%u pktlen=%u",
 	      psmp.grp_no,
 	      psmp.ifin,
 	      psmp.ifout,
+	      psmp.proto,
 	      psmp.sample_n,
 	      psmp.grp_seq,
 	      drops,

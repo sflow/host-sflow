@@ -89,7 +89,12 @@ enum SFLHeader_protocol {
   SFLHEADER_AAL5_IP              = 10, /* e.g. Cisco AAL5 mux */
   SFLHEADER_IPv4                 = 11,
   SFLHEADER_IPv6                 = 12,
-  SFLHEADER_MPLS                 = 13
+  SFLHEADER_MPLS                 = 13,
+  SFLHEADER_POS                  = 14,
+  SFLHEADER_IEEE80211MAC         = 15,
+  SFLHEADER_IEEE80211_AMPDU      = 16,
+  SFLHEADER_IEEE80211_AMSDU_SUBFRAME = 17,
+  SFLHEADER_INFINIBAND           = 18
 };
 
 /* raw sampled header */
