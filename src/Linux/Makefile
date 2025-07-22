@@ -690,12 +690,12 @@ mod_vpp.so: $(OBJS_VPP)
 
 #----------------------------
 
-# TODO: aarch64 variant - use uname -m ?
-ASM_INCLUDE_DIR=/usr/include/x86_64-linux-gnu/asm
+ARCH=$(shell uname -m)
+ASM_INCLUDE_DIR=/usr/include/$(ARCH)-linux-gnu/asm
 ASM_INCLUDE_TGT=/usr/include/asm
 sample.bpf.o: sample.bpf.c $(HEADERS)
-	test -d $(ASM_INCLUDE_DIR) || ln -s $(ASM_INCLUDE_DIR) $(ASM_INCLUDE_TGT)
-	$(CLANG) -target bpf -g -O2 -D__TARGET_ARCH_x86_64 -c $< -o $@
+	test -d $(ASM_INCLUDE_TGT) || ln -s $(ASM_INCLUDE_DIR) $(ASM_INCLUDE_TGT)
+	$(CLANG) -target bpf -g -O2 -D__TARGET_ARCH_$(ARCH) -c $< -o $@
 
 sample.skel.h: sample.bpf.o
 	bpftool gen skeleton $< > $@
