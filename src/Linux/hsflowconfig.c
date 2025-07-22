@@ -66,6 +66,7 @@ extern "C" {
     HSPOBJ_PSAMPLE,
     HSPOBJ_DROPMON,
     HSPOBJ_PCAP,
+    HSPOBJ_EPCAP,
     HSPOBJ_TCP,
     HSPOBJ_CUMULUS,
     HSPOBJ_DENT,
@@ -98,6 +99,7 @@ extern "C" {
     "psample",
     "dropmon",
     "pcap",
+    "epcap",
     "tcp",
     "cumulus",
     "dent",
@@ -539,6 +541,13 @@ extern "C" {
     HSPPcap *col = (HSPPcap *)my_calloc(sizeof(HSPPcap));
     ADD_TO_LIST(sp->pcap.pcaps, col);
     sp->pcap.numPcaps++;
+    return col;
+  }
+
+  static HSPPcap *newEpcap(HSP *sp) {
+    HSPPcap *col = (HSPPcap *)my_calloc(sizeof(HSPPcap));
+    ADD_TO_LIST(sp->epcap.pcaps, col);
+    sp->epcap.numPcaps++;
     return col;
   }
 
@@ -1479,6 +1488,12 @@ extern "C" {
 	    newPcap(sp);
 	    level[++depth] = HSPOBJ_PCAP;
 	    break;
+	  case HSPTOKEN_EPCAP:
+	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
+	    sp->epcap.epcap = YES;
+	    newEpcap(sp);
+	    level[++depth] = HSPOBJ_EPCAP;
+	    break;
 	  case HSPTOKEN_TCP:
 	    if((tok = expectToken(sp, tok, HSPTOKEN_STARTOBJ)) == NULL) return NO;
 	    sp->tcp.tcp = YES;
@@ -1914,9 +1929,13 @@ extern "C" {
 	  }
 	  break;
 
+	  // mod_PCAP and mod_EPCAP take the same parameters
 	case HSPOBJ_PCAP:
+	case HSPOBJ_EPCAP:
 	  {
-	    HSPPcap *pc = sp->pcap.pcaps;
+	    HSPPcap *pc = (level[depth] == HSPOBJ_EPCAP)
+	      ? sp->epcap.pcaps
+	      : sp->pcap.pcaps;
 	    switch(tok->stok) {
 	    case HSPTOKEN_DEV:
 	      if((tok = expectDevice(sp, tok, &pc->dev)) == NULL) return NO;

@@ -23,7 +23,7 @@ extern "C" {
     buf->buf[buf->len] = '\0';
   }
 
-  UTStrBuf *UTStrBuf_new() {
+  UTStrBuf *UTStrBuf_new(void) {
     UTStrBuf *buf = (UTStrBuf *)my_calloc(sizeof(UTStrBuf));
     buf->cap = UTSTRBUF_START;
     buf->buf = my_calloc(buf->cap);
@@ -188,7 +188,7 @@ extern "C" {
     debugLevel = level;
   }
 
-  int getDebug() {
+  int getDebug(void) {
     return debugLevel;
   }
 
@@ -211,7 +211,7 @@ extern "C" {
     daemonFlag = yesno;
   }
 
-  bool getDaemon() {
+  bool getDaemon(void) {
     return daemonFlag;
   }
 
@@ -347,7 +347,7 @@ extern "C" {
   } UTHeap;
 
   // call once at startup
-  void UTHeapInit() {
+  void UTHeapInit(void) {
     if(UTHeap.sync_foreign == NULL) {
       UTHeap.sync_foreign = (pthread_mutex_t *)SYS_CALLOC(1, sizeof(pthread_mutex_t));
       pthread_mutex_init(UTHeap.sync_foreign, NULL);
@@ -596,7 +596,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  UTStringArray *strArrayNew() {
+  UTStringArray *strArrayNew(void) {
     return (UTStringArray *)my_calloc(sizeof(UTStringArray));
   }
 
@@ -1329,7 +1329,7 @@ extern "C" {
     ----------------___________________________------------------
   */
 
-  SFLAdaptorList *adaptorListNew()
+  SFLAdaptorList *adaptorListNew(void)
   {
     SFLAdaptorList *adList = (SFLAdaptorList *)my_calloc(sizeof(SFLAdaptorList));
     adList->capacity = 2; // will grow if necessary

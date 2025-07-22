@@ -18,7 +18,7 @@ extern "C" {
   // inter-bus (inter-thread) messages automatically in EVEventTx
   static __thread EVBus *threadBus;
 
-  EVBus *EVCurrentBus() {
+  EVBus *EVCurrentBus(void) {
     return threadBus;
   }
 

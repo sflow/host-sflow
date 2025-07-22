@@ -215,11 +215,12 @@ extern "C" {
 		  &flags,
 		  devName) == 6) {
 
-	  EVDebug(mod, 1, "adaptor %s has v6 address %s with scope 0x%x",
-		devName,
-		addr,
-		scope);
-
+	  EVDebug(mod, 1, "line %u: adaptor %s has v6 address %s with scope 0x%x",
+		  lineNo,
+		  devName,
+		  addr,
+		  scope);
+ 
 	  uint32_t devLen = my_strnlen(devName, MAX_PROC_LINE_CHARS-1);
 	  char *trimmed = trimWhitespace(devName, devLen);
 	  if(trimmed) {

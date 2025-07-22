@@ -2628,6 +2628,8 @@ extern "C" {
       EVLoadModule(sp->rootModule, "mod_k8s", sp->modulesPath);
     if(sp->pcap.pcap)
       EVLoadModule(sp->rootModule, "mod_pcap", sp->modulesPath);
+    if(sp->epcap.epcap)
+      EVLoadModule(sp->rootModule, "mod_epcap", sp->modulesPath);
     if(sp->tcp.tcp)
       EVLoadModule(sp->rootModule, "mod_tcp", sp->modulesPath);
     if(sp->ulog.ulog)

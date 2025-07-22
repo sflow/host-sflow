@@ -40,7 +40,7 @@ ifeq ($(GCOV),yes)
 endif
 
 #########  object files  #########
-FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO K8S NLROUTE VPP
+FEATURES_ALL= ULOG NFLOG PSAMPLE DROPMON PCAP TCP DOCKER KVM XEN NVML OVS CUMULUS DENT OS10 OPX SONIC DBUS SYSTEMD EAPI CONTAINERD CONTAINERDGO K8S NLROUTE VPP EPCAP
 FEATURES_CUMULUS= CUMULUS NFLOG PSAMPLE SYSTEMD DROPMON
 FEATURES_DENTOS= DENT PSAMPLE SYSTEMD DROPMON
 FEATURES_EOS= EAPI
@@ -180,10 +180,10 @@ endif
 HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h dropPoints_sw.h dropPoints_hw.h Makefile
 
 # compiler
-#CC= g++
-CC= gcc -std=gnu99
-#LD=ld
-LD=gcc
+GCC=gcc
+CLANG=clang
+CC=$(CLANG) -std=gnu99
+LD=$(CLANG)
 
 # optimization
 OPT_ALL= -O3 -DNDEBUG
@@ -325,6 +325,9 @@ LIBS_NLROUTE=
 CFLAGS_VPP=
 LIBS_VPP=
 
+CFLAGS_EPCAP=-I. -I/usr/include/bpf
+LIBS_EPCAP= -lbpf -lelf -lz
+
 # common CFLAGS and LIBS	
 CFLAGS = $(CFLAGS_HSFLOWD) $(CFLAGS_LOAD) $(CFLAGS_SHARED) $(OPT) -D_GNU_SOURCE -DHSP_VERSION=$(VERSION)
 CFLAGS += $(CFLAGS_MOUNTPOINTS)
@@ -388,6 +391,7 @@ OBJS_CONTAINERD=mod_containerd.o
 OBJS_K8S=mod_k8s.o util_netlink.o
 OBJS_NLROUTE=mod_nlroute.o util_netlink.o
 OBJS_VPP=mod_vpp.o util_netlink.o
+OBJS_EPCAP=mod_epcap.o
 
 BUILDTGTS= mod_json.so \
            mod_dnssd.so \
@@ -450,6 +454,8 @@ K8S: mod_k8s.so
 NLROUTE: mod_nlroute.so
 
 VPP: mod_vpp.so
+
+EPCAP: sample.skel.h sample.bpf.o mod_epcap.so
 
 #########  hsflowd  #########
 
@@ -682,6 +688,20 @@ mod_vpp.o: mod_vpp.c $(HEADERS)
 mod_vpp.so: $(OBJS_VPP)
 	$(LD) -o $@ $(OBJS_VPP) $(LDFLAGS_SHARED) $(LIBS_VPP)
 
+#----------------------------
+
+# TODO: aarch64 variant - use uname -m ?
+ASM_INCLUDE_DIR=/usr/include/x86_64-linux-gnu/asm
+ASM_INCLUDE_TGT=/usr/include/asm
+sample.bpf.o: sample.bpf.c $(HEADERS)
+	test -d $(ASM_INCLUDE_DIR) || ln -s $(ASM_INCLUDE_DIR) $(ASM_INCLUDE_TGT)
+	$(CLANG) -target bpf -g -O2 -D__TARGET_ARCH_x86_64 -c $< -o $@
+
+sample.skel.h: sample.bpf.o
+	bpftool gen skeleton $< > $@
+
+mod_epcap.so: $(OBJS_EPCAP)
+	$(LD) -o $@ $(OBJS_EPCAP) $(LDFLAGS_SHARED) $(LIBS_EPCAP)
 
 #########  install  #########
 
@@ -771,3 +791,6 @@ mod_containerd.o: mod_containerd.c $(HEADERS)
 mod_k8s.o: mod_k8s.c $(HEADERS)
 mod_nlroute.o: mod_nlroute.c $(HEADERS)
 mod_vpp.o: mod_vpp.c $(HEADERS)
+mod_epcap.o: mod_epcap.c $(HEADERS)
+sample.bpf.c:
+sample.bpf.o: sample.bpf.c $(HEADERS)

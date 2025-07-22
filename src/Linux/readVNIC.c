@@ -178,7 +178,6 @@ extern "C" {
       FILE *procV6 = fopen(PROCFS_STR "/net/if_inet6", "r");
       if(procV6) {
 	char line[MAX_PROC_LINE_CHARS];
-	int lineNo = 0;
 	int truncated;
 	while(my_readline(procV6, line, MAX_PROC_LINE_CHARS, &truncated) != EOF) {
 	  // expect lines of the form "<address> <netlink_no> <prefix_len(HEX)> <scope(HEX)> <flags(HEX)> <deviceName>
@@ -186,7 +185,6 @@ extern "C" {
 	  char devName[MAX_PROC_LINE_CHARS];
 	  u_char addr[MAX_PROC_LINE_CHARS];
 	  u_int devNo, maskBits, scope, flags;
-	  ++lineNo;
 	  if(sscanf(line, "%s %x %x %x %x %s",
 		    addr,
 		    &devNo,

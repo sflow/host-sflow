@@ -754,6 +754,11 @@ extern "C" {
       uint32_t numPcaps;
     } pcap;
     struct {
+      bool epcap;
+      HSPPcap *pcaps;
+      uint32_t numPcaps;
+    } epcap;
+    struct {
       bool tcp;
       bool tunnel;
       bool udp;
