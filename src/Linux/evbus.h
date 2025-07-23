@@ -83,6 +83,10 @@ extern "C" {
     volatile ut_atomic_t socketsRevision;
     ut_atomic_t socketsRunRevision;
     bool running:1;
+    // TODO: should this stop flag be declared as "volatile __sig_atomic_t"
+    // so that threads will all notice it promptly?  (I'm not sure it is
+    // necessary so long as the polling loop goes through a system call
+    // and the stop flag is tested first.)
     bool stop:1;
   } EVBus;
 
