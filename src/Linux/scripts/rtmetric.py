@@ -36,4 +36,4 @@ for i in range(0, len(args.name)):
 
 msg = {"rtmetric":metrics}
 sock = socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-sock.sendto(json.dumps(msg),("127.0.0.1",36343))
+sock.sendto(json.dumps(msg).encode("utf-8"),("127.0.0.1",36343))
