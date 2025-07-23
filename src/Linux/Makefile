@@ -177,7 +177,7 @@ endif
 
 #########  compilation flags  #########
 
-HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h dropPoints_sw.h dropPoints_hw.h Makefile
+HEADERS= util.h util_dbus.h util_netlink.h evbus.h hsflowd.h hsflowtokens.h hsflow_ethtool.h cpu_utils.h dropPoints_sw.h dropPoints_hw.h sample.bpf.h Makefile
 
 # compiler
 GCC=gcc
@@ -694,7 +694,7 @@ ARCH=$(shell uname -m)
 ASM_INCLUDE_DIR=/usr/include/$(ARCH)-linux-gnu/asm
 ASM_INCLUDE_TGT=/usr/include/asm
 sample.bpf.o: sample.bpf.c $(HEADERS)
-	test -d $(ASM_INCLUDE_TGT) || ln -s $(ASM_INCLUDE_DIR) $(ASM_INCLUDE_TGT)
+	#test -d $(ASM_INCLUDE_TGT) || ln -s $(ASM_INCLUDE_DIR) $(ASM_INCLUDE_TGT)
 	$(CLANG) -target bpf -g -O2 -D__TARGET_ARCH_$(ARCH) -c $< -o $@
 
 sample.skel.h: sample.bpf.o

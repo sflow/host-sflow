@@ -20,28 +20,15 @@ extern "C" {
 #include <sys/select.h>
 #include <bpf/libbpf.h>
 #include "sample.skel.h"
+#include "sample.bpf.h"
 
-// Must match sample.bpf.c
-#define MAX_PKT_HDR_LEN 128
-
-  // Must match sample.bpf.c
-  struct packet_event_t {
-    __u64 timestamp;
-    __u32 ifindex;
-    __u32 sampling_rate;
-    __u32 ingress_ifindex;
-    __u32 routed_ifindex;
-    __u32 pkt_len;
-    __u8 direction;
-    __u8 hdr[MAX_PKT_HDR_LEN];
-  } __attribute__((packed));
-  
+#define HSP_IPV4_FORWARDING_PROC "/proc/sys/net/ipv4/ip_forward"
+#define HSP_IPV6_FORWARDING_PROC "/proc/sys/net/ipv6/conf/all/forwarding"
 
   typedef struct _HSPEpcapDev {
     uint32_t ifIndex;
     char *deviceName;
     uint32_t samplingRate;
-    bool routingLookup;
     struct bpf_link *bpf_link_ingress;
     struct bpf_link *bpf_link_egress;
   } HSPEpcapDev;
@@ -50,10 +37,10 @@ extern "C" {
     EVBus *packetBus;
     struct sample_bpf *skel;
     struct perf_buffer *pb;
+    bool routingLookup;
     UTHash *devs;
     uint32_t num_cpus;
   } HSP_mod_EPCAP;
-
 
   static void cleanup_dev(EVMod *mod, HSPEpcapDev *dev);
 
@@ -93,7 +80,7 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     struct packet_event_t *evt = data;
     if (data_sz < sizeof(*evt)) {
-      EVDebug(mod, 0, "Invalid event size: %u", data_sz);
+      EVDebug(mod, 0, "Invalid event size: %u (< %u)", data_sz, sizeof(*evt));
       return;
     }
     EVDebug(mod, 0, "Timestamp: %llu, Ifindex: %u, Ingress: %u, Routed: %u, Direction %s, Packet length: %u, Header: ",
@@ -131,7 +118,7 @@ extern "C" {
 	       srcDev,
 	       dstDev,
 	       tapDev,
-	       0, // DLT_EN10MB?
+	       DLT_EN10MB,
 	       ds_options,
 	       0, // hook
 	       mac_hdr,
@@ -149,7 +136,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  bool init_perf_buffer(EVMod *mod) {
+  bool init_perf_buffer(EVMod *mod, bool routing) {
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
     libbpf_set_print(libbpf_print_fn);
     struct sample_bpf *skel = mdata->skel = sample_bpf__open_and_load();
@@ -165,6 +152,13 @@ extern "C" {
 							  NULL /* opts */);
     if (!pb) {
       myLog(LOG_ERR, "Failed to create perf buffer\n");
+      return NO;
+    }
+
+    int key = 0;
+    int ret = bpf_map__update_elem(skel->maps.routing, &key, sizeof(int), &routing, sizeof(int), 0);
+    if (ret < 0) {
+      EVDebug(mod, 0, "Failed to update routing map: %s\n", strerror(-ret));
       return NO;
     }
 
@@ -189,7 +183,6 @@ extern "C" {
     struct sample_bpf *skel = mdata->skel;
     struct perf_buffer *pb = mdata->pb;
     uint32_t rate = dev->samplingRate;
-    uint32_t routing = dev->routingLookup;
 
     if(skel==NULL
        || pb==NULL)
@@ -197,12 +190,6 @@ extern "C" {
 
     int key = dev->ifIndex;
     int ret = bpf_map__update_elem(skel->maps.sampling, &key, sizeof(int), &rate, sizeof(int), 0);
-    if (ret < 0) {
-      EVDebug(mod, 0, "Failed to update sample_rate map: %s\n", strerror(-ret));
-      return NO;
-    }
-    key = 0;
-    ret = bpf_map__update_elem(skel->maps.routing, &key, sizeof(int), &routing, sizeof(int), 0);
     if (ret < 0) {
       EVDebug(mod, 0, "Failed to update sample_rate map: %s\n", strerror(-ret));
       return NO;
@@ -400,10 +387,6 @@ extern "C" {
       if(ret < 0) {
 	myLog(LOG_ERR, "Failed to delete from sample_rate map: %s\n", strerror(-ret));
       }
-      ret = bpf_map__delete_elem(mdata->skel->maps.routing, &key, sizeof(int), 0);
-      if(ret < 0) {
-	myLog(LOG_ERR, "Failed to delete from routing map: %s\n", strerror(-ret));
-      }
     }
   }
   
@@ -425,6 +408,30 @@ extern "C" {
       perf_buffer__free(mdata->pb);
     }
   }
+  
+  /*_________________---------------------------__________________
+    _________________     ipRoutingTest         __________________
+    -----------------___________________________------------------
+  */
+  
+  static bool ipRoutingTestProc(EVMod *mod, const char *procPath) {
+    int forwarding = 0;
+    FILE *ff = fopen(procPath, "r");
+    if(ff == NULL) {
+      myLog(LOG_ERR, "ipRoutingTestProc failed to open %s : %s", procPath, strerror(errno));
+    }
+    else {
+      fscanf(ff, "%d", &forwarding);
+      fclose(ff);
+    }
+    return (forwarding == 1);
+  }
+
+  static bool ipRoutingOn(EVMod *mod) {
+    return ipRoutingTestProc(mod, HSP_IPV4_FORWARDING_PROC)
+      || ipRoutingTestProc(mod, HSP_IPV6_FORWARDING_PROC);
+  }
+    
 
   /*_________________---------------------------__________________
     _________________    module init            __________________
@@ -437,7 +444,8 @@ extern "C" {
     mdata->num_cpus = libbpf_num_possible_cpus();
     mdata->devs = UTHASH_NEW(HSPEpcapDev, ifIndex, UTHASH_DFLT);
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
-    init_perf_buffer(mod);
+    mdata->routingLookup = ipRoutingOn(mod);
+    init_perf_buffer(mod, mdata->routingLookup);
     // register call-backs
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);

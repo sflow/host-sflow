@@ -16,19 +16,21 @@ described here:
 http://sflow.net/host-sflow-linux-config.php
 
 Module dependencies vary by platform, but the following packages
-will typically be required for compilation:
+will typically be required for compilation (note that on some
+platforms *-dev will be *-devel):
 
- NFLOG:  libnfnetlink-dev(el)
- PCAP:  libpcap-dev(el)
- KVM: libvirt-dev(el), libxml2-dev(el)
+ NFLOG:  libnfnetlink-dev
+ PCAP:  libpcap-dev
+ KVM: libvirt-dev, libxml2-dev
  NVML: libnvidia-ml, nvml.h
  XEN: libxenctrl, libxenstore, xenctrl.h, xenstore.h
- SYSTEMD: dbus-dev(el) or libdbus-1-dev, openssl-dev(el), libssl-dev(el)
- DBUS: dbus-dev(el) or libdbus-1-dev
+ SYSTEMD: dbus-dev or libdbus-1-dev, openssl-dev, libssl-dev
+ DBUS: dbus-dev or libdbus-1-dev
  OPX: libsystemd-daemon-dev
  CONTAINERD: golang
- K8S: uuid-dev or libuuid-devel
- 
+ K8S: uuid-dev or libuuid-dev
+ EPCAP: libbpf-dev (and link /usr/include/asm -> /usr/include/$(ARCH)-linux-gnu/asm)
+
 To start the daemon, run:
 
 % sudo service hsflowd start

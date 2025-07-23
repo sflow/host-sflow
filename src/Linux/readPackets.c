@@ -12,15 +12,6 @@ extern "C" {
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 
-  // /usr/include/pcap/dlt.h may not be present, so
-  // just set the the definitions we need here.
-#ifndef DLT_EN10MB
-#define DLT_EN10MB 1
-#endif
-#ifndef DLT_INFINIBAND
-#define DLT_INFINIBAND 247
-#endif
-  
 
   /*_________________---------------------------__________________
     _________________       getPoller           __________________

@@ -976,6 +976,17 @@ extern "C" {
 #define HSP_SAMPLEOPT_PSAMPLE     0x8000
 #define HSP_SAMPLEOPT_VPP        0x10000
 
+  // /usr/include/pcap/dlt.h may not be present, so
+  // just set the the definitions we need here for
+  // all the modules that might send packet-samples
+#ifndef DLT_EN10MB
+#define DLT_EN10MB 1
+#endif
+#ifndef DLT_INFINIBAND
+#define DLT_INFINIBAND 247
+#endif
+  
+
   void takeSample(HSP *sp, SFLAdaptor *ad_in, SFLAdaptor *ad_out, SFLAdaptor *ad_tap, uint32_t protocol, uint32_t options, uint32_t hook, const u_char *mac_hdr, uint32_t mac_len, const u_char *cap_hdr, uint32_t cap_len, uint32_t pkt_len, uint32_t drops, uint32_t sampling_n, SFLFlow_sample_element *extended_elements);
   void *pendingSample_calloc(HSPPendingSample *ps, size_t len);
   void holdPendingSample(HSPPendingSample *ps);

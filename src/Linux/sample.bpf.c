@@ -7,21 +7,10 @@
 #include <linux/ipv6.h>
 #include <linux/pkt_cls.h>
 
-#define MAX_INTERFACES 128
-#define MAX_PKT_HDR_LEN 128
+#include "sample.bpf.h"
+
 #define AF_INET 2
 #define AF_INET6 10
-
-struct packet_event_t {
-    __u64 timestamp;
-    __u32 ifindex;
-    __u32 sampling_rate;
-    __u32 ingress_ifindex;
-    __u32 routed_ifindex;
-    __u32 pkt_len;
-    __u8  direction;
-    __u8  hdr[MAX_PKT_HDR_LEN];
-};
 
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
