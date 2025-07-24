@@ -63,7 +63,6 @@ extern "C" {
   static void readPackets_epcap(EVMod *mod, EVSocket *sock, void *magic) {
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
     uint32_t cpu = (intptr_t)magic;
-    EVDebug(mod, 0, "readPackets_epcap cpu=%u", cpu);
     if (perf_buffer__consume_buffer(mdata->pb, cpu) < 0) {
       myLog(LOG_ERR, "perf_buffer__consume_buffer(cpu=%d) failed\n", cpu);
     }
@@ -80,10 +79,10 @@ extern "C" {
     HSP *sp = (HSP *)EVROOTDATA(mod);
     struct packet_event_t *evt = data;
     if (data_sz < sizeof(*evt)) {
-      EVDebug(mod, 0, "Invalid event size: %u (< %u)", data_sz, sizeof(*evt));
+      EVDebug(mod, 1, "Invalid event size: %u (< %u)", data_sz, sizeof(*evt));
       return;
     }
-    EVDebug(mod, 0, "Timestamp: %llu, Ifindex: %u, Ingress: %u, Routed: %u, Direction %s, Packet length: %u, Header: ",
+    EVDebug(mod, 2, "Timestamp: %llu, Ifindex: %u, Ingress: %u, Routed: %u, Direction %s, Packet length: %u, Header: ",
 	    evt->timestamp, evt->ifindex, evt->ingress_ifindex, evt->routed_ifindex, evt->direction ? "egress" : "ingress", evt->pkt_len);
     int hdr_len = evt->pkt_len < MAX_PKT_HDR_LEN ? evt->pkt_len : MAX_PKT_HDR_LEN;
     u_char hex[128];
