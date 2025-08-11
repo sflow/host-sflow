@@ -36,10 +36,9 @@ extern "C" {
   typedef struct _HSP_mod_EPCAP {
     EVBus *packetBus;
     struct sample_bpf *skel;
-    struct perf_buffer *pb;
+    struct ring_buffer *rb;
     bool routingLookup;
     UTHash *devs;
-    uint32_t num_cpus;
   } HSP_mod_EPCAP;
 
   static void cleanup_dev(EVMod *mod, HSPEpcapDev *dev);
@@ -62,9 +61,8 @@ extern "C" {
 
   static void readPackets_epcap(EVMod *mod, EVSocket *sock, void *magic) {
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
-    uint32_t cpu = (intptr_t)magic;
-    if (perf_buffer__consume_buffer(mdata->pb, cpu) < 0) {
-      myLog(LOG_ERR, "perf_buffer__consume_buffer(cpu=%d) failed\n", cpu);
+    if (ring_buffer__consume(mdata->rb) < 0) {
+      myLog(LOG_ERR, "ring_buffer__consume() failed\n");
     }
   }
 
@@ -73,14 +71,14 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static void handle_event(void *ctx, int cpu, void *data, __u32 data_sz) {
+  static int handle_event(void *ctx, void *data, size_t data_sz) {
     EVMod *mod = (EVMod *)ctx;
     // HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     struct packet_event_t *evt = data;
     if (data_sz < sizeof(*evt)) {
-      EVDebug(mod, 1, "Invalid event size: %u (< %u)", data_sz, sizeof(*evt));
-      return;
+      EVDebug(mod, 1, "Invalid event size: %zu (< %u)", data_sz, sizeof(*evt));
+      return 1;
     }
     EVDebug(mod, 2, "Timestamp: %llu, Ifindex: %u, Ingress: %u, Routed: %u, Direction %s, Packet length: %u, Header: ",
 	    evt->timestamp, evt->ifindex, evt->ingress_ifindex, evt->routed_ifindex, evt->direction ? "egress" : "ingress", evt->pkt_len);
@@ -128,29 +126,20 @@ extern "C" {
 	       0, // drops
 	       evt->sampling_rate,
 	       NULL);
+    return 0; // OK
   }
 
   /*_________________---------------------------__________________
-    _________________     init_perf_buffer      __________________
+    _________________     init_ring_buffer      __________________
     -----------------___________________________------------------
   */
 
-  bool init_perf_buffer(EVMod *mod, bool routing) {
+  bool init_ring_buffer(EVMod *mod, bool routing) {
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
     libbpf_set_print(libbpf_print_fn);
     struct sample_bpf *skel = mdata->skel = sample_bpf__open_and_load();
     if (!skel) {
       myLog(LOG_ERR, "Failed to open and load BPF skeleton\n");
-      return NO;
-    }
-    struct perf_buffer *pb = mdata->pb = perf_buffer__new(bpf_map__fd(skel->maps.events),
-							  64, /* page_cnt */
-							  handle_event,
-							  NULL, /* lost_cb */
-							  mod,
-							  NULL /* opts */);
-    if (!pb) {
-      myLog(LOG_ERR, "Failed to create perf buffer\n");
       return NO;
     }
 
@@ -161,13 +150,18 @@ extern "C" {
       return NO;
     }
 
-    for (int cpu = 0; cpu < mdata->num_cpus; cpu++) {
-      int fd = perf_buffer__buffer_fd(pb, cpu);
-      if (fd < 0)
-	continue;
-      EVBusAddSocket(mod, mdata->packetBus, fd, readPackets_epcap, (void *)(intptr_t)cpu);
+    mdata->rb = ring_buffer__new(bpf_map__fd(skel->maps.events), handle_event, mod, NULL);
+    if (!mdata->rb) {
+      EVDebug(mod, 0, "Failed to create ring buffer\n");
+      return NO;
     }
 
+    int rb_fd = ring_buffer__epoll_fd(mdata->rb);
+    if (rb_fd < 0) {
+      EVDebug(mod, 0, "Failed to get ring buffer fd\n");
+      return NO;
+    }
+    EVBusAddSocket(mod, mdata->packetBus, rb_fd, readPackets_epcap, NULL);
     return YES;
   }
 
@@ -180,11 +174,9 @@ extern "C" {
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
 
     struct sample_bpf *skel = mdata->skel;
-    struct perf_buffer *pb = mdata->pb;
     uint32_t rate = dev->samplingRate;
 
-    if(skel==NULL
-       || pb==NULL)
+    if(skel==NULL)
       return NO;
 
     int key = dev->ifIndex;
@@ -403,8 +395,8 @@ extern "C" {
     if(mdata->skel) {
       sample_bpf__destroy(mdata->skel);
     }
-    if(mdata->pb) {
-      perf_buffer__free(mdata->pb);
+    if(mdata->rb) {
+      ring_buffer__free(mdata->rb);
     }
   }
   
@@ -440,11 +432,10 @@ extern "C" {
   void mod_epcap(EVMod *mod) {
     mod->data = my_calloc(sizeof(HSP_mod_EPCAP));
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
-    mdata->num_cpus = libbpf_num_possible_cpus();
     mdata->devs = UTHASH_NEW(HSPEpcapDev, ifIndex, UTHASH_DFLT);
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     mdata->routingLookup = ipRoutingOn(mod);
-    init_perf_buffer(mod, mdata->routingLookup);
+    init_ring_buffer(mod, mdata->routingLookup);
     // register call-backs
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_INTFS_CHANGED), evt_intfs_changed);

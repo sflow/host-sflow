@@ -13,9 +13,8 @@
 #define AF_INET6 10
 
 struct {
-    __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
-    __uint(key_size, sizeof(int));
-    __uint(value_size, sizeof(int));
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 16);
 } events SEC(".maps");
 
 struct {
@@ -93,19 +92,23 @@ static __always_inline void sample_packet(struct __sk_buff *skb, __u8 direction)
     if (!rate || (*rate > 0 && bpf_get_prandom_u32() % *rate != 0))
         return;
 
-    struct packet_event_t pkt = {};
-    pkt.timestamp = bpf_ktime_get_ns();
-    pkt.ifindex = skb->ifindex;
-    pkt.sampling_rate = *rate;
-    pkt.ingress_ifindex = skb->ingress_ifindex;
-    pkt.routed_ifindex = direction ? 0 : get_route(skb);
-    pkt.pkt_len = skb->len;
-    pkt.direction = direction;
+    struct packet_event_t *pkt= bpf_ringbuf_reserve(&events, sizeof(*pkt), 0);
+    if (!pkt)
+	return;
+    pkt->timestamp = bpf_ktime_get_ns();
+    pkt->ifindex = skb->ifindex;
+    pkt->sampling_rate = *rate;
+    pkt->ingress_ifindex = skb->ingress_ifindex;
+    pkt->routed_ifindex = direction ? 0 : get_route(skb);
+    pkt->pkt_len = skb->len;
+    pkt->direction = direction;
 
     __u32 hdr_len = skb->len < MAX_PKT_HDR_LEN ? skb->len : MAX_PKT_HDR_LEN;
-    if (hdr_len > 0 && bpf_skb_load_bytes(skb, 0, pkt.hdr, hdr_len) < 0)
+    if (hdr_len > 0 && bpf_skb_load_bytes(skb, 0, pkt->hdr, hdr_len) < 0) {
+	bpf_ringbuf_discard(pkt, BPF_RB_NO_WAKEUP);
         return;
-    bpf_perf_event_output(skb, &events, BPF_F_CURRENT_CPU, &pkt, sizeof(pkt));
+    }
+    bpf_ringbuf_submit(pkt, BPF_RB_FORCE_WAKEUP);
 }
 
 SEC("tcx/ingress")
