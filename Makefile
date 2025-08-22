@@ -120,7 +120,7 @@ pkg:
 	mv /tmp/$(PROG)-$$MYVER-$$MYREL .
 
 deb: $(PROG)
-	MYARCH=`uname -m|sed 's/x86_64/amd64/'`; \
+	MYARCH=`dpkg --print-architecture`; \
 	MYVER=`./getVersion`; \
 	MYREL=`./getRelease`; \
 	PLATFORM=`uname`; \
@@ -133,6 +133,7 @@ deb: $(PROG)
 	install DEBIAN_build/control debian/DEBIAN; \
 	sed -i -e s/_PACKAGE_/$(PROG)/g debian/DEBIAN/control; \
 	sed -i -e s/_VERSION_/$${MYVER}-$${MYREL}/g debian/DEBIAN/control; \
+	sed -i -e s/_ARCH_/$${MYARCH}/g debian/DEBIAN/control; \
 	chmod 644 debian/DEBIAN/control; \
 	install -m 555 DEBIAN_build/conffiles debian/DEBIAN; \
 	install -m 555 DEBIAN_build/preinst debian/DEBIAN; \
