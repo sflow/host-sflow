@@ -2,7 +2,7 @@ Package: _PACKAGE_
 Version: _VERSION_
 Section: admin 
 Priority: optional
-Architecture: all
+Architecture: _ARCH_
 Essential: no
 Maintainer: Neil McKee [neil.mckee@inmon.com]
 Description: sFlow(R) monitoring agent
