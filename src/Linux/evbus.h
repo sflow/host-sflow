@@ -73,6 +73,7 @@ extern "C" {
     int select_mS;
 #define EVBUS_SELECT_MS_TICK 599
 #define EVBUS_SELECT_MS_DECI 59
+#define EVBUS_SELECT_MS_BUSY 0
     struct timespec tstart;
     struct timespec now;
     struct timespec now_tick;
@@ -113,6 +114,7 @@ extern "C" {
     int id;
     UTArray *actions;
     UTArray *actions_run;
+    UTArray *actions_del;
     // Any thread changing the actions must increment the
     // actionsRevision (with the lock to ensure that every
     // change is counted).
@@ -137,6 +139,7 @@ extern "C" {
 #define EVEVENT_FINAL "_final"
 #define EVEVENT_END "_end"
 #define EVEVENT_HANDSHAKE "_handshake"
+#define EVEVENT_BUSY "_busy"
 
   typedef struct _EVEventHdr {
     uint32_t modId;
@@ -153,6 +156,7 @@ extern "C" {
   uint32_t EVBusCount(EVMod *mod);
   EVEvent *EVGetEvent(EVBus *bus, char *name);
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb);
+  void EVEventRxOff(EVMod *mod, EVEvent *evt, EVActionCB cb);
   void EVEventRxAll(EVMod *mod, char *evt_name, EVActionCB cb);
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);
   int EVEventTxAll(EVMod *mod, char *evt_name, void *data, size_t dataLen);

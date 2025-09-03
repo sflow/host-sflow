@@ -109,8 +109,9 @@ extern "C" {
 	evt->name = my_strdup(name);
 	UTHashAdd(bus->events, evt);
 	evt->bus = bus;
-	evt->actions = UTArrayNew(UTARRAY_DFLT);
+	evt->actions = UTArrayNew(UTARRAY_PACK);
 	evt->actions_run = UTArrayNew(UTARRAY_DFLT);
+	evt->actions_del = UTArrayNew(UTARRAY_DFLT);
 	// evt->id is index into eventsList
 	evt->id = UTArrayAdd(bus->eventList, evt);
       }
@@ -179,10 +180,38 @@ extern "C" {
       UTArrayAdd(evt->actions, act);
       // indicate the change in an appropriately atomic way
       UT_atomic_inc(evt->actionsRevision);
+      if(my_strequal(evt->name, EVEVENT_DECI)) {
+	// Possibly shorten select timeout so we can deliver deciTicks
+	if(evt->bus->select_mS > EVBUS_SELECT_MS_DECI)
+	  evt->bus->select_mS = EVBUS_SELECT_MS_DECI;
+      }
+      else if(my_strequal(evt->name, EVEVENT_BUSY)) {
+	// zero the select timeout so we can deliver busy-loop callbacks
+	evt->bus->select_mS = EVBUS_SELECT_MS_BUSY;
+      }
     }
-    if(my_strequal(evt->name, EVEVENT_DECI)) {
-      // shorten select timeout so we can deliver deciTicks
-      evt->bus->select_mS = EVBUS_SELECT_MS_DECI;
+
+  }
+
+  void EVEventRxOff(EVMod *mod, EVEvent *evt, EVActionCB cb) {
+    SEMLOCK_DO(mod->root->sync) {
+      EVAction *act;
+      UTARRAY_WALK(evt->actions, act) {
+	if(act->module == mod
+	   && act->actionCB == cb) {
+	  UTArrayDel(evt->actions, act);
+	  UTArrayAdd(evt->actions_del, act);
+	  if(my_strequal(evt->name, EVEVENT_BUSY)
+	     && (UTArrayN(evt->actions) == 0)) {
+	    // Turn off the busy loop and go back to a
+	    // reasonable select timeout.
+	    evt->bus->select_mS = EVBUS_SELECT_MS_DECI;
+	  }
+	  break;
+	}
+      }
+      // indicate the change in an appropriately atomic way
+      UT_atomic_inc(evt->actionsRevision);
     }
   }
 
@@ -355,6 +384,9 @@ extern "C" {
 	SEMLOCK_DO(mod->root->sync) {
 	  UTArrayReset(evt->actions_run);
 	  UTArrayAddAll(evt->actions_run, evt->actions);
+	  UTARRAY_WALK(evt->actions_del, act)
+	    my_free(act);
+	  UTArrayReset(evt->actions_del);
 	  UT_atomic_inc(evt->actionsRunRevision);
 	}
       }
@@ -413,7 +445,8 @@ extern "C" {
       SEMLOCK_DO(bus->root->sync) {
 	UTArrayReset(bus->sockets_run);
 	UTArrayAddAll(bus->sockets_run, bus->sockets);
-	UTARRAY_WALK(bus->sockets_del, sock) EVSocketFree(sock);
+	UTARRAY_WALK(bus->sockets_del, sock)
+	  EVSocketFree(sock);
 	UTArrayReset(bus->sockets_del);
 	UT_atomic_inc(bus->socketsRunRevision);
       }
@@ -499,6 +532,7 @@ extern "C" {
     EVEvent *tick = EVGetEvent(bus, EVEVENT_TICK);
     EVEvent *tock = EVGetEvent(bus, EVEVENT_TOCK);
     EVEvent *deci = EVGetEvent(bus, EVEVENT_DECI);
+    EVEvent *busy = EVGetEvent(bus, EVEVENT_BUSY);
     EVEvent *final = EVGetEvent(bus, EVEVENT_FINAL);
     EVEvent *end = EVGetEvent(bus, EVEVENT_END);
 
@@ -527,6 +561,10 @@ extern "C" {
 	  EVEventTx(mod, tock, NULL, 0);
 	}
       }
+      // busy loop callback - receiver is expected to call EVEventRxOff()
+      // to unsubscribe once the busy-work is done (so the select timeout
+      // can be restored).
+      EVEventTx(mod, busy, NULL, 0);
     }
     return NULL;
   }
