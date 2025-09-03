@@ -24,6 +24,7 @@ extern "C" {
 
 #define HSP_IPV4_FORWARDING_PROC "/proc/sys/net/ipv4/ip_forward"
 #define HSP_IPV6_FORWARDING_PROC "/proc/sys/net/ipv6/conf/all/forwarding"
+#define HSP_READPACKET_BATCH_EPCAP 100
 
   typedef struct _HSPEpcapDev {
     uint32_t ifIndex;
@@ -37,14 +38,18 @@ extern "C" {
     EVBus *packetBus;
     struct sample_bpf *skel;
     struct ring_buffer *rb;
+    EVSocket *rb_sock;
+    bool rb_busy;
+    int rb_quota;
     bool routingLookup;
     UTHash *devs;
   } HSP_mod_EPCAP;
 
   static void cleanup_dev(EVMod *mod, HSPEpcapDev *dev);
+  static void readPackets_epcap(EVMod *mod, EVSocket *sock, void *magic);
 
   /*_________________---------------------------__________________
-    _________________     logging               __________________
+    _________________     Logging               __________________
     -----------------___________________________------------------
   */
 
@@ -55,14 +60,43 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________        evt_busy           __________________
+    -----------------___________________________------------------
+  */
+  
+  static void evt_busy(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
+    // If we didn't fully empty the ringbuffer on the last call, then we need
+    // to poll it again in the idle loop until it is empty. The adaptive
+    // notification system means we only get an file-descriptor notification
+    // when the ringbuffer goes from empty to non-empty on write.
+    readPackets_epcap(mod, mdata->rb_sock, NULL);
+  }
+
+  /*_________________---------------------------__________________
     _________________      readPackets          __________________
     -----------------___________________________------------------
   */
 
   static void readPackets_epcap(EVMod *mod, EVSocket *sock, void *magic) {
     HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
-    if (ring_buffer__consume(mdata->rb) < 0) {
-      myLog(LOG_ERR, "ring_buffer__consume() failed\n");
+    // ring_buffer__consume_n() only appeared in version 1.5,
+    // so we manage the quota this way.
+    mdata->rb_quota = HSP_READPACKET_BATCH_EPCAP;
+    ring_buffer__consume(mdata->rb);
+    if(mdata->rb_quota == 0) {
+      // if we got a complete batch then remember to check again in BUSY
+      if(!mdata->rb_busy) {
+	mdata->rb_busy = YES;
+	EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_BUSY), evt_busy);
+      }
+    }
+    else {
+      // if not, remember to turn off BUSY
+      if(mdata->rb_busy) {
+	EVEventRxOff(mod, EVGetEvent(mdata->packetBus, EVEVENT_BUSY), evt_busy);
+	mdata->rb_busy = NO;
+      }
     }
   }
 
@@ -73,12 +107,12 @@ extern "C" {
 
   static int handle_event(void *ctx, void *data, size_t data_sz) {
     EVMod *mod = (EVMod *)ctx;
-    // HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
+    HSP_mod_EPCAP *mdata = (HSP_mod_EPCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     struct packet_event_t *evt = data;
     if (data_sz < sizeof(*evt)) {
       EVDebug(mod, 1, "Invalid event size: %zu (< %u)", data_sz, sizeof(*evt));
-      return 1;
+      return -2;
     }
     EVDebug(mod, 2, "Timestamp: %llu, Ifindex: %u, Ingress: %u, Routed: %u, Direction %s, Packet length: %u, Header: ",
 	    evt->timestamp, evt->ifindex, evt->ingress_ifindex, evt->routed_ifindex, evt->direction ? "egress" : "ingress", evt->pkt_len);
@@ -126,6 +160,12 @@ extern "C" {
 	       0, // drops
 	       evt->sampling_rate,
 	       NULL);
+    if(--mdata->rb_quota == 0) {
+      // This may be reported as an error, but all we are doing is relinquishing
+      // control so that we can't spin forever in this loop. Essentially a
+      // green-thread "yield".
+      return -1;
+    }
     return 0; // OK
   }
 
@@ -161,7 +201,7 @@ extern "C" {
       EVDebug(mod, 0, "Failed to get ring buffer fd\n");
       return NO;
     }
-    EVBusAddSocket(mod, mdata->packetBus, rb_fd, readPackets_epcap, NULL);
+    mdata->rb_sock = EVBusAddSocket(mod, mdata->packetBus, rb_fd, readPackets_epcap, NULL);
     return YES;
   }
 

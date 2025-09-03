@@ -14,7 +14,7 @@
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 1 << 16);
+    __uint(max_entries, HSP_BPF_RING_BUFFER_BYTES); // documentation says "max_entries" really is in bytes here
 } events SEC(".maps");
 
 struct {
@@ -108,7 +108,11 @@ static __always_inline void sample_packet(struct __sk_buff *skb, __u8 direction)
 	bpf_ringbuf_discard(pkt, BPF_RB_NO_WAKEUP);
         return;
     }
-    bpf_ringbuf_submit(pkt, BPF_RB_FORCE_WAKEUP);
+    // Using default adaptive notification instead of BPF_RB_FORCE_WAKEUP.
+    // That means the file-descriptor is only signalled when the ringbuffer
+    // goes from empty to non-empty on write. It is up to the user-space
+    // caller to make sure that all outstanding events are read.
+    bpf_ringbuf_submit(pkt, 0);
 }
 
 SEC("tcx/ingress")

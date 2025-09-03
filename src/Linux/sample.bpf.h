@@ -11,6 +11,7 @@ extern "C" {
 
 #define MAX_INTERFACES 128
 #define MAX_PKT_HDR_LEN 256 // should match HSP_MAX_HEADER_BYTES in hsflowd.h
+#define HSP_BPF_RING_BUFFER_BYTES (1 << 16)
 
 struct packet_event_t {
     __u64 timestamp;
