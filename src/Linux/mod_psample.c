@@ -13,6 +13,7 @@ extern "C" {
 #include <linux/netlink.h>
 #include <linux/genetlink.h>
 #include <linux/psample.h>
+#include <stdlib.h>
 #include <net/if.h>
 
 #include "util_netlink.h"
@@ -44,7 +45,12 @@ extern "C" {
     HSP_PSAMPLE_ATTR_LATENCY,/* u64, nanoseconds */
     HSP_PSAMPLE_ATTR_TIMESTAMP,/* u64, nanoseconds */
     HSP_PSAMPLE_ATTR_PROTO,/* u16 */
-
+    HSP_PSAMPLE_ATTR_USER_COOKIE,/* binary, user provided data */
+    HSP_PSAMPLE_ATTR_SAMPLE_PROBABILITY,/* no argument, interpret rate in
+					 * PSAMPLE_ATTR_SAMPLE_RATE as a
+					 * probability scaled 0 - U32_MAX.
+					 */
+    
     __HSP_PSAMPLE_ATTR_MAX
   } EnumHSPPsampleAttributes;
   
@@ -70,6 +76,7 @@ extern "C" {
     uint32_t grp_ingress;
     uint32_t grp_egress;
     uint32_t last_grp_seq[2];
+    bool probability_warning;
   } HSP_mod_PSAMPLE;
 
   /*_________________---------------------------__________________
@@ -243,7 +250,8 @@ extern "C" {
     SFLFlow_sample_element *ext_elems = NULL;
     // TODO: tunnel encap/decap may be avaiable too
     bool free_ext_elems = YES;
- 
+    bool sample_prob = NO;
+
     struct nlattr *ps_attr = (struct nlattr *)(msg + GENL_HDRLEN);
     for(int attrs_len = msglen;
 	UTNLA_OK(ps_attr, attrs_len);
@@ -259,6 +267,7 @@ extern "C" {
       case PSAMPLE_ATTR_SAMPLE_GROUP: psmp.grp_no = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_GROUP_SEQ: psmp.grp_seq = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_SAMPLE_RATE: psmp.sample_n = *(uint32_t *)datap; break;
+      case HSP_PSAMPLE_ATTR_SAMPLE_PROBABILITY: sample_prob = YES; break;
       case PSAMPLE_ATTR_DATA:
 	psmp.hdr = datap;
 	psmp.hdr_len = datalen;
@@ -296,6 +305,24 @@ extern "C" {
       }
     }
 
+    if(sample_prob
+       && psmp.sample_n) {
+      // sampling rate is actually a sampling probability expressed
+      // as a 32-bit number X, where probability = UINT_MAX / X.
+      // Unusual to change the meaning of a netlink attribute by
+      // side-effect like this. Not my favorite PSAMPLE patch. Conversion
+      // back to 1-in-N results in a error than can be significant.
+      if(!mdata->probability_warning) {
+	mdata->probability_warning = YES;
+	myLog(LOG_ERR, "Use of PSAMPLE_ATTR_SAMPLE_PROBABILITY is not compatible with sFlow");
+      }
+      ldiv_t ratio = ldiv(UINT_MAX, psmp.sample_n);
+      psmp.sample_n = ratio.quot;
+      // see if we should round up
+      if(ratio.rem > (UINT_MAX / 2))
+	psmp.sample_n++;
+    }
+    
     //#define TEST_PSAMPLE_EXTENSIONS 1
 #ifdef TEST_PSAMPLE_EXTENSIONS
     {
