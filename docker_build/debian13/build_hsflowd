@@ -1,12 +1,15 @@
 #!/bin/bash
 echo "build_hsflowd on platform:  $1"
 
+# clang seems to be looking for c headers (e.g. asm/types.h) in /usr/include/asm, which does not exist in 
+# the Debian 13/Trixie image.
+ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm
+
 git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
-&& make deb FEATURES="NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD DROPMON PSAMPLE DENT CONTAINERD"
+&& make deb FEATURES="NFLOG PCAP TCP DOCKER KVM OVS DBUS SYSTEMD DROPMON PSAMPLE DENT CONTAINERD EPCAP"
 
 for deb in `ls *.deb`; do cp "$deb" "/packages/${deb/hsflowd/hsflowd-$1}"; done
 echo ""
 echo "files in /packages:"
 ls -l /packages
-
