@@ -1,8 +1,10 @@
-FROM debian:bookworm
+FROM debian:trixie
 RUN apt-get -y update && apt-get install -y --no-install-recommends \
       build-essential \
       clang \
+      bpftool \
       git-all \
+      libbpf-dev \
       libpcap-dev \
       libvirt-dev \
       libnfnetlink-dev \
