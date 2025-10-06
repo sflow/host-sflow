@@ -260,7 +260,6 @@ extern "C" {
       int datalen = UTNLA_PAYLOAD(ps_attr);
 
       switch(ps_attr->nla_type) {
-      case PSAMPLE_ATTR_PROTO: psmp.proto = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_IIFINDEX: psmp.ifin = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_OIFINDEX: psmp.ifout = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_ORIGSIZE: psmp.pkt_len = *(uint32_t *)datap; break;
@@ -268,6 +267,7 @@ extern "C" {
       case PSAMPLE_ATTR_GROUP_SEQ: psmp.grp_seq = *(uint32_t *)datap; break;
       case PSAMPLE_ATTR_SAMPLE_RATE: psmp.sample_n = *(uint32_t *)datap; break;
       case HSP_PSAMPLE_ATTR_SAMPLE_PROBABILITY: sample_prob = YES; break;
+      case HSP_PSAMPLE_ATTR_PROTO: psmp.proto = *(uint16_t *)datap; break;
       case PSAMPLE_ATTR_DATA:
 	psmp.hdr = datap;
 	psmp.hdr_len = datalen;
