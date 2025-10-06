@@ -6,6 +6,7 @@ RUN echo "UPDATE" && yum -y update
 RUN echo "DEVTOOLS" && yum -y groupinstall "Development Tools"
 RUN echo "EXTRAS" && yum -y install \
       git \
+      clang \
       libpcap-devel \
       libvirt-devel \
       libnfnetlink-devel \

@@ -1,6 +1,7 @@
 FROM debian:bullseye
 RUN apt-get -y update && apt-get install -y --no-install-recommends \
       build-essential \
+      clang \
       git-all \
       libpcap-dev \
       libvirt-dev \
