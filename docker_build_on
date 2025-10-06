@@ -3,5 +3,5 @@
 PLATFORM="$1"
 DK="docker_build/$PLATFORM"
 
-docker build -t $DK $DK
+docker build --no-cache -t $DK $DK
 docker run --privileged=true --rm -v ${PWD}/docker_build_packages/:/packages $DK $PLATFORM

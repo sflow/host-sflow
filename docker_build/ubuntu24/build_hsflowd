@@ -1,0 +1,24 @@
+#!/bin/bash
+echo "build_hsflowd on platform:  $1"
+
+# Allow clang to find c headers /usr/include/asm
+ln -s /usr/include/`dpkg-architecture -qDEB_HOST_MULTIARCH`/asm /usr/include/asm
+
+# bpftool is not a package in ubuntu24?
+#apt update && apt -y install llvm linux-headers-generic \
+#&& git clone --recurse-submodules https://github.com/libbpf/bpftool.git \
+#&& pushd bpftool/src \
+#&& make \
+#&& make install \
+#&& ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool \
+#&& popd
+
+git clone https://github.com/sflow/host-sflow \
+&& cd host-sflow \
+&& make deb FEATURES="NFLOG PCAP EPCAP TCP DOCKER KVM OVS DBUS SYSTEMD DROPMON PSAMPLE DENT CONTAINERD"
+
+for deb in `ls *.deb`; do cp "$deb" "/packages/${deb/hsflowd/hsflowd-$1}"; done
+echo ""
+echo "files in /packages:"
+ls -l /packages
+

@@ -1,8 +1,8 @@
-FROM rockylinux:9
+FROM rockylinux/rockylinux:10
 RUN echo "UPDATE" && dnf -y update
-RUN echo "DEVTOOLS" && dnf -y install clang
-RUN echo "EXTRAS" && dnf -y --enablerepo=crb install \
+RUN echo "EXTRAS" && dnf -y install \
       git \
+      clang \
       libpcap-devel \
       libvirt-devel \
       libnfnetlink-devel \
