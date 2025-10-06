@@ -1,5 +1,5 @@
-FROM rockylinux/rockylinux:10
-RUN echo "UPDATE" && dnf -y update
+FROM almalinux:10
+# RUN echo "UPDATE" && dnf -y update
 RUN echo "EXTRAS" && dnf -y install \
       git \
       clang \

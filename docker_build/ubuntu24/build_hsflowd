@@ -5,13 +5,13 @@ echo "build_hsflowd on platform:  $1"
 ln -s /usr/include/`dpkg-architecture -qDEB_HOST_MULTIARCH`/asm /usr/include/asm
 
 # bpftool is not a package in ubuntu24?
-#apt update && apt -y install llvm linux-headers-generic \
-#&& git clone --recurse-submodules https://github.com/libbpf/bpftool.git \
-#&& pushd bpftool/src \
-#&& make \
-#&& make install \
-#&& ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool \
-#&& popd
+apt update && apt -y install llvm linux-headers-generic \
+&& git clone --recurse-submodules https://github.com/libbpf/bpftool.git \
+&& pushd bpftool/src \
+&& make \
+&& make install \
+&& ln -s /usr/local/sbin/bpftool /usr/sbin/bpftool \
+&& popd
 
 git clone https://github.com/sflow/host-sflow \
 && cd host-sflow \
