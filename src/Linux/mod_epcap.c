@@ -117,9 +117,9 @@ extern "C" {
     EVDebug(mod, 2, "Timestamp: %llu, Ifindex: %u, Ingress: %u, Routed: %u, Direction %s, Packet length: %u, Header: ",
 	    evt->timestamp, evt->ifindex, evt->ingress_ifindex, evt->routed_ifindex, evt->direction ? "egress" : "ingress", evt->pkt_len);
     int hdr_len = evt->pkt_len < MAX_PKT_HDR_LEN ? evt->pkt_len : MAX_PKT_HDR_LEN;
-    u_char hex[128];
-    printHex(evt->hdr, hdr_len, hex, 128, NO);
-    EVDebug(mod, 0, (char *)hex);
+    // u_char hex[128];
+    // printHex(evt->hdr, hdr_len, hex, 128, NO);
+    // EVDebug(mod, 0, (char *)hex);
     uint32_t in = evt->ingress_ifindex;
     uint32_t out = (evt->direction == 1) ? evt->ifindex : evt->routed_ifindex;
     SFLAdaptor *tapDev = adaptorByIndex(sp, evt->ifindex);
