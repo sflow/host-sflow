@@ -414,12 +414,6 @@ extern "C" {
   
   static void tap_close(EVMod *mod, BPFSoc *bpfs) {
     bpfs->adaptor = NULL;
-    if(bpfs->sock > 0) {
-      // The fd socket belongs to pcap, not to EVSocket. We
-      // can tell EVSocketClose not to touch it but this way
-      // is more ostentatious.
-      bpfs->sock->fd = -1;
-    }
     if(bpfs->pcap) {
       pcap_close(bpfs->pcap);
       bpfs->pcap = NULL;
@@ -436,18 +430,19 @@ extern "C" {
     -----------------___________________________------------------
   */
   static bool addBPFSocket(EVMod *mod,  HSPPcap *pcap, SFLAdaptor *adaptor) {
-    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
-    BPFSoc search = { .deviceName = adaptor->deviceName };
-    if(UTHashGet(mdata->bpf_socs, &search)) {
-      EVDebug(mod, 1, "sampling already configured for device=%s", adaptor->deviceName);
-      return NO;
+    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *) mod->data;
+    BPFSoc *bpfs = (BPFSoc *) my_calloc(sizeof(BPFSoc));
+    setStr(&bpfs->deviceName, adaptor->deviceName);
+    if (UTHashGetOrAdd(mdata->bpf_socs, bpfs)) {
+        EVDebug(mod, 1, "sampling already configured for device=%s", adaptor->deviceName);
+        if (bpfs->deviceName)
+            my_free(bpfs->deviceName);
+        my_free(bpfs);
+        return NO;
     }
     EVDebug(mod, 1, "addBPFSocket(%s) speed=%"PRIu64, adaptor->deviceName, adaptor->ifSpeed);
-    BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
-    UTHashAdd(mdata->bpf_socs, bpfs);
     bpfs->module = mod;
     bpfs->adaptor = adaptor;
-    setStr(&bpfs->deviceName, adaptor->deviceName);
     bpfs->promisc = pcap->promisc;
     bpfs->vport = pcap->vport;
     bpfs->vport_set = pcap->vport_set;
