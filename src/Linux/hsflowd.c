@@ -1066,7 +1066,8 @@ extern "C" {
     // hold the same semaphore in the more common "installSFlowSettings"
     // path, but there the collector sockets are deliberately opened
     // before the settings "go live" so it is not necessary.
-    if(sp->reopenCollectorSocketCountdown) {
+    if(sp->reopenCollectorSocketCountdown
+       && sp->sFlowSettings != NULL) {
       if(--sp->reopenCollectorSocketCountdown == 0) {
 	EVDebug(mod, 1, "Reopening collector socket(s) after error");
 	openCollectorSockets(sp, sp->sFlowSettings);
