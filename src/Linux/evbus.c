@@ -452,6 +452,13 @@ extern "C" {
       }
     }
     UTARRAY_WALK(bus->sockets_run, sock) {
+      if((uint32_t)sock->fd >= (uint32_t)FD_SETSIZE) {
+	myLog(LOG_ERR, "busRead() sock->fd==%u >= FD_SETSIZE==%u sockets_run=%u (file descriptor leak?)",
+	      (uint32_t)sock->fd,
+	      (uint32_t)FD_SETSIZE,
+	      UTArrayN(bus->sockets_run));
+	abort();
+      }
       FD_SET(sock->fd, &readfds);
       if(sock->fd > max_fd)
 	max_fd = sock->fd;
