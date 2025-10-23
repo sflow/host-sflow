@@ -34,7 +34,6 @@ extern "C" {
     UTHash *buses;
     UTHash *modules;
     UTArray *moduleList;
-    UTHash *sockets;
     struct _EVMod *rootModule;
     pthread_mutex_t *sync;
   } EVRoot;
@@ -161,7 +160,7 @@ extern "C" {
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);
   int EVEventTxAll(EVMod *mod, char *evt_name, void *data, size_t dataLen);
   EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic);
-  bool EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD);
+  void EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD);
   void EVClockMono(struct timespec *ts);
 
 #define EVSOCKETREADLINE_INCBYTES EV_MAX_EVT_DATALEN

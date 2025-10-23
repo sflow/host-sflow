@@ -36,7 +36,6 @@ extern "C" {
   EVMod *EVInit(void *data) {
     EVRoot *root = (EVRoot *)my_calloc(sizeof(EVRoot));
     root->buses = UTHASH_NEW(EVBus, name, UTHASH_SKEY);
-    root->sockets = UTHASH_NEW(EVSocket, fd, UTHASH_DFLT);
     root->modules = UTHASH_NEW(EVMod, name, UTHASH_SKEY);
     root->moduleList = UTArrayNew(UTARRAY_DFLT);
     root->rootModule = addModule(root, EVMOD_ROOT);
@@ -123,12 +122,27 @@ extern "C" {
       return getEvent(bus, name, YES);
   }
 
+  static EVSocket *EVBusSocketForFD(EVMod *mod, EVBus *bus, int fd) {
+    // TODO: require lock (clang static analysis?)
+    EVSocket *sock = NULL;
+    UTARRAY_WALK(bus->sockets, sock) {
+      if(sock->fd == fd)
+	return sock;
+    }
+    return NULL;
+  }
+	  
   EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic) {
     EVSocket *sock = NULL;
     SEMLOCK_DO(mod->root->sync) {
-      EVSocket search = { .fd = fd };
-      if(UTHashGet(mod->root->sockets, &search)) {
-	myDebug(1, "socket for fd=%u already exists", fd);
+      // Could return the same object if we already have this fd open, but
+      // it seems safer to always create a new object, or maybe just abort?
+      // This does mean that we should never create the socket object with
+      // the intention of providing the fd later.  It must be established at this point.
+      sock = EVBusSocketForFD(mod, bus, fd);
+      if(sock != NULL) {
+	myLog(LOG_ERR, "EVBusAddSocket: socket for fd=%u already exists", fd);
+	abort();
       }
       else {
 	sock = (EVSocket *)my_calloc(sizeof(EVSocket));
@@ -137,7 +151,6 @@ extern "C" {
 	sock->readCB = readCB;
 	sock->module = mod;
 	sock->magic = magic;
-	UTHashAdd(mod->root->sockets, sock);
 	UTArrayAdd(bus->sockets, sock);
 	UT_atomic_inc(bus->socketsRevision);
       }
@@ -145,12 +158,8 @@ extern "C" {
     return sock;
   }
 
-  bool EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD) {
-    EVSocket *deleted;
+  void EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD) {
     SEMLOCK_DO(mod->root->sync) {
-      EVSocket search = { .fd = sock->fd };
-      deleted = UTHashDelKey(mod->root->sockets, &search);
-      assert(deleted == sock);
       if(sock->fd > 0) {
 	if(closeFD)
 	  while(close(sock->fd) == -1 && errno == EINTR);
@@ -167,7 +176,6 @@ extern "C" {
       UTArrayAdd(bus->sockets_del, sock);
       UT_atomic_inc(bus->socketsRevision);
     }
-    return (deleted != NULL);
   }
 
   void EVEventRx(EVMod *mod, EVEvent *evt, EVActionCB cb) {
