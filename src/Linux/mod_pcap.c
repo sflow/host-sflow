@@ -44,6 +44,8 @@ extern "C" {
   typedef struct _HSP_mod_PCAP {
     UTHash *bpf_socs;
     EVBus *packetBus;
+    uint32_t open_count;
+    uint32_t close_count;
   } HSP_mod_PCAP;
 
   static void tap_close(EVMod *mod, BPFSoc *bpfs);
@@ -275,12 +277,25 @@ extern "C" {
     // read pcap stats to get drops - will go out with
     // packet samples sent from readPackets.c
     BPFSoc *bpfs;
+    uint ps_recv_total=0;
+    uint ps_drop_total=0;
     UTHASH_WALK(mdata->bpf_socs, bpfs) {
       struct pcap_stat stats;
       if(bpfs->pcap
 	 && pcap_stats(bpfs->pcap, &stats) == 0) {
 	bpfs->drops = stats.ps_drop;
+	ps_drop_total += stats.ps_drop;
+	ps_recv_total += stats.ps_recv;
       }
+    }
+
+    if(EVDebug(mod, 1, NULL)) {
+      EVDebug(mod, 1, "open=%u, close=%u, current=%d, rx=%u, lost=%u",
+	      mdata->open_count,
+	      mdata->close_count,
+	      (int)mdata->open_count - (int)mdata->close_count,
+	      ps_recv_total,
+	      ps_drop_total);
     }
   }
 
@@ -348,6 +363,7 @@ extern "C" {
     }
 
     EVDebug(mod, 1, "device %s opened OK", bpfs->deviceName);
+    mdata->open_count++;
 
     // get list of possible datalink types
     bpfs->n_dlts = pcap_list_datalinks(bpfs->pcap, &bpfs->dlts);
@@ -413,6 +429,7 @@ extern "C" {
   */
   
   static void tap_close(EVMod *mod, BPFSoc *bpfs) {
+    HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     bpfs->adaptor = NULL;
     if(bpfs->sock > 0) {
       // The fd socket belongs to pcap, not to EVSocket. We
@@ -422,6 +439,7 @@ extern "C" {
     }
     if(bpfs->pcap) {
       pcap_close(bpfs->pcap);
+      mdata->close_count++;
       bpfs->pcap = NULL;
     }
     if(bpfs->sock) {
