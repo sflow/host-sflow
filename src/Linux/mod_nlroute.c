@@ -146,6 +146,8 @@ extern "C" {
     UTQ(HSPNLRequest) requestQ;
     UTHash *requestHT;
     EVEvent *evt_get_nsid_ans;
+    uint32_t open_count;
+    uint32_t close_count;
   } HSP_mod_NLROUTE;
 
   static void processNetlinkCB(void *magic, struct nlmsghdr *recv_hdr, int msglen);
@@ -260,6 +262,7 @@ extern "C" {
 	EVDebug(mod, 1, "cannot open %s : %s", topath, strerror(errno));
 	goto not_sent;
       }
+      mdata->open_count++;
       rc = UTNLRoute_ns_send(mdata->nl_sock, mod->id, req->fd, req->seqNo);
     }
     else {
@@ -281,8 +284,10 @@ extern "C" {
 
   not_sent:
     // clean up
-    if(req->fd > 0)
+    if(req->fd > 0) {
       close(req->fd);
+      mdata->close_count++;
+    }
     if(req)
       my_free(req);
     if(strBuf)
@@ -506,6 +511,7 @@ extern "C" {
     if(req->fd) {
       close(req->fd);
       req->fd = 0;
+      mdata->close_count++;
     }
     // and announce the answer, found or not
     EVEventTx(mod, mdata->evt_get_nsid_ans, &req->get_nsid, sizeof(req->get_nsid));
@@ -657,12 +663,15 @@ extern "C" {
   
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_NLROUTE *mdata = (HSP_mod_NLROUTE *)mod->data;
-    EVDebug(mod, 1, "seqNo=%u, changes=%u, cursor=%u, sweeping=%u, requests=%u",
+    EVDebug(mod, 1, "seqNo=%u, changes=%u, cursor=%u, sweeping=%u, requests=%u, open=%u, close=%u, current=%d",
 	    mdata->seqNo,
 	    mdata->changes,
 	    mdata->cursor,
 	    mdata->sweeping,
-	    UTHashN(mdata->requestHT));
+	    UTHashN(mdata->requestHT),
+	    mdata->open_count,
+	    mdata->close_count,
+	    (int)mdata->open_count - (int)mdata->close_count);
   }
   
   /*_________________---------------------------__________________
