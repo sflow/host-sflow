@@ -504,30 +504,32 @@ extern "C" {
 
   static void *openNetlinkSocket(void *magic) {
     HSPTCPNetlinkSocket *sock = (HSPTCPNetlinkSocket *)magic;
+    void *ans = NULL;
+    int nsfd = -1;
 
     if(sock->nspid) {
       // switch namespace now
       // (1) open /proc/<nspid>/ns/net
       char topath[HSP_MAX_NETNS_PATH];
       snprintf(topath, HSP_MAX_NETNS_PATH, PROCFS_STR "/%u/ns/net", sock->nspid);
-      int nsfd = open(topath, O_RDONLY | O_CLOEXEC);
+      nsfd = open(topath, O_RDONLY | O_CLOEXEC);
       if(nsfd < 0) {
 	sock->err_step = "open()";
 	sock->err_msg = strerror(errno);
-	return NULL;
+	goto out;
       }
       // (2) set network namespace
       // CLONE_NEWNET means nsfd must refer to a network namespace
       if(MY_SETNS(nsfd, CLONE_NEWNET) < 0) {
 	sock->err_step = "setns()";
 	sock->err_msg = strerror(errno);
-	return NULL;
+	goto out;
       }
       // (3) call unshare
       if(unshare(CLONE_NEWNS) < 0) {
 	sock->err_step = "unshare()";
 	sock->err_msg = strerror(errno);
-	return NULL;
+	goto out;
       }
     }
 
@@ -535,10 +537,13 @@ extern "C" {
     if((sock->nl_sock = UTNLDiag_open()) == -1) {
       sock->err_step = "UTNLDiag_open()";
       sock->err_msg = strerror(errno);
-      return NULL;
+      goto out;
     }
-
-    return sock;
+    ans = sock;
+  out:
+    if(nsfd > 0)
+      close(nsfd);
+    return ans;
   }
 
   static HSPTCPNetlinkSocket *getNetlinkSocket(EVMod *mod, pid_t nspid, bool create) {
