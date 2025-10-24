@@ -262,6 +262,7 @@ extern "C" {
 	EVDebug(mod, 1, "cannot open %s : %s", topath, strerror(errno));
 	goto not_sent;
       }
+      EVDebug(mod, 2, "req->fd==%d", req->fd);
       mdata->open_count++;
       rc = UTNLRoute_ns_send(mdata->nl_sock, mod->id, req->fd, req->seqNo);
     }
