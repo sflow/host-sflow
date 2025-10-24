@@ -136,6 +136,7 @@ extern "C" {
 	if(statBuf.st_dev == myNS.st_dev
 	   && statBuf.st_ino == myNS.st_ino) {
 	  EVDebug(mod, 1, "skip my own namespace");
+	  close(nsfd);
 	  exit(0);
 	}
       }
@@ -145,6 +146,7 @@ extern "C" {
       */
       if(MY_SETNS(nsfd, CLONE_NEWNET) < 0) {
 	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
+	close(nsfd);
 	exit(EXIT_FAILURE);
       }
 
@@ -155,12 +157,14 @@ extern "C" {
 	 as well. Use of CLONE_NEWNS requires the CAP_SYS_ADMIN capability. */
       if(unshare(CLONE_NEWNS) < 0) {
 	fprintf(stderr, "seting network namespace failed: %s", strerror(errno));
+	close(nsfd);
 	exit(EXIT_FAILURE);
       }
 
       int fd = socket(PF_INET, SOCK_DGRAM, 0);
       if(fd < 0) {
 	fprintf(stderr, "error opening socket: %d (%s)\n", errno, strerror(errno));
+	close(nsfd);
 	exit(EXIT_FAILURE);
       }
 
@@ -294,11 +298,11 @@ extern "C" {
 	    }
 	  }
 	}
+	fclose(procFile);
       }
-
-      // don't even bother to close file-descriptors,  just bail
+      close(fd);
+      close(nsfd);
       exit(0);
-
     }
     else {
       // in parent
@@ -307,6 +311,7 @@ extern "C" {
       FILE *ovs;
       if((ovs = fdopen(pfd[0], "r")) == NULL) {
 	myLog(LOG_ERR, "readVNICInterfaces: fdopen() failed : %s", strerror(errno));
+	close(pfd[0]);
 	return 0;
       }
       char line[MAX_PROC_LINE_CHARS];
