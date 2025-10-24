@@ -109,6 +109,7 @@ extern "C" {
       myLog(LOG_ERR, "pipe() failed : %s", strerror(errno));
       exit(EXIT_FAILURE);
     }
+    EVDebug(mod, 2, "readVNICInterfaces: pipe fds=%u,%u", pfd[0], pfd[1]);
     pid_t cpid;
     if((cpid = fork()) == -1) {
       myLog(LOG_ERR, "fork() failed : %s", strerror(errno));
