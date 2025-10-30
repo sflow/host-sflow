@@ -482,6 +482,7 @@ extern "C" {
     uint32_t egressQ_id;
     uint64_t egressQ_byts;
     uint64_t transit_nS;
+    uint64_t timestamp_nS;
     uint32_t hdr_len;
     u_char *hdr;
   } HSPPSample;

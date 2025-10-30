@@ -509,6 +509,16 @@ typedef struct {
 } SFLExtended_queue_depth;
 #define XDRSIZ_SFLEXTENDED_Q_DEPTH 4
 
+/* Precision Timestamp */
+/* opaque = flow_data; enterprise = 0; format = 1043 */
+/* Time in relative to the UNIX epoch starting in 1970 using the
+   Coordinated Universal Time (UTC). Agent should report most accurate
+   synchronized time available, e.g. Atomic, PTP, NTP, etc. */
+
+typedef struct  {
+  uint64_t nanoseconds;
+} SFLExtended_timestamp;
+
 enum SFLFlow_type_tag {
   /* enterprise = 0, format = ... */
   SFLFLOW_HEADER    = 1,      /* Packet headers are sampled */
@@ -543,6 +553,7 @@ enum SFLFlow_type_tag {
   SFLFLOW_EX_Q_DEPTH             = 1040,
   SFLFLOW_EX_HW_TRAP             = 1041,
   SFLFLOW_EX_LINUX_REASON        = 1042,
+  SFLFLOW_EX_TIMESTAMP           = 1043,
   SFLFLOW_EX_SOCKET4        = 2100, /* server socket */
   SFLFLOW_EX_SOCKET6        = 2101, /* server socket */
   SFLFLOW_EX_PROXY_SOCKET4  = 2102, /* back-end (client) socket */
@@ -590,6 +601,7 @@ typedef union _SFLFlow_type {
   SFLExtended_transit_delay transit_delay;
   SFLExtended_hw_trap hw_trap;
   SFLExtended_linux_reason linux_reason;
+  SFLExtended_timestamp timestamp;
 } SFLFlow_type;
 
 typedef struct _SFLFlow_sample_element {

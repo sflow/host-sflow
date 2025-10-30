@@ -728,6 +728,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     SFLFlow_sample_element fnElem = { .tag=SFLFLOW_EX_FUNCTION };
     SFLFlow_sample_element hwElem = { .tag=SFLFLOW_EX_HW_TRAP };
     SFLFlow_sample_element rnElem = { .tag=SFLFLOW_EX_LINUX_REASON };
+    SFLFlow_sample_element tsElem = { .tag=SFLFLOW_EX_TIMESTAMP };
     
     // and some parameters to pick up for cross-check below
     uint32_t trunc_len=0;
@@ -737,6 +738,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     char *hw_name=NULL;
     char *sw_symbol=NULL;
     char *reason=NULL;
+    uint64_t timestamp_nS=0;
 
     // increment counter for threshold check
     mdata->totalDrops_thisTick++;
@@ -793,7 +795,8 @@ That would allow everything to stay on the stack as it does here, which has nice
 	}
 	break;
       case NET_DM_ATTR_TIMESTAMP:
-	EVDebug(mod, 4, "u64=TIMESTAMP=%"PRIu64, *(uint64_t *)datap);
+	timestamp_nS = *(uint64_t *)datap;
+	EVDebug(mod, 4, "u64=TIMESTAMP=%"PRIu64, timestamp_nS);
 	break;
       case NET_DM_ATTR_PROTO:
 	skb_protocol = *(uint16_t *)datap;
@@ -957,7 +960,10 @@ That would allow everything to stay on the stack as it does here, which has nice
       rnElem.flowType.linux_reason.reason.len = my_strlen(reason);
       SFLADD_ELEMENT(&discard, &rnElem);
     }
-
+    if(timestamp_nS) {
+      tsElem.flowType.timestamp.nanoseconds = timestamp_nS;
+      SFLADD_ELEMENT(&discard, &tsElem);
+    }
     HSPPendingEvtSample es = { .notifier = notifier, .discard = &discard };
     if(mdata->evt_intf_es)
       EVEventTx(mod, mdata->evt_intf_es, &es, sizeof(es));

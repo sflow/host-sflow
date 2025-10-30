@@ -302,6 +302,16 @@ extern "C" {
 	  ADD_TO_LIST(ext_elems, transit);
 	}
 	break;
+      case HSP_PSAMPLE_ATTR_TIMESTAMP:
+	{
+	  // wall clock timestamp - unixtime UTC (nS)
+	  SFLFlow_sample_element *tstamp = my_calloc(sizeof(SFLFlow_sample_element));
+	  tstamp->tag = SFLFLOW_EX_TIMESTAMP;
+	  psmp.timestamp_nS = *(uint64_t *)datap;
+	  tstamp->flowType.timestamp.nanoseconds = psmp.timestamp_nS;
+	  ADD_TO_LIST(ext_elems, tstamp);
+	}
+	break;
       }
     }
 

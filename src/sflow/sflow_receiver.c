@@ -375,6 +375,7 @@ static int xdr_enc_flow_sample_elements(SFDBuf *pktsmp, SFLFlow_sample_element *
     case SFLFLOW_EX_Q_DEPTH: sfd_xdr_enc_int32(pktsmp, elem->flowType.queue_depth.depth); break;
     case SFLFLOW_EX_HW_TRAP: xdr_enc_hw_trap(pktsmp, &elem->flowType.hw_trap); break;
     case SFLFLOW_EX_LINUX_REASON: xdr_enc_sflstring(pktsmp, &elem->flowType.linux_reason.reason); break;
+    case SFLFLOW_EX_TIMESTAMP: sfd_xdr_enc_int64(pktsmp, elem->flowType.timestamp.nanoseconds); break;
     default:
       return -1;
     }
