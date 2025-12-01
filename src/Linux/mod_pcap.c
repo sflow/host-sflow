@@ -98,7 +98,7 @@ extern "C" {
 	  u_char mac_s[13], mac_d[13];
 	  printHex(macsrc.mac, 6, mac_s, 13, NO);
 	  printHex(macdst.mac, 6, mac_d, 13, NO);
-	  EVDebug(mod, 0, "macsrc=%s, macdst=%s", mac_s, mac_d);
+	  EVDebug(mod, 0, "macsrc=%s, macdst=%s, ts=%"PRIu64".%"PRIu64, mac_s, mac_d, hdr->ts.tv_sec, hdr->ts.tv_usec);
 	  if(srcdev) {
 	    EVDebug(mod, 0, "srcdev=%s(%u)(peer=%u)",
 		    srcdev->deviceName,
@@ -150,6 +150,19 @@ extern "C" {
 	     && isBridge))
 	ds_options |= HSP_SAMPLEOPT_IF_POLLER;
 
+      SFLFlow_sample_element *ext_elems = NULL;
+      {
+	// Add nanosecond timestamp. The pcap_hdr timestamp is a struct timeval in UTC,
+	// so we just have to multiply tv_sec by 1e9 and add tv_usec * 1000, avoiding overflow.
+	uint64_t nS = hdr->ts.tv_sec;
+	nS *= 1000000000LL;
+	nS += (hdr->ts.tv_usec * 1000);
+	SFLFlow_sample_element *tstamp = my_calloc(sizeof(SFLFlow_sample_element));
+	tstamp->tag = SFLFLOW_EX_TIMESTAMP;
+	tstamp->flowType.timestamp.nanoseconds = nS;
+	ADD_TO_LIST(ext_elems, tstamp);
+      }
+
       takeSample(sp,
 		 srcdev,
 		 dstdev,
@@ -164,7 +177,7 @@ extern "C" {
 		 hdr->len - mac_len, /* length of packet (pdu) */
 		 bpfs->drops, /* droppedSamples */
 		 bpfs->samplingRate,
-		 NULL);
+		 ext_elems);
     }
   }
 
