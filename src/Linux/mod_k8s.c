@@ -370,7 +370,7 @@ extern "C" {
     int len = my_strlen(name);
     // also hash in agent IP address in case sp->uuid is missing or not unique
     int addrLen = sp->agentIP.type == SFLADDRESSTYPE_IP_V6 ? 16 : 4;
-    char *buf = (char *)UTHeapQNew(len + addrLen);
+    char *buf = (char *)my_calloc(len + addrLen);
     memcpy(buf, name, len);
     memcpy(buf + len, &sp->agentIP.address, addrLen);
     uuid_generate_sha1(uuid, (u_char *)sp->uuid, buf, len + addrLen);
@@ -529,7 +529,7 @@ extern "C" {
     HSPK8sContainer *container = UTHashGet(mdata->containersByID, &cont);
     if(container == NULL
        && create) {
-      container = (HSPK8sContainer *)UTHeapQNew(sizeof(HSPK8sContainer));
+      container = (HSPK8sContainer *)my_calloc(sizeof(HSPK8sContainer));
       container->id = my_strdup(id);
       // add to collection
       UTHashAdd(mdata->containersByID, container);
