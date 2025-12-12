@@ -164,7 +164,7 @@ int remote_mount(const char *device, const char *type)
 	  }
 	}
       }
-      tdestroy(treeRoot, my_free);
+      tdestroy(treeRoot, my_free_f);
       fclose(procFile);
     }
 

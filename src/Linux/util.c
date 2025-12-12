@@ -260,19 +260,20 @@ extern "C" {
   */
 
   typedef enum {
-    // use primes to help with corruption testing - field is 16 bits
+    // use primes to help with corruption testing - field is 8 bits
     UTHeapState_undefined = 0,
-    UTHeapState_allocated = 337,
-    UTHeapState_foreign = 8539,
-    UTHeapState_queued = 13177
+    UTHeapState_allocated = 19,
+    UTHeapState_foreign = 109,
+    UTHeapState_queued = 199
   } EnumUTHeapState;
   
   typedef struct _UTHeapHeader {
     struct _UTHeapHeader *nxt;
     struct {
       uint32_t realmIdx;
-      uint16_t queueIdx;
-      uint16_t state; /* EnumUTHeapState */
+      uint16_t line;
+      uint8_t queueIdx;
+      uint8_t state; /* EnumUTHeapState */
     } h;
   } UTHeapHeader;
 
@@ -301,7 +302,7 @@ extern "C" {
     Variable-length, recyclable
   */
 
-  void *UTHeapQNew(size_t len) {
+  void *UTHeapQNewFnL(size_t len, uint16_t line) {
     // initialize the realm so that we can trap on any cross-thread
     // allocation activity. We could move this to EVBusRunThread
     // to save a few cycles but it doesn't seem worth it because
@@ -332,27 +333,34 @@ extern "C" {
       utBuf->h.queueIdx = queueIdx;
     }
     utBuf->h.state = UTHeapState_allocated;
+    utBuf->h.line = line;
     // remember the details so we know what to do on free
     // return a pointer to just after the header
     return (char *)utBuf + sizeof(UTHeapHeader);
   }
+
+  void *UTHeapQNewFn(size_t len) {
+    return UTHeapQNewFnL(len, 0);
+  }
+
   /*_________________---------------------------__________________
     _________________    UTHeapQRecycle         __________________
     -----------------___________________________------------------
   */
 
-  static void UTHeapQRecycle(UTHeapHeader *utBuf)
+  static void UTHeapQRecycle(UTHeapHeader *utBuf, uint16_t line)
   {
-    assert(utBuf->h.realmIdx == utRealm.realmIdx
-	   && utBuf->h.queueIdx > 0
-	   && utBuf->h.queueIdx < UT_MAX_BUFFER_Q
-	   && (utBuf->h.state == UTHeapState_allocated
-	       || utBuf->h.state == UTHeapState_foreign));
+    assert(utBuf->h.realmIdx == utRealm.realmIdx);
+    assert(utBuf->h.queueIdx > 0);
+    assert(utBuf->h.queueIdx < UT_MAX_BUFFER_Q);
+    assert(utBuf->h.state == UTHeapState_allocated
+	   || utBuf->h.state == UTHeapState_foreign);
     uint16_t queueIdx = utBuf->h.queueIdx;
     // zero the body but leave the header untouched
     memset((u_char *)utBuf + sizeof(UTHeapHeader), 0, (1 << queueIdx) - sizeof(UTHeapHeader));
     // put it back on the queue
     utBuf->h.state = UTHeapState_queued;
+    utBuf->h.line = line;
     utBuf->nxt = (UTHeapHeader *)(utRealm.bufferLists[queueIdx]);
     utRealm.bufferLists[queueIdx] = utBuf;
   }
@@ -390,7 +398,7 @@ extern "C" {
 	    // this one is mine - recycle and unlink
 	    myDebug(1, "UTHeapGC: realm %u foreign free (n=%u)", utRealm.realmIdx, UTHeap.n_foreign);
 	    utBuf->nxt = NULL;
-	    UTHeapQRecycle(utBuf);
+	    UTHeapQRecycle(utBuf, utBuf->h.line);
 	    if(prev) prev->nxt = nextBuf;
 	    else UTHeap.foreign = nextBuf;
 	    if(UT_atomic_dec(UTHeap.n_foreign) == 0)
@@ -408,26 +416,44 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  void UTHeapQFree(void *buf)
+  void UTHeapQFreeFnL(void *buf, uint16_t line)
   {
     UTHeapHeader *utBuf = UTHeapQHdr(buf);
-    // make sure it was not already freed (or corrupted)
-    assert(utBuf->nxt == NULL);
+    if(utBuf->nxt) {
+      // This object was already freed (or has been corrupted).
+      myLog(LOG_ERR, "UTHeap double-free at %u (prev=%u realm=%u%s qidx=%u state=%u)\n",
+	    line,
+	    utBuf->h.line,
+	    utBuf->h.realmIdx,
+	    (utBuf->h.realmIdx == utRealm.realmIdx ? "" : "(foreign)"),
+	    utBuf->h.queueIdx,
+	    utBuf->h.state);
+      // Should just abort here, but may choose to continue for troubleshooting purposes...
+      // abort();
+      return;
+    }
 
     if(utBuf->h.realmIdx == utRealm.realmIdx) {
-      UTHeapQRecycle(utBuf);
+      UTHeapQRecycle(utBuf, line);
     }
     else {
       // foreign realm - queue it for the owner to recycle.  Could
       // improve this to use a separate mutex and queue for each
       // realm if we ever find that there is performance pressure.
+      // Could also check to make sure that this realm actually
+      // exists, in case we have memory corruption.
       SEMLOCK_DO(UTHeap.sync_foreign) {
 	utBuf->nxt = UTHeap.foreign;
 	utBuf->h.state = UTHeapState_foreign;
+	utBuf->h.line = line;
 	UTHeap.foreign = utBuf;
 	UT_atomic_inc(UTHeap.n_foreign);
       }
     }
+  }
+
+  void UTHeapQFreeFn(void *buf) {
+    return UTHeapQFreeFnL(buf, 0);
   }
 
   /*_________________---------------------------__________________
@@ -435,17 +461,21 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  void *UTHeapQReAlloc(void *buf, size_t newSiz)
+  void *UTHeapQReAllocFnL(void *buf, size_t newSiz, uint16_t line)
   {
     if(buf == NULL)
-      return UTHeapQNew(newSiz);
+      return UTHeapQNewFnL(newSiz, line);
     size_t siz = UTHeapQSize(buf);
     if(newSiz <= siz)
       return buf;
-    void *newBuf = UTHeapQNew(newSiz);
+    void *newBuf = UTHeapQNewFnL(newSiz, line);
     memcpy(newBuf, buf, siz);
-    UTHeapQFree(buf);
+    UTHeapQFreeFnL(buf, line);
     return newBuf;
+  }
+
+  void *UTHeapQReAllocFn(void *buf, size_t newSiz) {
+    return UTHeapQReAllocFnL(buf, newSiz, 0);
   }
 
 #endif /* UTHEAP */

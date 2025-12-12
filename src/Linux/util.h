@@ -103,18 +103,29 @@ typedef int32_t ut_atomic_t;
 #ifdef UTHEAP
   // realm allocation (buffer recycling)
   void UTHeapInit(void);
-  void *UTHeapQNew(size_t len);
-  void *UTHeapQReAlloc(void *buf, size_t newSiz);
-  void UTHeapQFree(void *buf);
+  void *UTHeapQNewFn(size_t len);
+  void *UTHeapQNewFnL(size_t len, uint16_t line);
+  void *UTHeapQReAllocFn(void *buf, size_t newSiz);
+  void *UTHeapQReAllocFnL(void *buf, size_t newSiz, uint16_t line);
+  void UTHeapQFreeFn(void *buf);
+  void UTHeapQFreeFnL(void *buf, uint16_t line);
   void UTHeapGC(void);
-
-#define my_calloc UTHeapQNew
-#define my_realloc UTHeapQReAlloc
-#define my_free UTHeapQFree
+  
+  // invoke macro where possible
+#define my_calloc(len) UTHeapQNewFnL((len),__LINE__)
+#define my_realloc(buf, len) UTHeapQReAllocFnL((buf),(len),__LINE__)
+#define my_free(buf) UTHeapQFreeFnL((buf),__LINE__)
+  // but sometimes it has to be a function ptr
+#define my_calloc_f UTHeapQNewFn
+#define my_realloc_f UTHeapQReAllocFn
+#define my_free_f UTHeapQFreeFn
 #else
 #define my_calloc my_os_calloc
 #define my_realloc my_os_realloc
 #define my_free my_os_free
+#define my_calloc_f my_os_calloc
+#define my_realloc_f my_os_realloc
+#define my_free_f my_os_free
 #endif
 
   // safer string fns

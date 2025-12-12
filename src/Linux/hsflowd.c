@@ -2385,8 +2385,8 @@ extern "C" {
     // link to it themselves,  but it is not compiled with -fPIC and
     // I don't know how portable that option is.)
     cJSON_Hooks hooks;
-    hooks.malloc_fn = my_calloc;
-    hooks.free_fn = my_free;
+    hooks.malloc_fn = my_calloc_f;
+    hooks.free_fn = my_free_f;
     cJSON_InitHooks(&hooks);
 
     // allocate device tables - these ones need sync
