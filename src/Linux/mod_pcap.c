@@ -498,11 +498,14 @@ extern "C" {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     // we can find out about this in more than one way, so
     // gate it by the hash table to make sure we don't free twice.
-    if(UTHashDel(mdata->bpf_socs, bpfs)) {
+    if(bpfs->deviceName
+       && UTHashDel(mdata->bpf_socs, bpfs)) {
       tap_close(mod, bpfs);
-      if(bpfs->deviceName)
+      if(bpfs->deviceName) {
 	my_free(bpfs->deviceName);
-      my_free(bpfs);
+	bpfs->deviceName = NULL;
+	my_free(bpfs);
+      }
     }
   }
 
