@@ -496,11 +496,14 @@ extern "C" {
   */
   static void removeAndFreeBPFSocket(EVMod *mod,  BPFSoc *bpfs) {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
-    tap_close(mod, bpfs);
-    UTHashDel(mdata->bpf_socs, bpfs);
-    if(bpfs->deviceName)
-      my_free(bpfs->deviceName);
-    my_free(bpfs);
+    // we can find out about this in more than one way, so
+    // gate it by the hash table to make sure we don't free twice.
+    if(UTHashDel(mdata->bpf_socs, bpfs)) {
+      tap_close(mod, bpfs);
+      if(bpfs->deviceName)
+	my_free(bpfs->deviceName);
+      my_free(bpfs);
+    }
   }
 
   /*_________________---------------------------__________________
