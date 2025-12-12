@@ -43,6 +43,7 @@ extern "C" {
 
   typedef struct _HSP_mod_PCAP {
     UTHash *bpf_socs;
+    UTHash *bpf_socs_idty;
     EVBus *packetBus;
     uint32_t open_count;
     uint32_t close_count;
@@ -292,7 +293,7 @@ extern "C" {
     BPFSoc *bpfs;
     uint ps_recv_total=0;
     uint ps_drop_total=0;
-    UTHASH_WALK(mdata->bpf_socs, bpfs) {
+    UTHASH_WALK(mdata->bpf_socs_idty, bpfs) {
       struct pcap_stat stats;
       if(bpfs->pcap
 	 && pcap_stats(bpfs->pcap, &stats) == 0) {
@@ -475,7 +476,6 @@ extern "C" {
     }
     EVDebug(mod, 1, "addBPFSocket(%s) speed=%"PRIu64, adaptor->deviceName, adaptor->ifSpeed);
     BPFSoc *bpfs = (BPFSoc *)my_calloc(sizeof(BPFSoc));
-    UTHashAdd(mdata->bpf_socs, bpfs);
     bpfs->module = mod;
     bpfs->adaptor = adaptor;
     setStr(&bpfs->deviceName, adaptor->deviceName);
@@ -484,6 +484,8 @@ extern "C" {
     bpfs->vport_set = pcap->vport_set;
     bpfs->samplingRate = pcap->sampling_n;
     bpfs->samplingRateSet = pcap->sampling_n_set;
+    UTHashAdd(mdata->bpf_socs_idty, bpfs);
+    UTHashAdd(mdata->bpf_socs, bpfs);
     // if the tap does not open, keep bpfs object (but indicate using flag)
     bpfs->tap_open_ok = tap_open(mod, bpfs);
     // say that we added a new bpfs,  even if it didn't work
@@ -499,7 +501,8 @@ extern "C" {
     // we can find out about this in more than one way, so
     // gate it by the hash table to make sure we don't free twice.
     if(bpfs->deviceName
-       && UTHashDel(mdata->bpf_socs, bpfs)) {
+       && UTHashDel(mdata->bpf_socs_idty, bpfs)) {
+      UTHashDel(mdata->bpf_socs, bpfs);
       tap_close(mod, bpfs);
       if(bpfs->deviceName) {
 	my_free(bpfs->deviceName);
@@ -613,10 +616,11 @@ extern "C" {
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     // close sockets and remove adaptor references for anything that no longer exists
-    UTArray *elems = UTHashElements(mdata->bpf_socs);
+    UTArray *elems = UTHashElements(mdata->bpf_socs_idty);
     BPFSoc *bpfs;
     UTARRAY_WALK(elems, bpfs) {
-      if(adaptorByName(sp, bpfs->deviceName) == NULL) {
+      if(bpfs->deviceName
+	 && adaptorByName(sp, bpfs->deviceName) == NULL) {
 	removeAndFreeBPFSocket(mod, bpfs);
       }
     }
@@ -632,6 +636,7 @@ extern "C" {
     mod->data = my_calloc(sizeof(HSP_mod_PCAP));
     HSP_mod_PCAP *mdata = (HSP_mod_PCAP *)mod->data;
     mdata->bpf_socs = UTHASH_NEW(BPFSoc, deviceName, UTHASH_SKEY);
+    mdata->bpf_socs_idty = UTHASH_NEW(BPFSoc, deviceName, UTHASH_IDTY);
     // register call-backs
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
