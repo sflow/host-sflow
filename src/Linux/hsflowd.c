@@ -1345,10 +1345,46 @@ extern "C" {
     // Do something useful with siginfo_t
     if (sig == SIGSEGV)
       fprintf(outFile, "SIGSEGV, faulty address is %p\n", info->si_addr);
-
-    // thread info
+#endif
+    // hsflowd and thread info
     EVBus *bus = EVCurrentBus();
-    fprintf(outFile, "current bus: %s\n", (bus ? bus->name : "<none>"));
+    fprintf(outFile, "hsflowd version %s, current bus: %s\n",
+	    STRINGIFY_DEF(HSP_VERSION),
+	    (bus ? bus->name : "<none>"));
+
+    // now see if we can find gdb for a *real* backtrace
+#ifdef GDB
+    char *gdbPath = STRINGIFY_DEF(GDB);
+    if(my_strlen(gdbPath)) {
+      char pidStr[32];
+      sprintf(pidStr, "%u", getpid());
+      pid_t childPid = fork();
+      if(childPid == -1) {
+	fprintf(outFile, "gdb backtrace fork failed\n");
+      }
+      else if(childPid == 0) {
+	// successful fork. In child.
+	char *cmd[] = {
+	  gdbPath,
+	  "-p",
+	  pidStr,
+	  "-batch",
+	  "-ex",
+	  "thread apply all bt full",
+	  "-ex",
+	  "detach",
+	  NULL
+	};
+	fprintf(outFile, "Attempting gdb stack trace for pid=%s\n", pidStr);
+	if(execv(cmd[0], cmd)) {
+	  fprintf(outFile, "execv failed : %s\n", strerror(errno));
+	}
+      }
+      else {
+	// in parent
+	waitpid(childPid, NULL, 0);
+      }
+    }
 #endif
   }
 
