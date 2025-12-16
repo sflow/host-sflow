@@ -301,7 +301,6 @@ extern "C" {
 
   static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP *sp = (HSP *)EVROOTDATA(mod);
-
     // the list of pcap {} sections may expand to a longer list of BPFSoc
     // objects if we are matching with patterns or on ifSpeed etc.
     SFLAdaptor *adaptor;
@@ -309,31 +308,81 @@ extern "C" {
       for(HSPPcap *pcap = sp->epcap.pcaps; pcap; pcap = pcap->nxt) {
 	if(pcap->dynamic) // ignore dynamic pcaps here
 	  continue;
-	if(pcap->dev
-	   && adaptorByName(sp, pcap->dev) != adaptor)
-	  continue;
+	bool specificDevSelected = NO;
+	if(pcap->dev) {
+	  specificDevSelected = (adaptorByName(sp, pcap->dev) == adaptor);
+	  if(!specificDevSelected)
+	    continue;
+	}
 	if(pcap->dev_regex
 	   && regexec(pcap->dev_regex, adaptor->deviceName, 0, NULL, 0) != 0)
 	  continue;
 	if(pcap->speed_set
 	   && !speedTestOK(mod, pcap, adaptor))
 	    continue;
-	// passed speed test, but there may be other reasons to reject:
+	// passed speed test, but there may be other reasons to reject,
+	// especially if the device has been found using a pattern or speed range.
+	// In general these restrictions are recommended for indvidual pcap{dev=xyz}
+	// configurations too, but there are cases where the sFlow model is applied
+	// in abstract to interfaces that are not actually physical, so if you ask for
+	// packet-sampling on a particular virtual, bond or vlan interface then you
+	// (hopefully) know what you are doing, and you will see only a warning here.
+
+	// Background: the sFlow data model is designed as a whole-network monitoring
+	// system. The network is represented as a graph with nodes (agents) and
+	// edges (links) so that an observation point at one end of a link corresponds
+	// to an equivalent observation point at the other end. In most cases this
+	// means only physical, layer-2 ports (NICs) are considered to be valid data
+	// sources. Abstractions like VLANs, MPLS label-stack or routing sub-interfaces
+	// are captured only by annotations that may appear in the packet-samples. And
+	// bond/LAG interfaces are treated specially so that LAG/MLAG results can
+	// be added up correctly by a network-wide traffic dedup algorithm (the
+	// bond sends only counters with extra meta-data, while the packet samples
+	// appear only on the component datasources: https://sflow.org/sflow_lag.txt).
+
+	// However, on a server that is naturally a "leaf" node in the graph, there
+	// it is often convenient to present a NIC as one (upstream-facing) port
+	// on the graph node and some internal virtual interfaces as additional ports
+	// on the node.
+	// This happens when we monitor, say, ports on a docker bridge, ports on a
+	// virtual switch or ports that connect to Kubernetes pods. In this scenario
+	// the sFlow data model is still consistent as seen by the sFlow collector,
+	// but we have effectively added an extra node to the graph and now our new
+	// "leaves" are VMs, pods, containers etc.
+
 	HSPAdaptorNIO *nio = (HSPAdaptorNIO *)adaptor->userData;
 	if(nio->bond_master) {
-	  EVDebug(mod, 1, "skip %s (bond_master)", adaptor->deviceName);
-	  continue;
+	  if(specificDevSelected) {
+	    EVDebug(mod, 1, "WARNING: specific config dev %s is bond_master", adaptor->deviceName);
+	  }
+	  else {
+	    EVDebug(mod, 1, "skip %s (bond_master)", adaptor->deviceName);
+	    continue;
+	  }
 	}
 	if(nio->vlan != HSP_VLAN_ALL) {
-	  EVDebug(mod, 1, "skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
-	  continue;
+	  if(specificDevSelected) {
+	    EVDebug(mod, 1, "WARNING: specific config dev %s is vlan=%u interface", adaptor->deviceName, nio->vlan);
+	  }
+	  else {
+	    EVDebug(mod, 1, "skip %s (vlan=%u)", adaptor->deviceName, nio->vlan);
+	    continue;
+	  }
 	}
 	if(nio->devType != HSPDEV_PHYSICAL
+	   && nio->devType != HSPDEV_BRIDGE
 	   && nio->devType != HSPDEV_OTHER) {
-	  EVDebug(mod, 1, "skip %s (devType=%s)",
-		  adaptor->deviceName,
-		  devTypeName(nio->devType));
-	  continue;
+	  if(specificDevSelected) {
+	    EVDebug(mod, 1, "WARNING specific config dev %s has devType=%s",
+		    adaptor->deviceName,
+		    devTypeName(nio->devType));
+	  }
+	  else {
+	    EVDebug(mod, 1, "skip %s (devType=%s)",
+		    adaptor->deviceName,
+		    devTypeName(nio->devType));
+	    continue;
+	  }
 	}
 	// passed all the tests
 	addBPFSocket(mod, pcap, adaptor);
