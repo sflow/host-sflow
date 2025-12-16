@@ -429,7 +429,7 @@ extern "C" {
 	    utBuf->h.queueIdx,
 	    utBuf->h.state);
       // Should just abort here, but may choose to continue for troubleshooting purposes...
-      // abort();
+      abort();
       return;
     }
 
