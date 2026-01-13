@@ -72,6 +72,7 @@ type SFlowContainer struct {
 	metricsCountdown int
 	mark             bool
 	pollNow          bool
+	pollTime         time.Time
 	Metrics          struct {
 		Names struct {
 			Image            string
@@ -125,11 +126,14 @@ type CMonitor struct {
 	c_countdown  int
 	c_pollM      int
 	c_pollC      int
+	c_finalC     int
 	c_apiEvt     int
 	c_pollL      int
+	unixsock     string
 }
 
 func main() {
+	unixsock := flag.String("unixsock", "/run/containerd/containerd.sock", "open this CRI API unixsocket")
 	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	debugLevel := flag.Int("debugLevel", 0, "set debug level")
@@ -154,8 +158,10 @@ func main() {
 		c_countdown:  0,
 		c_pollM:      0,
 		c_pollC:      0,
+		c_finalC:     0,
  	        c_apiEvt:     0,
 		c_pollL:      0,
+		unixsock:     *unixsock,
 	}
 
 	if err := cm.readConfig("/etc/hsflowd.auto"); err != nil {
@@ -322,7 +328,24 @@ func (cm *CMonitor) loadContainers(ctx context.Context, client *containerd.Clien
 	return nil
 }
 
+
+func (cm *CMonitor) sendMetrics(sfc *SFlowContainer) error {
+	mjson, err := json.Marshal(sfc)
+	if err != nil {
+		return err
+	}
+	cm.dataLog(string(mjson))
+	if cm.dbg >= 1 {
+		// also pretty-print
+		mjson, err = json.MarshalIndent(sfc, "", "   ")
+		cm.log(0, string(mjson))
+	}
+	return nil
+}
+
+
 func (cm *CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, sfc *SFlowContainer) error {
+	sfc.pollTime = time.Now()
 	cm.c_pollM += 1
 	cm.log(1, "pollmetrics: ", sfc.Id)
 	myctx := namespaces.WithNamespace(ctx, sfc.Namespace)
@@ -417,17 +440,15 @@ func (cm *CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, 
 		return errors.New("unexpected metrics type")
 	}
 
-	mjson, err := json.Marshal(sfc)
+	err = cm.sendMetrics(sfc)
 	if err != nil {
 		return err
 	}
-	cm.dataLog(string(mjson))
-	if cm.dbg >= 1 {
-		// also pretty-print
-		mjson, err = json.MarshalIndent(sfc, "", "   ")
-		cm.log(0, string(mjson))
-	}
 	return nil
+}
+
+func (cm *CMonitor) okToPoll(sfc *SFlowContainer) bool {
+	return (sfc.pollTime.IsZero() || time.Since(sfc.pollTime) > (time.Second * 1))
 }
 
 func (cm *CMonitor) metricTick(ctx context.Context, client *containerd.Client) error {
@@ -438,21 +459,21 @@ func (cm *CMonitor) metricTick(ctx context.Context, client *containerd.Client) e
 		cm.ctrLog("gauge32 ncontainers ", len(cm.sfcontainers))
 		cm.ctrLog("counter32 metricpolls ", cm.c_pollM)
 		cm.ctrLog("counter32 containerpolls ", cm.c_pollC)
+		cm.ctrLog("counter32 containerfinals ", cm.c_finalC)
 		cm.ctrLog("counter32 apievents ", cm.c_apiEvt)
 		cm.ctrLog("counter32 eventloop", cm.c_pollL)
 	}
 	for _, sfc := range cm.sfcontainers {
-		if sfc.pollNow {
-			// extra poll at beginning or end of lifecycle
-			sfc.pollNow = false
+		if (sfc.pollTime.IsZero()) {
+			// extra poll at beginning of lifecycle
 			err := cm.pollMetrics(ctx, client, sfc)
 			if err != nil {
 				return err
 			}
 		}
 		sfc.metricsCountdown--
-		// TODO: don't poll if not in state running
-		if sfc.metricsCountdown <= 0 {
+		// TODO: don't poll if not in state running?
+		if (sfc.metricsCountdown <= 0 && cm.okToPoll(sfc)) {
 			sfc.metricsCountdown = cm.polling
 			err := cm.pollMetrics(ctx, client, sfc)
 			if err != nil {
@@ -463,35 +484,67 @@ func (cm *CMonitor) metricTick(ctx context.Context, client *containerd.Client) e
 	return nil
 }
 
-func (cm *CMonitor) pollContainer(ctx context.Context, client *containerd.Client, nsname string, id string) error {
-	cm.c_pollC += 1
+func (cm *CMonitor) evtGetContainer(ctx context.Context, client *containerd.Client, nsname string, id string) (*SFlowContainer, error) {
 	nsctx := namespaces.WithNamespace(ctx, nsname)
 	cont, err := client.LoadContainer(nsctx, id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	key := cm.sFlowContainerKey(nsname, cont)
 	sfc, ok := cm.sfcontainers[key]
 	if !ok {
 		err := cm.loadContainer(nsctx, nsname, cont)
 		if err != nil {
+			return nil, err
+		}
+		sfc = cm.sfcontainers[key]
+	}
+	return sfc, nil
+}
+
+func (cm *CMonitor) evtPollContainer(ctx context.Context, client *containerd.Client, nsname string, id string) error {
+	cm.c_pollC += 1
+	sfc, err := cm.evtGetContainer(ctx, client, nsname, id)
+	if err != nil {
+		return err
+	}
+	if (sfc != nil) {
+		// Don't poll again if we just polled it. This allows us to trigger a poll
+		// on various events without risk that we will trigger multiple times in
+		// quick succession. We do want to trigger promptly on the first event in
+		// the flurry, however, so we can get metrics before the container goes away.
+		// That seems to depend on how quickly the TaskExit event is followed by
+		// the removal of the cgroup directory.
+		// TODO: It may be necessary to put a thumb on the cgroup just to keep it
+		// around long enough to read the final stats.
+		if(cm.okToPoll(sfc)) {
+			cm.pollMetrics(ctx, client, sfc)
+		}
+	}
+	return nil
+}
+
+func (cm *CMonitor) evtFinalizeContainer(ctx context.Context, client *containerd.Client, nsname string, id string) error {
+	cm.c_finalC += 1
+	sfc, err := cm.evtGetContainer(ctx, client, nsname, id)
+	if err != nil {
+		return err
+	}
+	if (sfc != nil) {
+		// tell hsflowd that this container has gone away
+		sfc.Metrics.Cpu.VirDomainState = uint32(vir_shutdown)
+		// including the same metrics as last time
+		err = cm.sendMetrics(sfc)
+		if(err != nil) {
 			return err
 		}
-		sfc, ok = cm.sfcontainers[key]
-	}
-	if ok {
-		// We don't seem to be able to get the last metrics on a "TaskExit" event
-		// so there is no need to rush this.  And by just setting the flag here we
-		// avoid polling metrics in quick succession if two triggering events are seen.
-		sfc.pollNow = true
-		// cm.pollMetrics(ctx, client, sfc)
 	}
 	return nil
 }
 
 func (cm *CMonitor) monitorContainers(ctx context.Context) error {
 	cm.log(1, "monitorContainers polling=", cm.polling)
-	client, err := containerd.New("/run/containerd/containerd.sock")
+	client, err := containerd.New(cm.unixsock)
 	if err != nil {
 		return err
 	}
@@ -547,6 +600,7 @@ func (cm *CMonitor) monitorContainers(ctx context.Context) error {
 				}
 
 				var pollIt string = ""
+				var finalizeIt string = ""
 				switch v.(type) {
 				case *apievents.TaskCreate:
 					evt := v.(*apievents.TaskCreate)
@@ -562,6 +616,7 @@ func (cm *CMonitor) monitorContainers(ctx context.Context) error {
 					evt := v.(*apievents.TaskExit)
 					cm.log(1, "type=TaskExit containerID=", evt.ContainerID)
 					pollIt = evt.ContainerID
+					finalizeIt = evt.ContainerID
 				case *apievents.TaskDelete:
 					evt := v.(*apievents.TaskDelete)
 					cm.log(1, "type=TaskDelete id=", evt.ID, "containerID=", evt.ContainerID)
@@ -623,9 +678,20 @@ func (cm *CMonitor) monitorContainers(ctx context.Context) error {
 					cm.log(1, "type=SnapshotRemove key=", evt.Key)
 				}
 				if pollIt != "" {
-					err := cm.pollContainer(ctx, client, e.Namespace, pollIt)
+					err := cm.evtPollContainer(ctx, client, e.Namespace, pollIt)
 					if err != nil {
 						cm.log(0, "error polling container: ", pollIt, err)
+						if(finalizeIt != "") {
+							// We get here because the container is done but maybe we
+							// have not yet reported that it is no longer running.
+							// So we force out one more update with state == shutdown,
+							// otherwise supplying the same metric values as the last
+							// successful poll.
+							err := cm.evtFinalizeContainer(ctx, client, e.Namespace, finalizeIt)
+							if err != nil {
+								cm.log(0, "error finalizing container: ", finalizeIt, err)
+							}
+						}
 					}
 				}
 			}
