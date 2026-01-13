@@ -1381,6 +1381,7 @@ extern "C" {
   }
 
   static void evt_tock(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     HSP_mod_K8S *mdata = (HSP_mod_K8S *)mod->data;
     if(mdata->configRevisionNo
        && mdata->readerPid == 0) {
@@ -1389,7 +1390,11 @@ extern "C" {
       // snprintf(level, 16, "%u", getDebug());
       // char *cmd[] = { HSP_K8S_READER, "--debugLevel", level,  NULL };
       // but can always debug reader separately, so just invoke it like this:
-      char *cmd[] = { HSP_K8S_READER, NULL };
+      char *cmd[] = { HSP_K8S_READER, NULL, NULL, NULL };
+      if(sp->k8s.unixsock) {
+	cmd[1] = "--unixsock";
+	cmd[2] = sp->k8s.unixsock;
+      }
       mdata->readerPid = EVBusExec(mod, mdata->pollBus, mdata, cmd, readCB);
     }
   }

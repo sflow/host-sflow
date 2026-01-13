@@ -1804,6 +1804,9 @@ extern "C" {
 	    case HSPTOKEN_SETIFNAME:
 	      if((tok = expectONOFF(sp, tok, &sp->k8s.setIfName)) == NULL) return NO;
 	      break;
+	    case HSPTOKEN_UNIXSOCK:
+	      if((tok = expectString(sp, tok, &sp->k8s.unixsock, "path")) == NULL) return NO;
+	      break;
 	    default:
 	      unexpectedToken(sp, tok, level[depth]);
 	      return NO;

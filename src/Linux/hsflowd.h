@@ -671,6 +671,7 @@ extern "C" {
       bool eof;
       bool setIfAlias;
       bool setIfName;
+      char *unixsock;
     } k8s;
     struct {
       bool cumulus;
