@@ -261,7 +261,17 @@ extern "C" {
     HSPK8sContainer *container;
     UTHASH_WALK(pod->containers, container) {
       if(container->stats.state == SFL_VIR_DOMAIN_RUNNING) {
+	// if any container in the pod is running,  then say the pod is running...
 	stats.state = SFL_VIR_DOMAIN_RUNNING;
+      }
+      else if(stats.state != SFL_VIR_DOMAIN_RUNNING) {
+	// ...otherwise follow whatever is the state of the last container in this pod.
+	// This way we should report that the pod has stopped (or crashed) along with
+	// the last counter-sample update.  So the collector can know if the pod ended
+	// gracefully, reclaim resources immiediately, and still accrue the residual
+	// counter-deltas for the last moments. This could be important if the pod only
+	// ran for a few seconds.
+	stats.state = container->stats.state;
       }
       stats.cpu_count += container->stats.cpu_count;
       EVDebug(mod, 2, "getCounters_POD(): container %s has cpu_count %u (total now = %u)",
@@ -279,10 +289,17 @@ extern "C" {
       stats.dsk.wr_req += container->stats.dsk.wr_req;
       stats.dsk.wr_bytes += container->stats.dsk.wr_bytes;
       stats.dsk.errs += container->stats.dsk.errs;
-      // TODO: accumulate net counters too?  (If they appear)
+      stats.net.bytes_in += container->stats.net.bytes_in;
+      stats.net.bytes_in += container->stats.net.bytes_in;
+      stats.net.pkts_in += container->stats.net.pkts_in;
+      stats.net.errs_in += container->stats.net.errs_in;
+      stats.net.drops_in += container->stats.net.drops_in;
+      stats.net.bytes_out += container->stats.net.bytes_out;
+      stats.net.pkts_out += container->stats.net.pkts_out;
+      stats.net.errs_out += container->stats.net.errs_out;
+      stats.net.drops_out += container->stats.net.drops_out;
     }
 
-    // TODO: how to detect that a POD has stopped?  No containers running?
     pod->state = stats.state;
     
     // host ID
