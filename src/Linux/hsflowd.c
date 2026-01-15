@@ -1329,14 +1329,14 @@ extern "C" {
   */
 
   void log_backtrace(int sig, siginfo_t *info, FILE *out) {
+    FILE *outFile = out ?: stderr;
+
 #ifdef HAVE_BACKTRACE
 #define HSP_NUM_BACKTRACE_PTRS 50
     static void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
 
     // ask for the backtrace pointers
     size_t siz = backtrace(backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
-
-    FILE *outFile = out ?: stderr;
 
     // do this first in case everything else is compromised
     backtrace_symbols_fd(backtracePtrs, siz, fileno(outFile));
