@@ -65,6 +65,14 @@ extern "C" {
     ----------------___________________________------------------
   */
 
+  static HSPLocalIP *getLocalIP(HSP *sp, SFLAddress *addr) {
+    UTHash *localHT = (addr->type == SFLADDRESSTYPE_IP_V6)
+      ? sp->localIP6
+      : sp->localIP;
+    HSPLocalIP search = { .ipAddr = *addr };
+    return UTHashGet(localHT, &search);
+  }
+
   static bool addLocalIP(HSP *sp, UTHash *ht, SFLAddress *addr, char *dev) {
     HSPLocalIP searchIP = { .ipAddr = *addr };
     HSPLocalIP *lip = UTHashGet(ht, &searchIP);
@@ -231,6 +239,13 @@ extern "C" {
 	      if(hexToBinary(addr, v6addr.address.ip_v6.addr, 16) == 16) {
 		if(addLocalIP(sp, addrHT, &v6addr, adaptor->deviceName))
 		  addresses_added++;
+	      }
+	      if(flags & 0x80) {
+		// The kernel's IFF_IN6_AUTOCONF flag is here. Capture it so we
+		// can avoid picking one of these SLAAC addresses as the agent address.
+		HSPLocalIP *v6AutoIP = getLocalIP(sp, &v6addr);
+		if(v6AutoIP)
+		  v6AutoIP->v6auto = YES;
 	      }
 	    }
 	  }
@@ -957,14 +972,11 @@ extern "C" {
   ________________   isLocalAddress          __________________
   ----------------___________________________------------------
 */
+
   bool isLocalAddress(HSP *sp, SFLAddress *addr) {
-    UTHash *localHT = (addr->type == SFLADDRESSTYPE_IP_V6)
-      ? sp->localIP6
-      : sp->localIP;
-    HSPLocalIP search = { .ipAddr = *addr };
-    return (UTHashGet(localHT, &search) != NULL);
+    return (getLocalIP(sp, addr) != NULL);
   }
-  
+
 
 #if defined(__cplusplus)
 } /* extern "C" */

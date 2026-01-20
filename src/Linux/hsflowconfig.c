@@ -1029,13 +1029,13 @@ extern "C" {
 
     return tokens;
   }
-  
+
   /*_________________---------------------------__________________
     _________________  agentAddressPriority     __________________
     -----------------___________________________------------------
   */
 
-  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback)
+  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int32_t vlan, bool loopback, bool v6auto)
   {
     EnumIPSelectionPriority ipPriority = IPSP_NONE;
 
@@ -1150,7 +1150,8 @@ extern "C" {
 	      uint32_t priority = agentAddressPriority(sp,
 						       &lip->ipAddr,
 						       adaptorNIO->vlan,
-						       adaptorNIO->loopback);
+						       adaptorNIO->loopback,
+						       lip->v6auto);
 	      // remember the highest priority score (and which dev it was)
 	      if(priority > lip->ipPriority) {
 		lip->ipPriority = priority;
@@ -1204,6 +1205,10 @@ extern "C" {
       return NO;
     if(pri_challenge > pri_local)
       return YES;
+
+    // tiebreaker (0) : allocated address beats auto (SLAAC) address
+    if(challenger->v6auto != localIP->v6auto)
+      return (challenger->v6auto == NO);
 
     // tiebreaker (1) : lower SONiC selectionPriority wins
     if(challenger->minSelectionPriority != localIP->minSelectionPriority)

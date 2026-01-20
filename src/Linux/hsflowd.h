@@ -277,6 +277,7 @@ extern "C" {
 		 IPSP_LOOPBACK4,
 		 IPSP_SELFASSIGNED4,
 		 IPSP_IP6_SCOPE_LINK,
+		 IPSP_IP6_AUTO,
 		 IPSP_VLAN6,
 		 IPSP_VLAN4,
 		 IPSP_IP6_SCOPE_UNIQUE,
@@ -294,6 +295,7 @@ extern "C" {
     uint32_t discoveryIndex;
     uint32_t minIfIndex;
     uint32_t minSelectionPriority;
+    bool v6auto;
   } HSPLocalIP;
 
   typedef struct _HSP_ethtool_counters {
@@ -896,7 +898,7 @@ extern "C" {
   void clearApplicationSettings(HSPSFlowSettings *settings);
   int lookupApplicationSettings(HSPSFlowSettings *settings, char *prefix, char *app, uint32_t *p_sampling, uint32_t *p_polling);
   uint32_t lookupPacketSamplingRate(SFLAdaptor *adaptor, HSPSFlowSettings *settings);
-  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int vlan, int loopback);
+  uint32_t agentAddressPriority(HSP *sp, SFLAddress *addr, int32_t vlan, bool loopback, bool v6auto);
   bool selectAgentAddress(HSP *sp, bool *p_changed, bool *p_mismatch);
   void addAgentCIDR(HSPSFlowSettings *settings, HSPCIDR *cidr, bool atEnd);
   void clearAgentCIDRs(HSPSFlowSettings *settings);
