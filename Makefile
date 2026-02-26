@@ -57,6 +57,7 @@ rpm: dist
 	MYARCH=`uname -m`; \
 	MYVER=`./getVersion`; \
 	MYREL=`./getRelease`; \
+	SPEC=`./getRpmSpec $(FEATURES)`; \
 	MYTARBALL=$(PROG)-$$MYVER-$$MYREL.tar.gz; \
 	mkdir -p $(MY_RPM_TOP)/BUILD; \
 	mkdir -p $(MY_RPM_TOP)/SRPMS; \
@@ -65,7 +66,7 @@ rpm: dist
 	rm -rf $$MYSRCDIR; \
 	mkdir -p $$MYSRCDIR; \
 	cp $$MYTARBALL $$MYSRCDIR; \
-	rpmbuild --define "_topdir $(MY_RPM_TOP)" --define "_FEATURES \"$(FEATURES)\"" --buildroot=$(MY_RPM_BUILDROOT) -ba $(PROG).spec; \
+	rpmbuild --define "_topdir $(MY_RPM_TOP)" --define "_FEATURES \"$(FEATURES)\"" --buildroot=$(MY_RPM_BUILDROOT) -ba $$SPEC; \
 	echo "==============="; \
 	MYRPM="$(MY_RPM_TOP)/RPMS/$$MYARCH/$(PROG)-$$MYVER-$$MYREL.$$MYARCH.rpm"; \
 	MYSRPM="$(MY_RPM_TOP)/SRPMS/$(PROG)-$$MYVER-$$MYREL.src.rpm"; \
@@ -126,7 +127,6 @@ deb: $(PROG)
 	PLATFORM=`uname`; \
 	mkdir -p debian/DEBIAN; \
 	mkdir -p debian/usr/sbin; \
-	mkdir -p debian/etc/init.d; \
 	mkdir -p debian/etc/hsflowd/modules; \
 	mkdir -p debian/lib/systemd/system; \
 	mkdir -p debian/etc/dbus-1/system.d; \

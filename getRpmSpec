@@ -1,0 +1,6 @@
+# This helper script chooses the rpm spec file to invoke based on values in the $FEATURES list provided.
+if echo "$*" | grep -c INITD >/dev/null; then
+   echo "hsflowd_initd.spec"
+else
+   echo "hsflowd.spec";
+fi

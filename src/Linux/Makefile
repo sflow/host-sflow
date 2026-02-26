@@ -136,6 +136,10 @@ endif
 #  XTGTS += $(FEATURES_CONTAINERD)
 #endif
 
+ifneq ($(shell echo $(FEATURES2)|grep -c " INITD "),0)
+  HSFLOWD_USE_INITD=yes
+endif
+
 # in XTGTS2 every token has spaces before and after
 XTGTS2=" $(XTGTS) "
 $(info $$XTGTS is [$(XTGTS)])
@@ -457,6 +461,8 @@ VPP: mod_vpp.so
 
 EPCAP: sample.skel.h sample.bpf.o mod_epcap.so
 
+INITD:
+
 #########  hsflowd  #########
 
 hsflowd: $(OBJS_HSFLOWD) $(HEADERS)
@@ -710,10 +716,13 @@ install: all
 	$(INSTALL) -m 700 hsflowd $(BIN_D)
 	$(INSTALL) -d $(CONF_D)
 	$(INSTALL) -m 644 $(HSFLOWD_CONF) $(CONF_D)/hsflowd.conf
-	$(INSTALL) -d $(SYSTEMD_D)
-	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMD_D)/hsflowd.service
+ifeq ($(HSFLOWD_USE_INITD),yes)
 	$(INSTALL) -d $(INIT_D)
 	$(INSTALL) -m 755 $(HSFLOWD_INITSCRIPT) $(INIT_D)/hsflowd
+else
+	$(INSTALL) -d $(SYSTEMD_D)
+	$(INSTALL) -m 644 $(HSFLOWD_SYSTEMD_SERVICE) $(SYSTEMD_D)/hsflowd.service
+endif
 	$(INSTALL) -d $(MOD_D)
 	$(INSTALL) -m 755 *.so $(MOD_D)
 ifneq ($(strip $(HSFLOWD_DBUS_CONF)),)
