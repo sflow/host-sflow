@@ -382,8 +382,14 @@ func (cm *CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, 
 		// extract metrics into export struct
 		sfc.Metrics.Cpu.CpuCount = uint32(len(data.CPU.Usage.PerCPU))
 		// cpu units are in nS - see github containerd/metrics/cgrops/v1
-		// hsflowd mod_containerd expects nS, so we can use directly.
-		sfc.Metrics.Cpu.CpuTime = uint32(data.CPU.Usage.Total)
+		// hsflowd mod_containerd was expecting nS before, but converting
+		// that to a 32-bit integer here was probably clipping it since
+		// a 32-bit nanosecond counter can roll over in 4 seconds.  JSON
+		// does not do so well with 64-bit integers, but if we convert
+		// to milliseconds before sending then we can stick with 32-bits.
+		// This just requires an equivalent change in mod_k8s
+		// and mod_containerd in hsflowd.
+		sfc.Metrics.Cpu.CpuTime = uint32(data.CPU.Usage.Total / 1000000)
 		sfc.Metrics.Mem.Memory = data.Memory.Usage.Usage
 		sfc.Metrics.Mem.MaxMemory = data.Memory.Usage.Max
 		for _, ioentry := range data.Blkio.IoServiceBytesRecursive {

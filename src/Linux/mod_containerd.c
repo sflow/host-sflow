@@ -228,7 +228,7 @@ extern "C" {
     cpuElem.tag = SFLCOUNTERS_HOST_VRT_CPU;
     cpuElem.counterBlock.host_vrt_cpu.state = container->state;
     cpuElem.counterBlock.host_vrt_cpu.nrVirtCpu = container->cpu_count ?: (uint32_t)round(container->cpu_count_dbl);
-    cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)(container->cpu_total / 1000000); // convert to mS
+    cpuElem.counterBlock.host_vrt_cpu.cpuTime = (uint32_t)container->cpu_total; // converted to mS in containerd.go
     SFLADD_ELEMENT(&cs, &cpuElem);
 
     SFLCounters_sample_element memElem = { 0 };
