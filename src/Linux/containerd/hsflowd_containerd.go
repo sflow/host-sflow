@@ -388,7 +388,8 @@ func (cm *CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, 
 		// does not do so well with 64-bit integers, but if we convert
 		// to milliseconds before sending then we can stick with 32-bits.
 		// This just requires an equivalent change in mod_k8s
-		// and mod_containerd in hsflowd.
+		// and mod_containerd in hsflowd.  Note that in v2 metrics
+		// below this number is given in uS rather than nS.
 		sfc.Metrics.Cpu.CpuTime = uint32(data.CPU.Usage.Total / 1000000)
 		sfc.Metrics.Mem.Memory = data.Memory.Usage.Usage
 		sfc.Metrics.Mem.MaxMemory = data.Memory.Usage.Max
@@ -428,7 +429,7 @@ func (cm *CMonitor) pollMetrics(ctx context.Context, client *containerd.Client, 
 		data2 = v
 		cm.log(1, data2)
 		sfc.Metrics.Cpu.CpuCount = 1
-		sfc.Metrics.Cpu.CpuTime = uint32(data2.CPU.UsageUsec) // nS (see for v1 above)
+		sfc.Metrics.Cpu.CpuTime = uint32(data2.CPU.UsageUsec / 1000) // uS->mS (changed from v1)
 		sfc.Metrics.Mem.Memory = data2.Memory.Usage
 		sfc.Metrics.Mem.MaxMemory = data2.Memory.UsageLimit
 		for _, ioentry := range data2.Io.Usage {
