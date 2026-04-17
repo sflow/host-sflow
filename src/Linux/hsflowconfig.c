@@ -1485,6 +1485,7 @@ extern "C" {
 	    sp->dropmon.hw_function = NO;
 	    sp->dropmon.sw_passive = NO;
 	    sp->dropmon.hw_passive = NO;
+	    sp->dropmon.force = YES;
 	    level[++depth] = HSPOBJ_DROPMON;
 	    break;
 	  case HSPTOKEN_PCAP:
@@ -1891,6 +1892,9 @@ extern "C" {
 	      break;
 	    case HSPTOKEN_START:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.start)) == NULL) return NO;
+	      break;
+	    case HSPTOKEN_FORCE:
+	      if((tok = expectONOFF(sp, tok, &sp->dropmon.force)) == NULL) return NO;
 	      break;
 	    case HSPTOKEN_SW:
 	      if((tok = expectONOFF(sp, tok, &sp->dropmon.sw)) == NULL) return NO;
