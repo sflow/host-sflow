@@ -316,6 +316,14 @@ extern "C" {
 #define HSP_ETCTR_ADMIN  0x0040
   typedef uint32_t ETCTRFlags;
 
+#ifdef HSP_REPORT_PFC
+#define HSP_PFC_CHANNELS 8
+  typedef struct _HSP_pfc_counters {
+    uint32_t pfc_rx[HSP_PFC_CHANNELS];
+    uint32_t pfc_tx[HSP_PFC_CHANNELS];
+  } HSP_pfc_counters;
+#endif /* HSP_REPORT_PFC */
+
   typedef enum { HSPDEV_OTHER=0,
 		 HSPDEV_PHYSICAL,
 		 HSPDEV_VETH,
@@ -367,6 +375,10 @@ extern "C" {
     // latched counter for delta calculation
     HSP_ethtool_counters et_last;
     HSP_ethtool_counters et_total;
+#ifdef HSP_REPORT_PFC
+    HSP_pfc_counters pfc_last;
+    HSP_pfc_counters pfc_total;
+#endif
     // SFP (optical) stats
     // #define HSP_TEST_QSFP 1
     // These definitions should eventually be in ethtool.h
@@ -735,6 +747,7 @@ extern "C" {
     struct {
       bool dropmon;
       bool start;
+      bool force;
       bool sw;
       bool hw;
       bool rn;
@@ -917,7 +930,11 @@ extern "C" {
   void readBondState(HSP *sp);
   void syncPolling(HSP *sp);
   void syncBondPolling(HSP *sp);
+#ifdef HSP_REPORT_PFC
+  bool accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs, HSP_pfc_counters *pfc_ctrs);
+#else
   bool accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs);
+#endif
   void updateNioCounters(HSP *sp, SFLAdaptor *adaptor);
   int readHidCounters(HSP *sp, SFLHost_hid_counters *hid, char *hbuf, int hbufLen, char *rbuf, int rbufLen);
   int configSwitchPorts(HSP *sp);
