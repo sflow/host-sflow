@@ -631,7 +631,21 @@ extern "C" {
       sfp_elem.counterBlock.sfp = adaptorNIO->sfp; // struct copy - picks up lasers list
       SFLADD_ELEMENT(cs, &sfp_elem);
     }
-    
+
+#if HSP_REPORT_PFC
+    // possibly include PFC struct
+    SFLCounters_sample_element pfc_elem = { 0 };
+    pfc_elem.tag = SFLCOUNTERS_PFC;
+    for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
+      pfc_elem.counterBlock.pfc.requests += adaptorNIO->pfc_total.pfc_rx[qq];
+      pfc_elem.counterBlock.pfc.indications += adaptorNIO->pfc_total.pfc_tx[qq];
+    }
+    pfc_elem.counterBlock.pfc.pause_duration = UNSUPPORTED_SFLOW_COUNTER32;
+    pfc_elem.counterBlock.pfc.storm_detected = UNSUPPORTED_SFLOW_COUNTER32;
+    pfc_elem.counterBlock.pfc.storm_restored = UNSUPPORTED_SFLOW_COUNTER32;
+    SFLADD_ELEMENT(cs, &pfc_elem);
+#endif
+
     // circulate the cs to be annotated by other modules before it is sent out.
     // This differs from the packet-sample treatment in that everything is
     // on the stack.  If we ever wanted to delay counter samples until additional
@@ -2536,12 +2550,16 @@ extern "C" {
     // in mod_dropmon.c:evt_config_changed().
     sp->dropmon.dropmon = YES;
     sp->dropmon.start = NO;
-    sp->dropmon.limit = HSP_DEFAULT_DROPLIMIT;;
+    sp->dropmon.limit = HSP_DEFAULT_DROPLIMIT;
+    sp->dropmon.max = HSP_DEFAULT_DROPTRAP_MAX;
+    sp->dropmon.max_trip = HSP_DEFAULT_DROPTRAP_MAX_TRIP;
     sp->dropmon.sw = NO;
-    sp->dropmon.sw_passive = YES;
-    sp->dropmon.rn = YES;
     sp->dropmon.hw = NO;
+    sp->dropmon.rn = YES;
+    sp->dropmon.hw_unknown = NO;
+    sp->dropmon.sw_passive = YES;
     sp->dropmon.hw_passive = YES;
+    sp->dropmon.force = YES;
 #endif /* HSP_LOAD_SONIC */
 
 #ifdef HSP_LOAD_XEN
