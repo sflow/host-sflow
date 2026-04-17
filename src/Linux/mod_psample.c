@@ -496,7 +496,7 @@ extern "C" {
     int batch = 0;
     for( ; batch < HSP_PSAMPLE_READNL_BATCH; batch++) {
       int msglen = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
-      if(msglen < sizeof(struct nlmsghdr))
+      if(msglen < (int)sizeof(struct nlmsghdr))
 	break;
       EVDebug(mod, 4, "readNetlink_PSAMPLE - msg = %d bytes", msglen);
       int numbytes = msglen;
