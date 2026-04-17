@@ -413,7 +413,7 @@ extern "C" {
 	    | HSP_ETCTR_UNKN
 	    | HSP_ETCTR_OPER
 	    | HSP_ETCTR_ADMIN;
-	  accumulateNioCounters(sp, adaptor, &port->ctrs, &port->et_ctrs);
+	  accumulateNioCounters(sp, adaptor, &port->ctrs, &port->et_ctrs, NULL);
 	  nio->et_last.adminStatus = port->adminUp;
 	  nio->et_last.operStatus = port->operUp;
 	  nio->last_update = mdata->pollBus->now.tv_sec;

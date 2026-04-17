@@ -842,7 +842,7 @@ extern "C" {
 
     CPSPollIfState(mod, adaptor, &ctrs, &et_ctrs);
     CPSPollIfCounters(mod, adaptor, &ctrs, &et_ctrs);
-    accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs);
+    accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs, NULL);
     nio->last_update = sp->pollBus->now.tv_sec;
 
     uint64_t allocated2 = cps_api_objects_allocated();

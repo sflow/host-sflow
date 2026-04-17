@@ -702,7 +702,7 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  bool accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs)
+  bool accumulateNioCounters(HSP *sp, SFLAdaptor *adaptor, SFLHost_nio_counters *ctrs, HSP_ethtool_counters *et_ctrs, HSP_pfc_counters *pfc_ctrs)
   {
     EVMod *mod = sp->rootModule;
     HSPAdaptorNIO *nio = ADAPTOR_NIO(adaptor);
@@ -717,7 +717,7 @@ extern "C" {
       synthesizeBondMetaData(sp, adaptor);
       return NO;
     }
-    
+
     // have to detect discontinuities here, so use a full
     // set of latched counters and accumulators.
     bool accumulate = nio->last_update ? YES : NO;
@@ -726,6 +726,7 @@ extern "C" {
 
     SFLHost_nio_counters delta;
     HSP_ethtool_counters et_delta;
+    HSP_pfc_counters pfc_delta;
 #define NIO_COMPUTE_DELTA(field) delta.field = ctrs->field - nio->last_nio.field
     NIO_COMPUTE_DELTA(pkts_in);
     NIO_COMPUTE_DELTA(errs_in);
@@ -757,10 +758,20 @@ extern "C" {
     }
 
 #define ET_COMPUTE_DELTA(field) et_delta.field = et_ctrs->field - nio->et_last.field
-    ET_COMPUTE_DELTA(mcasts_in);
-    ET_COMPUTE_DELTA(mcasts_out);
-    ET_COMPUTE_DELTA(bcasts_in);
-    ET_COMPUTE_DELTA(bcasts_out);
+    if(et_ctrs) {
+      ET_COMPUTE_DELTA(mcasts_in);
+      ET_COMPUTE_DELTA(mcasts_out);
+      ET_COMPUTE_DELTA(bcasts_in);
+      ET_COMPUTE_DELTA(bcasts_out);
+    }
+
+#define PFC_COMPUTE_DELTA(field) pfc_delta.field = pfc_ctrs->field - nio->pfc_last.field
+    if(pfc_ctrs) {
+      for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
+	PFC_COMPUTE_DELTA(pfc_tx[qq]);
+	PFC_COMPUTE_DELTA(pfc_rx[qq]);
+      }
+    }
 
     if(accumulate) {
       // sanity check in case the counters were reset under out feet.
@@ -795,12 +806,30 @@ extern "C" {
 
 	accumulate = NO;
       }
-      if(et_delta.mcasts_in > HSP_MAX_NIO_DELTA64  ||
-	 et_delta.mcasts_out > HSP_MAX_NIO_DELTA64 ||
-	 et_delta.bcasts_in > HSP_MAX_NIO_DELTA64  ||
-	 et_delta.bcasts_out > HSP_MAX_NIO_DELTA64) {
-	myLog(LOG_ERR, "detected counter discontinuity in ethtool stats");
-	accumulate = NO;
+
+      if(et_ctrs) {
+	if(et_delta.mcasts_in > HSP_MAX_NIO_DELTA64  ||
+	   et_delta.mcasts_out > HSP_MAX_NIO_DELTA64 ||
+	   et_delta.bcasts_in > HSP_MAX_NIO_DELTA64  ||
+	   et_delta.bcasts_out > HSP_MAX_NIO_DELTA64) {
+	  myLog(LOG_ERR, "detected counter discontinuity in ethtool stats");
+	  accumulate = NO;
+	}
+      }
+
+#define PFC_DELTA_TOOBIG(field) (pfc_delta.field > HSP_MAX_NIO_DELTA32)
+      if(pfc_ctrs) {
+	for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
+	  if(PFC_DELTA_TOOBIG(pfc_tx[qq])
+	     || PFC_DELTA_TOOBIG(pfc_rx[qq])) {
+	    myLog(LOG_ERR, "detected counter discontinuity for %s: queue=%u deltaPFC=%u,%u",
+		  adaptor->deviceName,
+		  qq,
+		  pfc_delta.pfc_tx[qq],
+		  pfc_delta.pfc_rx[qq]);
+	    accumulate = NO;
+	  }
+	}
       }
     }
 
@@ -814,12 +843,23 @@ extern "C" {
       NIO_ACCUMULATE(nio, pkts_out);
       NIO_ACCUMULATE(nio, errs_out);
       NIO_ACCUMULATE(nio, drops_out);
+
 #define ET_ACCUMULATE(tgt, field) (tgt)->et_total.field += et_delta.field
-      ET_ACCUMULATE(nio, mcasts_in);
-      ET_ACCUMULATE(nio, mcasts_out);
-      ET_ACCUMULATE(nio, bcasts_in);
-      ET_ACCUMULATE(nio, bcasts_out);
-      
+      if(et_ctrs) {
+	ET_ACCUMULATE(nio, mcasts_in);
+	ET_ACCUMULATE(nio, mcasts_out);
+	ET_ACCUMULATE(nio, bcasts_in);
+	ET_ACCUMULATE(nio, bcasts_out);
+      }
+
+#define PFC_ACCUMULATE(tgt, field) (tgt)->pfc_total.field += pfc_delta.field
+      if(pfc_ctrs) {
+	for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
+	  PFC_ACCUMULATE(nio, pfc_tx[qq]);
+	  PFC_ACCUMULATE(nio, pfc_rx[qq]);
+	}
+      }
+
       if((nio->bond_slave
 	  || nio->bond_slave_2)
 	 && sp->synthesizeBondCounters) {
@@ -840,17 +880,29 @@ extern "C" {
 	  NIO_ACCUMULATE(bond_nio, errs_out);
 	  NIO_ACCUMULATE(bond_nio, drops_out);
 
-	  ET_ACCUMULATE(bond_nio, mcasts_in);
-	  ET_ACCUMULATE(bond_nio, mcasts_out);
-	  ET_ACCUMULATE(bond_nio, bcasts_in);
-	  ET_ACCUMULATE(bond_nio, bcasts_out);
+	  if(et_ctrs) {
+	    ET_ACCUMULATE(bond_nio, mcasts_in);
+	    ET_ACCUMULATE(bond_nio, mcasts_out);
+	    ET_ACCUMULATE(bond_nio, bcasts_in);
+	    ET_ACCUMULATE(bond_nio, bcasts_out);
+	  }
+
+	  if(pfc_ctrs) {
+	    for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
+	      PFC_ACCUMULATE(bond_nio, pfc_tx[qq]);
+	      PFC_ACCUMULATE(bond_nio, pfc_rx[qq]);
+	    }
+	  }
 	}
       }
     }
 
     // latch - with struct copy
     nio->last_nio = *ctrs;
-    nio->et_last = *et_ctrs;
+    if(et_ctrs)
+      nio->et_last = *et_ctrs;
+    if(pfc_ctrs)
+      nio->pfc_last = *pfc_ctrs;
 
     return accumulate;
   }
@@ -1012,7 +1064,7 @@ extern "C" {
 	    }
 #endif /*  ( HSP_OPTICAL_STATS && ETHTOOL_GMODULEEEPROM ) */
 
-	    accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs);
+	    accumulateNioCounters(sp, adaptor, &ctrs, &et_ctrs, NULL);
 	  }
 	}
       }

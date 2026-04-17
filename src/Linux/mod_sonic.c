@@ -45,12 +45,31 @@ extern "C" {
 #define HSP_SONIC_FIELD_IFOUT_ERRORS "SAI_PORT_STAT_IF_OUT_ERRORS"
 #define HSP_SONIC_FIELD_IFOUT_DISCARDS "SAI_PORT_STAT_IF_OUT_DISCARDS"
 
+#ifdef HSP_REPORT_PFC
+#define HSP_SONIC_FIELD_PFC_RX_0  "SAI_PORT_STAT_PFC_0_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_1  "SAI_PORT_STAT_PFC_1_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_2  "SAI_PORT_STAT_PFC_2_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_3  "SAI_PORT_STAT_PFC_3_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_4  "SAI_PORT_STAT_PFC_4_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_5  "SAI_PORT_STAT_PFC_5_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_6  "SAI_PORT_STAT_PFC_6_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_RX_7  "SAI_PORT_STAT_PFC_7_RX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_0  "SAI_PORT_STAT_PFC_0_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_1  "SAI_PORT_STAT_PFC_1_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_2  "SAI_PORT_STAT_PFC_2_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_3  "SAI_PORT_STAT_PFC_3_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_4  "SAI_PORT_STAT_PFC_4_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_5  "SAI_PORT_STAT_PFC_5_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_6  "SAI_PORT_STAT_PFC_6_TX_PKTS"
+#define HSP_SONIC_FIELD_PFC_TX_7  "SAI_PORT_STAT_PFC_7_TX_PKTS"
+#endif
+
 #define HSP_SONIC_FIELD_SFLOW_ADMIN_STATE "admin_state"
 #define HSP_SONIC_FIELD_SFLOW_POLLING "polling_interval"
 #define HSP_SONIC_FIELD_SFLOW_AGENT "agent_id"
-#define HSP_SONIC_FIELD_SFLOW_DROP_MONITOR_LIMIT "drop_monitor_limit" // *proposed*
-#define HSP_SONIC_FIELD_SFLOW_SAMPLE_DIRECTION "sample_direction" // *proposed*
-#define HSP_SONIC_FIELD_SFLOW_HEADER_BYTES "max_header_size" // *proposed*
+#define HSP_SONIC_FIELD_SFLOW_DROP_MONITOR_LIMIT "drop_monitor_limit"
+#define HSP_SONIC_FIELD_SFLOW_SAMPLE_DIRECTION "sample_direction"
+#define HSP_SONIC_FIELD_SFLOW_HEADER_BYTES "max_header_size"
 
 #define HSP_SONIC_FIELD_COLLECTOR_IP "collector_ip"
 #define HSP_SONIC_FIELD_COLLECTOR_PORT "collector_port"
@@ -119,6 +138,9 @@ extern "C" {
     char *ifAlias;
     SFLHost_nio_counters ctrs;
     HSP_ethtool_counters et_ctrs;
+#ifdef HSP_REPORT_PFC
+    HSP_pfc_counters pfc_ctrs;
+#endif
   } HSPSonicPort;
 
   typedef struct _HSPSonicLAG {
@@ -1589,6 +1611,9 @@ extern "C" {
       return; // will skip this poll
     memset(&prt->ctrs, 0, sizeof(prt->ctrs));
     memset(&prt->et_ctrs, 0, sizeof(prt->et_ctrs));
+#ifdef HSP_REPORT_PFC
+    memset(&prt->pfc_ctrs, 0, sizeof(prt->pfc_ctrs));
+#endif
     if(reply->type == REDIS_REPLY_ARRAY
        && reply->elements > 0
        && ISEVEN(reply->elements)) {
@@ -1632,6 +1657,42 @@ extern "C" {
 
 	  prt->et_ctrs.operStatus = prt->operUp;
 	  prt->et_ctrs.adminStatus = prt->adminUp;
+
+#ifdef HSP_REPORT_PFC
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_0))
+	    prt->pfc_ctrs.pfc_tx[0] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_1))
+	    prt->pfc_ctrs.pfc_tx[1] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_2))
+	    prt->pfc_ctrs.pfc_tx[2] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_3))
+	    prt->pfc_ctrs.pfc_tx[3] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_4))
+	    prt->pfc_ctrs.pfc_tx[4] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_5))
+	    prt->pfc_ctrs.pfc_tx[5] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_6))
+	    prt->pfc_ctrs.pfc_tx[6] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_7))
+	    prt->pfc_ctrs.pfc_tx[7] = db_getU32(c_val);
+
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_0))
+	    prt->pfc_ctrs.pfc_rx[0] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_1))
+	    prt->pfc_ctrs.pfc_rx[1] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_2))
+	    prt->pfc_ctrs.pfc_rx[2] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_3))
+	    prt->pfc_ctrs.pfc_rx[3] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_4))
+	    prt->pfc_ctrs.pfc_rx[4] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_5))
+	    prt->pfc_ctrs.pfc_rx[5] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_6))
+	    prt->pfc_ctrs.pfc_rx[6] = db_getU32(c_val);
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_7))
+	    prt->pfc_ctrs.pfc_rx[7] = db_getU32(c_val);
+#endif
 	}
       }
     }
@@ -1648,7 +1709,11 @@ extern "C" {
 	  | HSP_ETCTR_UNKN
 	  | HSP_ETCTR_OPER
 	  | HSP_ETCTR_ADMIN;
-	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs);
+#ifdef HSP_REPORT_PFC
+	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs, &prt->pfc_ctrs);
+#else
+	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs, NULL);
+#endif
 	nio->last_update = mdata->pollBus->now.tv_sec;
       }
     }
