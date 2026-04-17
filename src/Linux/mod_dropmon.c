@@ -29,7 +29,7 @@ extern "C" {
      that the kernel will only ever add to these, and never
      change them.
   */
-  
+
   /* net_dm_addr */
 #define NET_DM_ATTR_UNSPEC 0
 #define NET_DM_ATTR_ALERT_MODE 1                 /* u8 */
@@ -65,9 +65,9 @@ extern "C" {
 #define NET_DM_ATTR_PORT_NETDEV_IFINDEX 0        /* u32 */
 #define NET_DM_ATTR_PORT_NETDEV_NAME 1           /* string */
 #define NET_DM_ATTR_PORT_MAX NET_DM_ATTR_PORT_NETDEV_NAME
-  
-#endif /* HSP_REPLICATE_DROPMON_DEFS */		      
-  
+
+#endif /* HSP_REPLICATE_DROPMON_DEFS */
+
 #define HSP_DROPMON_READNL_RCV_BUF 16384
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000
@@ -96,22 +96,23 @@ extern "C" {
     "RUN",
     "STOP"
   };
-  
+
   typedef struct _HSPDropPoint {
     char *dropPoint;
     EnumSFLDropReason reason;
     bool pattern;
   } HSPDropPoint;
-    
+
   typedef struct _HSP_mod_DROPMON {
     EnumDropmonState state;
     EVBus *packetBus;
-    bool dropmon_configured;
     int nl_sock;
     EVSocket *nl_evsock;
     uint32_t nl_seq;
     int retry_countdown;
-#define HSP_DROPMON_WAIT_RETRY_S 15
+#define HSP_DROPMON_WAIT_RETRY_GROUP_S 15
+#define HSP_DROPMON_WAIT_RETRY_FAMILY_S 15
+#define HSP_DROPMON_WAIT_RETRY_START_S 4
     uint32_t genetlink_version;
     uint16_t family_id;
     uint32_t group_id;
@@ -126,6 +127,9 @@ extern "C" {
     UTArray *dropPatterns_rn;
     UTHash *notifiers;
     uint32_t feedControlErrors;
+    uint32_t startAttempts;
+#define HSP_DROPMON_MAX_START_ATTEMPTS 5
+    uint32_t stopAttempts;
     int quota;   // notification rate-limit
     uint32_t noQuota; // number of rate-limit drops
     uint32_t ignoredDrops_hw;
@@ -137,6 +141,8 @@ extern "C" {
     EVEvent *evt_intf_es;
   } HSP_mod_DROPMON;
 
+  static void stopMonitoring(EVMod *mod);
+  static bool openSocket(EVMod *mod);
 
   /*_________________---------------------------__________________
     _________________     state change          __________________
@@ -259,7 +265,7 @@ extern "C" {
       if(dp)
 	return dp;
     }
-    
+
     // see if we can find it via a pattern
     UTARRAY_WALK(mdata->dropPatterns_hw, dp) {
       if(fnmatch(dp->dropPoint, dropPointStr, FNM_CASEFOLD) == 0) {
@@ -369,7 +375,7 @@ extern "C" {
 	return NULL;
       }
     }
- 
+
     // check operator
     bool eq = my_strequal(loader->op, "==");
     bool isPattern = my_strequal(loader->op, "*=");
@@ -479,12 +485,18 @@ That would allow everything to stay on the stack as it does here, which has nice
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
 
+    EVDebug(mod, 1, "start_DROPMON(startIt=%s)", startIt ? "YES" : "NO");
+
     // Always transition state even on no-op
-    setState(mod,
-	     startIt
-	     ? HSP_DROPMON_STATE_START
-	     : HSP_DROPMON_STATE_STOP);
-    
+    if(startIt) {
+      mdata->startAttempts++;
+      setState(mod, HSP_DROPMON_STATE_START);
+    }
+    else {
+      mdata->stopAttempts++;
+      setState(mod, HSP_DROPMON_STATE_STOP);
+    }
+
     struct nlmsghdr nlh = { };
     struct genlmsghdr ge = { };
     struct nlattr attr[2] = { };
@@ -535,6 +547,19 @@ That would allow everything to stay on the stack as it does here, which has nice
   }
 
   /*_________________---------------------------__________________
+    _________________      stop_DROPMON         __________________
+    -----------------___________________________------------------
+  */
+
+  static int stop_DROPMON(EVMod *mod) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    EVDebug(mod, 1, "stop_DROPMON: turning off feed (sw=%s, hw=%s)",
+	    sp->dropmon.sw ? "on" : "off",
+	    sp->dropmon.hw ? "on" : "off");
+    return start_DROPMON(mod, NO, sp->dropmon.sw, sp->dropmon.hw);
+  }
+
+  /*_________________---------------------------__________________
     _________________    configure_DROPMON      __________________
     -----------------___________________________------------------
   */
@@ -549,6 +574,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     int status;
     // This control will fail if the feed has already been configured and started externally.
     // TODO: set these in one message?
+    EVDebug(mod, 1, "configure_DROPMON set TRUNC_LEN=%u", truncLen);
     status = UTNLGeneric_send(mdata->nl_sock,
 				  mod->id,
 				  mdata->family_id,
@@ -559,6 +585,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 				  ++mdata->nl_seq);
     if(status < 0)
       myLog(LOG_ERR, "UTNLGeneric_send(truncLen) failed: %s", strerror(errno));
+    EVDebug(mod, 1, "configure_DROPMON set QUEUE_LEN=%u", queueLen);
     status = UTNLGeneric_send(mdata->nl_sock,
 			      mod->id,
 			      mdata->family_id,
@@ -569,6 +596,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 			      ++mdata->nl_seq);
     if(status < 0)
       myLog(LOG_ERR, "UTNLGeneric_send(queueLen) failed: %s", strerror(errno));
+    EVDebug(mod, 1, "configure_DROPMON set ALERT_MODE=%u(packet)", alertMode);
     status = UTNLGeneric_send(mdata->nl_sock,
 			      mod->id,
 			      mdata->family_id,
@@ -721,7 +749,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     }
     struct genlmsghdr *genl = (struct genlmsghdr *)msg;
     EVDebug(mod, 3, "netlink (type=%u) CMD = %u", nlh->nlmsg_type, genl->cmd);
-    
+
     // sFlow strutures to fill in
     SFLEvent_discarded_packet discard = { .reason = SFLDrop_unknown };
     SFLFlow_sample_element hdrElem = { .tag=SFLFLOW_HEADER };
@@ -729,7 +757,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     SFLFlow_sample_element hwElem = { .tag=SFLFLOW_EX_HW_TRAP };
     SFLFlow_sample_element rnElem = { .tag=SFLFLOW_EX_LINUX_REASON };
     SFLFlow_sample_element tsElem = { .tag=SFLFLOW_EX_TIMESTAMP };
-    
+
     // and some parameters to pick up for cross-check below
     uint32_t trunc_len=0;
     uint32_t orig_len=0;
@@ -742,14 +770,14 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     // increment counter for threshold check
     mdata->totalDrops_thisTick++;
-    
+
     struct nlattr *attr = (struct nlattr *)(msg + GENL_HDRLEN);
     int len = msglen - GENL_HDRLEN;
     while(UTNLA_OK(attr, len)) {
 
       u_char *datap = UTNLA_DATA(attr);
       int datalen = UTNLA_PAYLOAD(attr);
-      
+
       if(EVDebug(mod, 4, NULL)) {
 	u_char hex[1024];
 	printHex(datap, datalen, hex, 1023, YES);
@@ -865,11 +893,11 @@ That would allow everything to stay on the stack as it does here, which has nice
       }
       attr = UTNLA_NEXT(attr, len);
     }
-    
+
     // cross check: make sure frame_length is not missing
     if(hdrElem.flowType.header.frame_length == 0)
       hdrElem.flowType.header.frame_length = hdrElem.flowType.header.header_length;
-    
+
     // cross check: trunc_len
     if(trunc_len
        && trunc_len < hdrElem.flowType.header.header_length)
@@ -896,7 +924,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 	|| dp->reason == SFLDrop_unknown)
        && sw_symbol)
       dp = getDropPoint_sw(mod, sw_symbol);
-    
+
     if(dp == NULL
        || dp->reason == -1
        || skb_protocol == 0) {
@@ -904,7 +932,7 @@ That would allow everything to stay on the stack as it does here, which has nice
       EVDebug(mod, 4, "trap not considered a drop. Ignoring.");
       return;
     }
-    
+
     EVDebug(mod, 1, "found dropPoint %s reason_code=%u", dp->dropPoint, dp->reason);
 
     if(sp->dropmon.hide_regex_str) {
@@ -913,7 +941,7 @@ That would allow everything to stay on the stack as it does here, which has nice
 	 || hideDrop(mod, reason))
 	return;
     }
-    
+
     // fill in discard reason
     discard.reason = dp->reason;
 
@@ -975,7 +1003,10 @@ That would allow everything to stay on the stack as it does here, which has nice
       sp->telemetry[HSP_TELEMETRY_EVENT_SAMPLES]++;
     }
 
-    // first successful event confirms we are up and running
+    // first successful event confirms we are up and running. Note that
+    // if the channel was already open when we started then we might
+    // have seen events come through here already.  So only advance
+    // the state machine if we have been through the previous steps.
     if(mdata->state == HSP_DROPMON_STATE_START)
       setState(mod, HSP_DROPMON_STATE_RUN);
   }
@@ -1004,15 +1035,16 @@ That would allow everything to stay on the stack as it does here, which has nice
   static void readNetlink_DROPMON(EVMod *mod, EVSocket *sock, void *magic)
   {
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSP *sp = (HSP *)EVROOTDATA(mod);
     uint8_t recv_buf[HSP_DROPMON_READNL_RCV_BUF];
     int batch = 0;
     for( ; batch < HSP_DROPMON_READNL_BATCH; batch++) {
       int msglen = recv(sock->fd, recv_buf, sizeof(recv_buf), 0);
-      if(msglen < sizeof(struct nlmsghdr))
+      if(msglen < (int)(sizeof(struct nlmsghdr)))
 	break;
       EVDebug(mod, 4, "readNetlink_DROPMON - msg = %d bytes", msglen);
       int numbytes = msglen;
-      for(struct nlmsghdr *nlh = (struct nlmsghdr*) recv_buf;
+      for(struct nlmsghdr *nlh = (struct nlmsghdr *) recv_buf;
 	  NLMSG_OK(nlh, numbytes);
 	  nlh = NLMSG_NEXT(nlh, numbytes)) {
 	if(nlh->nlmsg_type == NLMSG_DONE)
@@ -1023,14 +1055,42 @@ That would allow everything to stay on the stack as it does here, which has nice
 	    EVDebug(mod, 4, "received Netlink ACK");
 	  }
 	  else {
-	    // TODO: parse NLMSGERR_ATTR_OFFS to get offset?  Might be helpful
+	    int err_number = -err_msg->error;
 	    EVDebug(mod, 4, "state %u: error in netlink message: %d : %s",
 		    mdata->state,
 		    err_msg->error,
-		    strerror(-err_msg->error));
+		    strerror(err_number));
+
 	    if(mdata->state == HSP_DROPMON_STATE_CONFIGURE
-	       || mdata->state == HSP_DROPMON_STATE_START)
+	       && err_number == EBUSY) {
 	      mdata->feedControlErrors++;
+	      EVDebug(mod, 1, "CONFIGURE got EBUSY (feedControlErrors == %u)",
+		      mdata->feedControlErrors);
+	    }
+
+	    if(mdata->state == HSP_DROPMON_STATE_START
+	       && err_number == EAGAIN) {
+	      mdata->feedControlErrors++;
+	      EVDebug(mod, 1, "START got EGAIN (feedControlErrors == %u)",
+		      mdata->feedControlErrors);
+	      if(sp->dropmon.force
+		 && mdata->startAttempts < HSP_DROPMON_MAX_START_ATTEMPTS) {
+		// We see 11=EAGAIN "resource temporarily busy" here on
+		// the start request if the channel was configured already.
+		// That will keep happening if we try again, so there is
+		// no point in looping. If force=off we will shrug and go
+		// on (with it counted as a feedControlError) so that we know
+		// not to stop the channel on graceful termination.  Buf with
+		// force=on we will reset the channel and try again.
+		EVDebug(mod, 1, "force=on so reset channel, then retry");
+		stop_DROPMON(mod);
+		setState(mod, HSP_DROPMON_STATE_WAIT);
+		mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_START_S;
+	      }
+	      else {
+		myLog(LOG_ERR, "mod_dropmon: unable to acquire netlink NET_DM channel");
+	      }
+	    }
 	  }
 	  break;
 	}
@@ -1042,10 +1102,25 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(mdata->state == HSP_DROPMON_STATE_GET_FAMILY) {
       EVDebug(mod, 1, "failed to get family details - wait before trying again");
       setState(mod, HSP_DROPMON_STATE_WAIT);
-      mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_S;
+      mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_FAMILY_S;
     }
   }
-  
+
+  /*_________________---------------------------__________________
+    _________________    evt_config_changed     __________________
+    -----------------___________________________------------------
+  */
+
+  static void evt_config_first(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    EVDebug(mod, 1, "evt_config_first: current dropLimit=%u", sp->dropmon.limit);
+    // open socket while we still have root privileges
+    if(openSocket(mod)) {
+      // kick off with the family lookup request
+      getFamily_DROPMON(mod);
+    }
+  }
+
   /*_________________---------------------------__________________
     _________________    evt_config_changed     __________________
     -----------------___________________________------------------
@@ -1058,49 +1133,48 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(mdata->dropmon_disabled)
       return;
 
-    EVDebug(mod, 1, "evt_config_changed configured=%s", mdata->dropmon_configured ? "YES" : "NO");
-    
+    EVDebug(mod, 1, "evt_config_changed: current dropLimit=%u", sp->dropmon.limit);
+
     if(sp->sFlowSettings == NULL)
       return; // no config (yet - may be waiting for DNS-SD)
 
     if(sp->sFlowSettings->dropLimit_set) {
       // dynamic override of dropLimit
-      sp->dropmon.limit = sp->sFlowSettings->dropLimit;
-      if(sp->dropmon.limit > 0) {
-	// dropLimit was set to positive integer in SONiC or DNS-SD.
+      uint32_t newLimit = sp->sFlowSettings->dropLimit;
+      EVDebug(mod, 1, "limit set dynamically %u -> %u",
+	      sp->dropmon.limit,
+	      newLimit);
+      if(sp->dropmon.limit == newLimit
+	 && sp->dropmon.start == YES) {
+	EVDebug(mod, 1, "change: none");
+	return;
+      }
+      sp->dropmon.limit = newLimit;
+      if(newLimit == 0) {
+	// if the limit is set back to 0 again it's not enough to just let the
+	// quota go to 0 and stop sending the drops.  Need to turn off the feed
+	// if we were the ones that turned it on.
+	stopMonitoring(mod);
+	sp->dropmon.start = NO;
+      }
+      else if(sp->dropmon.start) {
+	EVDebug(mod, 1, "change: quota");
+      }
+      else {
+	// first time dropLimit was set to positive integer in SONiC or DNS-SD.
 	// This implies that we should activate the feed even if dropmon.start is currently off,
 	// but we still assume that hardware DROPMON activation happens elsewhere.
-	// TODO: We may have to revisit this if our activation of sw drops here
-	// obstructs that activation of hw drops elsewhere.
-	EVDebug(mod, 1, "limit set dynamically=%u => start=YES", sp->dropmon.limit);
+	EVDebug(mod, 1, "change: activate");
 	sp->dropmon.start = YES;
 	sp->dropmon.sw = YES;
 	sp->dropmon.rn = YES;
 	sp->dropmon.hw_passive = YES;
+	if(openSocket(mod)) {
+	  // kick off with the family lookup request
+	  getFamily_DROPMON(mod);
+	}
       }
     }
-
-    if(mdata->dropmon_configured) {
-      // already configured from the first time (when we still had root privileges)
-      return;
-    }
-
-    // DROPMON group is set, so open the netfilter socket while we are still root
-    mdata->nl_sock = UTNLGeneric_open(mod->id);
-    if(mdata->nl_sock > 0) {
-      // increase socket receiver buffer size
-      UTSocketRcvbuf(mdata->nl_sock, HSP_DROPMON_RCVBUF);
-      // and submit for polling
-      mdata->nl_evsock = EVBusAddSocket(mod,
-					mdata->packetBus,
-					mdata->nl_sock,
-					readNetlink_DROPMON,
-					NULL);
-      // kick off with the family lookup request
-      getFamily_DROPMON(mod);
-    }
-
-    mdata->dropmon_configured = YES;
   }
 
   /*_________________---------------------------__________________
@@ -1114,17 +1188,49 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(sp->dropmon.start) {
       // turn off the feed - but only if it looks like we were the ones
       // that turned it on in the first place.
-      // TODO: may want to confirm that none of the parameters were
-      // changed under our feet too?
       if(mdata->feedControlErrors > 0) {
-	EVDebug(mod, 1, "detected feed-control errors: %u", mdata->feedControlErrors);
-	EVDebug(mod, 1, "assume external control - not stopping feed");
+	EVDebug(mod, 1, "stopMonitoring: detected feed-control errors: %u", mdata->feedControlErrors);
+	EVDebug(mod, 1, "stopMonitoring: assume external control - not stopping feed");
       }
       else {
-	EVDebug(mod, 1, "graceful shutdown: turning off feed");
-	start_DROPMON(mod, NO, sp->dropmon.sw, sp->dropmon.hw);
+	EVDebug(mod, 1, "stopMonitoring: stopping feed");
+	stop_DROPMON(mod);
       }
     }
+  }
+
+  /*_________________---------------------------__________________
+    _________________      openSocket           __________________
+    -----------------___________________________------------------
+  */
+
+  static bool openSocket(EVMod *mod) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    if(mdata->nl_evsock == NULL) {
+      // DROPMON group is set, so open the netfilter socket while we are still root
+      mdata->nl_sock = UTNLGeneric_open(mod->id);
+      if(mdata->nl_sock > 0) {
+	// increase socket receiver buffer size
+	UTSocketRcvbuf(mdata->nl_sock, HSP_DROPMON_RCVBUF);
+	// and submit for polling
+	mdata->nl_evsock = EVBusAddSocket(mod,
+					  mdata->packetBus,
+					  mdata->nl_sock,
+					  readNetlink_DROPMON,
+					  NULL);
+      }
+    }
+    // return true if the socket is open
+    return (mdata->nl_evsock != NULL);
+  }
+
+  /*_________________---------------------------__________________
+    _________________    closeSocket            __________________
+    -----------------___________________________------------------
+  */
+
+  static void closeSocket(EVMod *mod) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
     if(mdata->nl_evsock) {
       EVSocketClose(mod, mdata->nl_evsock, YES);
       mdata->nl_evsock = NULL;
@@ -1147,14 +1253,15 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(sp->dropmon.max) {
       if(mdata->totalDrops_thisTick > sp->dropmon.max) {
 	mdata->max_exceeded++;
-	EVDebug(mod, 0, "threshold exceeded (%u > %u) for %u seconds (max_trip=%u)",
-		mdata->totalDrops_thisTick,
-		sp->dropmon.max,
-		mdata->max_exceeded,
-		sp->dropmon.max_trip);
+	myLog(LOG_ERR, "mod_dropmon: threshold exceeded (%u > %u) for %u seconds (max_trip=%u)",
+	      mdata->totalDrops_thisTick,
+	      sp->dropmon.max,
+	      mdata->max_exceeded,
+	      sp->dropmon.max_trip);
 	if(sp->dropmon.max_trip
 	   && (mdata->max_exceeded >= sp->dropmon.max_trip)) {
 	  stopMonitoring(mod);
+	  closeSocket(mod);
 	  mdata->dropmon_disabled = YES;
 	}
       }
@@ -1168,7 +1275,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     // when rate-limit is below 10 we refresh quota here
     if(sp->dropmon.limit < 10)
       mdata->quota = sp->dropmon.limit;
-    
+
     switch(mdata->state) {
     case HSP_DROPMON_STATE_INIT:
       // waiting for evt_config_changed
@@ -1178,22 +1285,25 @@ That would allow everything to stay on the stack as it does here, which has nice
       break;
     case HSP_DROPMON_STATE_WAIT:
       // pausing before trying again
-      if(--mdata->retry_countdown <= 0)
+      if(--mdata->retry_countdown <= 0) {
+	mdata->feedControlErrors = 0;
 	getFamily_DROPMON(mod);
+      }
       break;
     case HSP_DROPMON_STATE_GOT_GROUP:
       // got group id, now join
       // if dropmon.start is off we assume the feed is
       // externally configured and go straight to waiting for data.
-      if(joinGroup_DROPMON(mod))
+      if(joinGroup_DROPMON(mod)) {
 	setState(mod,
 		 sp->dropmon.start
 		 ? HSP_DROPMON_STATE_JOIN_GROUP
 		 : HSP_DROPMON_STATE_RUN);
+      }
       else {
 	EVDebug(mod, 1, "failed to join group - wait before trying again");
 	setState(mod, HSP_DROPMON_STATE_WAIT);
-	mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_S;
+	mdata->retry_countdown = HSP_DROPMON_WAIT_RETRY_GROUP_S;
       }
       break;
     case HSP_DROPMON_STATE_JOIN_GROUP:
@@ -1247,8 +1357,9 @@ That would allow everything to stay on the stack as it does here, which has nice
       return;
 
     stopMonitoring(mod);
+    closeSocket(mod);
   }
-  
+
   /*_________________---------------------------__________________
     _________________    module init            __________________
     -----------------___________________________------------------
@@ -1271,6 +1382,7 @@ That would allow everything to stay on the stack as it does here, which has nice
     mdata->notifiers = UTHASH_NEW(SFLNotifier, dsi, UTHASH_DFLT);
     loadDropPoints(mod);
     mdata->packetBus = EVGetBus(mod, HSPBUS_PACKET, YES);
+    EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_FIRST), evt_config_first);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, HSPEVENT_CONFIG_CHANGED), evt_config_changed);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_TICK), evt_tick);
     EVEventRx(mod, EVGetEvent(mdata->packetBus, EVEVENT_DECI), evt_deci);
