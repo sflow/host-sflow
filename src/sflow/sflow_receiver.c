@@ -587,6 +587,14 @@ static void xdr_enc_sfp(SFDBuf *ctrsmp, SFLSFP_counters *sfp) {
   }
 }
 
+static void xdr_enc_pfc(SFDBuf *ctrsmp, SFLPFC_counters *pfc) {
+  sfd_xdr_enc_int32(ctrsmp, pfc->requests);
+  sfd_xdr_enc_int32(ctrsmp, pfc->indications);
+  sfd_xdr_enc_int32(ctrsmp, pfc->pause_duration);
+  sfd_xdr_enc_int32(ctrsmp, pfc->storm_detected);
+  sfd_xdr_enc_int32(ctrsmp, pfc->storm_restored);
+}
+
 static void xdr_enc_processor(SFDBuf *ctrsmp, SFLProcessor_counters *pr) {
   sfd_xdr_enc_int32(ctrsmp, pr->five_sec_cpu);
   sfd_xdr_enc_int32(ctrsmp, pr->one_min_cpu);
@@ -902,6 +910,7 @@ static int xdr_enc_counter_sample_elements(SFDBuf *ctrsmp, SFLCounters_sample_el
     case SFLCOUNTERS_VLAN: xdr_enc_vlan(ctrsmp, &elem->counterBlock.vlan); break;
     case SFLCOUNTERS_LACP: xdr_enc_lacp(ctrsmp, &elem->counterBlock.lacp); break;
     case SFLCOUNTERS_SFP: xdr_enc_sfp(ctrsmp, &elem->counterBlock.sfp); break;
+    case SFLCOUNTERS_PFC: xdr_enc_pfc(ctrsmp, &elem->counterBlock.pfc); break;
     case SFLCOUNTERS_PROCESSOR: xdr_enc_processor(ctrsmp, &elem->counterBlock.processor); break;
     case SFLCOUNTERS_HOST_HID: xdr_enc_host_hid(ctrsmp, &elem->counterBlock.host_hid); break;
     case SFLCOUNTERS_HOST_PAR: xdr_enc_host_par(ctrsmp, &elem->counterBlock.host_par); break;
