@@ -2356,7 +2356,7 @@ extern "C" {
     
     if(nio->bond_master_2) {
       // trigger synthesizeBondMetaData
-      accumulateNioCounters(sp, adaptor, NULL, NULL);
+      accumulateNioCounters(sp, adaptor, NULL, NULL, NULL);
       return;
     }
 
