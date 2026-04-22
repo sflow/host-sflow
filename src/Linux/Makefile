@@ -345,6 +345,7 @@ CFLAGS += -Wunused-function
 CFLAGS += $(CFLAGS_GCOV)
 CFLAGS += $(CFLAGS_GPROF)
 CFLAGS += -DSFL_USE_SFDG -DSFL_USE_32BIT_INDEX
+CFLAGS += -DHSP_REPORT_PFC
 
 # xs.h became xenstore.h by 6.5. Detect that and set a flag.  Could drive this by reading
 # /etc/redhat-release to get the version number as in xenserver-ddk/Makefile,  but then it

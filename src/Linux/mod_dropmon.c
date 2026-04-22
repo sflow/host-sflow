@@ -97,10 +97,31 @@ extern "C" {
     "STOP"
   };
 
+  typedef enum {
+    HSP_DROPMON_DP_SW=0,
+    HSP_DROPMON_DP_HW,
+    HSP_DROPMON_DP_RN,
+    HSP_DROPMON_DP_TYPES
+  } EnumDropmonType;
+
+  static const char *HSPDropPointTypeNames[] = {
+    "SW",
+    "HW",
+    "RN"
+  };
+
+  typedef struct _HSPDropcodeSFlow {
+    char *name;
+    int code;
+  } HSPDropcodeSFlow;
+
   typedef struct _HSPDropPoint {
     char *dropPoint;
     EnumSFLDropReason reason;
+    char *reasonName;
     bool pattern;
+    EnumDropmonType dpType;
+    int dpIndex;
   } HSPDropPoint;
 
   typedef struct _HSP_mod_DROPMON {
@@ -139,6 +160,8 @@ extern "C" {
     uint32_t max_exceeded; // sucessive ticks over max
     bool dropmon_disabled;
     EVEvent *evt_intf_es;
+    UTHash *sflowDropsByCode;
+    UTHash *sflowDropsByName;
   } HSP_mod_DROPMON;
 
   static void stopMonitoring(EVMod *mod);
@@ -164,11 +187,13 @@ extern "C" {
     -----------------___________________________------------------
   */
 
-  static HSPDropPoint *newDropPoint(char *dropPointStr, bool pattern, EnumSFLDropReason reason) {
+  static HSPDropPoint *newDropPoint(char *dropPointStr, bool pattern, EnumSFLDropReason reason, EnumDropmonType dpType, int dpIndex) {
     HSPDropPoint *dp = (HSPDropPoint *)my_calloc(sizeof(HSPDropPoint));
     dp->dropPoint = my_strdup(dropPointStr);
     dp->pattern = pattern;
     dp->reason = reason;
+    dp->dpType = dpType;
+    dp->dpIndex = dpIndex;
     return dp;
   }
 
@@ -200,7 +225,7 @@ extern "C" {
       UTArrayAdd(mdata->dropPatterns_rn, dropPoint);
     else {
       if(UTHashGet(mdata->dropPoints_rn, dropPoint))
-        EVDebug(mod, 0, "WARNING: duplicate reason-dropPoint key: %s", dropPoint->dropPoint);
+	EVDebug(mod, 0, "WARNING: duplicate reason-dropPoint key: %s", dropPoint->dropPoint);
       UTHashAdd(mdata->dropPoints_rn, dropPoint);
     }
   }
@@ -232,7 +257,7 @@ extern "C" {
       if(fnmatch(dp->dropPoint, sw_symbol, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time and return it
 	EVDebug(mod, 2, "dropPoint pattern %s matched %s", dp->dropPoint, sw_symbol);
-	dp = newDropPoint(sw_symbol, NO, dp->reason);
+	dp = newDropPoint(sw_symbol, NO, dp->reason, dp->dpType, dp->dpIndex);
 	addDropPoint_sw(mod, dp);
 	return dp;
       }
@@ -274,7 +299,7 @@ extern "C" {
 		dp->dropPoint,
 		group ?: "<not supplied>",
 		dropPointStr);
-	dp = newDropPoint(dropPointStr, NO, dp->reason);
+	dp = newDropPoint(dropPointStr, NO, dp->reason, dp->dpType, dp->dpIndex);
 	addDropPoint_hw(mod, dp);
 	return dp;
       }
@@ -304,7 +329,7 @@ extern "C" {
       if(fnmatch(dp->dropPoint, dropReason, FNM_CASEFOLD) == 0) {
 	// yes - add the direct lookup to the hash table for next time and return it
 	EVDebug(mod, 2, "dropPoint pattern %s matched %s", dp->dropPoint, dropReason);
-	dp = newDropPoint(dropReason, NO, dp->reason);
+	dp = newDropPoint(dropReason, NO, dp->reason, dp->dpType, dp->dpIndex);
 	addDropPoint_rn(mod, dp);
 	return dp;
       }
@@ -319,18 +344,32 @@ extern "C" {
   */
 
 #define SFL_DROP(nm,cd) { .name=#nm, .code=cd },
-  static struct { char *name; int code; } sflow_codes[] = {
+  static HSPDropcodeSFlow sflow_drop_codes[] = {
 #include "sflow_drop.h"
   };
 #undef SFL_DROP
 
-  static int getReasonCode(char *reasonName) {
-    int entries = sizeof(sflow_codes) / sizeof(sflow_codes[0]);
+  static void loadSFlowDropcodes(EVMod *mod) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    int entries = sizeof(sflow_drop_codes) / sizeof(sflow_drop_codes[0]);
     for(int ii = 0; ii < entries; ii++) {
-      if(my_strequal(reasonName, sflow_codes[ii].name))
-	return sflow_codes[ii].code;
+      UTHashAdd(mdata->sflowDropsByCode, &sflow_drop_codes[ii]);
+      UTHashAdd(mdata->sflowDropsByName, &sflow_drop_codes[ii]);
     }
-    return -1; // not found
+  }
+
+  static char *getSFlowReasonName(EVMod *mod, int code) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSPDropcodeSFlow search = { .code = code };
+    HSPDropcodeSFlow *found = UTHashGet(mdata->sflowDropsByCode, &search);
+    return found ? found->name : "<none>";
+  }
+
+  static int getSFlowReasonCode(EVMod *mod, char *name) {
+    HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
+    HSPDropcodeSFlow search = { .name = name };
+    HSPDropcodeSFlow *found = UTHashGet(mdata->sflowDropsByName, &search);
+    return found ? found->code : -1;
   }
 
   /*_________________---------------------------__________________
@@ -358,7 +397,7 @@ extern "C" {
 
 #define HSP_ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
 
-  static HSPDropPoint *buildDropPoint(EVMod *mod, HSPDropPointLoader *loader) {
+  static HSPDropPoint *buildDropPoint(EVMod *mod, HSPDropPointLoader *loader, EnumDropmonType dpType, int dpIndex) {
     EVDebug(mod, 1, "loading dropPoint %s %s: reason=\"%s\"",
 	    loader->op,
 	    loader->dp,
@@ -369,7 +408,7 @@ extern "C" {
     // otherwise fail if the lookup fails.
     if(loader->reason
        && my_strlen(loader->reason) > 0) {
-      reasonCode = getReasonCode(loader->reason);
+      reasonCode = getSFlowReasonCode(mod, loader->reason);
       if(reasonCode < 0) {
 	EVDebug(mod, 1, "skipping dropPoint: failed reason code lookup \"%s\"", loader->reason);
 	return NULL;
@@ -384,7 +423,7 @@ extern "C" {
       return NULL;
     }
     // All OK
-    return newDropPoint(loader->dp, isPattern, reasonCode);
+    return newDropPoint(loader->dp, isPattern, reasonCode, dpType, dpIndex);
   }
 
   static void loadDropPoints(EVMod *mod) {
@@ -393,7 +432,7 @@ extern "C" {
     if(sp->dropmon.sw
        || sp->dropmon.sw_passive) {
       for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_sw); ii++) {
-	HSPDropPoint *dp = buildDropPoint(mod, &LoadDropPoints_sw[ii]);
+	HSPDropPoint *dp = buildDropPoint(mod, &LoadDropPoints_sw[ii], HSP_DROPMON_DP_SW, ii+1);
 	if(dp)
 	  addDropPoint_sw(mod, dp);
       }
@@ -402,7 +441,7 @@ extern "C" {
     if(sp->dropmon.hw
        || sp->dropmon.hw_passive) {
       for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_hw); ii++) {
-	HSPDropPoint *dp = buildDropPoint(mod, &LoadDropPoints_hw[ii]);
+	HSPDropPoint *dp = buildDropPoint(mod, &LoadDropPoints_hw[ii], HSP_DROPMON_DP_HW, ii+1);
 	if(dp)
 	  addDropPoint_hw(mod, dp);
       }
@@ -411,7 +450,7 @@ extern "C" {
 	// is the same as including "HSP_DROPPOINT(*=,*,unknown)" in dropPoints_hw.h
 	// except that we can turn it on/off in the config.
 	HSPDropPointLoader dplAll = { "*=", "*", "unknown" };
-	HSPDropPoint *dp = buildDropPoint(mod, &dplAll);
+	HSPDropPoint *dp = buildDropPoint(mod, &dplAll, HSP_DROPMON_DP_HW, -1);
 	if(dp)
 	  addDropPoint_hw(mod, dp);
       }
@@ -419,7 +458,7 @@ extern "C" {
 
     if(sp->dropmon.rn) {
       for(int ii = 0; ii < HSP_ARRAY_SIZE(LoadDropPoints_rn); ii++) {
-	HSPDropPoint *dp = buildDropPoint(mod, &LoadDropPoints_rn[ii]);
+	HSPDropPoint *dp = buildDropPoint(mod, &LoadDropPoints_rn[ii], HSP_DROPMON_DP_RN, ii+1);
 	if(dp)
 	  addDropPoint_rn(mod, dp);
       }
@@ -642,14 +681,14 @@ That would allow everything to stay on the stack as it does here, which has nice
 	break;
       case CTRL_ATTR_FAMILY_ID:
 	mdata->family_id = *(uint16_t *)UTNLA_DATA(attr0);
-	EVDebug(mod, 1, "generic family id: %u", mdata->family_id); 
+	EVDebug(mod, 1, "generic family id: %u", mdata->family_id);
 	break;
       case CTRL_ATTR_FAMILY_NAME:
-	EVDebug(mod, 1, "generic family name: %s", (char *)UTNLA_DATA(attr0)); 
+	EVDebug(mod, 1, "generic family name: %s", (char *)UTNLA_DATA(attr0));
 	break;
       case CTRL_ATTR_HDRSIZE:
 	mdata->headerSize = *(uint32_t *)UTNLA_DATA(attr0);
-	EVDebug(mod, 1, "generic family headerSize: %u", mdata->headerSize); 
+	EVDebug(mod, 1, "generic family headerSize: %u", mdata->headerSize);
 	break;
       case CTRL_ATTR_MAXATTR:
 	mdata->maxAttr = *(uint32_t *)UTNLA_DATA(attr0);
@@ -833,6 +872,13 @@ That would allow everything to stay on the stack as it does here, which has nice
 	// Local only packet with have all-zeros smac and dmac.
 	// When unused buffers are freed (e.g. in skb_queue_purge())
 	// they appear here with PROTO==0. Those we choose to ignore.
+	// We have also seen kfree_skb() from packet_rcv() with
+	// skb->protocol 0x0010 and reason NOT_SPECIFIED
+	// when MTU was causing drops.  The header in that case
+	// was not recognizable as a packet header, so this may
+	// have been a fragment or just an example of moving
+	// skbuff data around, but we are protected from it
+	// because dropPoints_sw.h does not match on packet_rcv.
 	break;
       case NET_DM_ATTR_PAYLOAD:
 	EVDebug(mod, 4, "PAYLOAD");
@@ -914,32 +960,78 @@ That would allow everything to stay on the stack as it does here, which has nice
 
     // look up drop point - allowing fallback if muliple attrs were supplied
     HSPDropPoint *dp = NULL;
-    if(reason)
+    // track progress through the decision tree so we can report at the end.
+#define HSP_DROPMON_MAX_DECISION_STEPS 16
+    char dseq[HSP_DROPMON_MAX_DECISION_STEPS] = {};
+    uint32_t dstep = 0;
+    int dpidx[HSP_DROPMON_DP_TYPES] = {};
+    if(skb_protocol) {
+      dseq[dstep++] = 'P'; // got PROTO
+    }
+    if(reason) {
+      dseq[dstep++] ='R';
       dp = getDropPoint_rn(mod, reason);
+      if(dp) {
+	dseq[dstep++] = 'r'; // found reason dropPoint
+	dpidx[HSP_DROPMON_DP_RN] = dp->dpIndex;
+	dseq[dstep++] = (dp->reason == SFLDrop_unknown) ? 'u' : 'k'; // unknown or known
+      }
+    }
     if((dp == NULL
 	|| dp->reason == SFLDrop_unknown)
-       && hw_name)
+       && hw_name) {
+      dseq[dstep++] = 'H';
       dp = getDropPoint_hw(mod, hw_group, hw_name);
+      if(dp) {
+	dseq[dstep++] = 'h'; // found hardware dropPoint
+	dpidx[HSP_DROPMON_DP_HW] = dp->dpIndex;
+	dseq[dstep++] = (dp->reason == SFLDrop_unknown) ? 'u' : 'k'; // unknown or known
+      }
+    }
     if((dp == NULL
 	|| dp->reason == SFLDrop_unknown)
-       && sw_symbol)
+       && sw_symbol) {
+      dseq[dstep++] = 'S';
       dp = getDropPoint_sw(mod, sw_symbol);
+      if(dp) {
+	dseq[dstep++] = 's'; // found software dropPoint
+	dpidx[HSP_DROPMON_DP_SW] = dp->dpIndex;
+	dseq[dstep++] = (dp->reason == SFLDrop_unknown) ? 'u' : 'k'; // unknown or known
+      }
+    }
 
-    if(dp == NULL
-       || dp->reason == -1
-       || skb_protocol == 0) {
-      // this one not considered a packet-drop, so ignore it.
-      EVDebug(mod, 4, "trap not considered a drop. Ignoring.");
+    if(dp == NULL) {
+      EVDebug(mod, 4, "No dropPoint found (%s) - IGNORE", dseq);
+      return;
+    }
+    if(dp->reason == -1) {
+      EVDebug(mod, 4, "DropPoint reason == -1 (%s) - IGNORE", dseq);
+      return;
+    }
+    if(skb_protocol == 0
+       && dp->dpType != HSP_DROPMON_DP_HW) {
+      EVDebug(mod, 4, "NET_DM_ATTR_PROTO required for %s drop (%s) - IGNORE",
+	      HSPDropPointTypeNames[dp->dpType],
+	      dseq);
       return;
     }
 
-    EVDebug(mod, 1, "found dropPoint %s reason_code=%u", dp->dropPoint, dp->reason);
+    EVDebug(mod, 1, "found %s dropPoint=%s reason_code=%u(%s) index=%d decision_sequence=%s",
+	    HSPDropPointTypeNames[dp->dpType],
+	    dp->dropPoint,
+	    dp->reason,
+	    getSFlowReasonName(mod, dp->reason),
+	    dp->dpIndex,
+	    dseq);
 
+    // last change to ignore, with runtime-settable regex in config
     if(sp->dropmon.hide_regex_str) {
       if(hideDrop(mod, hw_name)
 	 || hideDrop(mod, sw_symbol)
-	 || hideDrop(mod, reason))
+	 || hideDrop(mod, reason)) {
+	EVDebug(mod, 1, "but matches hide pattern - IGNORE");
 	return;
+      }
     }
 
     // fill in discard reason
@@ -1374,6 +1466,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     if(sp->dropmon.start
        || sp->dropmon.force)
       retainRootRequest(mod, "need CAP_NET_ADMIN for drop-monitor netlink feed.");
+    mdata->sflowDropsByCode = UTHASH_NEW(HSPDropcodeSFlow, code, UTHASH_DFLT);
+    mdata->sflowDropsByName = UTHASH_NEW(HSPDropcodeSFlow, name, UTHASH_SKEY);
+    loadSFlowDropcodes(mod);
     mdata->dropPoints_hw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_sw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_rn = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
