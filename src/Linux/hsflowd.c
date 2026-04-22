@@ -635,15 +635,17 @@ extern "C" {
 #if HSP_REPORT_PFC
     // possibly include PFC struct
     SFLCounters_sample_element pfc_elem = { 0 };
-    pfc_elem.tag = SFLCOUNTERS_PFC;
-    for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
-      pfc_elem.counterBlock.pfc.requests += adaptorNIO->pfc_total.pfc_rx[qq];
-      pfc_elem.counterBlock.pfc.indications += adaptorNIO->pfc_total.pfc_tx[qq];
+    if(adaptorNIO->pfc) {
+      pfc_elem.tag = SFLCOUNTERS_PFC;
+      for(uint32_t qq = 0; qq < HSP_PFC_CHANNELS; qq++) {
+	pfc_elem.counterBlock.pfc.requests += adaptorNIO->pfc_total.pfc_rx[qq];
+	pfc_elem.counterBlock.pfc.indications += adaptorNIO->pfc_total.pfc_tx[qq];
+      }
+      pfc_elem.counterBlock.pfc.pause_duration = UNSUPPORTED_SFLOW_COUNTER32;
+      pfc_elem.counterBlock.pfc.storm_detected = UNSUPPORTED_SFLOW_COUNTER32;
+      pfc_elem.counterBlock.pfc.storm_restored = UNSUPPORTED_SFLOW_COUNTER32;
+      SFLADD_ELEMENT(cs, &pfc_elem);
     }
-    pfc_elem.counterBlock.pfc.pause_duration = UNSUPPORTED_SFLOW_COUNTER32;
-    pfc_elem.counterBlock.pfc.storm_detected = UNSUPPORTED_SFLOW_COUNTER32;
-    pfc_elem.counterBlock.pfc.storm_restored = UNSUPPORTED_SFLOW_COUNTER32;
-    SFLADD_ELEMENT(cs, &pfc_elem);
 #endif
 
     // circulate the cs to be annotated by other modules before it is sent out.
@@ -2392,8 +2394,12 @@ extern "C" {
 	}
 
 	// close all file descriptors
-	int i;
-	for(i=getdtablesize(); i >= 0; --i) close(i);
+	int i, max_fd = sysconf(_SC_OPEN_MAX);
+	if(max_fd < 0
+	   || max_fd > 1024)
+	  max_fd = 1024;
+	for(i = max_fd; i >= 0; --i)
+	  close(i);
 	// create stdin/out/err
 	// stdin
 	if((i = open("/dev/null",O_RDWR)) == -1) {
