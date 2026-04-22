@@ -29,6 +29,7 @@ extern "C" {
 #define HSP_SONIC_FIELD_IFALIAS "alias"
 #define HSP_SONIC_FIELD_IFOPERSTATUS "oper_status"
 #define HSP_SONIC_FIELD_IFADMINSTATUS "admin_status"
+#define HSP_SONIC_FIELD_PFC_ENABLE "pfc_enable"
 
 #define HSP_SONIC_FIELD_IFIN_UCASTS "SAI_PORT_STAT_IF_IN_UCAST_PKTS"
 #define HSP_SONIC_FIELD_IFIN_MCASTS "SAI_PORT_STAT_IF_IN_MULTICAST_PKTS"
@@ -134,6 +135,9 @@ extern "C" {
     bool operUp:1;
     bool adminUp:1;
     bool oidChanged:1; // used to signal discontinuity (oid is key for counters)
+#ifdef HSP_REPORT_PFC
+    bool pfc:1;
+#endif
     uint64_t ifSpeed;
     char *ifAlias;
     SFLHost_nio_counters ctrs;
@@ -1592,6 +1596,56 @@ extern "C" {
     return NO;
   }
 
+  #ifdef HSP_REPORT_PFC
+  /*_________________---------------------------__________________
+    _________________   db_getPortStatePFC      __________________
+    -----------------___________________________------------------
+  */
+
+  static void db_portStatePFCCB(redisAsyncContext *ctx, void *magic, void *req_magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)ctx->ev.data;
+    EVMod *mod = db->mod;
+    redisReply *reply = (redisReply *)magic;
+    HSPSonicPort *prt = (HSPSonicPort *)req_magic;
+    EVDebug(mod, 1, "portStatePFC: reply=%s", db_replyStr(reply, db->replyBuf, YES));
+    if(reply == NULL)
+      return; // will skip this poll
+    bool pfc_enabled = NO; // missing means off
+    if(reply->type == REDIS_REPLY_ARRAY
+       && reply->elements > 0
+       && ISEVEN(reply->elements)) {
+      for(int ii = 0; ii < reply->elements; ii += 2) {
+	redisReply *c_name = reply->element[ii];
+	redisReply *c_val = reply->element[ii + 1];
+	if(c_name->type == REDIS_REPLY_STRING) {
+	  EVDebug(mod, 2, "portStatePFC: %s %s=%s",
+		  prt->portName,
+		  c_name->str,
+		  db_replyStr(c_val, db->replyBuf, YES));
+	  // pfc_enable will be missing or empty if pfc is not enabled on this port,
+	  // or it will contain a comma-separated list of priorities. e.g. "3,4".
+	  // Since the sFlow output combines the counters across all priorities,
+	  // we just need to know whether PFC is anabled on at least 1. Hence the
+	  // test is just for a non-empty string.
+	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_ENABLE))
+	    pfc_enabled = (my_strlen(c_val->str) > 0);
+	}
+      }
+    }
+    prt->pfc = pfc_enabled;
+  }
+
+  static void db_getPortStatePFC(EVMod *mod, HSPSonicPort *prt) {
+    HSPSonicDBClient *db = db_selectClient(mod, HSP_SONIC_DB_CONFIG_NAME);
+    if(db) {
+      EVDebug(mod, 1, "getPortStatePFC(%s)", prt->portName);
+      int status = redisAsyncCommand(db->ctx, db_portStatePFCCB, prt, "HGETALL PORT_QOS_MAP|%s", prt->portName);
+      EVDebug(mod, 1, "getPortStatePFC() returned %d", status);
+    }
+  }
+#endif /* HSP_REPORT_PFC */
+
   /*_________________---------------------------__________________
     _________________      db_getPortCounters   __________________
     -----------------___________________________------------------
@@ -1659,39 +1713,41 @@ extern "C" {
 	  prt->et_ctrs.adminStatus = prt->adminUp;
 
 #ifdef HSP_REPORT_PFC
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_0))
-	    prt->pfc_ctrs.pfc_tx[0] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_1))
-	    prt->pfc_ctrs.pfc_tx[1] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_2))
-	    prt->pfc_ctrs.pfc_tx[2] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_3))
-	    prt->pfc_ctrs.pfc_tx[3] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_4))
-	    prt->pfc_ctrs.pfc_tx[4] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_5))
-	    prt->pfc_ctrs.pfc_tx[5] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_6))
-	    prt->pfc_ctrs.pfc_tx[6] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_7))
-	    prt->pfc_ctrs.pfc_tx[7] = db_getU32(c_val);
+	  if(prt->pfc) {
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_0))
+	      prt->pfc_ctrs.pfc_tx[0] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_1))
+	      prt->pfc_ctrs.pfc_tx[1] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_2))
+	      prt->pfc_ctrs.pfc_tx[2] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_3))
+	      prt->pfc_ctrs.pfc_tx[3] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_4))
+	      prt->pfc_ctrs.pfc_tx[4] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_5))
+	      prt->pfc_ctrs.pfc_tx[5] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_6))
+	      prt->pfc_ctrs.pfc_tx[6] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_TX_7))
+	      prt->pfc_ctrs.pfc_tx[7] = db_getU32(c_val);
 
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_0))
-	    prt->pfc_ctrs.pfc_rx[0] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_1))
-	    prt->pfc_ctrs.pfc_rx[1] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_2))
-	    prt->pfc_ctrs.pfc_rx[2] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_3))
-	    prt->pfc_ctrs.pfc_rx[3] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_4))
-	    prt->pfc_ctrs.pfc_rx[4] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_5))
-	    prt->pfc_ctrs.pfc_rx[5] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_6))
-	    prt->pfc_ctrs.pfc_rx[6] = db_getU32(c_val);
-	  if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_7))
-	    prt->pfc_ctrs.pfc_rx[7] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_0))
+	      prt->pfc_ctrs.pfc_rx[0] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_1))
+	      prt->pfc_ctrs.pfc_rx[1] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_2))
+	      prt->pfc_ctrs.pfc_rx[2] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_3))
+	      prt->pfc_ctrs.pfc_rx[3] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_4))
+	      prt->pfc_ctrs.pfc_rx[4] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_5))
+	      prt->pfc_ctrs.pfc_rx[5] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_6))
+	      prt->pfc_ctrs.pfc_rx[6] = db_getU32(c_val);
+	    if(my_strequal(c_name->str, HSP_SONIC_FIELD_PFC_RX_7))
+	      prt->pfc_ctrs.pfc_rx[7] = db_getU32(c_val);
+	  }
 #endif
 	}
       }
@@ -1710,7 +1766,14 @@ extern "C" {
 	  | HSP_ETCTR_OPER
 	  | HSP_ETCTR_ADMIN;
 #ifdef HSP_REPORT_PFC
-	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs, &prt->pfc_ctrs);
+	// turn the export of PFC counters on/off
+	nio->pfc = prt->pfc;
+	// submit latest
+	accumulateNioCounters(sp,
+			      adaptor,
+			      &prt->ctrs,
+			      &prt->et_ctrs,
+			      prt->pfc ? &prt->pfc_ctrs : NULL);
 #else
 	accumulateNioCounters(sp, adaptor, &prt->ctrs, &prt->et_ctrs, NULL);
 #endif
@@ -2066,7 +2129,6 @@ extern "C" {
     }
   }
 
-
   /*_________________---------------------------__________________
     _________________    db_getSystemReady      __________________
     -----------------___________________________------------------
@@ -2374,6 +2436,9 @@ extern "C" {
 	// is preserved, so can just ask for state-refresh and counters
 	// together:
 	db_getPortState(mod, prt);
+#ifdef HSP_REPORT_PFC
+	db_getPortStatePFC(mod, prt);
+#endif
 	db_getPortCounters(mod, prt);
       }
     }
