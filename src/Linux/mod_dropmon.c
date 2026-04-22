@@ -1371,8 +1371,9 @@ That would allow everything to stay on the stack as it does here, which has nice
     HSP *sp = (HSP *)EVROOTDATA(mod);
     mod->data = my_calloc(sizeof(HSP_mod_DROPMON));
     HSP_mod_DROPMON *mdata = (HSP_mod_DROPMON *)mod->data;
-    if(sp->dropmon.start)
-      retainRootRequest(mod, "need CAP_NET_ADMIN to start drop-monitor netlink feed.");
+    if(sp->dropmon.start
+       || sp->dropmon.force)
+      retainRootRequest(mod, "need CAP_NET_ADMIN for drop-monitor netlink feed.");
     mdata->dropPoints_hw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_sw = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
     mdata->dropPoints_rn = UTHASH_NEW(HSPDropPoint, dropPoint, UTHASH_SKEY);
