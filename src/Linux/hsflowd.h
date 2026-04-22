@@ -353,6 +353,7 @@ extern "C" {
     bool changed_alias:1;
     bool changed_netnsid:1;
     bool changed_external:1; // something was changed by a module
+    bool pfc:1;
     int32_t vlan;
 #define HSP_VLAN_ALL -1
     SFLHost_nio_counters nio;
