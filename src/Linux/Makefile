@@ -136,14 +136,15 @@ endif
 #  XTGTS += $(FEATURES_CONTAINERD)
 #endif
 
-ifneq ($(shell echo $(FEATURES2)|grep -c " INITD "),0)
-  HSFLOWD_USE_INITD=yes
-endif
-
 # in XTGTS2 every token has spaces before and after
 XTGTS2=" $(XTGTS) "
 $(info $$XTGTS is [$(XTGTS)])
 $(info $$XTGTS2 is [$(XTGTS2)])
+
+# Notice if the INITD feature was present (or added)
+ifneq ($(shell echo $(XTGTS2)|grep -c " INITD "),0)
+  HSFLOWD_USE_INITD=yes
+endif
 
 # alternative mount points (to support hsflowd running in container
 # and/or with no root privileges)
