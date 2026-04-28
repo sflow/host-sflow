@@ -127,6 +127,7 @@ deb: $(PROG)
 	PLATFORM=`uname`; \
 	mkdir -p debian/DEBIAN; \
 	mkdir -p debian/usr/sbin; \
+	mkdir -p debian/etc/init.d; \
 	mkdir -p debian/etc/hsflowd/modules; \
 	mkdir -p debian/lib/systemd/system; \
 	mkdir -p debian/etc/dbus-1/system.d; \
