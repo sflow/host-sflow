@@ -1,15 +1,10 @@
 FROM debian:bullseye
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential \
-      clang \
+RUN apt-get -y update && apt-get install -y --no-install-recommends \
       git-all \
-      libpcap-dev \
-      libvirt-dev \
-      libnfnetlink-dev \
-      libxml2-dev \
-      libssl-dev \
-      libdbus-1-dev \
+      make \
+      gcc \
+      clang \
       libhiredis-dev
 RUN mkdir /packages && chown 777 /packages
 COPY build_hsflowd /root/build_hsflowd

@@ -2,8 +2,22 @@
 # http://sflow.net/host-sflow-linux-config.php
 
 sflow {
-  # sonic {} loaded automatically
-  # psample {} loaded automatically
+  # mod_sonic, mod_psample and mod_dropmon are loaded automatically
+  # when hsflowd is built with FEATURES=SONIC, so only uncomment here
+  # if you need to override defaults. This file may be overwritten
+  # again, so when testing you might want to copy it first.
+  # For example:
+  # cp /etc/hsflowd.conf /etc/hsflowd_test.conf
+  # <edit /etc/hsflowd.conf to adjust settings>
+  # gdb --args hsflowd -f /etc/hsflowd_test.conf -ddd
+  
+  # sonic { waitReady=300 setifalias=on setifname=on suppressOther=on }
+  # psample { group=1 ingress=on egress=on }
+  # dropmon { start=off sw=off hw=off hw_unknown=off
+  #           force=on
+  #           sw_passive=on hw_passive=on
+  #           limit=100 max=100000 max_trip=2 }
+  
   # ====== detect new interfaces ======
   refreshAdaptors=60
   # ======  Agent IP selection ======

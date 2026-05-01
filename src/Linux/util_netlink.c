@@ -69,7 +69,7 @@ extern "C" {
     }
     return rewritten;
   }
-       
+
   /*_________________---------------------------__________________
     _________________      UTNLDiag_send        __________________
     -----------------___________________________------------------
@@ -113,7 +113,7 @@ extern "C" {
 	  if(nlh->nlmsg_type == NLMSG_DONE)
 	    break;
 	  if(nlh->nlmsg_type == NLMSG_ERROR){
-            struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
+	    struct nlmsgerr *err_msg = (struct nlmsgerr *)NLMSG_DATA(nlh);
 	    // Frequently see:
 	    // "device or resource busy" (especially with NLM_F_DUMP set)
 	    // "netlink error" (IPv6 but connection not established)
@@ -420,7 +420,7 @@ extern "C" {
     rc = recv(sockfd, recv_buf, HSP_READNL_RCV_BUF, 0);
     if(rc < 0) {
       if(errno == EAGAIN || errno == EINTR)
-        goto try_again;
+	goto try_again;
       fprintf(stderr, "UTNLRoute_recv_nlmsg error : %s\n", strerror(errno));
     }
     int len = rc;
@@ -453,6 +453,22 @@ extern "C" {
     setNonBlocking(nl_sock);
     setCloseOnExec(nl_sock);
     return nl_sock;
+  }
+
+  /*_________________---------------------------__________________
+    _________________    UTNLReadString         __________________
+    -----------------___________________________------------------
+    defensive read, to cover cases where netlink-encoded string attribute
+    a null-termination character, or does not. Or includes it in the
+    attribute length, or does not.
+  */
+
+  char *UTNLReadString(char *datap, int datalen, char *buf, int buflen) {
+    if(datalen >= buflen)
+      return NULL;
+    memcpy(datap, buf, datalen);
+    buf[datalen] = '\0';
+    return buf;
   }
 
 #if defined(__cplusplus)

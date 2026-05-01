@@ -53,7 +53,7 @@ extern "C" {
        TCP_CLOSE_WAIT,
        TCP_LAST_ACK,
        TCP_LISTEN,
-       TCP_CLOSING 
+       TCP_CLOSING
   } EnumKernelTCPState;
 
   char *UTNLDiag_sockid_print(struct inet_diag_sockid *sockid);
@@ -81,6 +81,7 @@ extern "C" {
   int UTNLRoute_ns_send(int sockfd, uint32_t mod_id, int fd, uint32_t seqNo);
 
   int UTNLUsersock_open(uint32_t mod_id);
+  char *UTNLReadString(char *datap, int datalen, char *buf, int buflen);
 
   // linux/netlink.h defines struct nlattr but doesn't provide the walking macros NLA_OK, NLA_NEXT.
   // rtnetlink.h provides RTA_OK, RTA_NEXT macros.

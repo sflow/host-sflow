@@ -72,6 +72,7 @@ extern "C" {
 #define HSP_DROPMON_READNL_BATCH 100
 #define HSP_DROPMON_RCVBUF 8000000
 #define HSP_DROPMON_QUEUE 1000 // seems to be default (in kernel net/core/drop_monitor.c)
+#define HSP_DROPMON_MAX_STRLEN 255
 
   typedef enum {
     HSP_DROPMON_STATE_INIT=0,
@@ -801,10 +802,16 @@ That would allow everything to stay on the stack as it does here, which has nice
     uint32_t trunc_len=0;
     uint32_t orig_len=0;
     uint16_t skb_protocol=0;
-    char *hw_group=NULL;
-    char *hw_name=NULL;
-    char *sw_symbol=NULL;
-    char *reason=NULL;
+    char *hw_group = NULL;
+    char hw_group_buf[HSP_DROPMON_MAX_STRLEN+1];
+    char *hw_name = NULL;
+    char hw_name_buf[HSP_DROPMON_MAX_STRLEN+1];
+    char *sw_symbol = NULL;
+    char sw_symbol_buf[HSP_DROPMON_MAX_STRLEN+1];
+    char *reason = NULL;
+    char reason_buf[HSP_DROPMON_MAX_STRLEN+1];
+    char *netdev_name = NULL;
+    char netdev_name_buf[HSP_DROPMON_MAX_STRLEN+1];
     uint64_t timestamp_nS=0;
 
     // increment counter for threshold check
@@ -835,8 +842,8 @@ That would allow everything to stay on the stack as it does here, which has nice
 	EVDebug(mod, 4, "u64=PC=0x%"PRIx64, *(uint64_t *)datap);
 	break;
       case NET_DM_ATTR_SYMBOL:
-	EVDebug(mod, 4, "string=ATTR_SYMBOL=%s", datap);
-	sw_symbol = (char *)datap;
+	sw_symbol = UTNLReadString((char *)datap, datalen, sw_symbol_buf, HSP_DROPMON_MAX_STRLEN);
+	EVDebug(mod, 4, "string=ATTR_SYMBOL=%s", sw_symbol ?: "<string read failed>");
 	break;
       case NET_DM_ATTR_IN_PORT:
 	EVDebug(mod, 4, "nested=IN_PORT");
@@ -854,7 +861,11 @@ That would allow everything to stay on the stack as it does here, which has nice
 	      discard.input = *(uint32_t *)UTNLA_DATA(port_attr);
 	      break;
 	    case NET_DM_ATTR_PORT_NETDEV_NAME:
-	      EVDebug(mod, 4, "string=NETDEV_NAME=%s", (char *)UTNLA_DATA(port_attr));
+	      netdev_name = UTNLReadString((char *)UTNLA_DATA(port_attr),
+					   UTNLA_PAYLOAD(port_attr),
+					   netdev_name_buf,
+					   HSP_DROPMON_MAX_STRLEN);
+	      EVDebug(mod, 4, "string=NETDEV_NAME=%s", netdev_name ?: "<string read failed>");
 	      break;
 	    }
 	    port_attr = UTNLA_NEXT(port_attr, port_len);
@@ -910,12 +921,12 @@ That would allow everything to stay on the stack as it does here, which has nice
 	EVDebug(mod, 4, "u16=ORIGIN=%u", *(uint16_t *)datap);
 	break;
       case NET_DM_ATTR_HW_TRAP_GROUP_NAME:
-	EVDebug(mod, 4, "string=TRAP_GROUP_NAME=%s", datap);
-	hw_group = (char *)datap;
+	hw_group = UTNLReadString((char *)datap, datalen, hw_group_buf, HSP_DROPMON_MAX_STRLEN);
+	EVDebug(mod, 4, "string=TRAP_GROUP_NAME=%s", hw_group ?: "<string read failed>");
 	break;
       case NET_DM_ATTR_HW_TRAP_NAME:
-	EVDebug(mod, 4, "string=TRAP_NAME=%s", datap);
-	hw_name = (char *)datap;
+	hw_name = UTNLReadString((char *)datap, datalen, hw_name_buf, HSP_DROPMON_MAX_STRLEN);
+	EVDebug(mod, 4, "string=TRAP_NAME=%s", hw_name ?: "<string read failed>");
 	break;
       case NET_DM_ATTR_HW_ENTRIES:
 	EVDebug(mod, 4, "nested=HW_ENTRIES");
@@ -933,8 +944,8 @@ That would allow everything to stay on the stack as it does here, which has nice
 	EVDebug(mod, 4, "flag=HW_DROPS");
 	break;
       case NET_DM_ATTR_REASON:
-	EVDebug(mod, 4, "string=REASON=%s", datap);
-	reason = (char *)datap;
+	reason = UTNLReadString((char *)datap, datalen, reason_buf, HSP_DROPMON_MAX_STRLEN);
+	EVDebug(mod, 4, "string=REASON=%s", reason ?: "<string read failed>");
 	break;
       }
       attr = UTNLA_NEXT(attr, len);
