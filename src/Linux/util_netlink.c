@@ -464,9 +464,11 @@ extern "C" {
   */
 
   char *UTNLReadString(char *datap, int datalen, char *buf, int buflen) {
-    if(datalen >= buflen)
+    if(datalen >= buflen) {
+      buf[0] = '\0';
       return NULL;
-    memcpy(datap, buf, datalen);
+    }
+    memcpy(buf, datap, datalen);
     buf[datalen] = '\0';
     return buf;
   }
