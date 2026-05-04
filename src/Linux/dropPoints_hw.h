@@ -20,6 +20,7 @@ HSP_DROPPOINT(==,l3_drops,unknown_l3)
 HSP_DROPPOINT(==,l3_exceptions,unknown_l3_exception)
 HSP_DROPPOINT(==,tunnel_drops,unknown_tunnel)
 HSP_DROPPOINT(==,buffer_drops,unknown_buffer)
+HSP_DROPPOINT(==,policer_drops,traffic_shaping)
 
 /* Some groups are not considered drops. We
    can leave them out, or indicate they should
