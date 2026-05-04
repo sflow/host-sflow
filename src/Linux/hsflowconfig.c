@@ -618,9 +618,12 @@ extern "C" {
       char ipbuf[64];
       UTStrBuf_printf(buf, "hostname=%s\n", sp->hostname);
       UTStrBuf_printf(buf, "sampling=%u\n", settings->samplingRate);
+      // UTStrBuf_printf(buf, "samplingDirection=%d\n", settings->samplingDirection);
       UTStrBuf_printf(buf, "header=%u\n", settings->headerBytes);
       UTStrBuf_printf(buf, "datagram=%u\n", settings->datagramBytes);
       UTStrBuf_printf(buf, "polling=%u\n", settings->pollingInterval);
+      UTStrBuf_printf(buf, "dropLimit=%u\n", settings->dropLimit);
+      UTStrBuf_printf(buf, "dropLimit_set=%u\n", settings->dropLimit_set);
       // make sure the application specific ones always come after the general ones - to simplify the override logic there
       for(HSPApplicationSettings *appSettings = settings->applicationSettings; appSettings; appSettings = appSettings->nxt) {
 	if(appSettings->got_sampling_n) {
