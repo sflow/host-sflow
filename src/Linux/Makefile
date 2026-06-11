@@ -192,7 +192,7 @@ LD=$(CLANG)
 
 # optimization
 OPT_ALL= -O3 -DNDEBUG
-OPT_REG= -g -O2
+OPT_REG= -g -O2 -fno-omit-frame-pointer
 OPT_DBG= -g -ggdb
 
 # use "UTHEAP=no OPT=-g" to turn off buffer-recycling

@@ -599,6 +599,11 @@ extern "C" {
   } EnumVNodePriority;
 
   typedef struct _HSP {
+#ifdef HAVE_BACKTRACE
+#define HSP_NUM_BACKTRACE_PTRS 50
+    int crashFD;
+    void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
+#endif
     char *modulesPath;
     EVMod *rootModule;
     EVBus *pollBus;
@@ -821,6 +826,7 @@ extern "C" {
     uint32_t outputRevisionNo;
     FILE *f_out;
     char *crashFile;
+    bool handleCrashSignals;
     char *logFile;
     char *logBytes;
     UTStringArray *retainRootReasons;

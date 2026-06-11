@@ -23,8 +23,6 @@ extern "C" {
 
   // globals - easier for signal handler
   HSP HSPSamplingProbe;
-  int exitStatus = EXIT_SUCCESS;
-  FILE *f_crash = NULL;
 
   static void openCollectorSockets(HSP *sp, HSPSFlowSettings *settings);
   static bool installSFlowSettings(HSP *sp, HSPSFlowSettings *settings);
@@ -1124,6 +1122,31 @@ extern "C" {
   }
 
   /*_________________---------------------------__________________
+    _________________    start - all buses      __________________
+    -----------------___________________________------------------
+    this fn called on start by all buses (all threads) so be careful!
+  */
+
+  static void evt_all_start(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
+    myDebug(1, "evt_all_start() SIGSTKSZ=%u", SIGSTKSZ);
+    // allocate a signal stack so we can always get a backtrace in the crash handler.
+    // This must be allocated on the heap separately for each thread that wants
+    // to use it (see sigaction() with SA_ONSTACK)
+    stack_t ss = { .ss_size=SIGSTKSZ, .ss_flags=0 };
+    ss.ss_sp = my_os_calloc(SIGSTKSZ);
+    // 2. Register the alternate signal stack for this thread
+    if (sigaltstack(&ss, NULL) == -1)
+      myDebug(1, "sigaltstack() failed : %s\n", strerror(errno));
+#ifdef HAVE_BACKTRACE
+    // make sure thread backtrace is pre-initialized in case we need it
+    // to be ready to go in the interrupt handler. This step must also
+    // be done separately in every thread.
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    backtrace(sp->backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
+#endif
+  }
+
+  /*_________________---------------------------__________________
     _________________     tock - all buses      __________________
     -----------------___________________________------------------
     this fn called on tock by all buses (all threads) so be careful!
@@ -1298,7 +1321,7 @@ extern "C" {
   static void processCommandLine(HSP *sp, int argc, char *argv[])
   {
     int in;
-    while ((in = getopt(argc, argv, "dvPp:f:F:l:o:u:m:?hc:D:L:M:")) != -1) {
+    while ((in = getopt(argc, argv, "dvPp:f:F:l:o:u:m:?hCc:D:L:M:")) != -1) {
       switch(in) {
       case 'v':
 	printf("%s version %s\n", argv[0], STRINGIFY_DEF(HSP_VERSION));
@@ -1316,6 +1339,7 @@ extern "C" {
       case 'F': sp->debugFile = optarg; break;
       case 'l': sp->modulesPath = my_strlen(optarg) ? optarg : NULL; break;
       case 'o': sp->outputFile = optarg; break;
+      case 'C': sp->handleCrashSignals = YES; break;
       case 'c': sp->crashFile = optarg; break;
       case 'D': sp->logFile = optarg; break;
       case 'L': sp->logBytes = optarg; break;
@@ -1414,11 +1438,12 @@ extern "C" {
   /*_________________---------------------------__________________
     _________________     signal_handler        __________________
     -----------------___________________________------------------
+    Handler for "ok" signals that we expect.
   */
 
   static void signal_handler(int sig, siginfo_t *info, void *secret) {
     HSP *sp = &HSPSamplingProbe;
-
+    FILE *f_dbg = getDebugOut();
     switch(sig) {
     case SIGTERM:
       myLog(LOG_INFO,"Received SIGTERM");
@@ -1438,39 +1463,78 @@ extern "C" {
     case SIGUSR1:
       myLog(LOG_INFO,"Received SIGUSR1");
       // telemtry, backtrace and memory stats only - then keep going
-      log_telemetry(sp, getDebugOut());
-      log_backtrace(sig, info, getDebugOut());
+      log_telemetry(sp, f_dbg);
+#ifdef HAVE_BACKTRACE
+      size_t siz = backtrace(sp->backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
+      backtrace_symbols_fd(sp->backtracePtrs, siz, fileno(f_dbg));
+#endif
 #if (__GLIBC__ >= 2 && __GLIBC_MINOR__ >= 13)
-      malloc_info(0, getDebugOut());
+      malloc_info(0, f_dbg);
 #endif
       break;
     case SIGUSR2:
       myLog(LOG_INFO,"Received SIGUSR2");
       // increase debug log level
       setDebug(getDebug() + 1);
-      fprintf(getDebugOut(),"SIGUSR2: increased debug log level to %u (logBytes=%ld, limit=%ld)\n",
+      fprintf(f_dbg,"SIGUSR2: increased debug log level to %u (logBytes=%ld, limit=%ld)\n",
 	      getDebug(),
 	      ftell(getDebugOut()),
 	      getDebugLimit());
       break;
     default:
-      myLog(LOG_INFO,"Received signal %d", sig);
-      // first try to make sure we can't go in a loop
-      signal(SIGSEGV, SIG_DFL);
-      signal(SIGFPE, SIG_DFL);
-      signal(SIGILL, SIG_DFL);
-      signal(SIGBUS, SIG_DFL);
-      signal(SIGXFSZ, SIG_DFL);
-      // backtrace to stderr
-      log_backtrace(sig, info, stderr);
-      // backtrace to debug too
-      log_backtrace(sig, info, getDebugOut());
-      // and bail out
-      exit(sig);
+      // Not expecting to get here.  Other signals should go to the crash_handler.
+      // So treat this as a bad crash and do nothing else but _exit();
+      _exit(sig);
       break;
     }
   }
 
+  static void register_signal_handler(HSP *sp) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGUSR1, &sa, NULL);
+    sigaction(SIGUSR2, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
+  }
+
+  /*_________________---------------------------__________________
+    _________________     crash_handler         __________________
+    -----------------___________________________------------------
+    Handler for "not OK" signals. Important to get backtrace out here
+    but not do anything else that might trigger allocation, blow the
+    signal stack or lock up the process.
+  */
+
+  static void crash_handler(int sig, siginfo_t *info, void *secret) {
+    HSP *sp = &HSPSamplingProbe;
+#ifdef HAVE_BACKTRACE
+    size_t siz = backtrace(sp->backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
+    backtrace_symbols_fd(sp->backtracePtrs, siz, sp->crashFD);
+#endif
+    _exit(sig);
+  }
+
+  static void register_crash_handler(HSP *sp) {
+    sp->crashFD = fileno(stderr);
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = crash_handler;
+    sigemptyset(&sa.sa_mask);
+    // SA_RESETHAND: Prevent loop by reverting to default behavior after 1st call.
+    // SA_NODEFER: Secondary fault inside handler triggers immediate exit.
+    // SA_ONSTACK: Pivot to the thread's sigaltstack memory.
+    sa.sa_flags = SA_RESETHAND | SA_NODEFER | SA_ONSTACK;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGXFSZ, &sa, NULL);
+    sigaction(SIGABRT, &sa, NULL);
+  }
+    
   /*_________________---------------------------__________________
     _________________   pre_config_first        __________________
     -----------------___________________________------------------
@@ -2306,28 +2370,19 @@ extern "C" {
     openlog(HSP_DAEMON_NAME, LOG_CONS, LOG_USER);
     setlogmask(LOG_UPTO(LOG_DEBUG));
 
-    // register signal handler
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_sigaction = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGINT, &sa, NULL);
-    sigaction(SIGSEGV, &sa, NULL);
-    sigaction(SIGILL, &sa, NULL);
-    sigaction(SIGBUS, &sa, NULL);
-    sigaction(SIGXFSZ, &sa, NULL);
-    sigaction(SIGABRT, &sa, NULL);
-    sigaction(SIGUSR1, &sa, NULL);
-    sigaction(SIGUSR2, &sa, NULL);
-    sigaction(SIGHUP, &sa, NULL);
-    // TODO: SIGPIPE? SIGCHLD?
+    // register signal handler for regular signals
+    register_signal_handler(sp);
 
     // init
     setDefaults(sp);
 
     // read the command line
     processCommandLine(sp, argc, argv);
+
+    if(sp->handleCrashSignals) {
+      // register signal handler for crash signals
+      register_crash_handler(sp);
+    }
 
     // log file may have been specified
     openLogFile(sp);
@@ -2426,13 +2481,18 @@ extern "C" {
       exit(EXIT_FAILURE);
     }
 
-    // open a file we can use to write a crash dump (if necessary)
+    // open a file we can use to write a crash dump (if necessary). Otherwise,
+    // if crash-signals are handled, the crash-dump backtrace will go to stderr.
     if(sp->crashFile) {
+      FILE *f_crash;
       // the file pointer needs to be a global so it is accessible
       // to the signal handler
       if((f_crash = fopen(sp->crashFile, "w")) == NULL) {
 	myLog(LOG_ERR, "cannot open output file %s : %s", sp->crashFile, strerror(errno));
 	exit(EXIT_FAILURE);
+      }
+      else {
+	sp->crashFD = fileno(f_crash);
       }
     }
 
@@ -2790,6 +2850,9 @@ extern "C" {
       installSFlowSettings(sp, sp->sFlowSettings_file);
     }
 
+    // have every thread call in when it starts
+    EVEventRxAll(sp->rootModule, EVEVENT_START, evt_all_start);
+
     // have every thread call in every second
     EVEventRxAll(sp->rootModule, EVEVENT_TOCK, evt_all_tock);
 
@@ -2818,7 +2881,7 @@ extern "C" {
     HeapProfilerStop();
 #endif
     
-    exit(exitStatus);
+    exit(0);
   } /* main() */
 
 #if defined(__cplusplus)
