@@ -1128,20 +1128,23 @@ extern "C" {
   */
 
   static void evt_all_start(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
-    myDebug(1, "evt_all_start() SIGSTKSZ=%u", SIGSTKSZ);
-    // allocate a signal stack so we can always get a backtrace in the crash handler.
-    // This must be allocated on the heap separately for each thread that wants
-    // to use it (see sigaction() with SA_ONSTACK)
-    stack_t ss = { .ss_size=SIGSTKSZ, .ss_flags=0 };
-    ss.ss_sp = my_os_calloc(SIGSTKSZ);
-    // 2. Register the alternate signal stack for this thread
-    if (sigaltstack(&ss, NULL) == -1)
-      myDebug(1, "sigaltstack() failed : %s\n", strerror(errno));
+    HSP *sp = (HSP *)EVROOTDATA(mod);
+    myDebug(1, "evt_all_start()");
+    if(sp->handleCrashSignals) {
+      myDebug(1, "handleCrashSignals: SIGSTKSZ=%u", SIGSTKSZ);
+      // allocate a signal stack so we can always get a backtrace in the crash handler.
+      // This must be allocated on the heap separately for each thread that wants
+      // to use it (see sigaction() with SA_ONSTACK)
+      stack_t ss = { .ss_size=SIGSTKSZ, .ss_flags=0 };
+      ss.ss_sp = my_os_calloc(SIGSTKSZ);
+      // 2. Register the alternate signal stack for this thread
+      if (sigaltstack(&ss, NULL) == -1)
+	myDebug(1, "sigaltstack() failed : %s\n", strerror(errno));
+    }
 #ifdef HAVE_BACKTRACE
     // make sure thread backtrace is pre-initialized in case we need it
     // to be ready to go in the interrupt handler. This step must also
     // be done separately in every thread.
-    HSP *sp = (HSP *)EVROOTDATA(mod);
     backtrace(sp->backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
 #endif
   }
@@ -1509,12 +1512,35 @@ extern "C" {
     signal stack or lock up the process.
   */
 
+  static inline void safe_write_hex(int fd, uintptr_t num) {
+    #define HSP_HEXCHARS_64 18 // "0x" + 16 hex digits
+    char buf[HSP_HEXCHARS_64]; 
+    const char hex[] = "0123456789abcdef";
+    for(int ii = HSP_HEXCHARS_64; ii > 2; ) {
+      buf[--ii] = hex[num & 0x0F];
+      num >>= 4;
+    }
+    buf[1] = 'x';
+    buf[0] = '0';
+    write(fd, buf, HSP_HEXCHARS_64);
+}
+
+#define safe_write_lit(fd, lit) write((fd), (lit), sizeof(lit)-1)
+
   static void crash_handler(int sig, siginfo_t *info, void *secret) {
     HSP *sp = &HSPSamplingProbe;
 #ifdef HAVE_BACKTRACE
     size_t siz = backtrace(sp->backtracePtrs, HSP_NUM_BACKTRACE_PTRS);
     backtrace_symbols_fd(sp->backtracePtrs, siz, sp->crashFD);
 #endif
+    safe_write_lit(sp->crashFD, "signal=");
+    safe_write_hex(sp->crashFD, (uintptr_t)sig);
+    safe_write_lit(sp->crashFD, "\n");
+    if(sig == SIGSEGV) {
+      safe_write_lit(sp->crashFD, "SIGSEGV si_addr=");
+      safe_write_hex(sp->crashFD, (uintptr_t)info->si_addr);
+      safe_write_lit(sp->crashFD, "\n");
+    }
     _exit(sig);
   }
 
