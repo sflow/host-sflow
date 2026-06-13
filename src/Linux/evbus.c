@@ -158,6 +158,16 @@ extern "C" {
     return sock;
   }
 
+  void EVSocketSetWriteCB(EVSocket *sock, EVWriteCB writeCB) {
+    if(sock)
+      sock->writeCB = writeCB;
+  }
+
+  void EVSocketSetWantWrite(EVSocket *sock, bool on) {
+    if(sock)
+      sock->want_write = on;
+  }
+
   void EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD) {
     SEMLOCK_DO(mod->root->sync) {
       if(sock->fd > 0) {
@@ -438,7 +448,9 @@ extern "C" {
   static void busRead(EVBus *bus) {
     EVSocket *sock;
     fd_set readfds;
+    fd_set writefds;
     FD_ZERO(&readfds);
+    FD_ZERO(&writefds);
     sigset_t emptyset;
     sigemptyset(&emptyset);
     int max_fd = 0;
@@ -468,6 +480,10 @@ extern "C" {
 	abort();
       }
       FD_SET(sock->fd, &readfds);
+      if(sock->want_write
+	 && sock->writeCB) {
+	FD_SET(sock->fd, &writefds);
+      }
       if(sock->fd > max_fd)
 	max_fd = sock->fd;
     }
@@ -476,7 +492,7 @@ extern "C" {
     timeout.tv_nsec = bus->select_mS * 1000000;
     int nfds = pselect(max_fd + 1,
 		       &readfds,
-		       (fd_set *)NULL,
+		       &writefds,
 		       (fd_set *)NULL,
 		       &timeout,
 		       &emptyset);
@@ -492,6 +508,9 @@ extern "C" {
       UTARRAY_WALK(bus->sockets_run, sock) {
 	if(FD_ISSET(sock->fd, &readfds))
 	  (*sock->readCB)(sock->module, sock, sock->magic);
+	if(sock->writeCB
+	   && FD_ISSET(sock->fd, &writefds))
+	  (*sock->writeCB)(sock->module, sock, sock->magic);
       }
     }
     else if(nfds < 0) {

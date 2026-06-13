@@ -91,6 +91,7 @@ extern "C" {
   } EVBus;
 
   typedef void (*EVReadCB)(EVMod *mod, struct _EVSocket *sock, void *magic);
+  typedef void (*EVWriteCB)(EVMod *mod, struct _EVSocket *sock, void *magic);
 
   typedef struct _EVSocket {
     EVBus *bus;
@@ -103,6 +104,8 @@ extern "C" {
     UTStrBuf *iobuf;
     UTStrBuf *ioline;
     bool errOut;
+    EVWriteCB writeCB;
+    bool want_write;
   } EVSocket;
 
   struct _EVAction; // fwd decl
@@ -160,6 +163,8 @@ extern "C" {
   int EVEventTx(EVMod *mod, EVEvent *evt, void *data, size_t dataLen);
   int EVEventTxAll(EVMod *mod, char *evt_name, void *data, size_t dataLen);
   EVSocket *EVBusAddSocket(EVMod *mod, EVBus *bus, int fd, EVReadCB readCB, void *magic);
+  void EVSocketSetWriteCB(EVSocket *sock, EVWriteCB writeCB);
+  void EVSocketSetWantWrite(EVSocket *sock, bool on);
   void EVSocketClose(EVMod *mod, EVSocket *sock, bool closeFD);
   void EVClockMono(struct timespec *ts);
 
