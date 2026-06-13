@@ -874,17 +874,30 @@ extern "C" {
     redisAsyncHandleRead(db->ctx);
   }
 
+  static void db_writeCB(EVMod *mod, EVSocket *sock, void *magic)
+  {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)magic;
+    db->writes++;
+    // Event-loop driven: the kernel just told us the socket has space
+    // in its send buffer. Hand control to hiredis to flush queued
+    // output. If hiredis still has more queued after this, it will
+    // leave the addWrite hook armed (want_write stays YES) and the
+    // next pselect() will deliver another writable event.
+    if(db->ctx)
+      redisAsyncHandleWrite(db->ctx);
+  }
+
   static void db_addWriteCB(void *magic) {
     HSPSonicDBClient *db = (HSPSonicDBClient *)magic;
-    // We could modify evbus to regulate writes, but
-    // since the write direction consists only of short
-    // queries we just assume it's OK to go ahead.
-    // (If there were any danger of blocking for more than
-    // a second or so then we could set the file descriptor
-    // to non-blocking mode with fcntl and looks for an
-    // EWOULDBLOCK error.)
-    db->writes++;
-    redisAsyncHandleWrite(db->ctx);
+    // Just arm the writable-readiness flag in evbus. Do NOT call
+    // redisAsyncHandleWrite() here: hiredis invokes addWrite from
+    // inside its own write path when write() returns EWOULDBLOCK.
+    EVSocketSetWantWrite(db->sock, YES);
+  }
+
+  static void db_delWriteCB(void *magic) {
+    HSPSonicDBClient *db = (HSPSonicDBClient *)magic;
+    EVSocketSetWantWrite(db->sock, NO);
   }
 
   static void db_cleanupCB(void *magic) {
@@ -966,10 +979,11 @@ extern "C" {
       redisAsyncSetConnectCallback(ctx, db_connectCB);
       redisAsyncSetDisconnectCallback(ctx, db_disconnectCB);
       db->sock = EVBusAddSocket(mod, mdata->pollBus, fd, db_readCB, db /* magic */);
+      EVSocketSetWriteCB(db->sock, db_writeCB);
       // db->ev.addRead = db_addReadCB; // EVBus always ready to read
       // db->ev.delRead = db_delReadCB; // no-op
       ctx->ev.addWrite = db_addWriteCB;
-      // db->ev.delWrite = db_delWriteCB; // no-op
+      ctx->ev.delWrite = db_delWriteCB;
       ctx->ev.cleanup = db_cleanupCB;
       ctx->ev.data = db;
       db->ctx = ctx;
