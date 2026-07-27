@@ -542,16 +542,14 @@ v  */
   static void evt_psample(EVMod *mod, EVEvent *evt, void *data, size_t dataLen) {
     HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
-    // When osIndex=on, VPP stamps the Linux/SONiC ifIndex directly into the
-    // PSAMPLE metadata, so mod_psample already emits each flow sample in the
-    // correct ifIndex namespace (1:1). Sampling again here duplicates every
-    // flow sample at the collector (the "2x" seen on SONiC-VPP). Let mod_psample
-    // own flow samples in this mode, mod_vpp still contributes VPP interface
-    // counter samples via its own netlink channel.
-    if(sp->vpp.osIndex){
+    HSPPSample *psmp = (HSPPSample *)data;
+    // When osIndex=on, mod_psample already emits the INGRESS flow sample in the
+    // Linux/SONiC namespace, so re-sampling ingress here duplicates it (the 2x).
+    // Egress samples, however, are produced ONLY here — mod_psample's PSAMPLE
+    // egress group is not enabled in SONiC-VPP — so egress must still be handled.
+    if(sp->vpp.osIndex && psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_INGRESS){
       return;
     }
-    HSPPSample *psmp = (HSPPSample *)data;
     if(psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_INGRESS
        || psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_EGRESS) {
       EVDebug(mod, 3, "Got VPP PSample");
