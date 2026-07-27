@@ -543,6 +543,13 @@ v  */
     HSP_mod_VPP *mdata = (HSP_mod_VPP *)mod->data;
     HSP *sp = (HSP *)EVROOTDATA(mod);
     HSPPSample *psmp = (HSPPSample *)data;
+    // When osIndex=on, mod_psample already emits the INGRESS flow sample in the
+    // Linux/SONiC namespace, so re-sampling ingress here duplicates it (the 2x).
+    // Egress samples, however, are produced ONLY here — mod_psample's PSAMPLE
+    // egress group is not enabled in SONiC-VPP — so egress must still be handled.
+    if(sp->vpp.osIndex && psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_INGRESS){
+      return;
+    }
     if(psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_INGRESS
        || psmp->grp_no == SFLOW_VPP_PSAMPLE_GROUP_EGRESS) {
       EVDebug(mod, 3, "Got VPP PSample");
