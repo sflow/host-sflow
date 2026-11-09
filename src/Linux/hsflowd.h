@@ -599,9 +599,9 @@ extern "C" {
   } EnumVNodePriority;
 
   typedef struct _HSP {
+    int crashFD;
 #ifdef HAVE_BACKTRACE
 #define HSP_NUM_BACKTRACE_PTRS 50
-    int crashFD;
     void *backtracePtrs[HSP_NUM_BACKTRACE_PTRS];
 #endif
     char *modulesPath;
